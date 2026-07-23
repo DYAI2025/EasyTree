@@ -1,0 +1,28 @@
+scope,requirement_group,jira_epic,jira_items,status
+MVP,UX and clickdummy,EYT-1,"EYT-11;EYT-12",backlog
+MVP,Architecture and ADRs,EYT-2,EYT-13,backlog
+MVP,Users employees roles permissions,EYT-2,"EYT-14;EYT-15",backlog
+MVP,Sites and activities,EYT-3,EYT-16,backlog
+MVP,Weekly and four-week assignments,EYT-3,EYT-17,backlog
+MVP,Conflict detection and publishing,EYT-3,EYT-18,backlog
+MVP,Confirmation and rejection,EYT-4,EYT-19,backlog
+MVP,Leave sickness and absence,EYT-4,EYT-20,backlog
+MVP,Notifications reminder escalation,EYT-4,EYT-21,backlog
+MVP,Skills and planning gaps,EYT-5,EYT-22,backlog
+MVP,Equipment vehicles and condition,EYT-5,EYT-23,backlog
+MVP,Time start and stop,EYT-6,EYT-24,backlog
+MVP,Time approval and correction,EYT-6,EYT-25,backlog
+MVP,Weather provider cache and DWD,EYT-7,EYT-26,backlog
+MVP,Weather and warnings UI,EYT-7,EYT-27,backlog
+Release 1,PWA and read-only offline,EYT-8,EYT-28,backlog
+Release 1,Voice notes and transcription,EYT-8,EYT-29,backlog
+Release 1,Private route origin and travel time,EYT-8,EYT-30,backlog
+Release 1,PDF print and CSV import,EYT-8,EYT-31,backlog
+Release gate,CI testing security accessibility,EYT-9,EYT-32,backlog
+Release gate,Retention deletion backup restore,EYT-9,EYT-33,backlog
+Release gate,Pilot baselines targets and acceptance,EYT-9,EYT-34,backlog
+Release gate,Monitoring runbooks rollback,EYT-9,EYT-35,backlog
+Post-MVP,Effective-dated individual net rates,EYT-10,EYT-36,post-mvp
+Post-MVP,Planned and confirmed internal effort,EYT-10,EYT-37,post-mvp
+Post-MVP,Machine-rental revenue,EYT-10,EYT-38,post-mvp
+Post-MVP,Feature gate authorization and audit,EYT-10,EYT-39,post-mvp
