@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="easyTree">
+  <!-- Einfacher generierter Platzhalter (EYT-41): stilisierter Baum -->
+  <rect width="512" height="512" rx="96" fill="#166534"/>
+  <polygon points="256,72 136,264 200,264 112,392 400,392 312,264 376,264" fill="#ffffff"/>
+  <rect x="232" y="392" width="48" height="56" fill="#ffffff"/>
+</svg>

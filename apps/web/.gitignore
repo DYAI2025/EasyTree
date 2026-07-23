@@ -1,0 +1,6 @@
+# Von Next generiert (importiert .next/types/routes.d.ts und würde einen
+# frischen Checkout ohne Build brechen) — wird bei dev/build neu erzeugt.
+next-env.d.ts
+
+# TypeScript incremental build state
+*.tsbuildinfo
