@@ -1,0 +1,15 @@
+Arboscus Teamplaner PRD v1.1 validation
+Date: 2026-07-23
+
+PASS: prd_report.json parses as RFC 8259-compatible JSON.
+PASS: prd_report.json validates against the local Draft 2020-12 PRD schema.
+PASS: AI-Native PRD output-order and required-section validator.
+PASS: AI-Native artifact-policy validator.
+PASS: No duplicate PRD block IDs.
+PASS: Traceability references resolve to existing PRD IDs.
+PASS: Exactly ten open questions are retained.
+PASS: Weather requirement is mapped to FR-043, AC-043, API-017, DATA-021, ARCH-013, TASK-027, TEST-016, OBS-010, and RISK-013.
+PASS: Employee lifecycle supplement is mapped to FR-044 and AC-044.
+PASS: Minimum pilot scenario is mapped to NFR-017 and TEST-017 and is not defined as a technical maximum.
+PASS: analysis_report.json passes analysis structure, JSON order, source/evidence, and artifact-policy validators.
+NOTE: The provided Markdown output-order validator has a deterministic substring collision: it searches for "analysis" and finds it inside the mandatory root token "deep_reasoning_analysis_report". The Markdown sections are manually emitted in the required order; JSON order validation is authoritative here.
