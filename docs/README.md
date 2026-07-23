@@ -1,4 +1,4 @@
-# Arboscus Teamplaner – aktueller Projektstand
+# EasyTree Teamplaner – aktueller Projektstand
 
 Stand: 23.07.2026
 
