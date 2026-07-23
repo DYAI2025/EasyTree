@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+.turbo/
+coverage/
+
+# Environment files (never commit real credentials)
+.env
+.env.*
+!.env.example
+
+# Logs & misc
+*.log
+.DS_Store

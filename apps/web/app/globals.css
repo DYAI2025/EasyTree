@@ -1,0 +1,186 @@
+/*
+ * easyTree Web-Shell (EYT-41) — mobile-first, System-Font-Stack
+ * (bewusst KEINE Google-Font-Imports: Build muss offline funktionieren).
+ */
+
+:root {
+  --color-bg: #ffffff;
+  --color-text: #1f2937;
+  --color-brand: #166534;
+  --color-brand-contrast: #ffffff;
+  --color-border: #d1d5db;
+  --color-focus: #1d4ed8;
+  --space: 1rem;
+  --radius: 0.5rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sichtbare Fokusstile — für Tastaturnutzung unverzichtbar. */
+:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Skip-Link: erstes fokussierbares Element, sichtbar bei Fokus. */
+.skip-link {
+  position: absolute;
+  left: var(--space);
+  top: -100%;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--color-brand);
+  color: var(--color-brand-contrast);
+  border-radius: 0 0 var(--radius) var(--radius);
+  text-decoration: none;
+}
+
+.skip-link:focus-visible,
+.skip-link:focus {
+  top: 0;
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space);
+  padding: var(--space);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app-brand {
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--color-brand);
+}
+
+.app-nav-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-nav-list a {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.app-nav-list a[aria-current="page"] {
+  font-weight: 700;
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space);
+}
+
+.app-footer {
+  padding: var(--space);
+  border-top: 1px solid var(--color-border);
+  font-size: 0.875rem;
+}
+
+.lead {
+  max-width: 45rem;
+}
+
+/* Mobile-first: eine Spalte, ab 40rem zwei Spalten. */
+.card-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space);
+}
+
+@media (min-width: 40rem) {
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Primitives aus @easytree/ui — Styling gehört der App, nicht dem Paket. */
+.eyt-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space);
+}
+
+.eyt-card__title {
+  margin-top: 0;
+  font-size: 1.125rem;
+}
+
+.eyt-button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-brand);
+  cursor: pointer;
+}
+
+.eyt-button--primary {
+  background: var(--color-brand);
+  color: var(--color-brand-contrast);
+}
+
+.eyt-button--ghost {
+  background: transparent;
+  color: var(--color-brand);
+}
+
+.eyt-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/*
+ * Status nie NUR über Farbe (EYT-41): Text + Symbol tragen die
+ * Information, Farbe verstärkt sie lediglich.
+ */
+.api-status {
+  font-weight: 600;
+}
+
+.api-status__icon {
+  display: inline-block;
+  min-width: 1.25rem;
+}
+
+.api-status--erreichbar {
+  color: #166534;
+}
+
+.api-status--nicht-erreichbar {
+  color: #991b1b;
+}
