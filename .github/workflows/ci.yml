@@ -124,3 +124,32 @@ jobs:
         run: |
           grep "\[tenant-isolation\]" /tmp/tenant-direct.log >> "$GITHUB_STEP_SUMMARY" || true
           grep "\[tenant-pooling\]" /tmp/tenant-pooled.log >> "$GITHUB_STEP_SUMMARY" || true
+      # Runtime smokes (EYT-58): real processes against the real local stack.
+      - name: Build api for runtime smokes
+        run: pnpm --filter @easytree/api... build
+      - name: API smoke — healthy runtime (ready must be 200)
+        env:
+          NODE_ENV: test
+          API_PORT: "3001"
+          EXPECT_READY: "200"
+          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          SUPABASE_URL: "http://127.0.0.1:54321"
+          SUPABASE_ANON_KEY: "ci-local-anon-key"
+        run: bash scripts/smoke-api.sh
+      - name: API smoke — dependency down (ready must be 503)
+        env:
+          NODE_ENV: test
+          API_PORT: "3002"
+          EXPECT_READY: "503"
+          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:59999/postgres"
+          SUPABASE_URL: "http://127.0.0.1:54321"
+          SUPABASE_ANON_KEY: "ci-local-anon-key"
+        run: bash scripts/smoke-api.sh
+      - name: Worker smoke — no port, graceful shutdown
+        env:
+          NODE_ENV: test
+          API_PORT: "3003"
+          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          SUPABASE_URL: "http://127.0.0.1:54321"
+          SUPABASE_ANON_KEY: "ci-local-anon-key"
+        run: bash scripts/smoke-worker.sh

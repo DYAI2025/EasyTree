@@ -6,10 +6,10 @@ import { CorrelationIdMiddleware } from "./common/correlation-id.middleware";
 import { HttpExceptionFilter } from "./common/http-exception.filter";
 import { APP_CONFIG, ConfigModule } from "./config/config.module";
 import { HealthController } from "./health/health.controller";
+import { PgDatabasePing } from "./health/pg-database-ping";
 import {
   DATABASE_PING,
   READINESS_INDICATORS,
-  StubDatabasePing,
   type DatabasePing,
   type ReadinessIndicator,
 } from "./health/readiness";
@@ -24,7 +24,14 @@ import {
   imports: [ConfigModule],
   controllers: [HealthController],
   providers: [
-    { provide: DATABASE_PING, useClass: StubDatabasePing },
+    {
+      // Real database ping (EYT-58): SELECT 1 against the configured
+      // DATABASE_URL. Tests substitute this token via DI override
+      // (`StubDatabasePing` or inline fakes) — never the controller.
+      provide: DATABASE_PING,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig): DatabasePing => new PgDatabasePing(config.databaseUrl),
+    },
     {
       provide: READINESS_INDICATORS,
       inject: [APP_CONFIG, DATABASE_PING],
