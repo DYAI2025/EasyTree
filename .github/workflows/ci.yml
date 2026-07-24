@@ -1,0 +1,83 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm format
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm typecheck
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      # Tenant-Integrationstests laufen hier im Local-Mode (Skip mit Warnung);
+      # das PFLICHT-Gate dafür ist der Job db-gates (fail-closed, EYT-66/57).
+      - run: pnpm test
+
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @easytree/web... build
+
+  build-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @easytree/api... build
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fail if real .env files are tracked
+        run: |
+          tracked="$(git ls-files | grep -E '(^|/)\.env(\.local|\.production|\.development|\.test)?$' || true)"
+          if [ -n "$tracked" ]; then
+            echo "::error::Tracked .env files found:"; echo "$tracked"; exit 1
+          fi
+      - name: Fail if private key files are tracked
+        run: |
+          keys="$(git ls-files | grep -E '\.(pem|p12|pfx|key)$' || true)"
+          if [ -n "$keys" ]; then
+            echo "::error::Tracked key material found:"; echo "$keys"; exit 1
+          fi
+      - name: Run gitleaks (pinned)
+        env:
+          GITLEAKS_VERSION: "8.24.3"
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          /tmp/gitleaks git --redact --no-banner --exit-code 1 .
