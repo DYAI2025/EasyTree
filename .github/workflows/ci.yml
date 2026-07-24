@@ -120,25 +120,56 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
           grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
-      - name: Resolve pooler URL (Supavisor tenant username, EYT-15)
-        # Supavisor verlangt `postgres.<project_id>` als Usernamen; plain
-        # `postgres` wird abgelehnt (belegt: roter Lauf #1 auf PR #5).
-        # Primaer aus `supabase status` lesen (plain UND -o env — die env-Form
-        # enthielt in Lauf #2 keine Pooler-URL), Fallback auf das dokumentierte
-        # Format mit project_id "easytree" aus supabase/config.toml.
-        # WICHTIG: grep ohne Treffer darf den Step unter `-eo pipefail` nicht
-        # beenden (genau das brach Lauf #2) — daher `|| true` in der Pipeline.
+      - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
+        # Lauf #1: plain `postgres` vom Pooler abgelehnt. Lauf #2: Step starb
+        # an grep-Miss unter pipefail. Lauf #3: Pooler trotz Fallback-Username
+        # unerreichbar — Hypothese: `db reset` zerstoert die Supavisor-
+        # Tenant-Provisionierung. Dieser Step probiert deshalb mehrere
+        # Login-Kandidaten, startet den Pooler-Container nach den Resets neu
+        # und schreibt JEDE Diagnose ins Step-Summary (fuer Nachvollzug ohne
+        # Log-Zugriff). Fail-closed bleibt: ohne erreichbaren Pooler Exit 1.
         shell: bash
         run: |
+          summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
           status_all="$( { pnpm exec supabase status 2>/dev/null; pnpm exec supabase status -o env 2>/dev/null; } || true )"
-          pooler_url="$(printf '%s\n' "$status_all" | { grep -oE 'postgres(ql)?://[^"[:space:]]*:54329[^"[:space:]]*' || true; } | head -1)"
-          if [ -z "$pooler_url" ]; then
-            printf '%s\n' "$status_all" | { grep -i pooler || echo "supabase status enthaelt keinen Pooler-Eintrag"; }
-            pooler_url="postgresql://postgres.easytree:postgres@127.0.0.1:54329/postgres"
-            echo "Fallback auf dokumentiertes Format."
+          status_url="$(printf '%s\n' "$status_all" | { grep -oE 'postgres(ql)?://[^"[:space:]]*:54329[^"[:space:]]*' || true; } | head -1)"
+          candidates=()
+          [ -n "$status_url" ] && candidates+=("$status_url")
+          candidates+=("postgresql://postgres.easytree:postgres@127.0.0.1:54329/postgres")
+          candidates+=("postgresql://postgres:postgres@127.0.0.1:54329/postgres")
+          summary "Pooler-Kandidaten: ${#candidates[@]} (status-URL: ${status_url:-keine})"
+          working=""
+          try_all() {
+            local url out
+            for url in "${candidates[@]}"; do
+              if out="$(PGCONNECT_TIMEOUT=5 psql "$url" -Atc 'select 1' 2>&1)"; then
+                working="$url"; return 0
+              fi
+              summary "Probe fehlgeschlagen ($url): $out"
+            done
+            return 1
+          }
+          if ! try_all; then
+            pooler_ct="$( { docker ps --format '{{.Names}}' 2>/dev/null || true; } | { grep -iE 'pooler|supavisor' || true; } | head -1)"
+            summary "Pooler-Container: ${pooler_ct:-KEINER GEFUNDEN}"
+            if [ -n "$pooler_ct" ]; then
+              summary "Neustart des Pooler-Containers (Tenant-Reprovisionierung nach db reset)…"
+              docker restart "$pooler_ct" >/dev/null 2>&1 || true
+              for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                sleep 5
+                try_all && break
+              done
+            fi
           fi
-          echo "Pooler-URL aufgeloest: $pooler_url"
-          echo "EASYTREE_TEST_POOLER_URL=$pooler_url" >> "$GITHUB_ENV"
+          if [ -z "$working" ]; then
+            summary "FAIL-CLOSED: Pooler bleibt unerreichbar (EYT-15)."
+            if [ -n "${pooler_ct:-}" ]; then
+              { docker logs --tail 60 "$pooler_ct" 2>&1 || true; } | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 1
+          fi
+          summary "Pooler-Pre-flight OK: $working"
+          echo "EASYTREE_TEST_POOLER_URL=$working" >> "$GITHUB_ENV"
       - name: Tenant isolation gate (fail-closed, TRANSACTION POOLER)
         env:
           EASYTREE_TENANT_TESTS: required
