@@ -1,10 +1,10 @@
 /**
  * Tenant-Isolation durch den REALEN Transaction-Pooler (EYT-15).
  *
- * Verbindet gegen den lokalen Supavisor im TRANSACTION MODE (Port 54329,
- * supabase/config.toml [db.pooler]) statt gegen die Direct Connection
- * (54322). Damit wird der bisher nur simulierte Pooling-Kontrakt real
- * bewiesen:
+ * Verbindet gegen den lokalen Supavisor im TRANSACTION MODE (Port aus dem
+ * laufenden Container, lokal standardmaessig 54329) statt gegen die Direct
+ * Connection (54322). Damit wird der bisher nur simulierte Pooling-Kontrakt
+ * real bewiesen:
  *
  *   1. Der transaktionslokale Tenantkontext (set_config is_local +
  *      `set local role authenticated`) funktioniert DURCH den Pooler.
@@ -28,16 +28,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { inTenantTx, ORG_ALPHA, probeDatabase, USER_A, USER_C } from "./tenant-context.helper";
 
 /**
- * Supavisor identifiziert den Tenant ueber das Username-Suffix:
- * `postgres.<project_id>` (project_id aus supabase/config.toml = "easytree").
- * Plain `postgres` wird vom Pooler mit "Tenant or user not found" abgelehnt —
- * belegt durch den roten CI-Lauf #1 auf PR #5 (fail-closed wie designed).
- * CI ermittelt die URL zur Laufzeit aus `supabase status` (Workflow-Step
- * "Resolve pooler URL"); dieser Default gilt fuer lokale Entwicklung.
+ * Die lokale Supabase CLI provisioniert fuer Supavisor eine eigene
+ * POOLER_TENANT_ID. Diese ist nicht verlaesslich aus `project_id` abzuleiten.
+ * Der CI-Workflow liest Tenant-ID, Passwort und Port deshalb aus dem laufenden
+ * Supavisor-Container und uebergibt die vollstaendige URL explizit.
+ *
+ * Der Default unten ist nur ein best-effort Wert fuer lokale Entwicklung mit
+ * aktuellen Supabase-CLI-Images. Das verpflichtende CI-Gate verwendet ihn nie.
  */
 const POOLER_URL =
   process.env["EASYTREE_TEST_POOLER_URL"] ??
-  "postgresql://postgres.easytree:postgres@127.0.0.1:54329/postgres";
+  "postgresql://postgres.pooler-dev:postgres@127.0.0.1:54329/postgres?sslmode=disable";
 
 /** Fail-closed-Modus (EYT-66-Semantik): "required" (CI) | "local" (Default). */
 const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local";
@@ -123,9 +124,6 @@ describe("tenant isolation through real transaction pooler (Supavisor)", () => {
   poolerIt(
     "8 parallel pooled clients: A sees only Org-Alpha, C/no-claims see nothing",
     async () => {
-      // 4x User A (aktiv in Alpha), 2x User C (inaktiv), 2x ohne Claims —
-      // alle GLEICHZEITIG durch den Pooler (Promise.all), sodass sich die
-      // Transaktionen die gepoolten Server-Connections real teilen.
       const userIds: (string | null)[] = [
         USER_A,
         USER_A,
@@ -144,13 +142,11 @@ describe("tenant isolation through real transaction pooler (Supavisor)", () => {
             inTenantTx(clients[i]!, userId, async (tx) => {
               const items = await tx.query("select org_id from public.items");
               if (userId === USER_A) {
-                // A-Clients: ausschliesslich Org-Alpha-Zeilen, nie leer.
                 expect(items.rowCount).toBeGreaterThan(0);
                 for (const row of items.rows) {
                   expect(row).toEqual({ org_id: ORG_ALPHA });
                 }
               } else {
-                // C (inaktive Membership) und ohne Claims: 0 Zeilen.
                 expect(items.rowCount).toBe(0);
               }
             }),
@@ -165,9 +161,6 @@ describe("tenant isolation through real transaction pooler (Supavisor)", () => {
   poolerIt(
     "leak probe after parallel load: fresh claimless transaction has no identity, no rows",
     async () => {
-      // Laeuft NACH dem Parallel-Test: die gepoolten Server-Connections
-      // wurden gerade von A-/C-Transaktionen benutzt. Eine frische
-      // Transaktion ohne Claims darf davon nichts erben.
       await inTenantTx(client, null, async (tx) => {
         const uid = await tx.query("select auth.uid() as uid");
         expect(uid.rows[0]).toEqual({ uid: null });
