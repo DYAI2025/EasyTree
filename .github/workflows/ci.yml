@@ -108,6 +108,17 @@ jobs:
         run: pnpm exec supabase db reset
       - name: pgTAP suite (run 2, must be identical)
         run: pnpm exec supabase test db
+      - name: Restart stack — re-provision Supavisor tenant (EYT-15)
+        # `supabase db reset` loescht die Supavisor-Tenant-Provisionierung in
+        # der _supabase-Metadaten-DB. Beweis aus Lauf #4 auf PR #5: Pooler-
+        # Container laeuft und antwortet, meldet aber "tenant postgres.easytree
+        # not found"; auch ein Container-Restart hilft nicht, weil die
+        # Provisionierung CLI-seitig beim `supabase start` erfolgt. Der
+        # CLI-Neustart provisioniert den Tenant neu und erhaelt die
+        # DB-Volumes (Schema + Seeds aus Reset 2 bleiben bestehen).
+        run: |
+          pnpm exec supabase stop
+          pnpm exec supabase start -x studio
       - name: Build workspace deps for api tests
         run: pnpm --filter @easytree/config build
       - name: Tenant isolation gate (fail-closed, direct connection)
