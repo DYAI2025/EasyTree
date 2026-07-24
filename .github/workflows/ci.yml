@@ -81,3 +81,34 @@ jobs:
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
           tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
           /tmp/gitleaks git --redact --no-banner --exit-code 1 .
+
+  db-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: Start local Supabase stack (Docker)
+        run: pnpm exec supabase start -x studio
+      - name: Reset 1 — migrations + seed on empty DB
+        run: pnpm exec supabase db reset
+      - name: pgTAP suite (run 1)
+        run: pnpm exec supabase test db
+      - name: Reset 2 — reproducibility proof
+        run: pnpm exec supabase db reset
+      - name: pgTAP suite (run 2, must be identical)
+        run: pnpm exec supabase test db
+      - name: Build workspace deps for api tests
+        run: pnpm --filter @easytree/config build
+      - name: Tenant isolation gate (fail-closed, direct connection)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        # shell: bash erzwingt pipefail — sonst wuerde `| tee` einen roten
+        # vitest-Exit (echter RLS-Leak bei executed>0 skipped=0) verschlucken.
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
+          grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
+      - name: Tenant report -> step summary
+        if: always()
+        run: grep "\[tenant-isolation\]" /tmp/tenant-direct.log >> "$GITHUB_STEP_SUMMARY" || true
