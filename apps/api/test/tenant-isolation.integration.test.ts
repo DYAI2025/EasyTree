@@ -21,38 +21,38 @@
  * Login-Rolle dient ausschliesslich als lokaler Transportkanal (authenticated
  * ist NOLOGIN); nach dem Rollenwechsel gelten die Rechte von authenticated.
  *
- * CI-Schutz: Ist die DB nicht erreichbar, ueberspringt sich die Suite mit
- * klarem Hinweis. Fuer den EYT-15-Nachweis MUSS sie real gelaufen sein
- * (Testnamen + Dauer im Report).
+ * Fail-closed (EYT-66): Der Modus kommt aus EASYTREE_TENANT_TESTS.
+ * Im Modus "required" schlaegt die Suite fehl, wenn die DB nicht erreichbar
+ * ist oder auch nur ein Test uebersprungen wurde — kein gruener Lauf durch
+ * Skips. Der lokale Opt-out EASYTREE_TENANT_TESTS=local (Default) skippt bei
+ * fehlender DB mit Warnung und ist AUSSCHLIESSLICH fuer Entwicklermaschinen
+ * ohne laufenden Supabase-Stack gedacht; CI (Job db-gates) setzt "required".
+ * Regressionsbeweis: test/tenant-gate.fail-closed.test.ts.
  */
 import { Client, DatabaseError } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  BETA_ITEM_ID,
+  BETA_NOTE_ID,
+  inTenantTx,
+  ORG_ALPHA,
+  ORG_BETA,
+  probeDatabase,
+  USER_A,
+  USER_C,
+} from "./tenant-context.helper";
 
 const DB_URL =
   process.env["EASYTREE_TEST_DB_URL"] ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
-const ORG_ALPHA = "00000000-0000-0000-0000-0000000000a1";
-const ORG_BETA = "00000000-0000-0000-0000-0000000000b2";
-const USER_A = "00000000-0000-0000-0000-00000000aaa1"; // aktiv in Org Alpha
-const USER_C = "00000000-0000-0000-0000-00000000ccc3"; // INAKTIV in Org Alpha
-const BETA_ITEM_ID = "00000000-0000-0000-0000-0000000220b2";
-const BETA_NOTE_ID = "00000000-0000-0000-0000-0000000320b2";
-
-async function probeDatabase(): Promise<boolean> {
-  const client = new Client({
-    connectionString: DB_URL,
-    connectionTimeoutMillis: 3000,
-  });
-  try {
-    await client.connect();
-    await client.query("select 1");
-    return true;
-  } catch {
-    return false;
-  } finally {
-    await client.end().catch(() => undefined);
-  }
-}
+/**
+ * Fail-closed-Modus (EYT-66): "required" (CI) laesst unerreichbare DB und
+ * Skips fehlschlagen; "local" (Default, NUR Entwicklermaschinen) skippt mit
+ * Warnung.
+ */
+const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local"; // "required" | "local"
+let executedCount = 0;
+let skippedCount = 0;
 
 let dbAvailable = false;
 let client: Client;
@@ -60,26 +60,34 @@ let client: Client;
 /**
  * Runtime-Skip statt describe.skipIf: Die Erreichbarkeit wird in beforeAll
  * geprueft (kein top-level await unter CommonJS). Nicht erreichbar => jeder
- * Test wird mit klarem Hinweis uebersprungen (CI-Schutz); fuer das
- * EYT-15-Sicherheitsgate MUSS die Suite real gelaufen sein.
+ * Test wird NUR im Local-Modus mit klarem Hinweis uebersprungen; im
+ * Required-Modus macht afterAll jeden Skip zum Fehler (fail-closed, EYT-66).
  */
 function dbIt(name: string, fn: () => Promise<void>): void {
   it(name, async (ctx) => {
     if (!dbAvailable) {
+      skippedCount++;
       ctx.skip(
         `SKIPPED: Supabase-Postgres unter ${DB_URL} nicht erreichbar — ` +
           "lokal starten mit `pnpm exec supabase start && pnpm exec supabase db reset`.",
       );
     }
+    executedCount++;
     await fn();
   });
 }
 
 describe("tenant isolation via RLS (transaction-mode context)", () => {
   beforeAll(async () => {
-    dbAvailable = await probeDatabase();
+    dbAvailable = await probeDatabase(DB_URL);
     if (!dbAvailable) {
-      // eslint-disable-next-line no-console
+      if (TENANT_TESTS_MODE === "required") {
+        throw new Error(
+          "[tenant-isolation] fail-closed: Pflicht-Tenant-Tests koennen nicht laufen — DB unter " +
+            DB_URL +
+            " nicht erreichbar (EYT-66).",
+        );
+      }
       console.warn(
         `[tenant-isolation.integration] SKIPPED: Supabase-Postgres unter ${DB_URL} nicht erreichbar. ` +
           "Lokal starten mit `pnpm exec supabase start && pnpm exec supabase db reset`. " +
@@ -97,28 +105,26 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
     }
   });
 
-  /**
-   * Fuehrt `fn` in einer Transaktion mit transaktionslokalem Tenantkontext
-   * aus — exakt das Muster, das Transaction-Mode-Pooling erzwingt.
-   * userId === null: authenticated ohne JWT-Claims (kaputter/fehlender Kontext).
-   */
-  async function inTenantTx<T>(userId: string | null, fn: (tx: Client) => Promise<T>): Promise<T> {
-    await client.query("begin");
-    try {
-      if (userId !== null) {
-        await client.query("select set_config('request.jwt.claims', $1, true)", [
-          JSON.stringify({ sub: userId, role: "authenticated" }),
-        ]);
-      }
-      await client.query("set local role authenticated");
-      return await fn(client);
-    } finally {
-      await client.query("rollback");
+  afterAll(() => {
+    // Report fuer CI-Step-Summary (EYT-66 AC: Zahlen ausweisen).
+    // process.stdout.write statt console.info: Vitest 4 unterdrueckt
+    // console-Ausgaben aus Hooks im Default-Reporter — die Zeile MUSS
+    // aber im Log stehen, damit CI sie greppen kann (Task 4, EYT-57).
+    process.stdout.write(
+      `[tenant-isolation] mode=${TENANT_TESTS_MODE} executed=${executedCount} skipped=${skippedCount}\n`,
+    );
+    if (TENANT_TESTS_MODE === "required" && skippedCount > 0) {
+      throw new Error(
+        `[tenant-isolation] fail-closed: ${skippedCount} Pflicht-Tenant-Tests uebersprungen (EYT-66).`,
+      );
     }
-  }
+  });
+
+  // inTenantTx (Transaction-Mode-Kontextmuster) kommt aus
+  // test/tenant-context.helper.ts — geteilt mit der Pooler-Suite (EYT-15).
 
   dbIt("runs as authenticated without BYPASSRLS (no service role involved)", async () => {
-    await inTenantTx(USER_A, async (tx) => {
+    await inTenantTx(client, USER_A, async (tx) => {
       const who = await tx.query("select current_user");
       expect(who.rows[0]).toEqual({ current_user: "authenticated" });
       const bypass = await tx.query(
@@ -129,7 +135,7 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
   });
 
   dbIt("cross-tenant read: user A sees only Org-Alpha rows, Org-Beta reads are empty", async () => {
-    await inTenantTx(USER_A, async (tx) => {
+    await inTenantTx(client, USER_A, async (tx) => {
       const all = await tx.query("select distinct org_id from public.items");
       expect(all.rows).toEqual([{ org_id: ORG_ALPHA }]);
 
@@ -144,7 +150,7 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
   });
 
   dbIt("IDOR: direct lookup of a foreign UUID leaks nothing", async () => {
-    await inTenantTx(USER_A, async (tx) => {
+    await inTenantTx(client, USER_A, async (tx) => {
       const item = await tx.query("select * from public.items where id = $1", [BETA_ITEM_ID]);
       expect(item.rowCount).toBe(0);
 
@@ -154,7 +160,7 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
   });
 
   dbIt("cross-tenant write: insert with foreign org_id fails with 42501", async () => {
-    await inTenantTx(USER_A, async (tx) => {
+    await inTenantTx(client, USER_A, async (tx) => {
       let caught: unknown;
       try {
         await tx.query("insert into public.items (org_id, title) values ($1, $2)", [
@@ -170,7 +176,7 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
   });
 
   dbIt("cross-tenant write: update/delete on foreign rows affect 0 rows", async () => {
-    await inTenantTx(USER_A, async (tx) => {
+    await inTenantTx(client, USER_A, async (tx) => {
       const upd = await tx.query("update public.items set title = 'pwned' where org_id = $1", [
         ORG_BETA,
       ]);
@@ -182,7 +188,7 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
   });
 
   dbIt("inactive membership: user C sees no Org-Alpha data at all", async () => {
-    await inTenantTx(USER_C, async (tx) => {
+    await inTenantTx(client, USER_C, async (tx) => {
       const items = await tx.query("select id from public.items");
       expect(items.rowCount).toBe(0);
       const notes = await tx.query("select id from public.item_notes");
@@ -194,13 +200,13 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
     "transaction-mode guarantee: tenant context does not leak into the next transaction",
     async () => {
       // 1. Transaktion mit Kontext von User A (sieht Alpha-Daten)
-      await inTenantTx(USER_A, async (tx) => {
+      await inTenantTx(client, USER_A, async (tx) => {
         const items = await tx.query("select id from public.items");
         expect(items.rowCount).toBeGreaterThan(0);
       });
       // 2. Folgetransaktion OHNE Claims (wie eine fremde, wiederverwendete
       //    Pooler-Connection): auth.uid() ist null => alles leer.
-      await inTenantTx(null, async (tx) => {
+      await inTenantTx(client, null, async (tx) => {
         const uid = await tx.query("select auth.uid() as uid");
         expect(uid.rows[0]).toEqual({ uid: null });
         const items = await tx.query("select id from public.items");

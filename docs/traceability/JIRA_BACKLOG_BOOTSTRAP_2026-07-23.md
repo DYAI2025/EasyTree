@@ -8,18 +8,18 @@ Der Backlog wurde aus dem PRD v1.3 und den ergänzenden MVP-, Wetter-, Architekt
 
 ## Epics
 
-| Key | Epic | Scope |
-|---|---|---|
-| EYT-1 | Produktgrundlage, UX und Clickdummy | mobile Nutzerreisen und UX-Validierung |
-| EYT-2 | Plattformgrundlage, Supabase und Berechtigungen | Architektur, Auth, Daten, RLS und Audit |
-| EYT-3 | Wochenplanung, Baustellen und Einsatzsteuerung | Planungskern und Veröffentlichung |
-| EYT-4 | Einsatzbestätigung, Benachrichtigungen und Abwesenheiten | Kommunikation und Verfügbarkeit |
-| EYT-5 | Ressourcen und Fähigkeiten verwalten | Skills, Geräte und Fahrzeuge |
-| EYT-6 | Arbeitszeit, Freigabe und Korrektur | Timer und Zeitprozess |
-| EYT-7 | Baustellenwetter und amtliche Warnungen | Prognose, Ozon und DWD-Warnungen |
-| EYT-8 | Erweiterte Funktionen des ersten Releases | PWA, Offline, Transkription, Routing, PDF und CSV |
-| EYT-9 | Qualität, Datenschutz und Produktionsfreigabe | Tests, Retention, Pilot und Betrieb |
-| EYT-10 | Post-MVP: Planungsökonomie und Maschinenverleih | interne Sätze, Aufwände und Verleiherlöse |
+| Key    | Epic                                                     | Scope                                             |
+| ------ | -------------------------------------------------------- | ------------------------------------------------- |
+| EYT-1  | Produktgrundlage, UX und Clickdummy                      | mobile Nutzerreisen und UX-Validierung            |
+| EYT-2  | Plattformgrundlage, Supabase und Berechtigungen          | Architektur, Auth, Daten, RLS und Audit           |
+| EYT-3  | Wochenplanung, Baustellen und Einsatzsteuerung           | Planungskern und Veröffentlichung                 |
+| EYT-4  | Einsatzbestätigung, Benachrichtigungen und Abwesenheiten | Kommunikation und Verfügbarkeit                   |
+| EYT-5  | Ressourcen und Fähigkeiten verwalten                     | Skills, Geräte und Fahrzeuge                      |
+| EYT-6  | Arbeitszeit, Freigabe und Korrektur                      | Timer und Zeitprozess                             |
+| EYT-7  | Baustellenwetter und amtliche Warnungen                  | Prognose, Ozon und DWD-Warnungen                  |
+| EYT-8  | Erweiterte Funktionen des ersten Releases                | PWA, Offline, Transkription, Routing, PDF und CSV |
+| EYT-9  | Qualität, Datenschutz und Produktionsfreigabe            | Tests, Retention, Pilot und Betrieb               |
+| EYT-10 | Post-MVP: Planungsökonomie und Maschinenverleih          | interne Sätze, Aufwände und Verleiherlöse         |
 
 ## Stories und Tasks
 

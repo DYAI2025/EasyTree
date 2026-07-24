@@ -1,0 +1,227 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm format
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm typecheck
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      # Tenant-Integrationstests laufen hier im Local-Mode (Skip mit Warnung);
+      # das PFLICHT-Gate dafür ist der Job db-gates (fail-closed, EYT-66/57).
+      - run: pnpm test
+
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @easytree/web... build
+
+  # Real-Browser-Smoke der Web-Shell (EYT-58b): Tastatur, Fokus,
+  # Viewports und axe inkl. color-contrast in echtem Chromium.
+  web-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @easytree/web... build
+      - run: pnpm --filter @easytree/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @easytree/web run test:e2e
+
+  build-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @easytree/api... build
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fail if real .env files are tracked
+        run: |
+          tracked="$(git ls-files | grep -E '(^|/)\.env(\.local|\.production|\.development|\.test)?$' || true)"
+          if [ -n "$tracked" ]; then
+            echo "::error::Tracked .env files found:"; echo "$tracked"; exit 1
+          fi
+      - name: Fail if private key files are tracked
+        run: |
+          keys="$(git ls-files | grep -E '\.(pem|p12|pfx|key)$' || true)"
+          if [ -n "$keys" ]; then
+            echo "::error::Tracked key material found:"; echo "$keys"; exit 1
+          fi
+      - name: Run gitleaks (pinned)
+        env:
+          GITLEAKS_VERSION: "8.24.3"
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          /tmp/gitleaks git --redact --no-banner --exit-code 1 .
+
+  db-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: Start local Supabase stack (Docker)
+        run: pnpm exec supabase start -x studio
+      - name: Reset 1 — migrations + seed on empty DB
+        run: pnpm exec supabase db reset
+      - name: pgTAP suite (run 1)
+        run: pnpm exec supabase test db
+      - name: Reset 2 — reproducibility proof
+        run: pnpm exec supabase db reset
+      - name: pgTAP suite (run 2, must be identical)
+        run: pnpm exec supabase test db
+      - name: Restart stack — re-provision Supavisor tenant (EYT-15)
+        run: |
+          pnpm exec supabase stop
+          pnpm exec supabase start -x studio
+      - name: Build workspace deps for api tests
+        run: pnpm --filter @easytree/config build
+      - name: Tenant isolation gate (fail-closed, direct connection)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
+          grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
+      - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
+          pooler_ct="$(docker ps --filter 'name=supabase_pooler_' --format '{{.Names}}' | head -1 || true)"
+          if [ -z "$pooler_ct" ]; then
+            summary "FAIL-CLOSED: Kein laufender Supavisor-Container gefunden."
+            docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          pooler_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$pooler_ct" 2>/dev/null || true)"
+          runtime_tenant="$(printf '%s\n' "$pooler_env" | sed -n 's/^POOLER_TENANT_ID=//p' | head -1 || true)"
+          runtime_password="$(printf '%s\n' "$pooler_env" | sed -n 's/^POSTGRES_PASSWORD=//p' | head -1 || true)"
+          published="$(docker port "$pooler_ct" 6543/tcp 2>/dev/null | head -1 || true)"
+          runtime_port="${published##*:}"
+
+          # Belegte lokale Supabase-CLI-Fallbacks. Die Direct-Connection desselben
+          # Jobs verwendet bereits postgres/postgres; config.toml bindet 54329.
+          postgres_password="${runtime_password:-postgres}"
+          pooler_port="${runtime_port:-54329}"
+          tenant_candidates=()
+          [ -n "$runtime_tenant" ] && tenant_candidates+=("$runtime_tenant")
+          if [ "$runtime_tenant" != "pooler-dev" ]; then
+            tenant_candidates+=("pooler-dev")
+          fi
+
+          summary "Pooler-Diagnose: container=${pooler_ct}, runtime_tenant=${runtime_tenant:-nicht-exportiert}, published=${published:-nicht-exportiert}, effective_port=${pooler_port}, candidates=${#tenant_candidates[@]}."
+          if ! [[ "$pooler_port" =~ ^[0-9]+$ ]] || [ "${#tenant_candidates[@]}" -eq 0 ]; then
+            summary "FAIL-CLOSED: Keine valide lokale Pooler-Konfiguration ableitbar."
+            exit 1
+          fi
+
+          working_tenant=""
+          for tenant_id in "${tenant_candidates[@]}"; do
+            pooler_user="postgres.${tenant_id}"
+            for attempt in 1 2 3 4 5 6; do
+              if PGPASSWORD="$postgres_password" PGCONNECT_TIMEOUT=5 psql \
+                "host=127.0.0.1 port=${pooler_port} dbname=postgres user=${pooler_user} sslmode=disable" \
+                -Atc 'select 1' >/tmp/pooler-preflight.out 2>/tmp/pooler-preflight.err; then
+                working_tenant="$tenant_id"
+                break 2
+              fi
+              summary "Pre-flight tenant=${tenant_id}, Versuch ${attempt}/6: $(tr '\n' ' ' </tmp/pooler-preflight.err)"
+              sleep 2
+            done
+          done
+
+          if [ -z "$working_tenant" ]; then
+            summary "FAIL-CLOSED: Kein belegter Supavisor-Tenant ist erreichbar."
+            docker inspect --format '{{json .NetworkSettings.Ports}}' "$pooler_ct" | tee -a "$GITHUB_STEP_SUMMARY" || true
+            docker logs --tail 100 "$pooler_ct" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+            exit 1
+          fi
+
+          pooler_user="postgres.${working_tenant}"
+          encoded_user="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$pooler_user")"
+          encoded_password="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$postgres_password")"
+          pooler_url="postgresql://${encoded_user}:${encoded_password}@127.0.0.1:${pooler_port}/postgres?sslmode=disable"
+          summary "Pooler-Pre-flight OK: tenant=${working_tenant}, port=${pooler_port}, sslmode=disable."
+          echo "EASYTREE_TEST_POOLER_URL=$pooler_url" >> "$GITHUB_ENV"
+      - name: Tenant isolation gate (fail-closed, TRANSACTION POOLER)
+        env:
+          EASYTREE_TENANT_TESTS: required
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/tenant-pooling.integration.test.ts 2>&1 | tee /tmp/tenant-pooled.log
+          grep -E "\[tenant-pooling\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-pooled.log
+      - name: Tenant report -> step summary
+        if: always()
+        run: |
+          grep "\[tenant-isolation\]" /tmp/tenant-direct.log >> "$GITHUB_STEP_SUMMARY" || true
+          grep "\[tenant-pooling\]" /tmp/tenant-pooled.log >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Build api for runtime smokes
+        run: pnpm --filter @easytree/api... build
+      - name: API smoke — healthy runtime (ready must be 200)
+        env:
+          NODE_ENV: test
+          API_PORT: "3001"
+          EXPECT_READY: "200"
+          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          SUPABASE_URL: "http://127.0.0.1:54321"
+          SUPABASE_ANON_KEY: "ci-local-anon-key"
+        run: bash scripts/smoke-api.sh
+      - name: API smoke — dependency down (ready must be 503)
+        env:
+          NODE_ENV: test
+          API_PORT: "3002"
+          EXPECT_READY: "503"
+          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:59999/postgres"
+          SUPABASE_URL: "http://127.0.0.1:54321"
+          SUPABASE_ANON_KEY: "ci-local-anon-key"
+        run: bash scripts/smoke-api.sh
+      - name: Worker smoke — no port, graceful shutdown
+        env:
+          NODE_ENV: test
+          API_PORT: "3003"
+          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          SUPABASE_URL: "http://127.0.0.1:54321"
+          SUPABASE_ANON_KEY: "ci-local-anon-key"
+        run: bash scripts/smoke-worker.sh

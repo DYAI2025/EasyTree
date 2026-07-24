@@ -7,6 +7,7 @@ Sprint window: 2026-07-27 to 2026-08-09
 Jira scope: EYT-13, EYT-15, EYT-40, EYT-41, EYT-42, EYT-43, EYT-44
 
 <!-- GOAL_START -->
+
 Goal: Mandantenfähige easyTree-Foundation für Sprint 1
 
 Ziel. Innerhalb des zweiwöchigen Sprints entsteht eine lokal reproduzierbare technische Basis für easyTree. Ein frischer Checkout startet die mobile Web-Shell, die Backend-API, den getrennten Worker und den lokalen Supabase-Stack. Die wichtigste spätere SaaS-Voraussetzung wird früh bewiesen: Zwei synthetische Organisationen können weder über API, Datenbank noch Storage auf Daten der jeweils anderen zugreifen.
@@ -14,6 +15,7 @@ Ziel. Innerhalb des zweiwöchigen Sprints entsteht eine lokal reproduzierbare te
 Scope. Umsetzung auf einem neuen Feature-Branch des aktuellen Default-Branches im Repository `DYAI2025/EasyTree`. Zielstruktur: `apps/web`, `apps/backend`, klar benannte `packages/*`, `supabase/migrations`, `supabase/tests` und `docs`. Der Sprint umfasst ausschließlich Boilerplate, lokale Entwicklungsfähigkeit, minimale Health-Smokes, Konfigurationsvalidierung, SQL-Migrationsgrundlage und einen reproduzierbaren Tenant-Isolation-Spike.
 
 Bedingungen (hart).
+
 - Keine direkten Commits auf `master`; Änderungen erfolgen in kleinen, reviewbaren Patches.
 - Keine operativen Browser- oder Agentenwrites direkt nach Supabase.
 - Normale API- und Workerpfade verwenden weder Service Role noch `BYPASSRLS`.
@@ -22,6 +24,7 @@ Bedingungen (hart).
 - Kein Microservice-, Kubernetes-, Kafka-, Billing- oder Fachfeature-Ausbau in diesem Sprint.
 
 Akzeptanzkriterien.
+
 - Ein dokumentierter Fresh Checkout installiert Abhängigkeiten und startet Web, API, Worker und lokalen Supabase-Stack ohne manuelle Dashboardänderung.
 - Root-Kommandos für Formatierung, Lint, Typprüfung, Tests und Build sind definiert und erfolgreich ausführbar.
 - API-Health, API-Readiness, Worker-Start und Web-Smoke sind automatisiert prüfbar.
@@ -31,6 +34,7 @@ Akzeptanzkriterien.
 - Der gewählte RLS- und Connection-Pooling-Ansatz ist durch Datenbank- und Integrationstests belegt oder als `BLOCKER` dokumentiert.
 
 Explizit out-of-scope.
+
 - OpenAPI-Client, Transactional Outbox und produktive Jobqueue.
 - Planungs-, Baustellen-, Arbeitszeit-, Wetter- oder Benachrichtigungsfunktionen.
 - Produktivdeployment, produktive Datenmigration und Produktionsfreigabe.
@@ -66,23 +70,23 @@ Wenn RLS und der gewählte Poolingmodus den Tenantkontext nicht zuverlässig iso
 
 ## Requirements
 
-| ID | Anforderung | Verifikation |
-|---|---|---|
-| REQ-F-001 | Fresh Checkout startet Web, API, Worker und Supabase | dokumentierter Fresh-Checkout-Smoke |
-| REQ-F-002 | Mobile und zugängliche Web-Shell | Browser-, Tastatur-, Fokus- und Zoom-Smoke |
-| REQ-F-003 | API und Worker sind getrennte Prozesse | Start-, Health- und Shutdown-Tests |
-| REQ-F-004 | Supabase ist aus Repositorydateien reproduzierbar | zweifacher DB-Reset |
-| REQ-F-005 | Zwei Organisationen sind vollständig isoliert | Cross-Tenant-Negativtests |
-| REQ-NF-001 | Toolchain und Builds sind deterministisch | Clean Install und Root-Kommandos |
-| REQ-NF-002 | Fehlerhafte Konfiguration stoppt früh | Konfigurations-Negativtests |
-| REQ-A-001 | Split-Monolith-Struktur wird eingehalten | ADR- und Architekturreview |
-| REQ-A-002 | Keine operativen Browserwrites | Import- und Codeprüfung |
-| REQ-D-001 | SQL-Migrationen sind einzige Schemaquelle | reproduzierbarer Reset |
-| REQ-D-002 | Cross-Tenant-Referenzen sind ausgeschlossen | Constraint- und FK-Tests |
-| REQ-S-001 | Tenantkontext stammt aus verifizierter Membership | Auth- und Membership-Tests |
-| REQ-S-002 | Keine RLS-Umgehung im Laufzeitpfad | Laufzeit- und Konfigurationsreview |
-| REQ-S-003 | Keine Secrets in Repository oder Logs | Redaction- und Secret-Scan |
-| REQ-O-001 | API und Worker sind diagnostizierbar | Health-, Readiness- und Shutdown-Test |
+| ID         | Anforderung                                          | Verifikation                               |
+| ---------- | ---------------------------------------------------- | ------------------------------------------ |
+| REQ-F-001  | Fresh Checkout startet Web, API, Worker und Supabase | dokumentierter Fresh-Checkout-Smoke        |
+| REQ-F-002  | Mobile und zugängliche Web-Shell                     | Browser-, Tastatur-, Fokus- und Zoom-Smoke |
+| REQ-F-003  | API und Worker sind getrennte Prozesse               | Start-, Health- und Shutdown-Tests         |
+| REQ-F-004  | Supabase ist aus Repositorydateien reproduzierbar    | zweifacher DB-Reset                        |
+| REQ-F-005  | Zwei Organisationen sind vollständig isoliert        | Cross-Tenant-Negativtests                  |
+| REQ-NF-001 | Toolchain und Builds sind deterministisch            | Clean Install und Root-Kommandos           |
+| REQ-NF-002 | Fehlerhafte Konfiguration stoppt früh                | Konfigurations-Negativtests                |
+| REQ-A-001  | Split-Monolith-Struktur wird eingehalten             | ADR- und Architekturreview                 |
+| REQ-A-002  | Keine operativen Browserwrites                       | Import- und Codeprüfung                    |
+| REQ-D-001  | SQL-Migrationen sind einzige Schemaquelle            | reproduzierbarer Reset                     |
+| REQ-D-002  | Cross-Tenant-Referenzen sind ausgeschlossen          | Constraint- und FK-Tests                   |
+| REQ-S-001  | Tenantkontext stammt aus verifizierter Membership    | Auth- und Membership-Tests                 |
+| REQ-S-002  | Keine RLS-Umgehung im Laufzeitpfad                   | Laufzeit- und Konfigurationsreview         |
+| REQ-S-003  | Keine Secrets in Repository oder Logs                | Redaction- und Secret-Scan                 |
+| REQ-O-001  | API und Worker sind diagnostizierbar                 | Health-, Readiness- und Shutdown-Test      |
 
 ## Zielstruktur
 
@@ -132,6 +136,7 @@ Jira: EYT-13
 5. Verbotene Architekturabkürzungen dokumentieren.
 
 Abnahme:
+
 - ADR, Jira und Sprintplan widersprechen sich nicht.
 - Alle sieben Sprinttickets sind eindeutig zugeordnet.
 - Kein zurückgestelltes Feature befindet sich im Sprintscope.
@@ -148,6 +153,7 @@ Jira: EYT-40
 6. Clean Install sowie gefilterte Web- und Backend-Builds ausführen.
 
 Abnahme:
+
 - genau ein Package Manager und Lockfile;
 - Root-Kommandos funktionieren;
 - Web und Backend können separat gebaut werden.
@@ -163,6 +169,7 @@ Jira: EYT-43
 5. Web, API und Worker mit synthetischer Konfiguration starten.
 
 Abnahme:
+
 - ungültige Konfiguration stoppt vor Netzwerk- oder Datenbankzugriff;
 - Secrets werden redigiert;
 - `.env.example` enthält keine echten Zugangsdaten.
@@ -179,6 +186,7 @@ Jira: EYT-42
 6. API und Worker gemeinsam starten und kontrolliert beenden.
 
 Abnahme:
+
 - API-Health und Readiness sind prüfbar;
 - Worker startet separat;
 - beide Prozesse beenden sich ohne hängende Handles.
@@ -195,6 +203,7 @@ Jira: EYT-41
 6. Smartphonebreiten und 200-%-Zoom prüfen.
 
 Abnahme:
+
 - keine horizontale Scrollleiste auf bestätigten Smartphonebreiten;
 - zentrale Shell ist mit Tastatur bedienbar;
 - Browser schreibt nicht direkt in operative Tabellen.
@@ -211,6 +220,7 @@ Jira: EYT-44
 6. Datenbank zweimal vollständig resetten.
 
 Abnahme:
+
 - kein manueller Dashboard-Schritt erforderlich;
 - Reset erzeugt Schema, Policies, Buckets und Seeds;
 - Migrationen funktionieren in einer leeren Datenbank.
@@ -230,6 +240,7 @@ Jira: EYT-15
 9. parallele Requests unter gewähltem Poolingmodus testen.
 
 Abnahme:
+
 - sämtliche Cross-Tenant-Versuche werden abgelehnt;
 - Cross-Tenant-Fremdschlüssel sind unmöglich;
 - manipulierte Requestparameter verändern den Tenantkontext nicht;
@@ -253,14 +264,14 @@ Abnahme:
 
 ## Empfohlener Zwei-Wochen-Ablauf
 
-| Zeitraum | Schwerpunkt |
-|---|---|
-| Tage 1–2 | EYT-13 und EYT-40 |
-| Tage 2–4 | EYT-43 und EYT-42 |
-| Tage 3–5 | EYT-41 parallel bei bestätigter Kapazität |
-| Tage 4–7 | EYT-44 |
-| Tage 7–9 | EYT-15 |
-| Tag 10 | Fresh Checkout, integrierte Tests und Review |
+| Zeitraum | Schwerpunkt                                  |
+| -------- | -------------------------------------------- |
+| Tage 1–2 | EYT-13 und EYT-40                            |
+| Tage 2–4 | EYT-43 und EYT-42                            |
+| Tage 3–5 | EYT-41 parallel bei bestätigter Kapazität    |
+| Tage 4–7 | EYT-44                                       |
+| Tage 7–9 | EYT-15                                       |
+| Tag 10   | Fresh Checkout, integrierte Tests und Review |
 
 Diese Einteilung ist eine Reihenfolge, keine belastbare Aufwandsschätzung.
 
@@ -311,15 +322,15 @@ Tenantkontext wird falsch gesetzt
 
 ## Readiness-Entscheidung
 
-| Bereich | Status |
-|---|---|
-| Sprintziel | klar und überprüfbar |
-| Tickets | vollständig zugeordnet |
-| technische Reihenfolge | definiert |
-| TDD-Strategie | definiert |
-| Validierung | definiert |
-| Rollback | definiert |
-| Toolversionen | MISSING – vor Umsetzung verifizieren |
-| Entwicklerkapazität | MISSING |
-| Sprint-Commitment | noch nicht bestätigt |
-| Planstatus | PASS_WITH_ASSUMPTIONS |
+| Bereich                | Status                               |
+| ---------------------- | ------------------------------------ |
+| Sprintziel             | klar und überprüfbar                 |
+| Tickets                | vollständig zugeordnet               |
+| technische Reihenfolge | definiert                            |
+| TDD-Strategie          | definiert                            |
+| Validierung            | definiert                            |
+| Rollback               | definiert                            |
+| Toolversionen          | MISSING – vor Umsetzung verifizieren |
+| Entwicklerkapazität    | MISSING                              |
+| Sprint-Commitment      | noch nicht bestätigt                 |
+| Planstatus             | PASS_WITH_ASSUMPTIONS                |

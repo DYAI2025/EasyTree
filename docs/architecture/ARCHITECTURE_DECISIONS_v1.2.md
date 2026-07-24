@@ -83,19 +83,19 @@ Zu überwachen sind insbesondere Authentifizierung, Autorisierung, Planveröffen
 
 Diese Werte sind noch rechtlich zu prüfen:
 
-| Kategorie | Vorläufiger Wert |
-|---|---:|
-| Arbeitszeiten und Freigaben | mindestens 2 Jahre |
-| Einsatz- und Planungshistorie | 3 Jahre vorgeschlagen |
-| Urlaub und Abwesenheit | 3 Jahre vorgeschlagen |
-| reiner Krankheitsstatus | möglichst kurz, vorgeschlagen maximal 12 Monate nach Jahresende |
-| Zustandsmeldungen und Fotos | 3 Jahre nach Abschluss vorgeschlagen |
-| Audit-Einträge | 3 Jahre vorgeschlagen |
-| Security- und Zugriffslogs | 90 Tage |
-| Benachrichtigungsdaten | 90 Tage |
-| Roh-Audio | nach Bestätigung, spätestens nach 24 Stunden |
-| Wettercache | 48 Stunden bis maximal 7 Tage |
-| Backups | rollierend 30 Tage vorgeschlagen |
+| Kategorie                     |                                                Vorläufiger Wert |
+| ----------------------------- | --------------------------------------------------------------: |
+| Arbeitszeiten und Freigaben   |                                              mindestens 2 Jahre |
+| Einsatz- und Planungshistorie |                                           3 Jahre vorgeschlagen |
+| Urlaub und Abwesenheit        |                                           3 Jahre vorgeschlagen |
+| reiner Krankheitsstatus       | möglichst kurz, vorgeschlagen maximal 12 Monate nach Jahresende |
+| Zustandsmeldungen und Fotos   |                            3 Jahre nach Abschluss vorgeschlagen |
+| Audit-Einträge                |                                           3 Jahre vorgeschlagen |
+| Security- und Zugriffslogs    |                                                         90 Tage |
+| Benachrichtigungsdaten        |                                                         90 Tage |
+| Roh-Audio                     |                    nach Bestätigung, spätestens nach 24 Stunden |
+| Wettercache                   |                                   48 Stunden bis maximal 7 Tage |
+| Backups                       |                                rollierend 30 Tage vorgeschlagen |
 
 ## Noch offen
 

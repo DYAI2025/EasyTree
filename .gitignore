@@ -7,6 +7,10 @@ dist/
 .turbo/
 coverage/
 
+# Playwright runtime artifacts (EYT-58b)
+test-results/
+playwright-report/
+
 # Environment files (never commit real credentials)
 .env
 .env.*

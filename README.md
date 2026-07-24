@@ -37,6 +37,30 @@ pnpm build        # Build aller Pakete (dist/**, .next/**)
 
 Einzelne Pakete lassen sich filtern, z. B. `pnpm --filter @easytree/config test`.
 
+## CI & Pflichtchecks
+
+Jeder Pull Request gegen `master` durchläuft den GitHub-Actions-Workflow
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Alle Jobs sind Pflichtchecks
+und blockieren den Merge; Branch Protection erzwingt sie technisch (EYT-67). Die
+Installation läuft ausschließlich mit `pnpm install --frozen-lockfile` (Composite-Action
+[`.github/actions/setup-pnpm`](.github/actions/setup-pnpm/action.yml)).
+
+| Job           | Zweck                                                                     | merge-blockierend    |
+| ------------- | ------------------------------------------------------------------------- | -------------------- |
+| `format`      | Prettier-Check über das gesamte Repo (`pnpm format`)                      | ja                   |
+| `lint`        | ESLint über alle Pakete (`pnpm lint`)                                     | ja                   |
+| `typecheck`   | `tsc --noEmit` über alle Pakete (`pnpm typecheck`)                        | ja                   |
+| `unit-tests`  | Vitest über alle Pakete (`pnpm test`)                                     | ja                   |
+| `build-web`   | Produktions-Build der Web-Shell inkl. Abhängigkeiten                      | ja                   |
+| `build-api`   | Produktions-Build von API/Worker inkl. Abhängigkeiten                     | ja                   |
+| `secret-scan` | gitleaks (gepinnt, `--redact`) + Checks auf getrackte `.env`-/Key-Dateien | ja                   |
+| `db-gates`    | Migrationen, pgTAP und fail-closed Tenant-Gates auf echtem Supabase-Stack | ja — folgt in EYT-57 |
+| `web-smoke`   | Browser-Smoke (Playwright/Chromium) inkl. Accessibility                   | ja — folgt in EYT-58 |
+
+Hinweise: Die Tenant-Integrationstests skippen im Job `unit-tests` ohne erreichbare
+Datenbank mit Warnung (Local-Mode); das verbindliche, fail-closed geprüfte Gate dafür
+ist der Job `db-gates`. Keiner der Pflichtchecks verwendet `continue-on-error`.
+
 ## Struktur
 
 ```

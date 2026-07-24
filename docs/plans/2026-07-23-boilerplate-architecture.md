@@ -6,6 +6,7 @@ Owner/Executor: coding agent + engineering review
 Last updated: 2026-07-23
 
 <!-- GOAL_START -->
+
 Goal: Mandantenfähige Arboscus-Boilerplate aufbauen
 
 Ziel. Eine ausführbare Greenfield-Boilerplate für den Arboscus Teamplaner schaffen, die den ersten MVP schnell trägt und weitere Firmen ohne Kundenforks aufnehmen kann. Kritische Planungs-, Tenant-, Audit- und Zeitinvarianten werden von Beginn an testbar und serverseitig erzwungen. Das Ergebnis ist kein fertiges Produkt, sondern ein belastbarer, lauffähiger Architekturrahmen mit einem ersten vertikalen Referenz-Slice.
@@ -13,6 +14,7 @@ Ziel. Eine ausführbare Greenfield-Boilerplate für den Arboscus Teamplaner scha
 Scope. Neuer Feature-Branch vom aktuellen Default-Branch. TypeScript-Monorepo mit `apps/web`, `apps/backend`, benannten `packages/*`, `supabase/`, `openapi/`, `infra/`, Architekturtests und CI. Supabase Postgres/Auth/Storage bleibt Plattformbasis; operative Kommandos laufen über den NestJS-Anwendungskern. Der Backend-Build liefert API- und Worker-Entrypoints.
 
 Bedingungen (hart).
+
 - Shared-schema-Multitenancy mit `organization_id`, tenant-sicheren Fremdschlüsseln, Application Authorization und getesteter RLS.
 - SQL-Migrationen sind die einzige Schemaquelle; keine parallele ORM-Migrationsquelle.
 - Domainlogik bleibt frei von Next.js-, NestJS-, Kysely-, HTTP- und Providerabhängigkeiten.
@@ -20,6 +22,7 @@ Bedingungen (hart).
 - Kein direkter Browser- oder Agentenschreibzugriff auf operative Tabellen.
 
 Akzeptanzkriterien.
+
 - Ein frischer Checkout startet Web, API, Worker und lokalen Supabase-Stack anhand dokumentierter Befehle.
 - CI prüft Formatierung, Lint, Typen, Unit-/Property-Tests, pgTAP, API-Integration, OpenAPI-Drift, Architekturgrenzen, E2E und Build.
 - Zwei synthetische Organisationen können nicht auf Daten der jeweils anderen Organisation zugreifen.
@@ -28,6 +31,7 @@ Akzeptanzkriterien.
 - Dokumentierte Rollback-, Migrations- und Provider-Austauschpfade liegen vor.
 
 Explizit out-of-scope.
+
 - Fachliche Vollimplementierung aller EYT-Tickets.
 - Native iOS-/Android-App, Solver, KI-Planung oder MCP.
 - Microservices, Kubernetes, Kafka, Event Sourcing oder GraphQL.
@@ -49,58 +53,64 @@ Reference-Doc: `docs/architecture/ADR-001-boilerplate-architecture.md`
 ## Assumptions, missing information, open questions, blockers
 
 ### ASSUMPTION
+
 - Ein kleines Kernteam verantwortet Web und Backend gemeinsam.
 - Ein gemeinsames EU-Postgres reicht für Pilot und erste weitere Firmen.
 - PWA deckt den frühen Feldnutzen ab; native App wird durch Feldtests entschieden.
 - REST/JSON erfüllt Web-, Mobile- und Partnerintegrationen.
 
 ### MISSING
+
 - Exakte Runtime- und Frameworkversionen.
 - Finaler Hosting-, E-Mail-, Wetter-, Ozon- und Routingprovider.
 - Verbindliche SLOs, Mandantenzahlen, Peak-Concurrency und Kostenbudget.
 - Rechtlich freigegebene Datenaufbewahrung.
 
 ### OPEN QUESTION
+
 - Direct Connection, Session Pooler oder Transaction Pooler für API und Worker.
 - Datenisolationsoptionen für spätere Großkunden.
 - Browser-Push im erweiterten Release.
 
 ### BLOCKER
+
 - Kein Blocker für lokale Boilerplate und Referenz-Slice.
 - Produktion bleibt blockiert, bis Hosting, Security, Retention, Backup/Restore, SLOs und Release-Gates belegt sind.
 
 ## Requirements
 
-| ID | Type | Statement | Verification |
-|---|---|---|---|
-| REQ-F-001 | Functional | Web, API, Worker und lokaler Supabase-Stack sind reproduzierbar startbar. | Fresh-checkout smoke |
-| REQ-F-002 | Functional | Erster vertikaler Planungs-/Publish-Slice ist ausführbar. | Playwright + API integration |
-| REQ-F-003 | Functional | Benachrichtigungsjobs sind transaktional und idempotent. | Retry-/duplicate integration test |
-| REQ-F-004 | Functional | OpenAPI erzeugt typisierten Webclient. | Generated diff clean |
-| REQ-NF-001 | Non-functional | Domainmodule sind unabhängig testbar und Grenzen erzwungen. | Architecture tests |
-| REQ-NF-002 | Non-functional | Pilotdichte 12 Nutzer/3 Baustellen bleibt nutzbar. | Synthetic E2E/load smoke |
-| REQ-D-001 | Data | SQL-Migrationen sind einzige Schemaquelle. | `supabase db reset` |
-| REQ-D-002 | Data | Tenant-owned Zeilen und FKs sind organisationsgebunden. | pgTAP negative tests |
-| REQ-D-003 | Data | Veröffentlichte Mitarbeiter-/Ressourcenintervalle überlappen nicht. | PostgreSQL exclusion tests |
-| REQ-D-004 | Data | Höchstens ein aktiver Timer pro Mitarbeiter. | Partial unique index test |
-| REQ-A-001 | Architecture | Web enthält UI/PWA; Backend enthält operative Domainlogik. | Import/route review |
-| REQ-A-002 | Architecture | Module folgen Domain/Application/Infrastructure/Interface. | Dependency tests |
-| REQ-A-003 | Architecture | Externe Provider sind Ports/Adapter. | Contract tests |
-| REQ-S-001 | Security | Backend verifiziert Supabase JWT und Membership. | Auth integration tests |
-| REQ-S-002 | Security | RLS und least-privilege Runtime-Rolle sind getestet. | pgTAP/runtime tests |
-| REQ-S-003 | Security | Cross-Tenant-, IDOR-, Export-, Cache-, Job- und Dateizugriffe sind negativ getestet. | Security suite |
-| REQ-O-001 | Operations | API/Worker besitzen Health, Readiness und Korrelation. | Smoke/telemetry assertions |
-| REQ-O-002 | Operations | Migrationen sind expand/verify/contract-fähig. | Migration checklist |
-| REQ-O-003 | Operations | Worker besitzt Retry, Dead-Letter, Queue-Lag und Reconciliation. | Failure injection tests |
+| ID         | Type           | Statement                                                                            | Verification                      |
+| ---------- | -------------- | ------------------------------------------------------------------------------------ | --------------------------------- |
+| REQ-F-001  | Functional     | Web, API, Worker und lokaler Supabase-Stack sind reproduzierbar startbar.            | Fresh-checkout smoke              |
+| REQ-F-002  | Functional     | Erster vertikaler Planungs-/Publish-Slice ist ausführbar.                            | Playwright + API integration      |
+| REQ-F-003  | Functional     | Benachrichtigungsjobs sind transaktional und idempotent.                             | Retry-/duplicate integration test |
+| REQ-F-004  | Functional     | OpenAPI erzeugt typisierten Webclient.                                               | Generated diff clean              |
+| REQ-NF-001 | Non-functional | Domainmodule sind unabhängig testbar und Grenzen erzwungen.                          | Architecture tests                |
+| REQ-NF-002 | Non-functional | Pilotdichte 12 Nutzer/3 Baustellen bleibt nutzbar.                                   | Synthetic E2E/load smoke          |
+| REQ-D-001  | Data           | SQL-Migrationen sind einzige Schemaquelle.                                           | `supabase db reset`               |
+| REQ-D-002  | Data           | Tenant-owned Zeilen und FKs sind organisationsgebunden.                              | pgTAP negative tests              |
+| REQ-D-003  | Data           | Veröffentlichte Mitarbeiter-/Ressourcenintervalle überlappen nicht.                  | PostgreSQL exclusion tests        |
+| REQ-D-004  | Data           | Höchstens ein aktiver Timer pro Mitarbeiter.                                         | Partial unique index test         |
+| REQ-A-001  | Architecture   | Web enthält UI/PWA; Backend enthält operative Domainlogik.                           | Import/route review               |
+| REQ-A-002  | Architecture   | Module folgen Domain/Application/Infrastructure/Interface.                           | Dependency tests                  |
+| REQ-A-003  | Architecture   | Externe Provider sind Ports/Adapter.                                                 | Contract tests                    |
+| REQ-S-001  | Security       | Backend verifiziert Supabase JWT und Membership.                                     | Auth integration tests            |
+| REQ-S-002  | Security       | RLS und least-privilege Runtime-Rolle sind getestet.                                 | pgTAP/runtime tests               |
+| REQ-S-003  | Security       | Cross-Tenant-, IDOR-, Export-, Cache-, Job- und Dateizugriffe sind negativ getestet. | Security suite                    |
+| REQ-O-001  | Operations     | API/Worker besitzen Health, Readiness und Korrelation.                               | Smoke/telemetry assertions        |
+| REQ-O-002  | Operations     | Migrationen sind expand/verify/contract-fähig.                                       | Migration checklist               |
+| REQ-O-003  | Operations     | Worker besitzt Retry, Dead-Letter, Queue-Lag und Reconciliation.                     | Failure injection tests           |
 
 ## Architecture and file boundaries
 
 ### Current architecture facts
+
 - Greenfield-Repository ohne nachgewiesene App-Boilerplate.
 - Supabase, TypeScript-first, modularer Monolith und Provideradapter sind beschlossen.
 - Produktion ist nicht freigegeben.
 
 ### Target architecture constraints
+
 - Ein Repository und eine transaktionale PostgreSQL-Datenbank.
 - Deployables: `web`, `backend-api`, `backend-worker`; API und Worker aus demselben Backend-Artefakt.
 - Shared-schema Multitenancy ab Tag eins.
@@ -108,6 +118,7 @@ Reference-Doc: `docs/architecture/ADR-001-boilerplate-architecture.md`
 - Keine Domainlogik in React-Komponenten, Next Route Handlers, SQL-Triggern oder Queue-Handlern duplizieren.
 
 ### Files and modules
+
 ```text
 apps/
   web/
@@ -130,6 +141,7 @@ docs/
 Backendmodule: `tenancy`, `identity`, `workforce`, `sites`, `planning`, `resources`, `timekeeping`, `communications`, `weather-routing`, `files`, `audit-integration`.
 
 ### Prohibited changes
+
 - Kein `packages/shared` als Sammelablage.
 - Keine direkte Browsermutation operativer Tabellen.
 - Keine Service-Role als normale Runtime-Identität.
@@ -139,20 +151,25 @@ Backendmodule: `tenancy`, `identity`, `workforce`, `sites`, `planning`, `resourc
 ## Implementation phases
 
 ### Phase 1: Discovery and test baseline
+
 Workspace, Toolchain, lokale Supabase-Umgebung, Architekturtests und CI-Verträge aufsetzen.
 
 ### Phase 2: Core change
+
 Tenantmodell, Auth-Kontext, SQL-Invarianten, Domainmodule und erste Application Commands implementieren.
 
 ### Phase 3: Integration and edge cases
+
 OpenAPI, Webclient, Outbox/Worker, Providerports, Cross-Tenant-, Nebenläufigkeits- und E2E-Tests ergänzen.
 
 ### Phase 4: Documentation and handoff
+
 Container, Fresh-checkout-Verifikation, Threat Model, Runbooks, Rollback und Architekturstand abschließen.
 
 ## Tasks
 
 ### TASK-001: Workspace und Toolchain anlegen
+
 Objective: Reproduzierbares pnpm-/Turborepo-Grundgerüst.  
 Requirement links: REQ-F-001, REQ-NF-001  
 Files/modules: root manifests, `apps/*`, `packages/*`, `tools/*`.  
@@ -162,6 +179,7 @@ Validation: Zielbefehl `pnpm verify`.
 Rollback: gesamter Task als isolierter Commit revertierbar.
 
 ### TASK-002: Next.js-Web/PWA-Shell aufbauen
+
 Objective: Mobile-first Webshell ohne operative Direktwrites.  
 Requirement links: REQ-A-001, REQ-NF-003  
 Files/modules: `apps/web`.  
@@ -171,6 +189,7 @@ Validation: `pnpm --filter web test && pnpm --filter web build`.
 Rollback: Webshell unabhängig revertierbar.
 
 ### TASK-003: NestJS API- und Worker-Bootstrap schaffen
+
 Objective: Ein Backendartefakt mit zwei Entrypoints.  
 Requirement links: REQ-F-001, REQ-O-001  
 Files/modules: `apps/backend/src/bootstrap`, `platform`.  
@@ -180,6 +199,7 @@ Validation: `pnpm --filter backend test && pnpm --filter backend build`.
 Rollback: Entrypoints getrennt committen.
 
 ### TASK-004: Modulgrenzen automatisiert erzwingen
+
 Objective: Scheinkapselung verhindern.  
 Requirement links: REQ-NF-001, REQ-A-002  
 Files/modules: architecture test config.  
@@ -189,6 +209,7 @@ Validation: `pnpm test:architecture`.
 Rollback: Regeländerungen nur mit ADR.
 
 ### TASK-005: Lokalen Supabase-Stack und SQL-Migrationsworkflow aufsetzen
+
 Objective: Reproduzierbares Schema und lokale Integration.  
 Requirement links: REQ-D-001, REQ-S-002  
 Files/modules: `supabase/config.toml`, `migrations`, `tests`.  
@@ -198,6 +219,7 @@ Validation: `pnpm db:reset && pnpm test:db`.
 Rollback: Migrationen vor Remote-Nutzung korrigierbar; danach nur additive Änderungen.
 
 ### TASK-006: Shared-schema-Tenantmodell implementieren
+
 Objective: Cross-Tenant-Referenzen strukturell verhindern.  
 Requirement links: REQ-D-002, REQ-S-002, REQ-S-003  
 Files/modules: Tenancy/Identity migration and tests.  
@@ -207,6 +229,7 @@ Validation: `pnpm test:db -- tenancy`.
 Rollback: Feature-Branch reset; nach Remote-Nutzung expand/contract.
 
 ### TASK-007: Supabase-JWT und Autorisierungskontext anbinden
+
 Objective: Authentifizierten Benutzer sicher auf Organisation und Rechte abbilden.  
 Requirement links: REQ-S-001, REQ-S-003  
 Files/modules: backend auth platform and tenancy application.  
@@ -216,6 +239,7 @@ Validation: `pnpm test:integration -- auth`.
 Rollback: Authadapter austauschbar halten.
 
 ### TASK-008: Kysely-Datenzugriff und Transaktionsgrenze einrichten
+
 Objective: Typisierte Queries ohne zweite Schemaquelle.  
 Requirement links: REQ-D-001, REQ-A-002  
 Files/modules: backend database platform and module repositories.  
@@ -225,6 +249,7 @@ Validation: `pnpm test:integration -- repositories`.
 Rollback: Repositoryadapter hinter Ports.
 
 ### TASK-009: PostgreSQL-Invarianten definieren
+
 Objective: Konflikte auch unter Nebenläufigkeit verhindern.  
 Requirement links: REQ-D-003, REQ-D-004  
 Files/modules: planning/timekeeping migrations and pgTAP.  
@@ -234,6 +259,7 @@ Validation: `pnpm test:db -- invariants`.
 Rollback: Constraintänderungen nur nach Datenprüfung.
 
 ### TASK-010: Domainmodule und öffentliche APIs scaffolden
+
 Objective: Fachliche Ownership sichtbar und erweiterbar machen.  
 Requirement links: REQ-A-002, REQ-A-003  
 Files/modules: backend `modules/*`.  
@@ -243,6 +269,7 @@ Validation: `pnpm test:architecture && pnpm typecheck`.
 Rollback: Module einzeln entfernbar.
 
 ### TASK-011: Ersten vertikalen Planungs-/Publish-Slice TDD-first bauen
+
 Objective: Architektur an echtem Wertstrom beweisen.  
 Requirement links: REQ-F-002, REQ-D-003, REQ-S-001  
 Files/modules: tenancy, workforce, sites, planning, audit.  
@@ -252,6 +279,7 @@ Validation: `pnpm test:e2e -- planning-reference-slice`.
 Rollback: Slice über Featureflag deaktivierbar.
 
 ### TASK-012: OpenAPI und generierten TypeScript-Client etablieren
+
 Objective: Stabiler Vertrag für Web, spätere Mobile-App und Integrationen.  
 Requirement links: REQ-F-004, REQ-A-001  
 Files/modules: backend HTTP, `openapi`, `packages/api-client`.  
@@ -261,6 +289,7 @@ Validation: `pnpm openapi:check`.
 Rollback: Spec und Client gemeinsam versionieren.
 
 ### TASK-013: Transactional Outbox und pg-boss-Worker implementieren
+
 Objective: Zustandsänderung und externe Nebenwirkung entkoppeln, ohne Broker.  
 Requirement links: REQ-F-003, REQ-O-003  
 Files/modules: audit/integration, communications, queue platform.  
@@ -270,6 +299,7 @@ Validation: `pnpm test:integration -- outbox-worker`.
 Rollback: Worker kill switch; Outboxdaten erhalten.
 
 ### TASK-014: Providerports und Fakeadapter definieren
+
 Objective: E-Mail, Wetter, DWD, Routing, Storage und Transkription austauschbar halten.  
 Requirement links: REQ-A-003, REQ-S-004  
 Files/modules: communications, weather-routing, files.  
@@ -279,6 +309,7 @@ Validation: `pnpm test:contract -- providers`.
 Rollback: Adapter einzeln deaktivierbar.
 
 ### TASK-015: Observability und Datenschutzkonventionen einbauen
+
 Objective: Fehler sichtbar machen, ohne Beschäftigtendaten zu leaken.  
 Requirement links: REQ-S-004, REQ-O-001, REQ-O-003  
 Files/modules: observability package/platform.  
@@ -288,6 +319,7 @@ Validation: `pnpm test:observability`.
 Rollback: Exporter austauschbar; lokale No-op-Option.
 
 ### TASK-016: CI-Gates und Supply-Chain-Prüfungen definieren
+
 Objective: Pflichtprüfungen vor Merge erzwingen.  
 Requirement links: alle Qualitätsanforderungen.  
 Files/modules: `.github/workflows`, root scripts.  
@@ -297,6 +329,7 @@ Validation: alle Root-Checks Exit 0.
 Rollback: Checks nicht umgehen; Flakiness ursächlich beheben.
 
 ### TASK-017: Container- und lokale Betriebsumgebung definieren
+
 Objective: Web, API und Worker reproduzierbar bauen/starten.  
 Requirement links: REQ-F-001, REQ-O-001  
 Files/modules: Dockerfiles, `.dockerignore`, local orchestration.  
@@ -306,6 +339,7 @@ Validation: `pnpm containers:build && pnpm containers:smoke`.
 Rollback: providerneutral, kein produktives Infra-Setup.
 
 ### TASK-018: Performance- und Nebenläufigkeitssmoke erstellen
+
 Objective: Pilotfähigkeit messen, ohne SLOs zu erfinden.  
 Requirement links: REQ-NF-002, REQ-D-003  
 Files/modules: synthetic generator/load scenarios.  
@@ -315,6 +349,7 @@ Validation: `pnpm test:performance:smoke`.
 Rollback: getrennt vom normalen CI ausführbar.
 
 ### TASK-019: Security-, Privacy- und Worker-Impact-Review abschließen
+
 Objective: Risikoreichste Daten- und Autorisierungsfehler prüfen.  
 Requirement links: REQ-S-001 bis REQ-S-004  
 Files/modules: threat model, authorization matrix, data classification, security tests.  
@@ -324,6 +359,7 @@ Validation: `pnpm test:security`.
 Rollback: unsichere Funktion deaktivieren.
 
 ### TASK-020: Runbooks und Fresh-checkout-Abnahme liefern
+
 Objective: Betrieb und Erweiterung ohne verborgenes Wissen.  
 Requirement links: alle.  
 Files/modules: README, architecture, runbooks, release gates.  
@@ -335,6 +371,7 @@ Rollback: normale Revert-/Forward-fix-Strategie.
 ## Validation strategy
 
 ### Focused tests
+
 - Domain unit/property tests ohne Framework.
 - Application use-case tests mit Ports/Fakes.
 - pgTAP für RLS, Grants, Composite-FKs, Exclusion Constraints, Timerindex, Audit und Outbox.
@@ -344,6 +381,7 @@ Rollback: normale Revert-/Forward-fix-Strategie.
 - OpenAPI-Generation und Breaking-Change-Erkennung.
 
 ### Broader regression checks
+
 ```bash
 pnpm install --frozen-lockfile
 pnpm format:check
@@ -358,9 +396,11 @@ pnpm test:e2e
 pnpm build
 pnpm containers:smoke
 ```
+
 Diese Befehle sind Zielverträge des Boilerplates und werden erst durch die Tasks geschaffen.
 
 ### Manual review checklist
+
 - Kleine Viewports, 200-%-Zoom, Outdoor-Kontrast, Keyboard und Fokus.
 - Kein direkter Browserwrite auf operative Tabellen.
 - Kein normaler Runtimepfad mit Service-Role/BYPASSRLS.

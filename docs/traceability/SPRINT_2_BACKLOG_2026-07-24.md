@@ -10,15 +10,15 @@ Eine mergegeschützte, reproduzierbare Foundation, deren Tenant-Isolation, Laufz
 
 ## Kandidaten
 
-| Jira | Typ | Priorität | Sprint-2-Beitrag | Status bei Planung | Label |
-|---|---|---:|---|---|---|
-| EYT-15 | Task | Highest | realen Tenant-/Poolingnachweis vervollständigen | Zu erledigen | `sprint-2-candidate` |
-| EYT-41 | Task | Highest | offene manuelle Accessibility-Baseline abschließen | Zu erledigen | `sprint-2-candidate` |
-| EYT-56 | Task | Highest | PR-CI-Baseline | Zu erledigen | `sprint-2-candidate` |
-| EYT-57 | Task | Highest | DB-, Migration-, RLS- und Tenant-Gates | Zu erledigen | `sprint-2-candidate` |
-| EYT-58 | Task | Highest | API-, Worker-, Browser- und Accessibility-Smokes | Zu erledigen | `sprint-2-candidate` |
-| EYT-66 | Bug | Highest | Pflicht-Tenant-Tests fail-closed machen | Zu erledigen | `sprint-2-candidate` |
-| EYT-67 | Task | Highest | Branch Protection und Required Checks | Zu erledigen | `sprint-2-candidate` |
+| Jira   | Typ  | Priorität | Sprint-2-Beitrag                                   | Status bei Planung | Label                |
+| ------ | ---- | --------: | -------------------------------------------------- | ------------------ | -------------------- |
+| EYT-15 | Task |   Highest | realen Tenant-/Poolingnachweis vervollständigen    | Zu erledigen       | `sprint-2-candidate` |
+| EYT-41 | Task |   Highest | offene manuelle Accessibility-Baseline abschließen | Zu erledigen       | `sprint-2-candidate` |
+| EYT-56 | Task |   Highest | PR-CI-Baseline                                     | Zu erledigen       | `sprint-2-candidate` |
+| EYT-57 | Task |   Highest | DB-, Migration-, RLS- und Tenant-Gates             | Zu erledigen       | `sprint-2-candidate` |
+| EYT-58 | Task |   Highest | API-, Worker-, Browser- und Accessibility-Smokes   | Zu erledigen       | `sprint-2-candidate` |
+| EYT-66 | Bug  |   Highest | Pflicht-Tenant-Tests fail-closed machen            | Zu erledigen       | `sprint-2-candidate` |
+| EYT-67 | Task |   Highest | Branch Protection und Required Checks              | Zu erledigen       | `sprint-2-candidate` |
 
 ## Review-Korrekturen
 
@@ -40,13 +40,13 @@ EYT-58 ────────────────────────�
 
 ## Nicht im Sprint-2-Kandidatenumfang
 
-| Jira | Grund |
-|---|---|
-| EYT-45 | Datenzugriffsausbau erst nach erzwungenen Tenant-Gates |
-| EYT-46 / EYT-59 | Architekturgrenzen wichtig, aber nach Quality Foundation |
-| EYT-47 / EYT-60 | API-Vertragsausbau folgt nach stabiler CI-Basis |
-| EYT-61 / EYT-62 | Fachinvarianten und E2E benötigen ersten Domain-Slice |
-| EYT-63 / EYT-64 / EYT-65 | Nightly-, Release- und Supply-Chain-Ausbau später |
+| Jira                     | Grund                                                    |
+| ------------------------ | -------------------------------------------------------- |
+| EYT-45                   | Datenzugriffsausbau erst nach erzwungenen Tenant-Gates   |
+| EYT-46 / EYT-59          | Architekturgrenzen wichtig, aber nach Quality Foundation |
+| EYT-47 / EYT-60          | API-Vertragsausbau folgt nach stabiler CI-Basis          |
+| EYT-61 / EYT-62          | Fachinvarianten und E2E benötigen ersten Domain-Slice    |
+| EYT-63 / EYT-64 / EYT-65 | Nightly-, Release- und Supply-Chain-Ausbau später        |
 
 ## Jira-Capability-Gap
 

@@ -156,6 +156,46 @@ alle grün.
   ersten produktiven Deployment: denselben Integrationstest einmal mit
   `EASYTREE_TEST_DB_URL` auf den Pooler-Port ausführen.
 
+## Pooling-Evidenz (Sprint 2, real)
+
+Schließt den oben dokumentierten `TOOL_GAP` **Live-Pooler-Test** (EYT-15, Sprint 2):
+
+- **Vorher (Sprint 1, simuliert):** Der Transaction-Mode-Kontrakt wurde nur auf
+  DB-Ebene nachgestellt — dieselbe Direct Connection (Port 54322), Kontext pro
+  Transaktion via `set_config(…, is_local => true)`, Leak-Probe über eine
+  Folgetransaktion ohne Claims (Testmatrix #18). Ein realer Supavisor war nie
+  im Pfad; der lokale Pooler-Container war in `supabase/config.toml` deaktiviert
+  (`[db.pooler] enabled = false`) und startete in der Entwicklungs-Sandbox nicht.
+- **Jetzt (Sprint 2, real):** `[db.pooler] enabled = true` (transaction mode,
+  Port 54329), und die neue Suite `apps/api/test/tenant-pooling.integration.test.ts`
+  verbindet über `EASYTREE_TEST_POOLER_URL` (Default
+  `postgresql://postgres:postgres@127.0.0.1:54329/postgres`) **durch den laufenden
+  Supavisor** statt direkt. Geteilte Bausteine (Seed-Konstanten, `probeDatabase`,
+  `inTenantTx`-Muster) liegen DRY in `apps/api/test/tenant-context.helper.ts` und
+  werden von Direct- und Pooler-Suite gemeinsam genutzt.
+- **Real getestete Szenarien (3 Tests, eigenes Report-Prefix `[tenant-pooling]`):**
+  1. Tenantkontext funktioniert durch den Pooler: ein Client, transaktionslokaler
+     Kontext, User A sieht ausschließlich Org-Alpha-Items (identisches Muster wie
+     die Direct-Suite).
+  2. **Parallelität:** 8 gleichzeitige `pg.Client`-Verbindungen via `Promise.all`
+     (4x User A aktiv, 2x User C inaktiv, 2x ohne Claims) teilen sich die gepoolten
+     Server-Connections — A-Clients sehen ausschließlich Org-Alpha-Zeilen (nie
+     leer), C-/No-Claims-Clients 0 Zeilen.
+  3. **Leak-Probe nach Parallellast:** eine frische Transaktion ohne Claims liefert
+     `auth.uid() IS NULL` und 0 Items — eine vom Pooler wiederverwendete
+     Server-Connection erbt keinen fremden Tenantkontext.
+- **Fail-closed-Gate (gleiche Semantik wie EYT-66):** CI-Job `db-gates`, Step
+  „Tenant isolation gate (fail-closed, TRANSACTION POOLER)" läuft mit
+  `EASYTREE_TENANT_TESTS=required` und greppt die Report-Zeile
+  `[tenant-pooling] mode=required executed=[1-9][0-9]* skipped=0` aus
+  `/tmp/tenant-pooled.log` — unerreichbarer Pooler oder auch nur ein Skip lässt
+  den Job fehlschlagen. Lokal ohne Docker verifiziert: Required-Mode gegen den
+  nicht erreichbaren Pooler-Port ⇒ Exit 1 mit
+  `[tenant-pooling] fail-closed: Pflicht-Pooler-Tests koennen nicht laufen …`;
+  Local-Mode ⇒ Exit 0 mit `[tenant-pooling] mode=local executed=0 skipped=3`.
+- **Evidenzstufe:** CI-Lauf ausstehend — Run-URL nach erstem grünen Lauf hier
+  eintragen (erst dann gilt das EYT-15-AC „reproduzierbar belegt“ als erfüllt).
+
 ## Verbleibende Risiken
 
 1. **Service-Role-Key-Disziplin:** `service_role` hat `BYPASSRLS` per Rollenattribut

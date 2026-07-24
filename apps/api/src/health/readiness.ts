@@ -15,7 +15,10 @@ export interface ReadinessIndicator {
 /** DI token for the list of readiness indicators consumed by /ready. */
 export const READINESS_INDICATORS = "EASYTREE_READINESS_INDICATORS";
 
-/** Minimal database ping abstraction — no real Supabase wiring yet. */
+/**
+ * Minimal database ping abstraction. Production wires `PgDatabasePing`
+ * (EYT-58, see ./pg-database-ping.ts); tests override the token.
+ */
 export interface DatabasePing {
   ping(): Promise<boolean>;
 }
@@ -24,8 +27,9 @@ export interface DatabasePing {
 export const DATABASE_PING = "EASYTREE_DATABASE_PING";
 
 /**
- * Stub used until the Supabase stack is wired up: always reachable.
- * Replaced via DI (`provide: DATABASE_PING`) once a real client exists.
+ * Always-reachable stub, kept ONLY for tests: e2e cases override
+ * `DATABASE_PING` with it to model a healthy database without opening
+ * real TCP connections. Production uses `PgDatabasePing`.
  */
 export class StubDatabasePing implements DatabasePing {
   ping(): Promise<boolean> {

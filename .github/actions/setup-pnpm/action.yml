@@ -1,0 +1,23 @@
+name: Setup Node + pnpm (frozen)
+description: Node 22 + corepack-pinned pnpm + frozen-lockfile install
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+    - name: Enable corepack (pinned pnpm from packageManager)
+      shell: bash
+      run: corepack enable
+    - name: Get pnpm store path
+      id: store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-${{ runner.os }}-
+    - name: Install (frozen lockfile only)
+      shell: bash
+      run: pnpm install --frozen-lockfile

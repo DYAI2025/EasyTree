@@ -11,28 +11,28 @@ Diese Matrix verbindet den Boilerplate-Implementierungsplan mit den Jira-Tickets
 
 ## Traceability-Matrix
 
-| Boilerplate-Task | Jira | Typ | Sprint 1 |
-|---|---|---|---|
-| TASK-001 Architekturentscheidung und Leitplanken | EYT-13 | Task | ja |
-| TASK-002 pnpm-/Turborepo-Workspace | EYT-40 | Task | ja |
-| TASK-003 Next.js-Web-/PWA-Shell | EYT-41 | Task | ja |
-| TASK-004 NestJS-API und Worker | EYT-42 | Task | ja |
-| TASK-005 Konfiguration und Secrets | EYT-43 | Task | ja |
-| TASK-006 Lokaler Supabase-Stack | EYT-44 | Task | ja |
-| TASK-007 Tenant-/Identity-Schema und RLS-Spike | EYT-15 | Task | ja |
-| TASK-008 Kysely und Transaktionskontext | EYT-45 | Task | nein |
-| TASK-009 Domainmodule und Architekturtests | EYT-46 | Task | nein |
-| TASK-010 OpenAPI und generierter Client | EYT-47 | Task | nein |
-| TASK-011 Transactional Outbox und Workerqueue | EYT-48 | Task | nein |
-| TASK-012 Zeit-, Revisions- und Audit-Invarianten | EYT-49 | Task | nein |
-| TASK-013 Vertikaler Planungs-/Publish-Slice | EYT-50 | Story | nein |
-| TASK-014 Tenant-Konfiguration und Entitlements | EYT-51 | Task | nein |
-| TASK-015 Observability und Telemetrie | EYT-52 | Task | nein |
-| TASK-016 CI-, Test-, Security- und Accessibility-Gates | EYT-32 | Task | nein |
-| TASK-017 Container und lokale Betriebsumgebung | EYT-53 | Task | nein |
-| TASK-018 Performance- und Nebenläufigkeitssmoke | EYT-54 | Task | nein |
-| TASK-019 Security-, Privacy- und Beschäftigtenreview | EYT-55 | Task | nein |
-| TASK-020 Runbooks und Fresh-Checkout-Abnahme | EYT-35 | Task | nein |
+| Boilerplate-Task                                       | Jira   | Typ   | Sprint 1 |
+| ------------------------------------------------------ | ------ | ----- | -------- |
+| TASK-001 Architekturentscheidung und Leitplanken       | EYT-13 | Task  | ja       |
+| TASK-002 pnpm-/Turborepo-Workspace                     | EYT-40 | Task  | ja       |
+| TASK-003 Next.js-Web-/PWA-Shell                        | EYT-41 | Task  | ja       |
+| TASK-004 NestJS-API und Worker                         | EYT-42 | Task  | ja       |
+| TASK-005 Konfiguration und Secrets                     | EYT-43 | Task  | ja       |
+| TASK-006 Lokaler Supabase-Stack                        | EYT-44 | Task  | ja       |
+| TASK-007 Tenant-/Identity-Schema und RLS-Spike         | EYT-15 | Task  | ja       |
+| TASK-008 Kysely und Transaktionskontext                | EYT-45 | Task  | nein     |
+| TASK-009 Domainmodule und Architekturtests             | EYT-46 | Task  | nein     |
+| TASK-010 OpenAPI und generierter Client                | EYT-47 | Task  | nein     |
+| TASK-011 Transactional Outbox und Workerqueue          | EYT-48 | Task  | nein     |
+| TASK-012 Zeit-, Revisions- und Audit-Invarianten       | EYT-49 | Task  | nein     |
+| TASK-013 Vertikaler Planungs-/Publish-Slice            | EYT-50 | Story | nein     |
+| TASK-014 Tenant-Konfiguration und Entitlements         | EYT-51 | Task  | nein     |
+| TASK-015 Observability und Telemetrie                  | EYT-52 | Task  | nein     |
+| TASK-016 CI-, Test-, Security- und Accessibility-Gates | EYT-32 | Task  | nein     |
+| TASK-017 Container und lokale Betriebsumgebung         | EYT-53 | Task  | nein     |
+| TASK-018 Performance- und Nebenläufigkeitssmoke        | EYT-54 | Task  | nein     |
+| TASK-019 Security-, Privacy- und Beschäftigtenreview   | EYT-55 | Task  | nein     |
+| TASK-020 Runbooks und Fresh-Checkout-Abnahme           | EYT-35 | Task  | nein     |
 
 ## Sprint-1-Zuordnung
 
