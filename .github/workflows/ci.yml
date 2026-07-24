@@ -109,13 +109,9 @@ jobs:
       - name: pgTAP suite (run 2, must be identical)
         run: pnpm exec supabase test db
       - name: Restart stack — re-provision Supavisor tenant (EYT-15)
-        # `supabase db reset` loescht die Supavisor-Tenant-Provisionierung in
-        # der _supabase-Metadaten-DB. Beweis aus Lauf #4 auf PR #5: Pooler-
-        # Container laeuft und antwortet, meldet aber "tenant postgres.easytree
-        # not found"; auch ein Container-Restart hilft nicht, weil die
-        # Provisionierung CLI-seitig beim `supabase start` erfolgt. Der
-        # CLI-Neustart provisioniert den Tenant neu und erhaelt die
-        # DB-Volumes (Schema + Seeds aus Reset 2 bleiben bestehen).
+        # `supabase db reset` may invalidate the local Supavisor provisioning.
+        # A CLI-managed restart preserves the DB volumes while recreating the
+        # pooler container and its tenant metadata.
         run: |
           pnpm exec supabase stop
           pnpm exec supabase start -x studio
@@ -132,55 +128,64 @@ jobs:
           pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
           grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
-        # Lauf #1: plain `postgres` vom Pooler abgelehnt. Lauf #2: Step starb
-        # an grep-Miss unter pipefail. Lauf #3: Pooler trotz Fallback-Username
-        # unerreichbar — Hypothese: `db reset` zerstoert die Supavisor-
-        # Tenant-Provisionierung. Dieser Step probiert deshalb mehrere
-        # Login-Kandidaten, startet den Pooler-Container nach den Resets neu
-        # und schreibt JEDE Diagnose ins Step-Summary (fuer Nachvollzug ohne
-        # Log-Zugriff). Fail-closed bleibt: ohne erreichbaren Pooler Exit 1.
+        # Der lokale Supavisor-Tenant ist NICHT aus `project_id` abzuleiten.
+        # Die Supabase CLI provisioniert eine eigene POOLER_TENANT_ID (bei den
+        # aktuellen Images typischerweise `pooler-dev`). Wir lesen deshalb die
+        # effektive Runtime-Konfiguration aus dem Container, statt Usernamen zu
+        # raten. Fehlende Werte bleiben ein harter, nachvollziehbarer Fehler.
         shell: bash
         run: |
+          set -Eeuo pipefail
           summary() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
-          status_all="$( { pnpm exec supabase status 2>/dev/null; pnpm exec supabase status -o env 2>/dev/null; } || true )"
-          status_url="$(printf '%s\n' "$status_all" | { grep -oE 'postgres(ql)?://[^"[:space:]]*:54329[^"[:space:]]*' || true; } | head -1)"
-          candidates=()
-          [ -n "$status_url" ] && candidates+=("$status_url")
-          candidates+=("postgresql://postgres.easytree:postgres@127.0.0.1:54329/postgres")
-          candidates+=("postgresql://postgres:postgres@127.0.0.1:54329/postgres")
-          summary "Pooler-Kandidaten: ${#candidates[@]} (status-URL: ${status_url:-keine})"
-          working=""
-          try_all() {
-            local url out
-            for url in "${candidates[@]}"; do
-              if out="$(PGCONNECT_TIMEOUT=5 psql "$url" -Atc 'select 1' 2>&1)"; then
-                working="$url"; return 0
-              fi
-              summary "Probe fehlgeschlagen ($url): $out"
-            done
-            return 1
-          }
-          if ! try_all; then
-            pooler_ct="$( { docker ps --format '{{.Names}}' 2>/dev/null || true; } | { grep -iE 'pooler|supavisor' || true; } | head -1)"
-            summary "Pooler-Container: ${pooler_ct:-KEINER GEFUNDEN}"
-            if [ -n "$pooler_ct" ]; then
-              summary "Neustart des Pooler-Containers (Tenant-Reprovisionierung nach db reset)…"
-              docker restart "$pooler_ct" >/dev/null 2>&1 || true
-              for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-                sleep 5
-                try_all && break
-              done
-            fi
-          fi
-          if [ -z "$working" ]; then
-            summary "FAIL-CLOSED: Pooler bleibt unerreichbar (EYT-15)."
-            if [ -n "${pooler_ct:-}" ]; then
-              { docker logs --tail 60 "$pooler_ct" 2>&1 || true; } | tee -a "$GITHUB_STEP_SUMMARY"
-            fi
+
+          pooler_ct="$(docker ps --filter 'name=supabase_pooler_' --format '{{.Names}}' | head -1)"
+          if [ -z "$pooler_ct" ]; then
+            summary "FAIL-CLOSED: Kein laufender Supavisor-Container gefunden."
+            docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          summary "Pooler-Pre-flight OK: $working"
-          echo "EASYTREE_TEST_POOLER_URL=$working" >> "$GITHUB_ENV"
+
+          pooler_env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$pooler_ct")"
+          tenant_id="$(printf '%s\n' "$pooler_env" | sed -n 's/^POOLER_TENANT_ID=//p' | head -1)"
+          postgres_password="$(printf '%s\n' "$pooler_env" | sed -n 's/^POSTGRES_PASSWORD=//p' | head -1)"
+          published="$(docker port "$pooler_ct" 6543/tcp 2>/dev/null | head -1 || true)"
+          pooler_port="${published##*:}"
+
+          if [ -z "$tenant_id" ] || [ -z "$postgres_password" ]; then
+            summary "FAIL-CLOSED: POOLER_TENANT_ID oder POSTGRES_PASSWORD fehlt in der Container-Konfiguration."
+            exit 1
+          fi
+          if ! [[ "$pooler_port" =~ ^[0-9]+$ ]]; then
+            summary "FAIL-CLOSED: Veröffentlichter Transaction-Pooler-Port konnte nicht ermittelt werden (${published:-kein Mapping})."
+            exit 1
+          fi
+
+          pooler_user="postgres.${tenant_id}"
+          summary "Pooler-Runtime erkannt: container=${pooler_ct}, tenant=${tenant_id}, port=${pooler_port}, user=${pooler_user}."
+
+          probe_ok=""
+          for attempt in 1 2 3 4 5 6; do
+            if PGPASSWORD="$postgres_password" PGCONNECT_TIMEOUT=5 psql \
+              "host=127.0.0.1 port=${pooler_port} dbname=postgres user=${pooler_user} sslmode=disable" \
+              -Atc 'select 1' >/tmp/pooler-preflight.out 2>/tmp/pooler-preflight.err; then
+              probe_ok="yes"
+              break
+            fi
+            summary "Pooler-Pre-flight Versuch ${attempt}/6 fehlgeschlagen: $(tr '\n' ' ' </tmp/pooler-preflight.err)"
+            sleep 2
+          done
+
+          if [ -z "$probe_ok" ]; then
+            summary "FAIL-CLOSED: Supavisor ist mit seiner effektiven Tenant-ID nicht erreichbar."
+            docker logs --tail 80 "$pooler_ct" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+            exit 1
+          fi
+
+          encoded_user="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$pooler_user")"
+          encoded_password="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$postgres_password")"
+          pooler_url="postgresql://${encoded_user}:${encoded_password}@127.0.0.1:${pooler_port}/postgres?sslmode=disable"
+          summary "Pooler-Pre-flight OK (Tenant-ID aus Container, SSL lokal deaktiviert)."
+          echo "EASYTREE_TEST_POOLER_URL=$pooler_url" >> "$GITHUB_ENV"
       - name: Tenant isolation gate (fail-closed, TRANSACTION POOLER)
         env:
           EASYTREE_TENANT_TESTS: required
