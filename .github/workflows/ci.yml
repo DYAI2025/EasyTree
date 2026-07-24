@@ -123,15 +123,19 @@ jobs:
       - name: Resolve pooler URL (Supavisor tenant username, EYT-15)
         # Supavisor verlangt `postgres.<project_id>` als Usernamen; plain
         # `postgres` wird abgelehnt (belegt: roter Lauf #1 auf PR #5).
-        # Primaer aus `supabase status` lesen, Fallback auf das dokumentierte
+        # Primaer aus `supabase status` lesen (plain UND -o env — die env-Form
+        # enthielt in Lauf #2 keine Pooler-URL), Fallback auf das dokumentierte
         # Format mit project_id "easytree" aus supabase/config.toml.
+        # WICHTIG: grep ohne Treffer darf den Step unter `-eo pipefail` nicht
+        # beenden (genau das brach Lauf #2) — daher `|| true` in der Pipeline.
         shell: bash
         run: |
-          status_env="$(pnpm exec supabase status -o env 2>/dev/null || true)"
-          pooler_url="$(printf '%s\n' "$status_env" | grep -oE 'postgres(ql)?://[^"[:space:]]*:54329/[^"[:space:]]*' | head -1)"
+          status_all="$( { pnpm exec supabase status 2>/dev/null; pnpm exec supabase status -o env 2>/dev/null; } || true )"
+          pooler_url="$(printf '%s\n' "$status_all" | { grep -oE 'postgres(ql)?://[^"[:space:]]*:54329[^"[:space:]]*' || true; } | head -1)"
           if [ -z "$pooler_url" ]; then
+            printf '%s\n' "$status_all" | { grep -i pooler || echo "supabase status enthaelt keinen Pooler-Eintrag"; }
             pooler_url="postgresql://postgres.easytree:postgres@127.0.0.1:54329/postgres"
-            echo "supabase status lieferte keine Pooler-URL — Fallback auf dokumentiertes Format."
+            echo "Fallback auf dokumentiertes Format."
           fi
           echo "Pooler-URL aufgeloest: $pooler_url"
           echo "EASYTREE_TEST_POOLER_URL=$pooler_url" >> "$GITHUB_ENV"
