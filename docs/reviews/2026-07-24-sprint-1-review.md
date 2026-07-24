@@ -82,14 +82,14 @@ Der öffentliche Git-Clone war aufgrund fehlender DNS-/Netzwerkauflösung im Aus
 
 ## Ticketstatus nach Review
 
-| Ticket | Reviewstatus | Begründung |
-|---|---|---|
-| EYT-13 | Fertig akzeptiert | ADR und technische Leitplanken liegen vor |
-| EYT-15 | Zurück auf Zu erledigen | echter Pooler-Nachweis und fail-closed CI fehlen |
-| EYT-40 | Fertig akzeptiert | Workspace, Root-Skripte und Lockfile vorhanden |
-| EYT-41 | Zurück auf Zu erledigen | manuelle Accessibility-Abnahme offen |
-| EYT-42 | Fertig mit Rest-Risiko akzeptiert | API/Worker vorhanden; CI-Ausführung folgt EYT-58 |
-| EYT-43 | Fertig mit Rest-Risiko akzeptiert | Konfigurationscode und Tests vorhanden; CI folgt EYT-56 |
+| Ticket | Reviewstatus                      | Begründung                                                |
+| ------ | --------------------------------- | --------------------------------------------------------- |
+| EYT-13 | Fertig akzeptiert                 | ADR und technische Leitplanken liegen vor                 |
+| EYT-15 | Zurück auf Zu erledigen           | echter Pooler-Nachweis und fail-closed CI fehlen          |
+| EYT-40 | Fertig akzeptiert                 | Workspace, Root-Skripte und Lockfile vorhanden            |
+| EYT-41 | Zurück auf Zu erledigen           | manuelle Accessibility-Abnahme offen                      |
+| EYT-42 | Fertig mit Rest-Risiko akzeptiert | API/Worker vorhanden; CI-Ausführung folgt EYT-58          |
+| EYT-43 | Fertig mit Rest-Risiko akzeptiert | Konfigurationscode und Tests vorhanden; CI folgt EYT-56   |
 | EYT-44 | Fertig mit Rest-Risiko akzeptiert | Migrationen/Seeds vorhanden; automatische CI folgt EYT-57 |
 
 ## Neue Folge-Tickets

@@ -39,6 +39,7 @@
 ## Task 2 (EYT-56): PR-CI-Baseline
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`
 - Create: `.github/actions/setup-pnpm/action.yml` (DRY-Setup)
 - Modify: `README.md` (Abschnitt „CI & Pflichtchecks“)
@@ -168,6 +169,7 @@ Hinweise: gitleaks als CLI (nicht `gitleaks-action`) — keine Org-Lizenz nötig
 ```bash
 pnpm install --frozen-lockfile && pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
+
 Expected: alles grün (Tenant-Suite skippt im Local-Mode mit Warnung — bis Task 3 ist das noch das alte Verhalten).
 
 **Step 4: Workflow statisch prüfen**
@@ -175,6 +177,7 @@ Expected: alles grün (Tenant-Suite skippt im Local-Mode mit Warnung — bis Tas
 ```bash
 actionlint .github/workflows/ci.yml   # Binary bei Bedarf herunterladen (gepinnt)
 ```
+
 Expected: keine Fehler.
 
 **Step 5: Synthetisches Testsecret erkennen (AC-Beweis, lokal)**
@@ -183,6 +186,7 @@ Expected: keine Fehler.
 echo 'aws_secret_access_key = "AKIAIOSFODNN7EXAMPLE1234"' > /tmp/leak-probe/planted.txt  # außerhalb des Repos
 /tmp/gitleaks dir --no-banner /tmp/leak-probe ; echo "exit=$?"
 ```
+
 Expected: Finding gemeldet, Exit ≠ 0. Output als Evidenz in den PR-/Jira-Kommentar. Nichts committen.
 
 **Step 6: README-Abschnitt „CI & Pflichtchecks“** — Tabelle Job ⇒ Zweck ⇒ merge-blockierend ja/nein (alle ja); Hinweis, dass Branch Protection die Checks erzwingt (EYT-67).
@@ -198,6 +202,7 @@ git add .github README.md && git commit -m "ci: add PR baseline workflow with ma
 ## Task 3 (EYT-66): Tenant-Gate fail-closed
 
 **Files:**
+
 - Modify: `apps/api/test/tenant-isolation.integration.test.ts`
 - Create: `apps/api/test/tenant-gate.fail-closed.test.ts`
 - Modify: `docs/runbooks/database-workflow.md` (Modi dokumentieren)
@@ -218,36 +223,32 @@ import { describe, expect, it } from "vitest";
 const run = promisify(execFile);
 
 describe("tenant gate fail-closed (EYT-66)", () => {
-  it(
-    "required mode + unreachable DB => non-zero exit and no skipped-as-green",
-    async () => {
-      let exitCode = 0;
-      let output = "";
-      try {
-        const res = await run(
-          "pnpm",
-          ["exec", "vitest", "run", "test/tenant-isolation.integration.test.ts"],
-          {
-            cwd: __dirname + "/..",
-            env: {
-              ...process.env,
-              EASYTREE_TENANT_TESTS: "required",
-              EASYTREE_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:59999/postgres",
-            },
-            timeout: 120_000,
+  it("required mode + unreachable DB => non-zero exit and no skipped-as-green", async () => {
+    let exitCode = 0;
+    let output = "";
+    try {
+      const res = await run(
+        "pnpm",
+        ["exec", "vitest", "run", "test/tenant-isolation.integration.test.ts"],
+        {
+          cwd: __dirname + "/..",
+          env: {
+            ...process.env,
+            EASYTREE_TENANT_TESTS: "required",
+            EASYTREE_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:59999/postgres",
           },
-        );
-        output = res.stdout + res.stderr;
-      } catch (error) {
-        const e = error as { code?: number; stdout?: string; stderr?: string };
-        exitCode = e.code ?? 1;
-        output = `${e.stdout ?? ""}${e.stderr ?? ""}`;
-      }
-      expect(exitCode).not.toBe(0);
-      expect(output).toContain("fail-closed");
-    },
-    150_000,
-  );
+          timeout: 120_000,
+        },
+      );
+      output = res.stdout + res.stderr;
+    } catch (error) {
+      const e = error as { code?: number; stdout?: string; stderr?: string };
+      exitCode = e.code ?? 1;
+      output = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+    }
+    expect(exitCode).not.toBe(0);
+    expect(output).toContain("fail-closed");
+  }, 150_000);
 });
 ```
 
@@ -256,6 +257,7 @@ describe("tenant gate fail-closed (EYT-66)", () => {
 ```bash
 pnpm --filter @easytree/config build && cd apps/api && pnpm exec vitest run test/tenant-gate.fail-closed.test.ts
 ```
+
 Expected: FAIL — aktueller Code skippt im Required-Modus trotzdem (Exit 0, kein „fail-closed“ im Output).
 
 **Step 3: Minimal implementieren** — in `tenant-isolation.integration.test.ts`:
@@ -308,38 +310,39 @@ git add apps/api/test docs/runbooks/database-workflow.md && git commit -m "test:
 ## Task 4 (EYT-57): DB-, Migrations- und Tenant-Gates in CI
 
 **Files:**
+
 - Modify: `.github/workflows/ci.yml` (Job `db-gates`)
 
 **Step 1: Job `db-gates` anfügen**
 
 ```yaml
-  db-gates:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-pnpm
-      - name: Start local Supabase stack (Docker)
-        run: pnpm exec supabase start -x studio
-      - name: Reset 1 — migrations + seed on empty DB
-        run: pnpm exec supabase db reset
-      - name: pgTAP suite (run 1)
-        run: pnpm exec supabase test db
-      - name: Reset 2 — reproducibility proof
-        run: pnpm exec supabase db reset
-      - name: pgTAP suite (run 2, must be identical)
-        run: pnpm exec supabase test db
-      - name: Build workspace deps for api tests
-        run: pnpm --filter @easytree/config build
-      - name: Tenant isolation gate (fail-closed, direct connection)
-        env:
-          EASYTREE_TENANT_TESTS: required
-          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
-        run: |
-          pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
-          grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
-      - name: Tenant report -> step summary
-        if: always()
-        run: grep "\[tenant-isolation\]" /tmp/tenant-direct.log >> "$GITHUB_STEP_SUMMARY" || true
+db-gates:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/setup-pnpm
+    - name: Start local Supabase stack (Docker)
+      run: pnpm exec supabase start -x studio
+    - name: Reset 1 — migrations + seed on empty DB
+      run: pnpm exec supabase db reset
+    - name: pgTAP suite (run 1)
+      run: pnpm exec supabase test db
+    - name: Reset 2 — reproducibility proof
+      run: pnpm exec supabase db reset
+    - name: pgTAP suite (run 2, must be identical)
+      run: pnpm exec supabase test db
+    - name: Build workspace deps for api tests
+      run: pnpm --filter @easytree/config build
+    - name: Tenant isolation gate (fail-closed, direct connection)
+      env:
+        EASYTREE_TENANT_TESTS: required
+        EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+      run: |
+        pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
+        grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
+    - name: Tenant report -> step summary
+      if: always()
+      run: grep "\[tenant-isolation\]" /tmp/tenant-direct.log >> "$GITHUB_STEP_SUMMARY" || true
 ```
 
 Der `grep` nach `skipped=0` ist ein zweites, unabhängiges Fail-closed-Netz auf Job-Ebene (Report-Zeile muss existieren UND null Skips zeigen).
@@ -351,6 +354,7 @@ actionlint .github/workflows/ci.yml
 EASYTREE_TENANT_TESTS=required EASYTREE_TEST_DB_URL=postgresql://127.0.0.1:59999/postgres \
   pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts; echo $?   # != 0
 ```
+
 Expected: actionlint sauber; fail-closed-Pfad bewiesen. Grün-Pfad-Evidenz = CI-Lauf auf dem PR (Evidenz-Stufe „CI“ — erst dann AC-erfüllt).
 
 **Step 3: Commit**
@@ -364,6 +368,7 @@ git add .github/workflows/ci.yml && git commit -m "ci: run migration, pgTAP and 
 ## Task 5 (EYT-15): Realer Pooling-Pfad
 
 **Files:**
+
 - Modify: `supabase/config.toml` (`[db.pooler] enabled = true`)
 - Create: `apps/api/test/tenant-pooling.integration.test.ts`
 - Modify: `.github/workflows/ci.yml` (Pooler-Steps in `db-gates`)
@@ -398,13 +403,13 @@ EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/
 **Step 4: CI-Steps anfügen** (in `db-gates`, nach dem Direct-Gate):
 
 ```yaml
-      - name: Tenant isolation gate (fail-closed, TRANSACTION POOLER)
-        env:
-          EASYTREE_TENANT_TESTS: required
-          EASYTREE_TEST_POOLER_URL: postgresql://postgres:postgres@127.0.0.1:54329/postgres
-        run: |
-          pnpm --filter @easytree/api exec vitest run test/tenant-pooling.integration.test.ts 2>&1 | tee /tmp/tenant-pooled.log
-          grep -E "\[tenant-pooling\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-pooled.log
+- name: Tenant isolation gate (fail-closed, TRANSACTION POOLER)
+  env:
+    EASYTREE_TENANT_TESTS: required
+    EASYTREE_TEST_POOLER_URL: postgresql://postgres:postgres@127.0.0.1:54329/postgres
+  run: |
+    pnpm --filter @easytree/api exec vitest run test/tenant-pooling.integration.test.ts 2>&1 | tee /tmp/tenant-pooled.log
+    grep -E "\[tenant-pooling\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-pooled.log
 ```
 
 **Step 5: Report aktualisieren** — `docs/architecture/tenant-isolation-report.md`: neuer Abschnitt „Pooling-Evidenz (Sprint 2, real)“ mit Testdatei, CI-Job, Platzhalter für Run-URL (nach erstem grünen Lauf eintragen — erst dann gilt EYT-15-AC „reproduzierbar belegt“).
@@ -421,6 +426,7 @@ git commit -m "test: prove tenant context through real transaction pooler incl. 
 ## Task 6 (EYT-58a): Readiness mit echtem DB-Ping + Prozess-Smokes
 
 **Files:**
+
 - Create: `apps/api/src/health/pg-database-ping.ts`
 - Modify: `apps/api/src/app.module.ts` (DI: `DATABASE_PING` ⇒ `PgDatabasePing`)
 - Modify: `apps/api/package.json` (`pg` von devDependencies ⇒ dependencies)
@@ -499,23 +505,40 @@ echo "::error::Worker did not shut down gracefully"; exit 1
 **Step 5: CI-Steps in `db-gates`** (Supabase läuft dort bereits):
 
 ```yaml
-      - name: Build api for runtime smokes
-        run: pnpm --filter @easytree/api... build
-      - name: API smoke — healthy runtime (ready must be 200)
-        env: { NODE_ENV: test, API_PORT: "3001", EXPECT_READY: "200",
-               DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
-               SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_ANON_KEY: "ci-local-anon-key" }
-        run: bash scripts/smoke-api.sh
-      - name: API smoke — dependency down (ready must be 503)
-        env: { NODE_ENV: test, API_PORT: "3002", EXPECT_READY: "503",
-               DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:59999/postgres",
-               SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_ANON_KEY: "ci-local-anon-key" }
-        run: bash scripts/smoke-api.sh
-      - name: Worker smoke — no port, graceful shutdown
-        env: { NODE_ENV: test, API_PORT: "3003",
-               DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
-               SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_ANON_KEY: "ci-local-anon-key" }
-        run: bash scripts/smoke-worker.sh
+- name: Build api for runtime smokes
+  run: pnpm --filter @easytree/api... build
+- name: API smoke — healthy runtime (ready must be 200)
+  env:
+    {
+      NODE_ENV: test,
+      API_PORT: "3001",
+      EXPECT_READY: "200",
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+      SUPABASE_URL: "http://127.0.0.1:54321",
+      SUPABASE_ANON_KEY: "ci-local-anon-key",
+    }
+  run: bash scripts/smoke-api.sh
+- name: API smoke — dependency down (ready must be 503)
+  env:
+    {
+      NODE_ENV: test,
+      API_PORT: "3002",
+      EXPECT_READY: "503",
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:59999/postgres",
+      SUPABASE_URL: "http://127.0.0.1:54321",
+      SUPABASE_ANON_KEY: "ci-local-anon-key",
+    }
+  run: bash scripts/smoke-api.sh
+- name: Worker smoke — no port, graceful shutdown
+  env:
+    {
+      NODE_ENV: test,
+      API_PORT: "3003",
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+      SUPABASE_URL: "http://127.0.0.1:54321",
+      SUPABASE_ANON_KEY: "ci-local-anon-key",
+    }
+  run: bash scripts/smoke-worker.sh
 ```
 
 (`SUPABASE_ANON_KEY` ist im lokalen CI-Stack kein echtes Secret; Wert erfüllt nur das Schema. Kein Service-Role-Key irgendwo.)
@@ -533,6 +556,7 @@ git add apps/api scripts .github/workflows/ci.yml && git commit -m "feat(api): r
 ## Task 7 (EYT-58b): Web-Browser- und Accessibility-Smoke
 
 **Files:**
+
 - Create: `apps/web/playwright.config.ts`, `apps/web/e2e/shell-smoke.spec.ts`
 - Modify: `apps/web/package.json` (devDeps `@playwright/test`, `@axe-core/playwright`; Script `test:e2e`)
 - Modify: `.github/workflows/ci.yml` (Job `web-smoke`)
@@ -574,7 +598,9 @@ const VIEWPORTS = [
 
 test("laedt ohne ungefangene Console-Fehler", async ({ page }) => {
   const errors: string[] = [];
-  page.on("console", (msg) => { if (msg.type() === "error") errors.push(msg.text()); });
+  page.on("console", (msg) => {
+    if (msg.type() === "error") errors.push(msg.text());
+  });
   page.on("pageerror", (err) => errors.push(String(err)));
   await page.goto("/");
   await expect(page.getByRole("main")).toBeVisible();
@@ -623,9 +649,7 @@ test("Statusanzeige traegt Information nicht nur ueber Farbe", async ({ page }) 
 
 test("axe im echten Browser: 0 Violations inkl. color-contrast", async ({ page }) => {
   await page.goto("/");
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa"])
-    .analyze();
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
   expect(results.violations).toEqual([]);
 });
 ```
@@ -635,14 +659,14 @@ Run rot ⇒ ggf. Shell fixen ⇒ grün. Exakte Selektoren beim Implementieren ge
 **Step 3: CI-Job**
 
 ```yaml
-  web-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-pnpm
-      - run: pnpm --filter @easytree/web... build
-      - run: pnpm --filter @easytree/web exec playwright install --with-deps chromium
-      - run: pnpm --filter @easytree/web run test:e2e
+web-smoke:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/setup-pnpm
+    - run: pnpm --filter @easytree/web... build
+    - run: pnpm --filter @easytree/web exec playwright install --with-deps chromium
+    - run: pnpm --filter @easytree/web run test:e2e
 ```
 
 **Step 4: Lokal (Sandbox, Chromium vorhanden) voll ausführen** — `pnpm --filter @easytree/web run test:e2e`. Expected: PASS.
@@ -658,9 +682,11 @@ git add apps/web .github/workflows/ci.yml && git commit -m "test(web): real-brow
 ## Task 8 (EYT-41): Accessibility-Baseline abschließen
 
 **Files:**
+
 - Modify: `docs/runbooks/a11y-checklist.md`
 
 **Steps:**
+
 1. Punkte 1–6 der Checkliste sind durch Task 7 im echten Browser automatisiert belegt ⇒ Status je Zeile auf „bestanden (Datum, Prüfer: Claude, Chromium real, CI-Job web-smoke)“ setzen, mit Verweis auf Spec-Namen.
 2. Punkt 7 (Screenreader-Smoke) ist NICHT automatisierbar-ehrlich: VoiceOver-Durchgang durch Ben (5 Min: Landmarks, Titel, Überschriften) ODER schriftliches PO-Descoping. Bis dahin bleibt die Zeile „offen“ und EYT-41 maximal „In Arbeit“ (AC-Deckel!).
 3. Befunde aus Browser-Läufen ⇒ Jira-Bugs unter EYT-41.
@@ -671,6 +697,7 @@ git add apps/web .github/workflows/ci.yml && git commit -m "test(web): real-brow
 ## Task 9 (EYT-67): Branch Protection erzwingen und beweisen
 
 **Files:**
+
 - Create: `docs/runbooks/branch-protection.md`
 
 **Voraussetzung:** PR aus diesem Branch ist offen, CI-Checks existieren und sind auf dem PR sichtbar (Namen = Jobnamen).

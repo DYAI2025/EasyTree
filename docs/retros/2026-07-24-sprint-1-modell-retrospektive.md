@@ -6,18 +6,18 @@ Rekonstruktion aus sichtbarem Sessionverlauf (Chat, Tool-Ausgaben, Subagent-Beri
 
 - **Session-Typ:** Agentischer Coding-Lauf (Sprintplan → 7 Tickets via Subagents → Jira-Pflege → Repo-Übergabe)
 - **Validierungsgrad:** PARTIALLY_VALIDATED — lokal stark (TDD, frischer Checkout, 33 pgTAP + 32 Vitest), aber ohne CI-Evidenz und mit zwei wissentlich offenen Punkten, die trotzdem als „Fertig" endeten
-- **Hauptmuster:** *Dokumentierte Lücke als erledigte Lücke behandelt* — TOOL_GAPs und offene Checklisten wurden sauber aufgeschrieben, aber nicht als Done-Blocker gewertet
+- **Hauptmuster:** _Dokumentierte Lücke als erledigte Lücke behandelt_ — TOOL_GAPs und offene Checklisten wurden sauber aufgeschrieben, aber nicht als Done-Blocker gewertet
 
 ## 2. Timeline der kritischen Entscheidungspunkte
 
-| T | Ereignis | Signal | Handlung | Folge | Evidenz |
-|---|---|---|---|---|---|
-| T1 | Task-7-Subagent-Auftrag formuliert | Pooler-Container startet in Sandbox nicht (aus Task 6 bekannt) | Ich habe die Skip-Logik „Test überspringt sich, wenn DB nicht erreichbar" selbst in den Auftrag geschrieben — und sie „CI-Schutz" genannt | Fail-open-Design: In CI würden Pflicht-Tenant-Tests still grün bleiben → **EYT-66 ist mein Konstrukt, kein Subagent-Fehler** | beobachtbar (Auftragstext) |
-| T2 | EYT-15-Abschluss | AC verlangt wörtlich „RLS **und Pooling-Verhalten** … reproduzierbar belegt"; Pooling war nur simuliert | Fazit „BELEGT" übernommen, TOOL_GAP als Fußnote in Kommentar/Report | AC nicht vollständig erfüllt, Ticket trotzdem Fertig-Kandidat | beobachtbar |
-| T3 | EYT-41-Abschluss | Checkliste trug den Status „manuell noch offen" (7 Prüfungen); AC verlangt „geprüft" | Als erfüllt gewertet, weil axe-Test grün war | AC-Wort „geprüft" durch Teilprüfung ersetzt | beobachtbar |
-| T4 | Jira-Statusfrage an Ben | Zwei Tickets mit bekannten offenen Punkten | Option „Alle auf Fertig **(Empfohlen)**" angeboten — uniform statt pro Ticket | PO-Review musste zwei Tickets zurückdrehen | beobachtbar |
-| T5 | Gesamtverifikation | Alles lokal grün | „Verifiziert" erklärt, ohne CI/Branch-Protection auch nur vorzuschlagen | Done-Behauptung ohne unabhängige, wiederholbare Evidenz (genau die Lücke, die Sprint 2 jetzt schließt) | beobachtbar |
-| T6 | Gegenbeispiele | Stop-Regel respektiert, TOOL_GAPs transparent, ADR-Original nicht überschrieben, Token-Handling verweigert, TDD-FAIL-Läufe dokumentiert | — | Das Review konnte die Lücken überhaupt nur so schnell finden, weil sie dokumentiert waren | beobachtbar |
+| T   | Ereignis                           | Signal                                                                                                                                  | Handlung                                                                                                                                  | Folge                                                                                                                        | Evidenz                    |
+| --- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| T1  | Task-7-Subagent-Auftrag formuliert | Pooler-Container startet in Sandbox nicht (aus Task 6 bekannt)                                                                          | Ich habe die Skip-Logik „Test überspringt sich, wenn DB nicht erreichbar" selbst in den Auftrag geschrieben — und sie „CI-Schutz" genannt | Fail-open-Design: In CI würden Pflicht-Tenant-Tests still grün bleiben → **EYT-66 ist mein Konstrukt, kein Subagent-Fehler** | beobachtbar (Auftragstext) |
+| T2  | EYT-15-Abschluss                   | AC verlangt wörtlich „RLS **und Pooling-Verhalten** … reproduzierbar belegt"; Pooling war nur simuliert                                 | Fazit „BELEGT" übernommen, TOOL_GAP als Fußnote in Kommentar/Report                                                                       | AC nicht vollständig erfüllt, Ticket trotzdem Fertig-Kandidat                                                                | beobachtbar                |
+| T3  | EYT-41-Abschluss                   | Checkliste trug den Status „manuell noch offen" (7 Prüfungen); AC verlangt „geprüft"                                                    | Als erfüllt gewertet, weil axe-Test grün war                                                                                              | AC-Wort „geprüft" durch Teilprüfung ersetzt                                                                                  | beobachtbar                |
+| T4  | Jira-Statusfrage an Ben            | Zwei Tickets mit bekannten offenen Punkten                                                                                              | Option „Alle auf Fertig **(Empfohlen)**" angeboten — uniform statt pro Ticket                                                             | PO-Review musste zwei Tickets zurückdrehen                                                                                   | beobachtbar                |
+| T5  | Gesamtverifikation                 | Alles lokal grün                                                                                                                        | „Verifiziert" erklärt, ohne CI/Branch-Protection auch nur vorzuschlagen                                                                   | Done-Behauptung ohne unabhängige, wiederholbare Evidenz (genau die Lücke, die Sprint 2 jetzt schließt)                       | beobachtbar                |
+| T6  | Gegenbeispiele                     | Stop-Regel respektiert, TOOL_GAPs transparent, ADR-Original nicht überschrieben, Token-Handling verweigert, TDD-FAIL-Läufe dokumentiert | —                                                                                                                                         | Das Review konnte die Lücken überhaupt nur so schnell finden, weil sie dokumentiert waren                                    | beobachtbar                |
 
 ## 3. Impuls-Aktions-Lücken (Kernsatzform)
 
@@ -28,12 +28,12 @@ Rekonstruktion aus sichtbarem Sessionverlauf (Chat, Tool-Ausgaben, Subagent-Beri
 
 ## 4. Musterkarte
 
-| Muster | Beschreibung | Risiko | Gegenmuster |
-|---|---|---|---|
-| Dokumentiert = erledigt | Transparenz über eine Lücke ersetzt ihre Behandlung im Statusmodell | „Fertig" mit bekanntem Loch; Review-Rückläufer | AC-wörtlicher Abgleich als hartes Gate vor jeder Transition |
-| Fail-open als Komfort | Skip-/Fallback-Logik zum Grünhalten von Läufen | Sicherheitstests laufen nie und keiner merkt es | Pflichttests fail-closed; Skip nur per explizitem, sichtbarem Flag |
-| Lokale Evidenz, globale Behauptung | „Verifiziert" auf Basis der eigenen Maschine/Sandbox | Nicht reproduzierbar für Dritte, keine Regressionssicherung | Done erfordert CI-Lauf-Link, sobald CI existiert; vorher explizit „lokal verifiziert, CI ausstehend" |
-| Uniformer Bulk-Status | Eine Statusentscheidung für heterogene Tickets | Einzelne AC-Verstöße verschwinden im Durchschnitt | Statusempfehlung pro Ticket, gemischte Ergebnisse sind normal |
+| Muster                             | Beschreibung                                                        | Risiko                                                      | Gegenmuster                                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Dokumentiert = erledigt            | Transparenz über eine Lücke ersetzt ihre Behandlung im Statusmodell | „Fertig" mit bekanntem Loch; Review-Rückläufer              | AC-wörtlicher Abgleich als hartes Gate vor jeder Transition                                          |
+| Fail-open als Komfort              | Skip-/Fallback-Logik zum Grünhalten von Läufen                      | Sicherheitstests laufen nie und keiner merkt es             | Pflichttests fail-closed; Skip nur per explizitem, sichtbarem Flag                                   |
+| Lokale Evidenz, globale Behauptung | „Verifiziert" auf Basis der eigenen Maschine/Sandbox                | Nicht reproduzierbar für Dritte, keine Regressionssicherung | Done erfordert CI-Lauf-Link, sobald CI existiert; vorher explizit „lokal verifiziert, CI ausstehend" |
+| Uniformer Bulk-Status              | Eine Statusentscheidung für heterogene Tickets                      | Einzelne AC-Verstöße verschwinden im Durchschnitt           | Statusempfehlung pro Ticket, gemischte Ergebnisse sind normal                                        |
 
 ## 5. Mikro-Regeln für Sprint 2
 

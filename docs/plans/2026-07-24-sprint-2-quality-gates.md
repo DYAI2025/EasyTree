@@ -27,15 +27,15 @@ Der Sprint gilt als erfolgreich, wenn:
 
 ## Sprint-2-Kandidatenset
 
-| Jira | Priorität | Ergebnis | Abhängigkeiten |
-|---|---|---|---|
-| EYT-56 | Highest | PR-CI-Baseline mit verpflichtenden Qualitätschecks | EYT-40, EYT-43 |
-| EYT-57 | Highest | Datenbank-, Migrations- und Tenant-Gates laufen real in CI | EYT-44, EYT-15, EYT-42, EYT-66 |
-| EYT-58 | Highest | API-, Worker-, Web- und Accessibility-Smokes laufen in CI | EYT-41, EYT-42, EYT-43 |
-| EYT-66 | Highest | Tenant-Sicherheitsgate schlägt bei fehlender DB und Pflicht-Skips fehl | EYT-56, EYT-57 |
-| EYT-67 | Highest | Branch Protection erzwingt PR und Pflichtchecks | EYT-56, EYT-57, EYT-58 |
-| EYT-15 | Highest | Tenant-/RLS-Spike wird inklusive realem Poolingpfad abgeschlossen | EYT-57, EYT-66 |
-| EYT-41 | Highest | Accessibility-Baseline wird im echten Browser und manuell abgeschlossen | EYT-58 |
+| Jira   | Priorität | Ergebnis                                                                | Abhängigkeiten                 |
+| ------ | --------- | ----------------------------------------------------------------------- | ------------------------------ |
+| EYT-56 | Highest   | PR-CI-Baseline mit verpflichtenden Qualitätschecks                      | EYT-40, EYT-43                 |
+| EYT-57 | Highest   | Datenbank-, Migrations- und Tenant-Gates laufen real in CI              | EYT-44, EYT-15, EYT-42, EYT-66 |
+| EYT-58 | Highest   | API-, Worker-, Web- und Accessibility-Smokes laufen in CI               | EYT-41, EYT-42, EYT-43         |
+| EYT-66 | Highest   | Tenant-Sicherheitsgate schlägt bei fehlender DB und Pflicht-Skips fehl  | EYT-56, EYT-57                 |
+| EYT-67 | Highest   | Branch Protection erzwingt PR und Pflichtchecks                         | EYT-56, EYT-57, EYT-58         |
+| EYT-15 | Highest   | Tenant-/RLS-Spike wird inklusive realem Poolingpfad abgeschlossen       | EYT-57, EYT-66                 |
+| EYT-41 | Highest   | Accessibility-Baseline wird im echten Browser und manuell abgeschlossen | EYT-58                         |
 
 ## Umsetzungsreihenfolge
 
