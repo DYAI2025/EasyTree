@@ -49,6 +49,17 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @easytree/web... build
 
+  # Real-Browser-Smoke der Web-Shell (EYT-58b): Tastatur, Fokus,
+  # Viewports und axe inkl. color-contrast in echtem Chromium.
+  web-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm --filter @easytree/web... build
+      - run: pnpm --filter @easytree/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @easytree/web run test:e2e
+
   build-api:
     runs-on: ubuntu-latest
     steps:
