@@ -71,6 +71,48 @@ test("Statusanzeige traegt Information nicht nur ueber Farbe", async ({ page }) 
   await expect(status).not.toHaveText(/^\s*$/); // Textinhalt, nicht nur Farbe
 });
 
+test("Tab-Zyklus: alle interaktiven Elemente erreichbar, sichtbarer Fokus, keine Falle", async ({
+  page,
+}) => {
+  await page.goto("/");
+  // Alle fokussierbaren Elemente in DOM-Reihenfolge (Checkliste #1/#2).
+  const expected = await page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])",
+      ),
+    ).map((el) => `${el.tagName}:${el.getAttribute("href") ?? el.textContent?.trim()}`),
+  );
+  expect(expected.length).toBeGreaterThan(0);
+
+  const visited: string[] = [];
+  for (let i = 0; i < expected.length; i++) {
+    await page.keyboard.press("Tab");
+    const stop = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const s = getComputedStyle(el);
+      const visibleFocus =
+        (s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0) || s.boxShadow !== "none";
+      return {
+        id: `${el.tagName}:${el.getAttribute("href") ?? el.textContent?.trim()}`,
+        visibleFocus,
+      };
+    });
+    visited.push(stop.id);
+    expect(stop.visibleFocus, `Fokusindikator fehlt auf ${stop.id}`).toBe(true);
+  }
+  // Jedes interaktive Element wurde genau in DOM-Reihenfolge erreicht;
+  // Reihenfolge: Skip-Link zuerst, dann Navigation (Checkliste #2).
+  expect(visited).toEqual(expected);
+  expect(visited[0]).toContain("#hauptinhalt");
+  // Keine Tastaturfalle: der naechste Tab verlaesst das letzte Element.
+  await page.keyboard.press("Tab");
+  const after = await page.evaluate(
+    () => `${document.activeElement?.tagName}:${document.activeElement?.textContent?.trim()}`,
+  );
+  expect(after).not.toBe(visited[visited.length - 1]);
+});
+
 test("axe im echten Browser: 0 Violations inkl. color-contrast", async ({ page }) => {
   await page.goto("/");
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
