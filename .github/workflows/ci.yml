@@ -109,6 +109,18 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
           grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
+      - name: Tenant isolation gate (fail-closed, TRANSACTION POOLER)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_POOLER_URL: postgresql://postgres:postgres@127.0.0.1:54329/postgres
+        # shell: bash erzwingt pipefail — sonst wuerde `| tee` einen roten
+        # vitest-Exit (echter RLS-Leak bei executed>0 skipped=0) verschlucken.
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/tenant-pooling.integration.test.ts 2>&1 | tee /tmp/tenant-pooled.log
+          grep -E "\[tenant-pooling\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-pooled.log
       - name: Tenant report -> step summary
         if: always()
-        run: grep "\[tenant-isolation\]" /tmp/tenant-direct.log >> "$GITHUB_STEP_SUMMARY" || true
+        run: |
+          grep "\[tenant-isolation\]" /tmp/tenant-direct.log >> "$GITHUB_STEP_SUMMARY" || true
+          grep "\[tenant-pooling\]" /tmp/tenant-pooled.log >> "$GITHUB_STEP_SUMMARY" || true
