@@ -48,6 +48,19 @@ pnpm exec supabase db reset
 
 Das löscht die lokale DB, spielt alle Migrationen in Reihenfolge ein und lädt `supabase/seed.sql`. Wer Daten braucht, die einen Reset überleben sollen, gehört mit ihnen in den Seed (synthetisch!) oder in einen Test.
 
+## Tenant-Test-Modi (EYT-66)
+
+Die Tenant-Isolationstests (`apps/api/test/tenant-isolation.integration.test.ts`) laufen fail-closed. Der Modus kommt aus der Umgebungsvariable `EASYTREE_TENANT_TESTS`:
+
+| Modus      | Verhalten bei unerreichbarer DB / Skips                                                                  | Wer setzt das                                                            |
+| ---------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `local`    | Suite skippt mit Warnung, Exit 0 (bewusster lokaler Opt-out)                                             | Default — NUR für Entwicklermaschinen ohne laufenden Supabase-Stack      |
+| `required` | Suite schlägt fehl: unerreichbare DB ⇒ Error in `beforeAll`; jeder Skip ⇒ Error in `afterAll` (Exit ≠ 0) | CI, Job `db-gates` (EYT-57) — Pflicht-Gate, kein grüner Lauf durch Skips |
+
+Jeder Lauf schreibt eine greppbare Report-Zeile ins Log: `[tenant-isolation] mode=<modus> executed=<n> skipped=<n>`. CI prüft zusätzlich `skipped=0`.
+
+Das fail-closed-Verhalten selbst ist durch einen Regressionstest bewiesen: `apps/api/test/tenant-gate.fail-closed.test.ts` (Kind-Vitest-Lauf im Required-Modus gegen eine unerreichbare DB-URL muss mit Exit ≠ 0 und „fail-closed"-Fehler enden).
+
 ## Ist-Zustand (Foundation, Migration 0001)
 
 - Extension `pgtap` (Schema `extensions`) für DB-Tests

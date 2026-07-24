@@ -21,9 +21,13 @@
  * Login-Rolle dient ausschliesslich als lokaler Transportkanal (authenticated
  * ist NOLOGIN); nach dem Rollenwechsel gelten die Rechte von authenticated.
  *
- * CI-Schutz: Ist die DB nicht erreichbar, ueberspringt sich die Suite mit
- * klarem Hinweis. Fuer den EYT-15-Nachweis MUSS sie real gelaufen sein
- * (Testnamen + Dauer im Report).
+ * Fail-closed (EYT-66): Der Modus kommt aus EASYTREE_TENANT_TESTS.
+ * Im Modus "required" schlaegt die Suite fehl, wenn die DB nicht erreichbar
+ * ist oder auch nur ein Test uebersprungen wurde — kein gruener Lauf durch
+ * Skips. Der lokale Opt-out EASYTREE_TENANT_TESTS=local (Default) skippt bei
+ * fehlender DB mit Warnung und ist AUSSCHLIESSLICH fuer Entwicklermaschinen
+ * ohne laufenden Supabase-Stack gedacht; CI (Job db-gates) setzt "required".
+ * Regressionsbeweis: test/tenant-gate.fail-closed.test.ts.
  */
 import { Client, DatabaseError } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -54,23 +58,34 @@ async function probeDatabase(): Promise<boolean> {
   }
 }
 
+/**
+ * Fail-closed-Modus (EYT-66): "required" (CI) laesst unerreichbare DB und
+ * Skips fehlschlagen; "local" (Default, NUR Entwicklermaschinen) skippt mit
+ * Warnung.
+ */
+const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local"; // "required" | "local"
+let executedCount = 0;
+let skippedCount = 0;
+
 let dbAvailable = false;
 let client: Client;
 
 /**
  * Runtime-Skip statt describe.skipIf: Die Erreichbarkeit wird in beforeAll
  * geprueft (kein top-level await unter CommonJS). Nicht erreichbar => jeder
- * Test wird mit klarem Hinweis uebersprungen (CI-Schutz); fuer das
- * EYT-15-Sicherheitsgate MUSS die Suite real gelaufen sein.
+ * Test wird NUR im Local-Modus mit klarem Hinweis uebersprungen; im
+ * Required-Modus macht afterAll jeden Skip zum Fehler (fail-closed, EYT-66).
  */
 function dbIt(name: string, fn: () => Promise<void>): void {
   it(name, async (ctx) => {
     if (!dbAvailable) {
+      skippedCount++;
       ctx.skip(
         `SKIPPED: Supabase-Postgres unter ${DB_URL} nicht erreichbar — ` +
           "lokal starten mit `pnpm exec supabase start && pnpm exec supabase db reset`.",
       );
     }
+    executedCount++;
     await fn();
   });
 }
@@ -79,7 +94,13 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
   beforeAll(async () => {
     dbAvailable = await probeDatabase();
     if (!dbAvailable) {
-      // eslint-disable-next-line no-console
+      if (TENANT_TESTS_MODE === "required") {
+        throw new Error(
+          "[tenant-isolation] fail-closed: Pflicht-Tenant-Tests koennen nicht laufen — DB unter " +
+            DB_URL +
+            " nicht erreichbar (EYT-66).",
+        );
+      }
       console.warn(
         `[tenant-isolation.integration] SKIPPED: Supabase-Postgres unter ${DB_URL} nicht erreichbar. ` +
           "Lokal starten mit `pnpm exec supabase start && pnpm exec supabase db reset`. " +
@@ -94,6 +115,21 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
   afterAll(async () => {
     if (dbAvailable) {
       await client.end();
+    }
+  });
+
+  afterAll(() => {
+    // Report fuer CI-Step-Summary (EYT-66 AC: Zahlen ausweisen).
+    // process.stdout.write statt console.info: Vitest 4 unterdrueckt
+    // console-Ausgaben aus Hooks im Default-Reporter — die Zeile MUSS
+    // aber im Log stehen, damit CI sie greppen kann (Task 4, EYT-57).
+    process.stdout.write(
+      `[tenant-isolation] mode=${TENANT_TESTS_MODE} executed=${executedCount} skipped=${skippedCount}\n`,
+    );
+    if (TENANT_TESTS_MODE === "required" && skippedCount > 0) {
+      throw new Error(
+        `[tenant-isolation] fail-closed: ${skippedCount} Pflicht-Tenant-Tests uebersprungen (EYT-66).`,
+      );
     }
   });
 
