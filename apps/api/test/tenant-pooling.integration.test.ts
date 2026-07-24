@@ -27,9 +27,17 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { inTenantTx, ORG_ALPHA, probeDatabase, USER_A, USER_C } from "./tenant-context.helper";
 
+/**
+ * Supavisor identifiziert den Tenant ueber das Username-Suffix:
+ * `postgres.<project_id>` (project_id aus supabase/config.toml = "easytree").
+ * Plain `postgres` wird vom Pooler mit "Tenant or user not found" abgelehnt —
+ * belegt durch den roten CI-Lauf #1 auf PR #5 (fail-closed wie designed).
+ * CI ermittelt die URL zur Laufzeit aus `supabase status` (Workflow-Step
+ * "Resolve pooler URL"); dieser Default gilt fuer lokale Entwicklung.
+ */
 const POOLER_URL =
   process.env["EASYTREE_TEST_POOLER_URL"] ??
-  "postgresql://postgres:postgres@127.0.0.1:54329/postgres";
+  "postgresql://postgres.easytree:postgres@127.0.0.1:54329/postgres";
 
 /** Fail-closed-Modus (EYT-66-Semantik): "required" (CI) | "local" (Default). */
 const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local";

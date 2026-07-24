@@ -120,10 +120,24 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
           grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
+      - name: Resolve pooler URL (Supavisor tenant username, EYT-15)
+        # Supavisor verlangt `postgres.<project_id>` als Usernamen; plain
+        # `postgres` wird abgelehnt (belegt: roter Lauf #1 auf PR #5).
+        # Primaer aus `supabase status` lesen, Fallback auf das dokumentierte
+        # Format mit project_id "easytree" aus supabase/config.toml.
+        shell: bash
+        run: |
+          status_env="$(pnpm exec supabase status -o env 2>/dev/null || true)"
+          pooler_url="$(printf '%s\n' "$status_env" | grep -oE 'postgres(ql)?://[^"[:space:]]*:54329/[^"[:space:]]*' | head -1)"
+          if [ -z "$pooler_url" ]; then
+            pooler_url="postgresql://postgres.easytree:postgres@127.0.0.1:54329/postgres"
+            echo "supabase status lieferte keine Pooler-URL — Fallback auf dokumentiertes Format."
+          fi
+          echo "Pooler-URL aufgeloest: $pooler_url"
+          echo "EASYTREE_TEST_POOLER_URL=$pooler_url" >> "$GITHUB_ENV"
       - name: Tenant isolation gate (fail-closed, TRANSACTION POOLER)
         env:
           EASYTREE_TENANT_TESTS: required
-          EASYTREE_TEST_POOLER_URL: postgresql://postgres:postgres@127.0.0.1:54329/postgres
         # shell: bash erzwingt pipefail — sonst wuerde `| tee` einen roten
         # vitest-Exit (echter RLS-Leak bei executed>0 skipped=0) verschlucken.
         shell: bash
