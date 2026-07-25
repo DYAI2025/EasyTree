@@ -40,22 +40,40 @@ Einzelne Pakete lassen sich filtern, z. B. `pnpm --filter @easytree/config test`
 ## CI & Pflichtchecks
 
 Jeder Pull Request gegen `master` durchläuft den GitHub-Actions-Workflow
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Alle Jobs sind Pflichtchecks
-und blockieren den Merge; Branch Protection erzwingt sie technisch (EYT-67). Die
-Installation läuft ausschließlich mit `pnpm install --frozen-lockfile` (Composite-Action
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Die Installation läuft
+ausschließlich mit `pnpm install --frozen-lockfile` (Composite-Action
 [`.github/actions/setup-pnpm`](.github/actions/setup-pnpm/action.yml)).
 
-| Job           | Zweck                                                                     | merge-blockierend    |
-| ------------- | ------------------------------------------------------------------------- | -------------------- |
-| `format`      | Prettier-Check über das gesamte Repo (`pnpm format`)                      | ja                   |
-| `lint`        | ESLint über alle Pakete (`pnpm lint`)                                     | ja                   |
-| `typecheck`   | `tsc --noEmit` über alle Pakete (`pnpm typecheck`)                        | ja                   |
-| `unit-tests`  | Vitest über alle Pakete (`pnpm test`)                                     | ja                   |
-| `build-web`   | Produktions-Build der Web-Shell inkl. Abhängigkeiten                      | ja                   |
-| `build-api`   | Produktions-Build von API/Worker inkl. Abhängigkeiten                     | ja                   |
-| `secret-scan` | gitleaks (gepinnt, `--redact`) + Checks auf getrackte `.env`-/Key-Dateien | ja                   |
-| `db-gates`    | Migrationen, pgTAP und fail-closed Tenant-Gates auf echtem Supabase-Stack | ja — folgt in EYT-57 |
-| `web-smoke`   | Browser-Smoke (Playwright/Chromium) inkl. Accessibility                   | ja — folgt in EYT-58 |
+Zwei getrennte Aussagen, jede mit eigenem Beleg (EYT-67):
+
+1. **Konfiguriert:** Alle neun Jobs sind im Repository-Ruleset `19718704`
+   (`enforcement: active`, `bypass_actors: []`, Ziel `~DEFAULT_BRANCH`) als
+   `required_status_checks` eingetragen, zusammen mit `pull_request`,
+   `non_fast_forward` und `deletion`. Nachprüfbar read-only gegen die von GitHub
+   gemeldete Ist-Wirkung: `bash scripts/verify-branch-protection.sh`.
+2. **Wirksam:** Negativ-PR [#7](https://github.com/DYAI2025/EasyTree/pull/7) trug einen
+   absichtlich unformatierten Commit. Ergebnis: Job `format` = `failure`,
+   `mergeable_state` = `blocked`, und der Merge-Versuch wurde serverseitig abgelehnt
+   (`the base branch policy prohibits the merge`). Der PR wurde ohne Merge geschlossen.
+
+Details, Tarifgrenzen und Rollback: [`docs/runbooks/branch-protection.md`](docs/runbooks/branch-protection.md).
+
+| Job           | Zweck                                                                     | merge-blockierend |
+| ------------- | ------------------------------------------------------------------------- | ----------------- |
+| `format`      | Prettier-Check über das gesamte Repo (`pnpm format`)                      | ja                |
+| `lint`        | ESLint über alle Pakete (`pnpm lint`)                                     | ja                |
+| `typecheck`   | `tsc --noEmit` über alle Pakete (`pnpm typecheck`)                        | ja                |
+| `unit-tests`  | Vitest über alle Pakete (`pnpm test`)                                     | ja                |
+| `build-web`   | Produktions-Build der Web-Shell inkl. Abhängigkeiten                      | ja                |
+| `build-api`   | Produktions-Build von API/Worker inkl. Abhängigkeiten                     | ja                |
+| `secret-scan` | gitleaks (gepinnt, `--redact`) + Checks auf getrackte `.env`-/Key-Dateien | ja                |
+| `db-gates`    | Migrationen, pgTAP und fail-closed Tenant-Gates auf echtem Supabase-Stack | ja — verifiziert  |
+| `web-smoke`   | Browser-Smoke (Playwright/Chromium) inkl. Accessibility                   | ja — verifiziert  |
+
+„verifiziert" heißt: der Job ist implementiert **und** real grün gelaufen — alle neun Jobs
+inklusive `db-gates` und `web-smoke` in Run
+[`30133452629`](https://github.com/DYAI2025/EasyTree/actions/runs/30133452629) (Commit
+`d497bc9`, PR #5). Kein Job ist mehr „geplant".
 
 Hinweise: Die Tenant-Integrationstests skippen im Job `unit-tests` ohne erreichbare
 Datenbank mit Warnung (Local-Mode); das verbindliche, fail-closed geprüfte Gate dafür

@@ -148,7 +148,10 @@ alle grün.
   dass eine Folgetransaktion ohne Claims **nichts** sieht (`auth.uid()` = null) —
   d. h. eine vom Pooler wiederverwendete Connection kann keinen fremden
   Tenantkontext erben (Testmatrix #18).
-- `TOOL_GAP` **Live-Pooler-Test:** Der lokale Supavisor-Container
+- ~~`TOOL_GAP` **Live-Pooler-Test**~~ — **GESCHLOSSEN in Sprint 2**, siehe Abschnitt
+  „Pooling-Evidenz (Sprint 2, real)" direkt unten. Der Block bleibt als Historie
+  stehen und ist **nicht** mehr als offener Punkt zu lesen.
+  <br>Ursprünglicher Wortlaut: Der lokale Supavisor-Container
   (`supabase_pooler_easytree`, Port 54329) startet in dieser Sandbox nicht
   (von `supabase start` als „Stopped services" gemeldet, bekannte Limitierung, siehe
   Runbook `database-workflow.md`). Der Transaction-Mode-Kontraktsvertrag ist daher
@@ -168,11 +171,23 @@ Schließt den oben dokumentierten `TOOL_GAP` **Live-Pooler-Test** (EYT-15, Sprin
   (`[db.pooler] enabled = false`) und startete in der Entwicklungs-Sandbox nicht.
 - **Jetzt (Sprint 2, real):** `[db.pooler] enabled = true` (transaction mode,
   Port 54329), und die neue Suite `apps/api/test/tenant-pooling.integration.test.ts`
-  verbindet über `EASYTREE_TEST_POOLER_URL` (Default
-  `postgresql://postgres:postgres@127.0.0.1:54329/postgres`) **durch den laufenden
-  Supavisor** statt direkt. Geteilte Bausteine (Seed-Konstanten, `probeDatabase`,
-  `inTenantTx`-Muster) liegen DRY in `apps/api/test/tenant-context.helper.ts` und
-  werden von Direct- und Pooler-Suite gemeinsam genutzt.
+  verbindet über `EASYTREE_TEST_POOLER_URL` **durch den laufenden Supavisor** statt
+  direkt. Geteilte Bausteine (Seed-Konstanten, `probeDatabase`, `inTenantTx`-Muster)
+  liegen DRY in `apps/api/test/tenant-context.helper.ts` und werden von Direct- und
+  Pooler-Suite gemeinsam genutzt.
+- **Pooler-Verbindungsvertrag (korrigiert, EYT-69):** Supavisor verlangt einen
+  tenant-suffixierten Benutzernamen `postgres.<tenant_id>`, kein blankes `postgres`.
+  - Code-Default in `apps/api/test/tenant-pooling.integration.test.ts:40-41`:
+    `postgresql://postgres.pooler-dev:postgres@127.0.0.1:54329/postgres?sslmode=disable`
+  - In CI wird **nichts** davon fest verdrahtet: der Step „Resolve pooler URL +
+    pre-flight" in `.github/workflows/ci.yml` liest Tenant-ID (`POOLER_TENANT_ID`),
+    Passwort und den veröffentlichten Port direkt aus dem laufenden
+    `supabase_pooler_*`-Container, probiert Tenant-Kandidaten mit Pre-flight
+    (`select 1`, 6 Versuche) durch und schreibt die funktionierende URL nach
+    `EASYTREE_TEST_POOLER_URL`. Kein erreichbarer Tenant ⇒ fail-closed, Job rot.
+  - **Nicht funktionierend:** `postgresql://postgres:postgres@127.0.0.1:54329/postgres`
+    (frühere Angabe in diesem Report). Ohne Tenant-Suffix lehnt Supavisor die
+    Authentifizierung ab; ohne `sslmode=disable` schlägt die lokale Verbindung fehl.
 - **Real getestete Szenarien (3 Tests, eigenes Report-Prefix `[tenant-pooling]`):**
   1. Tenantkontext funktioniert durch den Pooler: ein Client, transaktionslokaler
      Kontext, User A sieht ausschließlich Org-Alpha-Items (identisches Muster wie
@@ -193,8 +208,13 @@ Schließt den oben dokumentierten `TOOL_GAP` **Live-Pooler-Test** (EYT-15, Sprin
   nicht erreichbaren Pooler-Port ⇒ Exit 1 mit
   `[tenant-pooling] fail-closed: Pflicht-Pooler-Tests koennen nicht laufen …`;
   Local-Mode ⇒ Exit 0 mit `[tenant-pooling] mode=local executed=0 skipped=3`.
-- **Evidenzstufe:** CI-Lauf ausstehend — Run-URL nach erstem grünen Lauf hier
-  eintragen (erst dann gilt das EYT-15-AC „reproduzierbar belegt“ als erfüllt).
+- **Evidenzstufe: ausgeführter CI-Lauf** (höchste Stufe der Evidenzhierarchie aus der
+  Sprint-1-Retrospektive). Run
+  [`30133452629`](https://github.com/DYAI2025/EasyTree/actions/runs/30133452629),
+  Commit `d497bc9`, PR #5: Job `db-gates` = `success`, damit sind der doppelte
+  `db reset`, beide pgTAP-Läufe, das Direct-Tenant-Gate und das
+  TRANSACTION-POOLER-Gate (jeweils `mode=required … skipped=0`) real ausgeführt.
+  Das EYT-15-AC „reproduzierbar belegt“ ist damit erfüllt.
 
 ## Verbleibende Risiken
 
