@@ -67,9 +67,20 @@ printf 'Repository:      %s (%s)\n' "$REPO" "$visibility"
 printf 'Default-Branch:  %s\n' "$default_branch"
 
 # --- Drift-Pruefung: ci.yml-Jobs vs. Pflichtcheck-Liste --------------------
-if [ -f "$WORKFLOW_FILE" ]; then
-  workflow_jobs="$(
-    awk '
+# BEIDE Richtungen, fail-closed:
+#  - Job in ci.yml, aber nicht in REQUIRED_CHECKS => neuer Job waere stillschweigend
+#    optional (der Fall, fuer den diese Pruefung urspruenglich gebaut wurde).
+#  - Eintrag in REQUIRED_CHECKS, aber nicht in ci.yml => GitHub wartet dauerhaft auf
+#    einen Kontext, den kein Workflow erzeugen kann; JEDER kuenftige PR wird damit
+#    permanent unmergebar. Der gefaehrlichere der beiden Faelle.
+# Eine fehlende Workflow-Datei ist ebenfalls ein Abbruch: ohne sie ist die
+# Pflichtcheck-Liste unbelegbar, und ein Blind-Write koennte genau die obige
+# Dauerblockade erzeugen.
+[ -f "$WORKFLOW_FILE" ] ||
+  die "Workflow-Datei ${WORKFLOW_FILE} nicht gefunden. Ohne sie ist die Pflichtcheck-Liste nicht pruefbar; Abbruch statt Blind-Konfiguration."
+
+workflow_jobs="$(
+  awk '
       /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
       in_jobs && /^[^[:space:]]/ { in_jobs = 0 }
       in_jobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
@@ -79,25 +90,43 @@ if [ -f "$WORKFLOW_FILE" ]; then
         print line
       }
     ' "$WORKFLOW_FILE"
-  )"
-  missing=""
-  while IFS= read -r job; do
-    [ -n "$job" ] || continue
-    if ! printf '%s\n' "$REQUIRED_CHECKS" | grep -qx -- "$job"; then
-      missing="${missing}${job} "
-    fi
-  done <<EOF
+)"
+
+[ -n "$workflow_jobs" ] ||
+  die "In ${WORKFLOW_FILE} wurde kein einziger Job erkannt. Parser oder Datei pruefen; Abbruch statt Blind-Konfiguration."
+
+# Richtung 1: ci.yml -> REQUIRED_CHECKS
+not_required=""
+while IFS= read -r job; do
+  [ -n "$job" ] || continue
+  if ! printf '%s\n' "$REQUIRED_CHECKS" | grep -qx -- "$job"; then
+    not_required="${not_required}${job} "
+  fi
+done <<EOF
 $workflow_jobs
 EOF
-  if [ -n "$missing" ]; then
-    die "Drift erkannt: ${WORKFLOW_FILE} enthaelt Jobs, die nicht als Pflichtcheck gefuehrt sind: ${missing}- REQUIRED_CHECKS in diesem Skript ergaenzen."
+
+# Richtung 2: REQUIRED_CHECKS -> ci.yml
+not_in_workflow=""
+while IFS= read -r want; do
+  [ -n "$want" ] || continue
+  if ! printf '%s\n' "$workflow_jobs" | grep -qx -- "$want"; then
+    not_in_workflow="${not_in_workflow}${want} "
   fi
-  printf 'Drift-Pruefung:  OK (%s CI-Jobs, %s Pflichtchecks)\n' \
-    "$(printf '%s\n' "$workflow_jobs" | grep -c . || true)" \
-    "$(printf '%s\n' "$REQUIRED_CHECKS" | grep -c . || true)"
-else
-  printf 'Drift-Pruefung:  uebersprungen (%s nicht gefunden)\n' "$WORKFLOW_FILE"
+done <<EOF
+$REQUIRED_CHECKS
+EOF
+
+if [ -n "$not_required" ]; then
+  die "Drift erkannt: ${WORKFLOW_FILE} enthaelt Jobs, die nicht als Pflichtcheck gefuehrt sind: ${not_required}- REQUIRED_CHECKS in diesem Skript ergaenzen."
 fi
+if [ -n "$not_in_workflow" ]; then
+  die "Drift erkannt: REQUIRED_CHECKS fuehrt Checks, die ${WORKFLOW_FILE} nicht erzeugt: ${not_in_workflow}- GitHub wuerde dauerhaft darauf warten und jeden PR blockieren. Liste oder Workflow korrigieren."
+fi
+
+printf 'Drift-Pruefung:  OK, beide Richtungen (%s CI-Jobs, %s Pflichtchecks)\n' \
+  "$(printf '%s\n' "$workflow_jobs" | grep -c . || true)" \
+  "$(printf '%s\n' "$REQUIRED_CHECKS" | grep -c . || true)"
 
 # --- Payload ---------------------------------------------------------------
 checks_json="$(printf '%s\n' "$REQUIRED_CHECKS" | grep . | jq -R '{context: .}' | jq -s '.')"
@@ -149,9 +178,18 @@ if [ "$DRY_RUN" = "true" ]; then
 fi
 
 # --- Anlegen oder aktualisieren -------------------------------------------
+# Fail-closed: nur eine NACHWEISLICH erfolgreiche Abfrage ohne Treffer darf in den
+# Create-Pfad fuehren. Ein transienter API-/Rate-Limit-/Rechte-Fehler wuerde sonst
+# als "kein Ruleset vorhanden" gelesen und ein zweites aktives Ruleset anlegen —
+# die Idempotenz waere gebrochen, und ein zurueckbleibendes Duplikat wuerde nach
+# spaeteren Updates weiter veraltete Checks verlangen.
+if ! rulesets_json="$(gh api "repos/${REPO}/rulesets")"; then
+  die "Ruleset-Liste von ${REPO} nicht lesbar. Abbruch statt Blind-POST — ein zweites Ruleset waere sonst die Folge."
+fi
+
 existing_id="$(
-  gh api "repos/${REPO}/rulesets" 2>/dev/null |
-    jq -r --arg n "$RULESET_NAME" 'map(select(.name == $n)) | .[0].id // empty' || true
+  printf '%s' "$rulesets_json" |
+    jq -r --arg n "$RULESET_NAME" 'map(select(.name == $n)) | .[0].id // empty'
 )"
 
 if [ -n "$existing_id" ]; then

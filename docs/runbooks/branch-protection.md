@@ -166,8 +166,60 @@ kaputter Pflichtcheck jeden Merge nach `master`. Das ist beabsichtigt. Der korre
 Weg ist, den Check zu reparieren — nicht, das Gate zu öffnen. Wird das Ruleset
 ausnahmsweise deaktiviert, ist das im betroffenen Jira-Vorgang zu vermerken.
 
+## 6.1 Fail-closed-Härtungen der Skripte (Review-Nachtrag, EYT-67)
+
+Ein Skript, das eine Sicherheitsaussage **falsch** bestätigt, ist schlechter als
+keines: es erzeugt Evidenz, die niemand mehr nachprüft. Der PR-Review von EYT-67
+fand fünf Stellen dieser Art, plus eine im Nachgang. Alle sind behoben; die
+Begründungen stehen als Kommentar direkt am Code.
+
+`scripts/setup-branch-protection.sh`:
+
+1. **Drift-Prüfung in beide Richtungen.** Vorher wurde nur „Job in `ci.yml`, aber
+   nicht in `REQUIRED_CHECKS`" erkannt. Der umgekehrte Fall ist der gefährlichere:
+   wird ein Job umbenannt oder gelöscht, ohne die Liste zu pflegen, bleibt der alte
+   Kontext `required`, GitHub wartet dauerhaft darauf, und **jeder** künftige PR ist
+   permanent unmergebar. Beide Richtungen brechen jetzt ab.
+2. **Fehlende Workflow-Datei ist ein Abbruch**, keine übersprungene Prüfung. Ohne
+   `ci.yml` ist die Pflichtcheck-Liste unbelegbar, und ein Blind-Write könnte genau
+   die Dauerblockade aus Punkt 1 erzeugen. Ebenso Abbruch, wenn der Parser keinen
+   einzigen Job findet.
+3. **Ruleset-Lookup ohne `|| true`.** Ein transienter API-/Rate-Limit-/Rechte-Fehler
+   wurde vorher als „kein Ruleset vorhanden" gelesen und führte in den Create-Pfad —
+   Ergebnis: ein **zweites** aktives Ruleset. Nur eine nachweislich erfolgreiche
+   Abfrage ohne Treffer darf noch anlegen.
+
+`scripts/verify-branch-protection.sh`:
+
+4. **Nicht lesbares Ruleset ⇒ FAIL statt PASS.** Vorher machte
+   `… | jq '.bypass_actors | length' || echo 0` aus einem fehlgeschlagenen Request
+   eine Null und damit ein PASS auf die sicherheitsrelevanteste Aussage des Skripts
+   („gilt auch für Repo-Admins") — ohne sie geprüft zu haben. Unlesbare Rulesets
+   werden jetzt namentlich gemeldet und schlagen fehl.
+5. **`strict_required_status_checks_policy` wird geprüft, nicht nur gedruckt.** Der
+   Wert ist Teil von AC 3 (Abschnitt 3). Ohne `strict` darf ein veralteter Branch mit
+   alten grünen Checks gemergt werden. Wer `STRICT_UP_TO_DATE=false` setzt, lässt
+   diese Verifikation bewusst rot werden.
+6. **AC 8 verlangt einen roten PFLICHTcheck.** Vorher genügte ein beliebiger roter
+   Check zusammen mit `mergeable_state=blocked`. Das ist zu schwach, denn
+   `mergeable_state` ist ein **Aggregat**: ein PR ist auch bei pendendem Pflichtcheck,
+   veraltetem Branch oder ungelöstem Review-Thread `blocked`. Ein roter optionaler
+   Doku-Check hätte so als Beweis durchgehen können. Die roten Checks werden jetzt
+   gegen `REQUIRED_CHECKS` geschnitten.
+7. **Offener und geschlossener Negativ-PR werden unterschieden.** Abschnitt 5 verlangt,
+   den PR nach dem Nachweis zu schließen — bei einem geschlossenen PR friert GitHub
+   `mergeable_state` aber ein. Eine späte Re-Verifikation meldet deshalb
+   `AC8 (historisch)` und sagt ausdrücklich, dass daraus **keine** aktuelle Sperre
+   folgt. Für einen Live-Nachweis ist ein neuer Negativ-PR nötig.
+
+Nicht behoben, weil nicht messbar ohne Risiko: dass die Sperre auch für
+Repo-Admins gilt, ist aus `bypass_actors: []` **abgeleitet**, nicht gemessen. Ein
+Gegentest (`gh pr merge --admin`) würde bei falscher Annahme den kaputten Commit auf
+`master` legen. Wer den Nachweis führen will, tut das auf einem Wegwerf-Repository.
+
 ## 7. Verwandte Dokumente
 
 - `docs/architecture/tenant-isolation-report.md` — CI-Evidenz der Tenant-Gates
 - `docs/plans/2026-07-24-sprint-2-quality-gates.md` — Sprint-2-Umsetzungsplan
+- `docs/plans/2026-07-25-eyt-sprint-2-abschluss.md` — Abschlussplan Sprint 2
 - `docs/retros/2026-07-24-sprint-1-modell-retrospektive.md` — Herkunft des Vorfalls
