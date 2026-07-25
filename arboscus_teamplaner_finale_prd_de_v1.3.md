@@ -1,8 +1,8 @@
 # Arboscus Teamplaner - Finale Product Requirements Document
 
-**Version:** 1.0 Final  
+**Version:** 1.3 Final — Repository, Supabase, Wetter und Post-MVP-Planungsökonomie  
 **Datum:** 23.07.2026  
-**Status:** Fachlich freigegeben. Bereit fuer Clickdummy, ADRs und phasenweise Implementierung.  
+**Status:** Fachlich freigegeben. MVP bereit fuer Clickdummy, ADRs und phasenweise Implementierung; Planungsökonomie/Maschinenverleih ist als Post-MVP-Backlog dokumentiert.  
 **Produktionsfreigabe:** Noch nicht erteilt; technische Anbieter-, Datenschutz-, Aufbewahrungs-, Backup- und Security-Gates bleiben verpflichtend.
 
 ---
@@ -52,9 +52,9 @@ Die Einsatzplanung ist heute auf mehrere Medien verteilt: Hero, Excel, Messenger
 
 ### 3.2 Nicht-Ziele
 
-- Keine Lohn-, Gehalts-, Honorar- oder Rechnungsberechnung.
-- Keine Stunden-, Tages- oder Pauschalpreislogik.
-- Keine vollstaendige Buchhaltungssoftware.
+- Im MVP keine Lohn-, Gehalts-, Honorar-, Rechnungs-, Umsatzsteuer-, Brutto-, Zahlungs- oder Buchungsberechnung.
+- Eine spätere Post-MVP-Funktion darf ausschließlich interne Netto-Plan-/Ist-Kosten und Netto-Erlöse aus Maschinenverleih darstellen.
+- Keine vollstaendige Buchhaltungssoftware und keine Übernahme der führenden Rolle von Lohnabrechnung, Faktura oder Finanzbuchhaltung.
 - Kein kontinuierliches GPS-Tracking.
 - Keine Bewegungsprofile und kein Geofencing.
 - Keine automatische ortsbasierte Anwesenheitserkennung.
@@ -113,18 +113,24 @@ Die Einsatzplanung ist heute auf mehrere Medien verteilt: Hero, Excel, Messenger
 
 ## 6. Verbleibende offene Punkte
 
-Das bestehende PRD bleibt die fachliche Quelle der Wahrheit. Das ergaenzende MVP-Zieldokument wird nur dort uebernommen, wo es ohne Widerspruch Praezision erhoeht. Folgende zehn Entscheidungen bleiben offen:
+Das bestehende PRD bleibt die fachliche Quelle der Wahrheit. Folgende Entscheidungen sind jetzt verbindlich geklärt:
 
-1. Welches Repository, welcher Stack und welche repository-spezifischen Validierungsbefehle werden verwendet?
-2. Welche EU-Hosting-, Datenbank-, Storage-, Auth-, E-Mail-, Routing-, Transkriptions-, PDF-, Monitoring- und Wetteranbieter werden gewaehlt?
-3. Welche rechtlich geprueften Aufbewahrungs- und Loeschfristen gelten je Daten- und Dateikategorie?
-4. Welche Pilot-Baselines und Zielwerte gelten fuer Planungsaufwand, Bestaetigung, Konflikte, Informationsqualitaet und Nutzung?
-5. Sehen Wetter nur zugewiesene Mitarbeiter oder auch Planer fuer alle sichtbaren und zukuenftigen Baustellen?
-6. Welche Wetterwerte sind Pflicht: Zustand, Temperatur, Niederschlagswahrscheinlichkeit/-menge, Wind, Boeen, Warnstatus oder weitere Werte?
-7. Wird eine Tageszusammenfassung, die konkrete Einsatzzeit oder beides angezeigt?
-8. Welche Aktualisierungsfrist, maximale Cache-Alterung und Fehler-Fallback-Regel gelten?
-9. Welche Unwetterveraenderungen erzeugen In-App-Hinweis, E-Mail oder Eskalation?
-10. Bleibt Wetter rein informativ oder duerfen definierte Schwellen spaeter warnen, Veroeffentlichung blockieren oder Arbeitsstopp empfehlen?
+- Kanonisches Implementierungsrepository: `https://github.com/DYAI2025/Arborga.git`.
+- Datenbankplattform: Supabase; Zielregion Central EU/Frankfurt.
+- Wetter ist nur für Nutzer mit sichtbarer Baustellenzuweisung verfügbar. Es wird kein Mitarbeiterstandort verfolgt.
+- Wetterfelder: Zustand, Temperatur, relative Luftfeuchtigkeit, Niederschlagswahrscheinlichkeit, Niederschlagsmenge, Windgeschwindigkeit, maximale Böen, Ozonprognose und amtlicher Warnstatus.
+- Darstellung: heute und Folgetag als kompletter Tagesverlauf in Zeitabschnitten; die Einsatzzeit wird hervorgehoben.
+- Amtliche Warnungen, insbesondere Gewitter und starke Böen, werden prominent mit offizieller DWD-Stufe dargestellt.
+- Wetter bleibt im MVP informativ und löst keine automatische Absage, Veröffentlichungsblockade oder verbindliche Arbeitsstopp-Anweisung aus.
+
+Noch offen beziehungsweise zu bestätigen sind:
+
+1. Empfohlener Stack und Deployment: modulare TypeScript-Web/PWA, serverseitige API/BFF, Supabase Frankfurt und separater Python-Worker auf deutschem Hosting.
+2. Soll der derzeitige Default-Branch `master` vor Implementierungsbeginn in `main` umbenannt werden?
+3. Welches transaktionale E-Mail-System wird angebunden; vorhandener Arboscus-Dienst oder vorläufig Brevo?
+4. Bestätigung der Wetterarchitektur: OpenWeather für Prognose/Ozon plus DWD-CAP für amtliche Warnungen.
+5. Sollen neue oder eskalierte Warnungen zusätzlich Browser-Push und E-Mail auslösen und eine Gesehen-Markierung verlangen?
+6. Rechtliche Freigabe der Aufbewahrungsmatrix sowie fachliche Freigabe der Pilot-Zielwerte.
 
 ## 7. Produktumfang
 
@@ -161,6 +167,21 @@ Das bestehende PRD bleibt die fachliche Quelle der Wahrheit. Das ergaenzende MVP
 - Sprachnotizen mit kontrollierbarer Transkription.
 - Automatische Anfahrtszeit aus privatem Startpunkt.
 - Begrenzter CSV-Import.
+
+### Post-MVP / zukünftiges Jira-Epic: Planungsökonomie und Maschinenverleih
+
+Diese Funktion gehört ausdrücklich **nicht zum MVP** und nicht zu den Implementierungsphasen 1 bis 6. Sie wird vollständig dokumentiert, damit sie später als eigenes Jira-Epic geplant werden kann.
+
+- Individuelle Netto-Stunden- oder Tagessätze je Mitarbeiter, freiem Mitarbeiter/Subunternehmer und Gerät/Fahrzeug.
+- Für vermietbare Maschinen zusätzlich individuelle Netto-Mieterlössätze je Stunde oder Tag.
+- Keine Standardkostensätze nach Rolle oder Ressourcentyp erforderlich.
+- Sätze besitzen `gültig ab` und optional `gültig bis`; Änderungen erzeugen neue Versionen und überschreiben keine Historie.
+- Geplante Kosten werden aus Einsatz- und Reservierungszeiten abgeleitet.
+- Ist-Kosten werden ausschließlich aus freigegebenen Arbeitszeiten und bestätigter Ressourcennutzung abgeleitet.
+- Erlöse werden ausschließlich für bestätigten Maschinenverleih erfasst. Andere Erlösarten bleiben außerhalb des Produkts.
+- Zugriff zunächst ausschließlich für Administrator und Geschäftsführung; spätere Erweiterung nur über atomare Berechtigungen.
+- Ausschließlich Netto-Beträge in EUR; keine Umsatzsteuer-, Brutto-, Rechnungs-, Zahlungs-, Lohn- oder Buchungslogik.
+- Auswertung nach Person, Ressource, Baustelle, Tag, Woche und frei gewähltem Zeitraum sowie getrennt nach Plan-Kosten, Ist-Kosten und Maschinenverleih-Erlösen.
 
 ## 8. Zentrale Nutzerreisen
 
@@ -262,7 +283,7 @@ Das bestehende PRD bleibt die fachliche Quelle der Wahrheit. Das ergaenzende MVP
 - **FR-050:** Administrator oder Geschaeftsfuehrung kann freigeben, mit Begruendung korrigieren oder zur Klaerung markieren.
 - **FR-051:** Originalwert, Korrektur, Person, Zeitpunkt und Begruendung bleiben nachvollziehbar.
 - **FR-052:** Mitarbeiter werden ueber Korrektur oder Beanstandung informiert.
-- **FR-053:** Zeitdaten erzeugen keinerlei Geld- oder Abrechnungswerte.
+- **FR-053:** Im MVP erzeugen Zeitdaten keinerlei Geld- oder Abrechnungswerte. Die Post-MVP-Anforderungen zur Planungsökonomie werden nur in einer separat freigegebenen Phase umgesetzt.
 
 ### 10.7 Benachrichtigung, Export und Offline
 
@@ -277,9 +298,27 @@ Das bestehende PRD bleibt die fachliche Quelle der Wahrheit. Das ergaenzende MVP
 
 ### 10.8 Wetter und Mitarbeiterlebenszyklus
 
-- **Kanonisch FR-043:** Fuer jede dem Mitarbeiter sichtbare, zugewiesene Baustelle zeigt die App das Wetter fuer heute und den Folgetag. Die Daten werden anhand des Baustellenstandorts ueber einen externen Wetterdienst-Adapter abgerufen. Aktualisierungszeitpunkt sowie veralteter oder nicht verfuegbarer Zustand sind sichtbar.
-- **Kanonisch FR-044:** Berechtigte Nutzer koennen Mitarbeiter anlegen, bearbeiten, deaktivieren und archivieren. Historische Einsaetze, Arbeitszeiten, Freigaben, Schadensmeldungen und Audit-Bezuege bleiben erhalten.
-- Wetter ist bis zu einer ausdruecklichen Entscheidung rein informativ. Es darf nicht stillschweigend Einsaetze sperren, Arbeit absagen oder Sicherheitsentscheidungen treffen.
+- **Kanonisch FR-043 — Sichtbarkeit:** Wetter wird nur für heute oder morgen zugewiesene, für den Nutzer sichtbare Baustellen angezeigt. Die Berechtigung ergibt sich aus Einsatz und Baustelle. Es gibt kein kontinuierliches GPS- oder Hintergrundtracking von Mitarbeitern.
+- **Kanonisch FR-044 — Mitarbeiterlebenszyklus:** Berechtigte Nutzer können Mitarbeiter anlegen, bearbeiten, deaktivieren und archivieren. Historische Einsätze, Arbeitszeiten, Freigaben, Schadensmeldungen und Audit-Bezüge bleiben erhalten.
+- **Kanonisch FR-045 — Wetterwerte:** Zustand, Temperatur, relative Luftfeuchtigkeit, Niederschlagswahrscheinlichkeit, erwartete Niederschlagsmenge, Windgeschwindigkeit, maximale Böen, Ozonprognose und amtlicher Warnstatus werden mit Einheit, Quelle und Aktualisierungszeit angezeigt.
+- **Kanonisch FR-046 — Tagesabschnitte:** Heute und Folgetag werden als vollständiger Tagesverlauf dargestellt. Empfohlene Standardabschnitte: Morgen 05–08 Uhr, Vormittag 08–11 Uhr, Mittag 11–14 Uhr, Nachmittag 14–18 Uhr, Abend 18–22 Uhr und Nacht 22–05 Uhr. Einsatzrelevante Abschnitte werden hervorgehoben.
+- **Kanonisch FR-047 — Amtliche Warnungen:** DWD-Warnungen für Gemeinde, Kreis oder direkt überlappende Warnfläche werden mit Ereignis, Stufe, Gültigkeit, Quelle und Aktualität prominent angezeigt. DWD-Farben bleiben gelb, orange, rot und violett; Farbe wird immer durch Text, Stufe und Icon ergänzt. Nahe Warnungen werden ausdrücklich als regional beziehungsweise in der Nähe gekennzeichnet.
+- **Kanonisch FR-048 — Informative Wirkung:** Im MVP darf Wetter keine Einsätze automatisch absagen, sperren, verschieben oder einen verbindlichen Arbeitsstopp auslösen. Die organisatorische und sicherheitsfachliche Entscheidung bleibt bei Arboscus.
+- **Kanonisch FR-049 — Ozon:** Ozon wird als Prognose in µg/m³ gekennzeichnet. 120 µg/m³ ist als gesundheitlicher Zielwert, 180 µg/m³ als Informationsschwelle und 240 µg/m³ als Alarmschwelle zu benennen. Die App erzeugt keine medizinische Diagnose.
+- **Aktualisierung:** Prognose und Luftqualität werden pro Baustelle gecacht, nicht pro Mitarbeiter. Empfohlen sind maximal dreistündliche Prognose- und sechsstündliche Ozonaktualisierung. Amtliche DWD-Warnungen werden zentral spätestens alle zehn Minuten geprüft; nach zwanzig Minuten ohne erfolgreichen Abruf gilt der Warnstand als veraltet.
+- **Ausfall:** Die Einsatzansicht bleibt verfügbar. Der letzte erfolgreiche Stand wird mit Zeitstempel als veraltet oder die Wetterfunktion als nicht verfügbar angezeigt.
+
+### 10.9 Post-MVP: Planungsökonomie und Maschinenverleih
+
+- **FR-062:** Die Funktion ist für Jira dokumentiert, aber im MVP deaktiviert und nicht Bestandteil der MVP-Abnahme.
+- **FR-063:** Nur Administrator und Geschäftsführung dürfen zunächst Sätze, Kosten, Erlöse, Berichte und Exporte sehen oder bearbeiten. Mitarbeiter sehen keinerlei wirtschaftliche Werte.
+- **FR-064:** Jeder Mitarbeiter, freie Mitarbeiter/Subunternehmer und jede Ressource kann einen individuellen Netto-Stunden- oder Tagessatz mit Gültigkeitszeitraum besitzen. Vermietbare Maschinen können zusätzlich einen individuellen Netto-Mieterlössatz besitzen.
+- **FR-065:** Neue Sätze werden versioniert. Historische Kalkulationen behalten die damals wirksame Satzversion; rückdatierte Korrekturen benötigen Berechtigung, Begründung, Vorschau und Audit.
+- **FR-066:** Plan-Kosten entstehen aus geplanten Einsatz- und Reservierungszeiten.
+- **FR-067:** Ist-Kosten entstehen nur aus freigegebenen Arbeitszeiten und bestätigter Ressourcennutzung.
+- **FR-068:** Netto-Erlöse werden ausschließlich aus bestätigten Maschinenverleih-Zeiträumen berechnet. Andere Erlösarten bleiben ausgeschlossen.
+- **FR-069:** Berichte trennen Plan-Kosten, Ist-Kosten und Maschinenverleih-Erlöse und können nach Person, Ressource, Baustelle, Tag, Woche und Zeitraum ausgewertet werden.
+- **FR-070:** Es werden keine Umsatzsteuer, Bruttobeträge, Löhne, Rechnungen, Zahlungen, Forderungen oder Buchungssätze erzeugt.
 
 ## 11. Nicht-funktionale Anforderungen
 
@@ -325,6 +364,11 @@ Kernentitaeten:
 19. SavedFilter
 20. PrivateRouteOrigin
 21. WeatherSnapshot
+22. OfficialWeatherWarning
+23. EconomicRateVersion (Post-MVP)
+24. PlannedEconomicSnapshot (Post-MVP, abgeleitet)
+25. ActualCostRecord (Post-MVP, abgeleitet)
+26. MachineRentalRecord (Post-MVP)
 
 Die vollstaendige Feld- und Beziehungsspezifikation befindet sich in `prd_report.json` und wird vor Implementierung in ein versioniertes Schema beziehungsweise ER-Modell ueberfuehrt.
 
@@ -348,7 +392,9 @@ Erforderliche API-Bereiche:
 - Transkriptions-Adapter.
 - PDF-/Druckexport.
 - CSV-Import.
-- Wetterdienst-Adapter fuer Baustellenprognosen heute und Folgetag.
+- Prognose- und Luftqualitätsadapter für Baustellenwetter und Ozon.
+- DWD-CAP-Adapter für amtliche Wetter- und Unwetterwarnungen.
+- Post-MVP: Rate-Administration, Plan-/Ist-Kostenberichte und Maschinenverleih-Erlös-Schnittstellen ohne Buchhaltungsnebenwirkungen.
 
 API-Vertraege muessen vor paralleler Frontend-/Backend-Implementierung als OpenAPI oder gleichwertiger Vertrag versioniert werden.
 
@@ -366,7 +412,12 @@ API-Vertraege muessen vor paralleler Frontend-/Backend-Implementierung als OpenA
 - Hintergrundjobs benoetigen Retry-Limit, Fehlerkanal, Monitoring und Stop-Bedingungen.
 - Entwicklungs-, Test- und Produktionsumgebung sind getrennt.
 - Zentrale Technologie- und Anbieterentscheidungen werden als ADR dokumentiert.
-- Der Wetteranbieter liegt hinter einem austauschbaren Adapter; sein Ausfall darf die Einsatzansicht nicht blockieren.
+- Prognose-, Luftqualitäts- und DWD-Warnquellen liegen hinter getrennten austauschbaren Adaptern; ihr Ausfall darf die Einsatzansicht nicht blockieren.
+- Wetter wird serverseitig pro Baustelle gecacht; mobile Clients besitzen keine Anbieter-Schlüssel.
+- Kanonisches Repository ist `DYAI2025/Arborga`; der Default-Branch wird vor Codebeginn per ADR auf `main` umgestellt oder bewusst als `master` bestätigt.
+- Supabase Postgres in Frankfurt ist die Datenbankbasis; Supabase Auth und private Storage-Buckets mit RLS sind die empfohlene Ergänzung.
+- Datenbank- und Datei-Backups werden getrennt behandelt, weil Supabase-Datenbankbackups gelöschte Storage-Objekte nicht wiederherstellen.
+- Post-MVP-Planungsökonomie bildet ein getrenntes Modul und konsumiert nur freigegebene Fakten aus Planung, Arbeitszeit und Ressourcennutzung. Historische Kalkulationen referenzieren unveränderliche Satzversionen.
 
 ## 15. Security, Datenschutz und Compliance-Grenzen
 
@@ -436,9 +487,13 @@ PWA, Offline-Cache, Filter, PDF, Profilbilder, Transkription, Anfahrtszeit und C
 
 Pilot, Messung, Datenschutz-/Retention-Review, Restore-Test, Security-Test, Browser-/Accessibility-Test, Monitoring, Runbooks und Produktionsfreigabe.
 
+### Phase 7 - Post-MVP Planungsökonomie und Maschinenverleih
+
+Erst nach separater Freigabe: Berechtigungen, individuelle zeitlich gültige Netto-Sätze, Plan-/Ist-Kosten, bestätigte Maschinenverleih-Erlöse, Berichte, Audit, Migration, Feature Flag und Rollback.
+
 ## 19. Atomare Aufgaben
 
-Die Implementierung ist in 26 Tasks zerlegt. Die vollstaendige atomare Taskliste mit IDs `TASK-001` bis `TASK-026`, Abhaengigkeiten, Testzuordnung, Risiken und Stop-Bedingungen befindet sich im kanonischen `prd_report.md`, `prd_report.json` und `traceability_matrix.csv`.
+Die MVP-Implementierung ist in mindestens 31 Tasks zerlegt; zusätzlich sind die Post-MVP-Tasks `TASK-032` bis `TASK-036` für Planungsökonomie und Maschinenverleih dokumentiert; Version 1.3 ergänzt Repository-/Plattform-ADR, Wetter-/DWD-Integration, Pilotmessung, Retention sowie das Post-MVP-Epic Planungsökonomie/Maschinenverleih. Die vollständige atomare Taskliste mit IDs `TASK-001` bis `TASK-036`, Abhaengigkeiten, Testzuordnung, Risiken und Stop-Bedingungen befindet sich im kanonischen `prd_report.md`, `prd_report.json` und `traceability_matrix.csv`.
 
 Zentrale Reihenfolge:
 
@@ -487,6 +542,7 @@ Beispiele:
 - Backup-Restore- und Environment-Isolation-Test.
 - Security-Tests fuer Auth, Authz, Upload, Injection, Rate Limits und Log-Redaction.
 - Pilot-Akzeptanztest mit realen Nutzern.
+- Post-MVP: Autorisierungs-, Satzversions-, historische Reproduzierbarkeits-, Plan-/Ist-Kosten-, Maschinenverleih-Erlös- und Scope-Boundary-Tests.
 
 ## 22. Observability und Monitoring
 
@@ -503,6 +559,7 @@ Zu beobachten sind mindestens:
 - Health- und Readiness-Checks.
 - Fehlgeschlagene Backups und haengende Jobs.
 - Produktmetriken fuer Planungsabdeckung, Informationsqualitaet und Nutzerakzeptanz.
+- Post-MVP: Änderungen von Satzversionen, Berechnungsfehler, nicht auflösbare Quellen, rückdatierte Korrekturen, Berichts-/Exportzugriffe und unerlaubte Zugriffsversuche.
 
 ## 23. Risikoregister
 
@@ -521,8 +578,11 @@ Hauptgefahren:
 - Vergessene Timer.
 - Fehlende rechtliche Aufbewahrungsentscheidung.
 - Veraltete oder ungenaue Wetterdaten werden als verbindliche Sicherheitsinformation missverstanden.
+- Post-MVP: Offenlegung vertraulicher Personen-/Ressourcensätze.
+- Post-MVP: Historische Kosten verändern sich durch überschriebene oder falsch wirksame Sätze.
+- Post-MVP: Interne Übersicht wird fälschlich als Lohn-, Rechnungs-, Steuer- oder Buchhaltungssystem verwendet.
 
-Die Massnahmen sind in `RISK-001` bis `RISK-012` und der Traceability-Matrix hinterlegt.
+Die Maßnahmen sind im kanonischen Risikoregister und der Traceability-Matrix hinterlegt. Ergänzt sind insbesondere Warnaktualität, räumliche Fehlinterpretation und die getrennte Supabase-Storage-Sicherung.
 
 ## 24. Rollback und Checkpoints
 
@@ -533,6 +593,7 @@ Die Massnahmen sind in `RISK-001` bis `RISK-012` und der Traceability-Matrix hin
 - PWA-Cache besitzt Versionierung und Invalidierung.
 - Der Pilot kann bei kritischen Fehlern auf den bisherigen Planungsprozess zurueckfallen.
 - Restore aus Backup wird vor Produktion geprobt.
+- Post-MVP-Planungsökonomie ist per Feature Flag abschaltbar; ein Rollback darf Planungen, freigegebene Zeiten, Ressourcennutzung oder Audit-Historie nicht verändern.
 
 ## 25. Definition of Done
 
@@ -547,10 +608,11 @@ Das Produkt ist fuer das erste Release fertig, wenn:
 - Browser-, Accessibility-, Performance-, Offline- und Upload-Tests bestehen;
 - Backup und Restore getestet sind;
 - Anbieter-ADRs, Datenfluss, Retention, Datenschutzinformationen und Runbooks freigegeben sind;
-- keine Lohn-, Rechnungs-, Geofencing- oder Trackingfunktionen vorhanden sind;
+- im MVP keine Lohn-, Kosten-, Erlös-, Rechnungs-, Geofencing- oder Trackingfunktionen vorhanden sind; die Post-MVP-Planungsökonomie ist nicht Teil der MVP-Abnahme;
 - Repository-spezifische CI-Validierung erfolgreich ist;
 - Pilotmetriken ausgewertet und kritische Rueckmeldungen bearbeitet sind.
-- Wetter fuer heute und den Folgetag sichtbar ist, der Aktualisierungsstatus klar ist und ein Anbieterausfall die Einsatzansicht nicht blockiert.
+- Wetter für heute und den Folgetag zuweisungsbezogen sichtbar ist, alle beschlossenen Werte und Tagesabschnitte enthält, amtliche DWD-Warnungen aktuell und prominent darstellt und ein Anbieterausfall die Einsatzansicht nicht blockiert.
+- keine Mitarbeiterortung für Wetter stattfindet und keine automatische wetterbasierte Absage oder Arbeitsstopp-Entscheidung existiert.
 - Mitarbeiterlebenszyklus sowie der Mindest-Pilotdatensatz mit zwoelf Mitarbeitern und drei parallelen Baustellen getestet sind.
 
 ## 26. Agenten-Handoff
@@ -563,7 +625,8 @@ Ein Coding Agent muss:
 - keine Datenfelder, Berechtigungen, Statusuebergaenge oder Anbieterannahmen erfinden;
 - Domaenenlogik von UI, Persistenz und Anbieteradaptern trennen;
 - Autorisierung niemals umgehen;
-- keine Lohn-, Rechnungs-, GPS-, Geofencing-, ERP- oder unbegrenzten No-Code-Funktionen hinzufuegen;
+- keine Lohn-, Rechnungs-, Umsatzsteuer-, Zahlungs-, Buchungs-, GPS-, Geofencing-, ERP- oder unbegrenzten No-Code-Funktionen hinzufuegen;
+- die Post-MVP-Anforderungen FR-062 bis FR-070 nicht während des MVP implementieren;
 - Tests und Rollback-Nachweise mit jeder Aenderung liefern;
 - bei Widerspruch, destruktiver Migration, neuem Anbieter oder unklarer geschuetzter Logik stoppen und Rueckfrage stellen.
 

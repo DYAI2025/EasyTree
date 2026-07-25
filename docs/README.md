@@ -8,7 +8,7 @@ Dieses Verzeichnis bündelt den aktuellen Planungs- und Anforderungsstand. Fachl
 
 - `prd/CURRENT_PRD_v1.3.md` – konsolidierter fachlicher Stand und verbindliche Entscheidungen
 - `mvp/MVP_SCOPE_v1.3.md` – MVP-Abgrenzung und Erfolgskriterien
-- `architecture/ARCHITECTURE_DECISIONS_v1.2.md` – Supabase-, Wetter-, Hosting-, Retention- und Pilotentscheidungen
+- `architecture/ARCHITECTURE_DECISIONS_v1.3.md` – Supabase-, Wetter-, Hosting-, Retention- und Pilotentscheidungen
 - `architecture/ADR-001-boilerplate-architecture.md` – akzeptierte Boilerplate- und Plattformarchitektur
 - `plans/2026-07-23-boilerplate-architecture.md` – vollständiger Boilerplate-Implementierungsplan
 - `plans/2026-07-23-sprint-1-mandantenfaehige-foundation.md` – Sprint-1-Umsetzungsplan

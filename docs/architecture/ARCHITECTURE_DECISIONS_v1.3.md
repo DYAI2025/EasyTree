@@ -1,10 +1,18 @@
 # Arboscus Teamplaner – Architektur-, Provider- und Betriebsentscheidungen
 
-Stand: 23.07.2026
+Stand der Entscheidungen: 23.07.2026 · Dokumentversion: v1.3 (26.07.2026)
+
+> **Versionshinweis:** Dieses Dokument hieß bis 26.07.2026 `ARCHITECTURE_DECISIONS_v1.2.md`.
+> Angeglichen an die einheitliche Dokumentversion v1.3; die Entscheidungen selbst sind
+> **unverändert** und stammen weiterhin vom 23.07.2026. Einzige inhaltliche Korrektur: der
+> Repository-Name (siehe unten). Ergänzt, nicht ersetzt, wird dieses Dokument durch
+> [ADR-001](./ADR-001-boilerplate-architecture.md) — ADR-001 regelt die Boilerplate-Architektur,
+> dieses Dokument die Provider-, Hosting-, Retention- und Pilotentscheidungen.
 
 ## Verbindlich
 
-- Repository: `DYAI2025/Arborga`
+- Repository: `DYAI2025/EasyTree` (bis 25.07.2026 `DYAI2025/Arborga`; GitHub leitet den alten
+  Namen weiter, kanonisch ist `EasyTree`)
 - Datenbankplattform: Supabase Postgres
 - Zielregion: Central EU / Frankfurt
 - mobile-first installierbare Web-App
