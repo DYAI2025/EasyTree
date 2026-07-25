@@ -14,6 +14,7 @@ Dieses Verzeichnis bündelt den aktuellen Planungs- und Anforderungsstand. Fachl
 - `plans/2026-07-23-sprint-1-mandantenfaehige-foundation.md` – Sprint-1-Umsetzungsplan
 - `ux/CLICKDUMMY_INPUTS.md` – Clickdummy-Fragen, Status und Mobile-Wireframe
 - `traceability/JIRA_BACKLOG_BOOTSTRAP_2026-07-23.md` – Jira-Erstaufschlag EYT-1 bis EYT-39; Boilerplate-Erweiterung bis EYT-55 ist in Jira gepflegt
+- `runbooks/branch-protection.md` – verbindliche Pflichtchecks, Ruleset-Konfiguration und Merge-Gate-Nachweis (EYT-67)
 - `handoff/AGENT_HANDOFF_v1.3.md` – Coding-Agent-Grenzen und Stop-Bedingungen
 - `validation/PRD_VALIDATION_v1.3.md` – Validierungsstatus
 
