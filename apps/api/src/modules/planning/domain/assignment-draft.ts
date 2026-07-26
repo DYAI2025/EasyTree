@@ -35,6 +35,7 @@ export interface AssignmentDraft {
  */
 export const CONFLICT_CODES = [
   "EMPLOYEE_INTERVAL_OVERLAP",
+  "EMPLOYEE_WEEKLY_CAPACITY",
   "EMPLOYEE_INACTIVE",
   "WORKSITE_NOT_PUBLISHABLE",
 ] as const;

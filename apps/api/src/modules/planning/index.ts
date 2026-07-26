@@ -10,3 +10,4 @@ export type { PlanningCommands } from "./application/planning-commands.port";
 export type { AssignmentDraft, ConflictCode, PlanningConflict } from "./domain/assignment-draft";
 export { CONFLICT_CODES } from "./domain/assignment-draft";
 export { conflictsWithExisting } from "./domain/assignment-draft";
+export { validateDraft } from "./domain/draft-validation";
