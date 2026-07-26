@@ -10,47 +10,66 @@
  * rechnete auf einer reinen Tageszeitachse, also nach einem anderen Modell als
  * die Dauerberechnung. Zwei Modelle, zwei Wahrheiten.
  *
- * ## Warum das hier strukturell nicht passieren kann
+ * ## Warum es eine Klasse mit privaten Feldern ist
  *
- * 1. **Ein Intervall entsteht nur durch Validierung.** `TimeInterval` ist ein
- *    gebrandeter Typ; ihn erzeugt ausschliesslich {@link createTimeInterval}.
- *    {@link durationMinutes} und {@link overlaps} nehmen nichts anderes
- *    entgegen. Dauer und Überlappung teilen sich damit *ein* Modell, weil es
- *    kein zweites gibt — nicht, weil eine Konvention es verlangt.
- * 2. **UTC-Instants statt Tageszeiten.** Die Prototyplogik konnte
- *    `15:30–07:00` nur deshalb umdeuten, weil ihr das Datum fehlte. Wer hier
- *    zwei Instants übergibt, hat den Kalendertag bereits entschieden. Eine
- *    Schicht über Mitternacht ist eine normale aufsteigende Instantfolge;
- *    `end < start` kann daher nur noch ein tatsächlich verkehrtes Intervall
- *    sein und wird abgelehnt. Die Zweideutigkeit verschwindet, statt geregelt
- *    zu werden.
- * 3. **Halb-offen `[start, end)`.** So gilt `08:00–12:00` und `12:00–16:00`
- *    als angrenzend, nicht als Überschneidung — sonst blockierte jeder
- *    Baustellenwechsel am selben Tag die Veröffentlichung.
- *    (`docs/audit/INTEGRATION_ARCHITECTURE.md`, „Zeit- und
- *    Veröffentlichungsregeln")
+ * Der erste Entwurf war ein `interface` mit einem Symbol-Brand. Das hielt
+ * **nicht**, nachgewiesen mit grünem `tsc --noEmit`, ohne Cast und ohne `any`:
+ *
+ * ```ts
+ * const forged: TimeInterval = { ...good, startUtc: spaeter, endUtc: frueher };
+ * durationMinutes(forged); // -600
+ * ```
+ *
+ * Object-Spread trägt symbolische Eigenschaften mit, also auch das Brand — nur
+ * die Daten nicht. Zusätzlich schützte `readonly startUtc: Date` bloss die
+ * Referenz: `interval.endUtc.setUTCFullYear(1999)` liess eine geprüfte
+ * Überschneidung nachträglich verschwinden. Beides war fail-open, also exakt
+ * die Fehlerart, die dieses Modul verhindern soll.
+ *
+ * Deshalb jetzt:
+ *
+ * 1. **Private Felder (`#startMs`/`#endMs`) statt öffentlicher Properties.**
+ *    TypeScript typisiert Klassen mit privaten Feldern nominal — ein
+ *    strukturell gleiches Objektliteral, ein Spread oder ein `Object.assign`
+ *    ist nicht zuweisbar. Der Konstruktor ist privat; der einzige Weg zu einer
+ *    Instanz ist {@link TimeInterval.create}.
+ * 2. **Millisekunden statt `Date` als Zustand.** Zahlen sind unveränderlich.
+ *    `startUtc`/`endUtc` geben bei jedem Zugriff eine **frische Kopie** zurück,
+ *    also gibt es keinen Alias, über den ein geprüftes Intervall nachträglich
+ *    kaputtgehen könnte.
+ * 3. **`Object.freeze` im Konstruktor**, damit auch reines JavaScript ohne
+ *    Typprüfung nichts anhängen oder überschreiben kann.
+ *
+ * Dadurch teilen Dauer und Überlappung ein Modell, weil es kein zweites geben
+ * *kann* — nicht, weil eine Konvention es verlangt.
+ *
+ * ## UTC-Instants statt Tageszeiten
+ *
+ * Die Prototyplogik konnte `15:30–07:00` nur deshalb umdeuten, weil ihr das
+ * Datum fehlte. Wer hier zwei Instants übergibt, hat den Kalendertag bereits
+ * entschieden; `end < start` kann daher nur noch ein tatsächlich verkehrtes
+ * Intervall sein. Die Zweideutigkeit verschwindet, statt geregelt zu werden.
+ *
+ * ## Halb-offen `[start, end)`
+ *
+ * `08:00–12:00` und `12:00–16:00` grenzen aneinander, sie überschneiden sich
+ * nicht — sonst blockierte jeder Baustellenwechsel am selben Tag die
+ * Veröffentlichung. (`docs/audit/INTEGRATION_ARCHITECTURE.md`, „Zeit- und
+ * Veröffentlichungsregeln")
  *
  * ## Ausdrücklich nicht hier
  *
- * - **Ist das Nachtarbeit?** Das ist keine Intervall-, sondern eine
- *   Kalenderfrage und braucht die IANA-Zeitzone plus das lokale Geschäftsdatum
- *   aus EYT-86. Dieses Modul entscheidet nur, ob ein Intervall *wohlgeformt*
- *   ist, nicht ob es *erlaubt* ist.
+ * - **Ist das Nachtarbeit?** Kalenderfrage, braucht IANA-Zeitzone und lokales
+ *   Geschäftsdatum aus EYT-86. Dieses Modul entscheidet Wohlgeformtheit, nicht
+ *   Erlaubnis.
  * - **Obergrenze für die Dauer.** Weder PRD noch ADR nennen eine; eine hier
- *   erfundene Grenze wäre geraten. Offen für EYT-74/EYT-86.
+ *   erfundene Grenze wäre geraten. Bewusst unbegrenzt, bis EYT-74/EYT-86 eine
+ *   fachliche Grenze festlegen — ein 30-Tage-Einsatz ist heute wohlgeformt.
+ * - **Deserialisierung.** {@link TimeInterval.toJSON} ist definiert, ein
+ *   stillschweigendes Wiederbeleben aus JSON gibt es bewusst nicht: der Weg
+ *   zurück führt über {@link TimeInterval.create}, damit gelesene Daten
+ *   dieselbe Prüfung durchlaufen wie geschriebene (relevant ab EYT-45/EYT-47).
  */
-
-declare const timeIntervalBrand: unique symbol;
-
-/**
- * Wohlgeformtes, halb-offenes Intervall `[startUtc, endUtc)` mit
- * `startUtc < endUtc`. Nur über {@link createTimeInterval} erhältlich.
- */
-export interface TimeInterval {
-  readonly startUtc: Date;
-  readonly endUtc: Date;
-  readonly [timeIntervalBrand]: "TimeInterval";
-}
 
 /** Ablehnungsgründe. Stabile Codes — sie werden Teil des API-Vertrags (EYT-47). */
 export const TIME_INTERVAL_ERRORS = [
@@ -70,50 +89,110 @@ export const TIME_INTERVAL_ERRORS = [
 
 export type TimeIntervalError = (typeof TIME_INTERVAL_ERRORS)[number];
 
+/** Was {@link TimeInterval.create} entgegennimmt — bewusst auch `null`/`undefined`. */
+export type MaybeInstant = Date | null | undefined;
+
 export type TimeIntervalResult =
   | { readonly ok: true; readonly interval: TimeInterval }
   | { readonly ok: false; readonly error: TimeIntervalError };
-
-/** Was `createTimeInterval` entgegennimmt — bewusst auch `null`/`undefined`. */
-export type MaybeInstant = Date | null | undefined;
 
 function isValidDate(value: MaybeInstant): value is Date {
   return value instanceof Date && Number.isFinite(value.getTime());
 }
 
 /**
- * Die einzige Stelle, an der ein {@link TimeInterval} entsteht.
- *
- * Gibt ein Ergebnisobjekt zurück statt zu werfen: der Aufrufer muss den
- * Fehlerfall behandeln, und der Fehlercode ist maschinenlesbar für die
- * API-Antwort. Ein `throw` liesse sich mit einem `try`/`catch` versehentlich
- * verschlucken — genau der Weg, auf dem fail-closed zu fail-open wird.
+ * Wohlgeformtes, halb-offenes Intervall `[startUtc, endUtc)` mit
+ * `startUtc < endUtc`. Nur über {@link TimeInterval.create} erhältlich.
  */
-export function createTimeInterval(start: MaybeInstant, end: MaybeInstant): TimeIntervalResult {
-  if (start === null || start === undefined) return { ok: false, error: "START_MISSING" };
-  if (end === null || end === undefined) return { ok: false, error: "END_MISSING" };
-  if (!isValidDate(start)) return { ok: false, error: "START_INVALID" };
-  if (!isValidDate(end)) return { ok: false, error: "END_INVALID" };
+export class TimeInterval {
+  readonly #startMs: number;
+  readonly #endMs: number;
 
-  const startMs = start.getTime();
-  const endMs = end.getTime();
-  if (startMs === endMs) return { ok: false, error: "START_EQUALS_END" };
-  if (endMs < startMs) return { ok: false, error: "END_BEFORE_START" };
+  private constructor(startMs: number, endMs: number) {
+    this.#startMs = startMs;
+    this.#endMs = endMs;
+    Object.freeze(this);
+  }
 
-  // Kopien: der Aufrufer darf sein Date nachtraeglich veraendern, das Intervall
-  // bleibt davon unberuehrt.
-  return {
-    ok: true,
-    interval: {
-      startUtc: new Date(startMs),
-      endUtc: new Date(endMs),
-    } as TimeInterval,
-  };
+  /**
+   * Die einzige Stelle, an der ein {@link TimeInterval} entsteht.
+   *
+   * Gibt ein Ergebnisobjekt zurück statt zu werfen: der Aufrufer muss den
+   * Fehlerfall behandeln, und der Fehlercode ist maschinenlesbar für die
+   * API-Antwort. Ein `throw` liesse sich mit einem `try`/`catch` versehentlich
+   * verschlucken — genau der Weg, auf dem fail-closed zu fail-open wird.
+   */
+  static create(start: MaybeInstant, end: MaybeInstant): TimeIntervalResult {
+    if (start === null || start === undefined) return { ok: false, error: "START_MISSING" };
+    if (end === null || end === undefined) return { ok: false, error: "END_MISSING" };
+    if (!isValidDate(start)) return { ok: false, error: "START_INVALID" };
+    if (!isValidDate(end)) return { ok: false, error: "END_INVALID" };
+
+    const startMs = start.getTime();
+    const endMs = end.getTime();
+    if (startMs === endMs) return { ok: false, error: "START_EQUALS_END" };
+    if (endMs < startMs) return { ok: false, error: "END_BEFORE_START" };
+
+    return { ok: true, interval: new TimeInterval(startMs, endMs) };
+  }
+
+  /** Startzeitpunkt als UTC-Instant. Jeder Zugriff liefert eine frische Kopie. */
+  get startUtc(): Date {
+    return new Date(this.#startMs);
+  }
+
+  /** Endzeitpunkt als UTC-Instant, exklusiv. Jeder Zugriff liefert eine frische Kopie. */
+  get endUtc(): Date {
+    return new Date(this.#endMs);
+  }
+
+  /** Startzeitpunkt in Millisekunden seit Epoch. */
+  get startMs(): number {
+    return this.#startMs;
+  }
+
+  /** Endzeitpunkt in Millisekunden seit Epoch, exklusiv. */
+  get endMs(): number {
+    return this.#endMs;
+  }
+
+  /**
+   * Serialisierbare Form. Ohne diese Methode ergaebe `JSON.stringify` `{}`,
+   * weil der Zustand in privaten Feldern liegt — ein stiller Datenverlust.
+   * Der Rueckweg fuehrt bewusst wieder ueber {@link TimeInterval.create}.
+   */
+  toJSON(): { readonly startUtc: string; readonly endUtc: string } {
+    return {
+      startUtc: new Date(this.#startMs).toISOString(),
+      endUtc: new Date(this.#endMs).toISOString(),
+    };
+  }
+}
+
+/**
+ * Letzte Bastion gegen ein Objekt, das nur *typseitig* ein Intervall ist.
+ *
+ * Private Felder machen den Typ nominal, aber `Object.assign(target, quelle)`
+ * typisiert TypeScript als **Schnittmenge** — `Object.assign({}, gutesIntervall,
+ * { endUtc: x })` gilt damit als `TimeInterval`, obwohl zur Laufzeit ein nacktes
+ * Objekt ohne `#startMs` herauskommt. Ohne diese Pruefung waere `startMs` dort
+ * `undefined`, jeder Vergleich `undefined < zahl` ergaebe `false`, und
+ * `overlaps` meldete brav „kein Konflikt": fail-open.
+ *
+ * Ein `instanceof` kostet nichts und macht daraus einen lauten Fehler.
+ */
+function assertInterval(value: TimeInterval, role: string): void {
+  if (!(value instanceof TimeInterval)) {
+    throw new TypeError(
+      `${role} ist kein geprueftes TimeInterval. Instanzen entstehen ausschliesslich ueber TimeInterval.create().`,
+    );
+  }
 }
 
 /** Dauer in Millisekunden. Immer > 0, weil `start < end` zugesichert ist. */
 export function durationMs(interval: TimeInterval): number {
-  return interval.endUtc.getTime() - interval.startUtc.getTime();
+  assertInterval(interval, "interval");
+  return interval.endMs - interval.startMs;
 }
 
 /**
@@ -122,7 +201,7 @@ export function durationMs(interval: TimeInterval): number {
  * Da UTC-Instants verwendet werden, ist die Dauer ueber eine Zeitumstellung
  * hinweg die tatsaechlich verstrichene Zeit: eine Schicht ueber die
  * Sommerzeitluecke dauert eine Stunde weniger als die Ortszeitdifferenz
- * suggeriert. Das ist beabsichtigt — bezahlt und geplant wird verstrichene Zeit.
+ * suggeriert. Das ist beabsichtigt — geplant und bezahlt wird verstrichene Zeit.
  */
 export function durationMinutes(interval: TimeInterval): number {
   return durationMs(interval) / 60_000;
@@ -135,23 +214,31 @@ export function durationMinutes(interval: TimeInterval): number {
  * aneinander. Siehe {@link isAdjacent}.
  */
 export function overlaps(a: TimeInterval, b: TimeInterval): boolean {
-  return a.startUtc.getTime() < b.endUtc.getTime() && b.startUtc.getTime() < a.endUtc.getTime();
+  assertInterval(a, "a");
+  assertInterval(b, "b");
+  return a.startMs < b.endMs && b.startMs < a.endMs;
 }
 
 /** Grenzen die Intervalle exakt aneinander, ohne Ueberschneidung und ohne Luecke? */
 export function isAdjacent(a: TimeInterval, b: TimeInterval): boolean {
-  return a.endUtc.getTime() === b.startUtc.getTime() || b.endUtc.getTime() === a.startUtc.getTime();
+  assertInterval(a, "a");
+  assertInterval(b, "b");
+  return a.endMs === b.startMs || b.endMs === a.startMs;
 }
 
 /**
  * Ueberschneiden sich irgendzwei Intervalle der Liste?
  *
- * Sortiert nach Startzeitpunkt und vergleicht nur Nachbarn — bei nach Start
- * sortierten Intervallen genuegt das: ueberschneidet sich ein Intervall mit
- * einem spaeteren, dann auch mit seinem direkten Nachfolger.
+ * Sortiert nach Startzeitpunkt und vergleicht nur Nachbarn. Das genuegt:
+ * ueberschneidet sich ein Intervall `a` mit einem spaeteren `c`, dann gilt fuer
+ * jedes dazwischenliegende `b` mit `a.start <= b.start <= c.start` bereits
+ * `b.start < a.end` (denn `b.start <= c.start < a.end`) und `b.end > a.start`
+ * (denn `b.end > b.start >= a.start`) — also ueberschneidet sich `a` auch mit
+ * seinem direkten Nachfolger. Ein Verstoss kann keinen Nachbarn ueberspringen.
  */
 export function hasAnyOverlap(intervals: readonly TimeInterval[]): boolean {
-  const sorted = [...intervals].sort((x, y) => x.startUtc.getTime() - y.startUtc.getTime());
+  intervals.forEach((entry, index) => assertInterval(entry, `intervals[${index}]`));
+  const sorted = [...intervals].sort((x, y) => x.startMs - y.startMs);
   for (let i = 1; i < sorted.length; i += 1) {
     const previous = sorted[i - 1];
     const current = sorted[i];

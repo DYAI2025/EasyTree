@@ -1,28 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  createTimeInterval,
   durationMinutes,
   hasAnyOverlap,
   isAdjacent,
   overlaps,
   TIME_INTERVAL_ERRORS,
-  type TimeInterval,
+  TimeInterval,
 } from "../src/time-interval.js";
 
 /** Kurzform fuer gueltige Intervalle im Test. Wirft, damit ein Testfehler auffaellt. */
 function interval(startIso: string, endIso: string): TimeInterval {
-  const result = createTimeInterval(new Date(startIso), new Date(endIso));
+  const result = TimeInterval.create(new Date(startIso), new Date(endIso));
   if (!result.ok) throw new Error(`Fixture ungueltig: ${startIso}..${endIso} -> ${result.error}`);
   return result.interval;
 }
 
 function errorOf(start: Date | null | undefined, end: Date | null | undefined): string {
-  const result = createTimeInterval(start, end);
+  const result = TimeInterval.create(start, end);
   return result.ok ? "OK" : result.error;
 }
 
-describe("createTimeInterval — Ablehnungen", () => {
+describe("TimeInterval.create — Ablehnungen", () => {
   it("verlangt einen Start", () => {
     expect(errorOf(null, new Date("2026-08-03T16:00:00Z"))).toBe("START_MISSING");
     expect(errorOf(undefined, new Date("2026-08-03T16:00:00Z"))).toBe("START_MISSING");
@@ -62,9 +61,9 @@ describe("createTimeInterval — Ablehnungen", () => {
   });
 });
 
-describe("createTimeInterval — Annahmen", () => {
+describe("TimeInterval.create — Annahmen", () => {
   it("akzeptiert eine Millisekunde", () => {
-    const result = createTimeInterval(
+    const result = TimeInterval.create(
       new Date("2026-08-03T08:00:00.000Z"),
       new Date("2026-08-03T08:00:00.001Z"),
     );
@@ -81,7 +80,7 @@ describe("createTimeInterval — Annahmen", () => {
   it("entkoppelt sich vom uebergebenen Date-Objekt", () => {
     const start = new Date("2026-08-03T08:00:00Z");
     const end = new Date("2026-08-03T16:00:00Z");
-    const result = createTimeInterval(start, end);
+    const result = TimeInterval.create(start, end);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     start.setUTCFullYear(1999);
@@ -95,16 +94,27 @@ describe("durationMinutes", () => {
     expect(durationMinutes(interval("2026-08-03T08:00:00Z", "2026-08-03T16:00:00Z"))).toBe(480);
   });
 
-  it("zaehlt ueber die Sommerzeitluecke die tatsaechlich verstrichene Zeit", () => {
-    // Europe/Berlin springt am 29.03.2026 von 02:00 auf 03:00 Ortszeit.
-    // Ortszeitdifferenz 01:00 -> 04:00 sind scheinbar 3 h, verstrichen sind 2 h.
+  const berlin = (d: Date): string =>
+    new Intl.DateTimeFormat("de-DE", {
+      timeZone: "Europe/Berlin",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(d);
+
+  it("Sommerzeitluecke: Wanduhr springt 3 h, verstrichen sind 2 h", () => {
+    // Ohne die Ortszeit-Zusicherung waere das nur eine UTC-Rechnung, die an
+    // JEDEM Datum gleich ausginge und ueber DST nichts beweist.
     const acrossGap = interval("2026-03-29T00:00:00Z", "2026-03-29T02:00:00Z");
+    expect(berlin(acrossGap.startUtc)).toBe("01:00");
+    expect(berlin(acrossGap.endUtc)).toBe("04:00");
     expect(durationMinutes(acrossGap)).toBe(120);
   });
 
-  it("zaehlt ueber die doppelte Winterzeitstunde ebenso die verstrichene Zeit", () => {
-    // 25.10.2026, 02:00 Ortszeit faellt zweimal an. In UTC bleibt es linear.
+  it("doppelte Winterzeitstunde: Wanduhr springt 2 h, verstrichen sind 3 h", () => {
     const acrossFold = interval("2026-10-25T00:00:00Z", "2026-10-25T03:00:00Z");
+    expect(berlin(acrossFold.startUtc)).toBe("02:00");
+    expect(berlin(acrossFold.endUtc)).toBe("04:00");
     expect(durationMinutes(acrossFold)).toBe(180);
   });
 });
@@ -165,7 +175,7 @@ describe("hasAnyOverlap", () => {
     expect(hasAnyOverlap([b, a])).toBe(true);
   });
 
-  it("findet eine Ueberschneidung mit einem umschliessenden Intervall, nicht nur mit Nachbarn", () => {
+  it("findet die Ueberschneidung eines umschliessenden Intervalls", () => {
     // Sortiert nach Start liegt das lange Intervall vorn; die Ueberschneidung
     // mit dem dritten Element wird ueber den direkten Nachfolger gefunden.
     const long = interval("2026-08-03T06:00:00Z", "2026-08-03T20:00:00Z");
@@ -198,8 +208,8 @@ describe("Eigenschaftssweep — deterministisch, ohne Zufall", () => {
       for (const bStart of offsets) {
         for (const bEnd of offsets) {
           if (aEnd <= 0 || bEnd <= bStart) continue;
-          const a = createTimeInterval(new Date(base), new Date(base + aEnd * 60_000));
-          const b = createTimeInterval(
+          const a = TimeInterval.create(new Date(base), new Date(base + aEnd * 60_000));
+          const b = TimeInterval.create(
             new Date(base + bStart * 60_000),
             new Date(base + bEnd * 60_000),
           );
@@ -220,5 +230,110 @@ describe("Eigenschaftssweep — deterministisch, ohne Zufall", () => {
     }
     // Nicht-Leerlauf: der Sweep muss wirklich Faelle geprueft haben.
     expect(checked).toBeGreaterThan(100);
+  });
+});
+
+describe("Faelschungssicherheit — die Loecher des ersten Entwurfs", () => {
+  // Der erste Entwurf war ein `interface` mit Symbol-Brand. Alle drei folgenden
+  // Angriffe liefen dagegen mit gruenem `tsc --noEmit` durch: Spread lieferte
+  // durationMinutes === -600, ein Nulllaengen-Intervall war fuer jede
+  // Ueberlappungspruefung unsichtbar, und eine Mutation nach der Validierung
+  // liess einen erkannten Konflikt wieder verschwinden. Fail-open.
+  const good = interval("2026-08-03T08:00:00Z", "2026-08-03T18:00:00Z");
+
+  it("laesst sich nicht per Spread faelschen", () => {
+    const forged = {
+      ...good,
+      startUtc: new Date("2026-08-03T18:00:00Z"),
+      endUtc: new Date("2026-08-03T08:00:00Z"),
+    };
+    // @ts-expect-error Private Felder machen den Typ nominal — ein strukturell
+    // gleiches Objekt ist kein TimeInterval.
+    const asInterval: TimeInterval = forged;
+    // Zur Laufzeit traegt der Spread keinen Zustand: er liegt in #startMs/#endMs.
+    expect(Object.keys(forged)).toEqual(["startUtc", "endUtc"]);
+    expect(asInterval).not.toBeInstanceOf(TimeInterval);
+  });
+
+  it("faellt bei Object.assign laut aus, statt still kein Konflikt zu melden", () => {
+    // Object.assign ist die eine Luecke, die die nominale Typisierung NICHT
+    // schliesst: TypeScript typisiert das Ergebnis als Schnittmenge, also gilt
+    // es als TimeInterval. Zur Laufzeit fehlen die privaten Felder. Ohne
+    // Laufzeitpruefung waere startMs `undefined`, jeder Vergleich `false` und
+    // `overlaps` meldete "kein Konflikt" — fail-open. Deshalb: TypeError.
+    const forged: TimeInterval = Object.assign({}, good, { endUtc: good.startUtc });
+    expect(forged).not.toBeInstanceOf(TimeInterval);
+    expect(() => overlaps(forged, good)).toThrow(TypeError);
+    expect(() => durationMinutes(forged)).toThrow(TypeError);
+    expect(() => hasAnyOverlap([good, forged])).toThrow(TypeError);
+  });
+
+  it("gibt nach aussen nur Kopien — Mutation kann ein geprueftes Intervall nicht brechen", () => {
+    const before = durationMinutes(good);
+    good.endUtc.setUTCFullYear(1999);
+    expect(durationMinutes(good)).toBe(before);
+    expect(good.endUtc.toISOString()).toBe("2026-08-03T18:00:00.000Z");
+  });
+
+  it("liefert bei jedem Zugriff ein neues Date", () => {
+    expect(good.startUtc).not.toBe(good.startUtc);
+    expect(good.startUtc.getTime()).toBe(good.startUtc.getTime());
+  });
+
+  it("ist eingefroren", () => {
+    expect(Object.isFrozen(good)).toBe(true);
+  });
+
+  it("serialisiert verlustfrei und laeuft fuer den Rueckweg wieder durch create", () => {
+    const json = JSON.parse(JSON.stringify(good)) as { startUtc: string; endUtc: string };
+    expect(json).toEqual({
+      startUtc: "2026-08-03T08:00:00.000Z",
+      endUtc: "2026-08-03T18:00:00.000Z",
+    });
+    const revived = TimeInterval.create(new Date(json.startUtc), new Date(json.endUtc));
+    expect(revived.ok).toBe(true);
+    if (revived.ok) expect(durationMinutes(revived.interval)).toBe(durationMinutes(good));
+  });
+});
+
+describe("hasAnyOverlap gegen einen Brute-Force-Orakel", () => {
+  // Der Nachbarvergleich ist im Modulkommentar begruendet, aber ein Beweis im
+  // Kommentar ist kein Test. Hier laeuft er gegen eine offensichtlich korrekte
+  // O(n^2)-Referenz ueber alle Tripel eines aufgezaehlten Rasters.
+  function oracle(list: readonly TimeInterval[]): boolean {
+    for (let i = 0; i < list.length; i += 1) {
+      for (let j = i + 1; j < list.length; j += 1) {
+        const a = list[i];
+        const b = list[j];
+        if (a !== undefined && b !== undefined && overlaps(a, b)) return true;
+      }
+    }
+    return false;
+  }
+
+  it("stimmt auf allen Tripeln des Rasters mit dem Orakel ueberein", () => {
+    const base = Date.UTC(2026, 7, 3, 8, 0, 0);
+    const bounds = [0, 30, 60, 90, 120];
+    const all: TimeInterval[] = [];
+    for (const s of bounds) {
+      for (const e of bounds) {
+        if (e <= s) continue;
+        const r = TimeInterval.create(new Date(base + s * 60_000), new Date(base + e * 60_000));
+        if (r.ok) all.push(r.interval);
+      }
+    }
+    expect(all.length).toBeGreaterThan(5);
+
+    let compared = 0;
+    for (const a of all) {
+      for (const b of all) {
+        for (const c of all) {
+          const list = [a, b, c];
+          expect(hasAnyOverlap(list)).toBe(oracle(list));
+          compared += 1;
+        }
+      }
+    }
+    expect(compared).toBeGreaterThan(500);
   });
 });
