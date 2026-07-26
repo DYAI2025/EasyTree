@@ -1,5 +1,13 @@
 # EYT Sprint 2 — Quality Gates Implementation Plan
 
+> **Historischer Stand (EYT-78, 2026-07-26).** Dieser Plan wurde am 24.07.2026 geschrieben und
+> ausgeführt, als das Repository noch `DYAI2025/Arborga` hieß. Die in Task 9 gezeigten
+> API-Aufrufe enthalten daher den alten Pfad und sind **als Ausführungsprotokoll unverändert
+> belassen**. Kanonisch ist seit 25.07.2026 `DYAI2025/EasyTree`
+> ([ADR-002](../architecture/ADR-002-integration-canonical-repo.md)) — jede erneute Ausführung
+> muss diesen Pfad verwenden. Aktueller, gepflegter Stand:
+> [`docs/runbooks/branch-protection.md`](../runbooks/branch-protection.md).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (bzw. subagent-driven execution) to implement this plan task-by-task.
 
 **Goal:** Eine mergegeschützte, reproduzierbare EasyTree-Foundation: Jeder PR gegen `master` muss Frozen-Install, Statik, Unit-Tests, Builds, Secret-Scan, DB-/Tenant-Gates (fail-closed), Runtime- und Accessibility-Smokes bestehen; `master` ist technisch gegen ungeprüfte Merges gesperrt.

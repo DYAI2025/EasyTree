@@ -1,7 +1,9 @@
 # Arboscus Teamplaner — Coding Agent Handoff v1.3
 
 **Source of truth:** `prd_report_v1.3.md` / `prd_report_v1.3.json`
-**Canonical repository:** `https://github.com/DYAI2025/Arborga.git`
+**Canonical repository:** `https://github.com/DYAI2025/EasyTree.git`
+(renamed from `DYAI2025/Arborga` on 2026-07-25 — see
+[ADR-002](../architecture/ADR-002-integration-canonical-repo.md))
 
 ## Active scope
 

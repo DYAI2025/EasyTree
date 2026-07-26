@@ -1,0 +1,3176 @@
+=== APP App.tsx ===
+     1	import React, { useState, useEffect } from 'react';
+     2	import { ActiveTab, BottomNav } from './components/BottomNav';
+     3	import { TopBar } from './components/TopBar';
+     4	import { Toast, ToastMessage } from './components/Toast';
+     5	import { OnboardingModal } from './components/OnboardingModal';
+     6	import { TodayView } from './views/TodayView';
+     7	import { WeekView } from './views/WeekView';
+     8	import { SiteDetailView } from './views/SiteDetailView';
+     9	import { MessagesView } from './views/MessagesView';
+    10	import { DamageReportModal } from './views/DamageReportModal';
+    11	import { AbsenceView } from './views/AbsenceView';
+    12	import { ProfileView } from './views/ProfileView';
+    13	import { ErrorBoundary } from './components/ErrorBoundary';
+    14	import { vibrateStartTimer, vibrateStopTimer, vibrateSubmitDamage } from './utils/haptics';
+    15	
+    16	import {
+    17	  currentUser,
+    18	  sampleAssignment,
+    19	  sampleWeekPlan,
+    20	  initialChecklist,
+    21	  initialNotifications,
+    22	  initialDamageReports,
+    23	  initialAbsences
+    24	} from './mockData';
+    25	
+    26	import {
+    27	  TimerState,
+    28	  WeekDayPlan,
+    29	  ChecklistItem,
+    30	  NotificationItem,
+    31	  DamageReport,
+    32	  AbsenceRequest
+    33	} from './types';
+    34	
+    35	const STORAGE_KEYS = {
+    36	  TIMER: 'arboscus_timer_state_v1',
+    37	  WEEK: 'arboscus_week_plan_v1',
+    38	  CHECKLIST: 'arboscus_checklist_v1',
+    39	  NOTIFICATIONS: 'arboscus_notifs_v1',
+    40	  DAMAGES: 'arboscus_damages_v1',
+    41	  ABSENCES: 'arboscus_absences_v1',
+    42	  OFFLINE: 'arboscus_offline_mode_v1',
+    43	  ONBOARDING: 'arboscus_onboarding_seen_v1',
+    44	  THEME: 'arboscus_theme_v1'
+    45	};
+    46	
+    47	export default function App() {
+    48	  const [activeTab, setActiveTab] = useState<ActiveTab | 'baustelle'>('heute');
+    49	
+    50	  // Dark/Light Theme state
+    51	  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    52	    const saved = localStorage.getItem(STORAGE_KEYS.THEME);
+    53	    return saved !== null ? saved === 'dark' : true;
+    54	  });
+    55	
+    56	  useEffect(() => {
+    57	    localStorage.setItem(STORAGE_KEYS.THEME, isDarkMode ? 'dark' : 'light');
+    58	    if (isDarkMode) {
+    59	      document.documentElement.classList.remove('light');
+    60	      document.documentElement.classList.add('dark');
+    61	    } else {
+    62	      document.documentElement.classList.remove('dark');
+    63	      document.documentElement.classList.add('light');
+    64	    }
+    65	  }, [isDarkMode]);
+    66	
+    67	  const handleToggleDarkMode = () => {
+    68	    setIsDarkMode(prev => !prev);
+    69	    triggerToast(
+    70	      !isDarkMode ? 'Dunkelmodus aktiv' : 'Hellmodus (#E9F4EA)',
+    71	      !isDarkMode ? 'Dunkles Design geladen.' : 'Helles Design mit transparenten Kontrasten geladen.',
+    72	      'info'
+    73	    );
+    74	  };
+    75	
+    76	  // Onboarding state
+    77	  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
+    78	    return localStorage.getItem(STORAGE_KEYS.ONBOARDING) !== 'true';
+    79	  });
+    80	
+    81	  // Local Storage State Initialization
+    82	  const [timer, setTimer] = useState<TimerState>(() => {
+    83	    const saved = localStorage.getItem(STORAGE_KEYS.TIMER);
+    84	    if (saved) {
+    85	      try { return JSON.parse(saved); } catch (e) { /* fallback */ }
+    86	    }
+    87	    return {
+    88	      isRunning: false,
+    89	      startTime: null,
+    90	      elapsedSeconds: 0,
+    91	      siteName: null,
+    92	      activityName: null,
+    93	      history: []
+    94	    };
+    95	  });
+    96	
+    97	  const [weekPlan, setWeekPlan] = useState<WeekDayPlan[]>(() => {
+    98	    const saved = localStorage.getItem(STORAGE_KEYS.WEEK);
+    99	    if (saved) {
+   100	      try { return JSON.parse(saved); } catch (e) { /* fallback */ }
+   101	    }
+   102	    return sampleWeekPlan;
+   103	  });
+   104	
+   105	  const [checklist, setChecklist] = useState<ChecklistItem[]>(() => {
+   106	    const saved = localStorage.getItem(STORAGE_KEYS.CHECKLIST);
+   107	    if (saved) {
+   108	      try { return JSON.parse(saved); } catch (e) { /* fallback */ }
+   109	    }
+   110	    return initialChecklist;
+   111	  });
+   112	
+   113	  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
+   114	    const saved = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+   115	    if (saved) {
+   116	      try { return JSON.parse(saved); } catch (e) { /* fallback */ }
+   117	    }
+   118	    return initialNotifications;
+   119	  });
+   120	
+   121	  const [damageReports, setDamageReports] = useState<DamageReport[]>(() => {
+   122	    const saved = localStorage.getItem(STORAGE_KEYS.DAMAGES);
+   123	    if (saved) {
+   124	      try { return JSON.parse(saved); } catch (e) { /* fallback */ }
+   125	    }
+   126	    return initialDamageReports;
+   127	  });
+   128	
+   129	  const [absences, setAbsences] = useState<AbsenceRequest[]>(() => {
+   130	    const saved = localStorage.getItem(STORAGE_KEYS.ABSENCES);
+   131	    if (saved) {
+   132	      try { return JSON.parse(saved); } catch (e) { /* fallback */ }
+   133	    }
+   134	    return initialAbsences;
+   135	  });
+   136	
+   137	  const [isOffline, setIsOffline] = useState<boolean>(() => {
+   138	    return localStorage.getItem(STORAGE_KEYS.OFFLINE) === 'true';
+   139	  });
+   140	
+   141	  const [showDamageModal, setShowDamageModal] = useState<boolean>(false);
+   142	  const [toast, setToast] = useState<ToastMessage | null>(null);
+   143	
+   144	  // Sync to LocalStorage
+   145	  useEffect(() => {
+   146	    localStorage.setItem(STORAGE_KEYS.TIMER, JSON.stringify(timer));
+   147	  }, [timer]);
+   148	
+   149	  useEffect(() => {
+   150	    localStorage.setItem(STORAGE_KEYS.WEEK, JSON.stringify(weekPlan));
+   151	  }, [weekPlan]);
+   152	
+   153	  useEffect(() => {
+   154	    localStorage.setItem(STORAGE_KEYS.CHECKLIST, JSON.stringify(checklist));
+   155	  }, [checklist]);
+   156	
+   157	  useEffect(() => {
+   158	    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+   159	  }, [notifications]);
+   160	
+   161	  useEffect(() => {
+   162	    localStorage.setItem(STORAGE_KEYS.DAMAGES, JSON.stringify(damageReports));
+   163	  }, [damageReports]);
+   164	
+   165	  useEffect(() => {
+   166	    localStorage.setItem(STORAGE_KEYS.ABSENCES, JSON.stringify(absences));
+   167	  }, [absences]);
+   168	
+   169	  useEffect(() => {
+   170	    localStorage.setItem(STORAGE_KEYS.OFFLINE, String(isOffline));
+   171	  }, [isOffline]);
+   172	
+   173	  // Live Timer Ticking Interval
+   174	  useEffect(() => {
+   175	    let interval: any = null;
+   176	    if (timer.isRunning) {
+   177	      interval = setInterval(() => {
+   178	        setTimer((prev) => ({
+   179	          ...prev,
+   180	          elapsedSeconds: prev.elapsedSeconds + 1
+   181	        }));
+   182	      }, 1000);
+   183	    }
+   184	    return () => {
+   185	      if (interval) clearInterval(interval);
+   186	    };
+   187	  }, [timer.isRunning]);
+   188	
+   189	  // Trigger Toast helper
+   190	  const triggerToast = (title: string, message?: string, type: 'success' | 'warning' | 'info' = 'success') => {
+   191	    setToast({
+   192	      id: Date.now().toString(),
+   193	      title,
+   194	      message,
+   195	      type
+   196	    });
+   197	  };
+   198	
+   199	  // Onboarding handlers
+   200	  const handleCloseOnboarding = () => {
+   201	    setShowOnboarding(false);
+   202	    localStorage.setItem(STORAGE_KEYS.ONBOARDING, 'true');
+   203	  };
+   204	
+   205	  const handleCompleteOnboarding = () => {
+   206	    setShowOnboarding(false);
+   207	    localStorage.setItem(STORAGE_KEYS.ONBOARDING, 'true');
+   208	    triggerToast('Willkommen bei Arboscus!', 'Arbeitsbereich bereit. Starte jetzt deinen ersten Einsatz.');
+   209	  };
+   210	
+   211	  const handleStartOnboarding = () => {
+   212	    setShowOnboarding(true);
+   213	  };
+   214	
+   215	  // Timer Actions
+   216	  const handleStartTimer = () => {
+   217	    if (isOffline) {
+   218	      triggerToast('Aktion gesperrt', 'Im Offline-Modus können keine Timer gestartet werden.', 'warning');
+   219	      return;
+   220	    }
+   221	    vibrateStartTimer();
+   222	    const nowStr = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr';
+   223	    setTimer((prev) => ({
+   224	      ...prev,
+   225	      isRunning: true,
+   226	      startTime: prev.startTime || nowStr,
+   227	      siteName: sampleAssignment.siteName,
+   228	      activityName: sampleAssignment.activity
+   229	    }));
+   230	    triggerToast('Arbeitszeit gestartet', `Einsatz auf ${sampleAssignment.siteName} läuft.`);
+   231	  };
+   232	
+   233	  const handleStopTimer = () => {
+   234	    if (isOffline) {
+   235	      triggerToast('Aktion gesperrt', 'Im Offline-Modus können keine Timer gestoppt werden.', 'warning');
+   236	      return;
+   237	    }
+   238	    vibrateStopTimer();
+   239	    const stopTimeStr = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr';
+   240	    const hours = Math.floor(timer.elapsedSeconds / 3600);
+   241	    const minutes = Math.floor((timer.elapsedSeconds % 3600) / 60);
+   242	    const durationStr = `${hours}h ${minutes}m`;
+   243	
+   244	    const newEntry = {
+   245	      id: `time-${Date.now()}`,
+   246	      siteName: timer.siteName || sampleAssignment.siteName,
+   247	      date: 'Heute',
+   248	      startTime: timer.startTime || '08:00 Uhr',
+   249	      endTime: stopTimeStr,
+   250	      durationStr,
+   251	      status: 'Zur Freigabe' as const
+   252	    };
+   253	
+   254	    setTimer((prev) => ({
+   255	      ...prev,
+   256	      isRunning: false,
+   257	      history: [newEntry, ...prev.history]
+   258	    }));
+   259	
+   260	    triggerToast('Arbeitszeit gestoppt', `Dauer: ${durationStr}. Der Eintrag wurde zur Freigabe eingereicht.`);
+   261	  };
+   262	
+   263	  // Checklist Action
+   264	  const handleToggleChecklist = (id: string) => {
+   265	    setChecklist((prev) =>
+   266	      prev.map((c) => (c.id === id ? { ...c, completed: !c.completed } : c))
+   267	    );
+   268	  };
+   269	
+   270	  // Week Actions
+   271	  const handleConfirmWeek = () => {
+   272	    if (isOffline) {
+   273	      triggerToast('Aktion gesperrt', 'Im Offline-Modus können keine Einsätze bestätigt werden.', 'warning');
+   274	      return;
+   275	    }
+   276	    setWeekPlan((prev) =>
+   277	      prev.map((day) => ({
+   278	        ...day,
+   279	        status: 'bestätigt',
+   280	        isChanged: false
+   281	      }))
+   282	    );
+   283	    triggerToast('Woche bestätigt', 'Alle Termine für KW 31 wurden verbindlich bestätigt.');
+   284	  };
+   285	
+   286	  const handleConfirmDay = (id: string) => {
+   287	    if (isOffline) {
+   288	      triggerToast('Aktion gesperrt', 'Im Offline-Modus können keine Einsätze bestätigt werden.', 'warning');
+   289	      return;
+   290	    }
+   291	    setWeekPlan((prev) =>
+   292	      prev.map((day) => (day.id === id ? { ...day, status: 'bestätigt', isChanged: false } : day))
+   293	    );
+   294	    triggerToast('Einsatz bestätigt', 'Der Termin wurde verbindlich bestätigt.');
+   295	  };
+   296	
+   297	  const handleRejectDay = (id: string, category: string, text: string) => {
+   298	    if (isOffline) {
+   299	      triggerToast('Aktion gesperrt', 'Im Offline-Modus können keine Ablehnungen gesendet werden.', 'warning');
+   300	      return;
+   301	    }
+   302	    setWeekPlan((prev) =>
+   303	      prev.map((day) =>
+   304	        day.id === id
+   305	          ? {
+   306	              ...day,
+   307	              status: 'abgelehnt',
+   308	              rejectionReasonCategory: category,
+   309	              rejectionReasonText: text
+   310	            }
+   311	          : day
+   312	      )
+   313	    );
+   314	    triggerToast('Ablehnung gesendet', `Grund: ${category}. Die Disposition wurde benachrichtigt.`, 'warning');
+   315	  };
+   316	
+   317	  // Notifications Actions
+   318	  const handleMarkNotificationRead = (id: string) => {
+   319	    setNotifications((prev) =>
+   320	      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+   321	    );
+   322	  };
+   323	
+   324	  const handleMarkAllNotificationsRead = () => {
+   325	    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+   326	    triggerToast('Alle Meldungen gelesen', 'Alle In-App Mitteilungen als gelesen markiert.');
+   327	  };
+   328	
+   329	  // Damage Submit
+   330	  const handleSubmitDamageReport = (report: DamageReport) => {
+   331	    vibrateSubmitDamage();
+   332	    setDamageReports((prev) => [report, ...prev]);
+   333	    setShowDamageModal(false);
+   334	    triggerToast(
+   335	      'Schadensmeldung eingereicht',
+   336	      `Meldungs-ID: ${report.id}. Weiterleitung an Werkstatt & Disposition erfolgt.`
+   337	    );
+   338	  };
+   339	
+   340	  // Absence Submit
+   341	  const handleSubmitAbsence = (absence: AbsenceRequest) => {
+   342	    setAbsences((prev) => [absence, ...prev]);
+   343	  };
+   344	
+   345	  // Offline Mode Toggle
+   346	  const handleToggleOffline = () => {
+   347	    const nextState = !isOffline;
+   348	    setIsOffline(nextState);
+   349	    if (nextState) {
+   350	      triggerToast('Offline-Modus aktiv', 'Lesende Funktionen verfügbar. Schreibzugriffe deaktiviert.', 'warning');
+   351	    } else {
+   352	      triggerToast('Online-Modus aktiv', 'Verbindung wiederhergestellt. Synchronisiert.');
+   353	    }
+   354	  };
+   355	
+   356	  // Reset Demo State
+   357	  const handleResetDemoState = () => {
+   358	    localStorage.clear();
+   359	    setTimer({
+   360	      isRunning: false,
+   361	      startTime: null,
+   362	      elapsedSeconds: 0,
+   363	      siteName: null,
+   364	      activityName: null,
+   365	      history: []
+   366	    });
+   367	    setWeekPlan(sampleWeekPlan);
+   368	    setChecklist(initialChecklist);
+   369	    setNotifications(initialNotifications);
+   370	    setDamageReports(initialDamageReports);
+   371	    setAbsences(initialAbsences);
+   372	    setIsOffline(false);
+   373	    setShowOnboarding(true);
+   374	    triggerToast('Demo zurückgesetzt', 'Alle Speicherzustände wurden auf Werkseinstellungen zurückgesetzt.');
+   375	  };
+   376	
+   377	  const unreadCount = notifications.filter((n) => !n.read).length;
+   378	
+   379	  return (
+   380	    <div className={`min-h-screen ${isDarkMode ? 'dark bg-[#050505] text-[#F1E8DC]' : 'light bg-[#D1E5D3] text-[#182418]'} font-sans antialiased flex items-center justify-center sm:p-4 transition-colors duration-300`}>
+   381	      {/* Mobile Device Canvas Container */}
+   382	      <main className={`w-full max-w-[410px] min-h-screen sm:min-h-[820px] sm:h-[820px] ${isDarkMode ? 'bg-[#0B0C0B] sm:border-[#1C201C]' : 'bg-[#E9F4EA] sm:border-[#97B89A]'} sm:rounded-[48px] border-0 sm:border-[10px] shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col relative overflow-hidden transition-colors duration-300`}>
+   383	
+   384	        {/* App Top Bar */}
+   385	        <TopBar
+   386	          userName={currentUser.name}
+   387	          avatarInitials={currentUser.avatarInitials}
+   388	          unreadCount={unreadCount}
+   389	          isOffline={isOffline}
+   390	          lastSynced={currentUser.lastSynced}
+   391	          isDarkMode={isDarkMode}
+   392	          onToggleDarkMode={handleToggleDarkMode}
+   393	          onOpenNotifications={() => setActiveTab('meldungen')}
+   394	          onOpenProfile={() => setActiveTab('profil')}
+   395	        />
+   396	
+   397	        {/* Toast Notification Engine */}
+   398	        <Toast toast={toast} onClose={() => setToast(null)} />
+   399	
+   400	        {/* User Onboarding Flow Modal */}
+   401	        <OnboardingModal
+   402	          isOpen={showOnboarding}
+   403	          onClose={handleCloseOnboarding}
+   404	          onComplete={handleCompleteOnboarding}
+   405	        />
+   406	
+   407	        {/* Main Content Area depending on Active View */}
+   408	        <div className="flex-1 overflow-y-auto">
+   409	          <ErrorBoundary>
+   410	            {activeTab === 'heute' && (
+   411	              <TodayView
+   412	                assignment={sampleAssignment}
+   413	                timer={timer}
+   414	                checklist={checklist}
+   415	                isOffline={isOffline}
+   416	                onStartTimer={handleStartTimer}
+   417	                onStopTimer={handleStopTimer}
+   418	                onToggleChecklist={handleToggleChecklist}
+   419	                onOpenSiteDetail={() => setActiveTab('baustelle')}
+   420	                onOpenDamageReport={() => setShowDamageModal(true)}
+=== APP Profile ===
+     1	import React from 'react';
+     2	import {
+     3	  User,
+     4	  Shield,
+     5	  Smartphone,
+     6	  WifiOff,
+     7	  RefreshCw,
+     8	  Phone,
+     9	  RotateCcw,
+    10	  Info,
+    11	  CheckCircle2,
+    12	  Lock,
+    13	  Compass,
+    14	  Sun,
+    15	  Moon,
+    16	  Palette
+    17	} from 'lucide-react';
+    18	import { HexBadge } from '../components/HexBadge';
+    19	import { currentUser } from '../mockData';
+    20	
+    21	interface ProfileViewProps {
+    22	  isOffline: boolean;
+    23	  isDarkMode?: boolean;
+    24	  onToggleDarkMode?: () => void;
+    25	  onToggleOffline: () => void;
+    26	  onResetDemoState: () => void;
+    27	  onStartOnboarding: () => void;
+    28	  onTriggerToast: (title: string, message?: string, type?: 'success' | 'warning' | 'info') => void;
+    29	}
+    30	
+    31	export const ProfileView: React.FC<ProfileViewProps> = ({
+    32	  isOffline,
+    33	  isDarkMode = true,
+    34	  onToggleDarkMode,
+    35	  onToggleOffline,
+    36	  onResetDemoState,
+    37	  onStartOnboarding,
+    38	  onTriggerToast
+    39	}) => {
+    40	  return (
+    41	    <div className="space-y-4 pb-24 px-4 pt-4">
+    42	      {/* Profile Header Card */}
+    43	      <div className="bg-[#1C201C] p-5 rounded-[20px] border border-[#34332D] relative overflow-hidden space-y-4 shadow-sm">
+    44	        <div className="flex items-center gap-4">
+    45	          <div className="w-16 h-16 rounded-2xl bg-[#272822] text-[#D6A875] font-extrabold text-xl flex items-center justify-center shrink-0 border-2 border-[#D6A875]/60 shadow-lg font-mono">
+    46	            {currentUser.avatarInitials}
+    47	          </div>
+    48	
+    49	          <div className="space-y-0.5 min-w-0">
+    50	            <span className="text-[10px] font-bold uppercase tracking-widest text-[#D6A875]">Mitarbeiter Profil</span>
+    51	            <h2 className="text-lg font-extrabold text-[#F1E8DC] truncate">{currentUser.name}</h2>
+    52	            <span className="text-xs font-semibold text-[#C2B3A0] block">{currentUser.role}</span>
+    53	            <span className="text-[11px] text-[#918577] font-mono flex items-center gap-1 mt-1">
+    54	              <Phone className="w-3 h-3 text-[#7D8B55]" />
+    55	              {currentUser.phone}
+    56	            </span>
+    57	          </div>
+    58	        </div>
+    59	
+    60	        {/* Qualifications Section */}
+    61	        <div className="pt-3 border-t border-[#34332D] space-y-2">
+    62	          <span className="text-xs font-bold text-[#F1E8DC] uppercase tracking-wider flex items-center gap-1.5">
+    63	            <Shield className="w-3.5 h-3.5 text-[#D6A875]" />
+    64	            Nachgewiesene Qualifikationen
+    65	          </span>
+    66	
+    67	          <div className="flex flex-wrap gap-2 pt-1">
+    68	            {currentUser.qualifications.map((qual) => (
+    69	              <HexBadge key={qual} label={qual} variant="wood" size="md" />
+    70	            ))}
+    71	          </div>
+    72	        </div>
+    73	      </div>
+    74	
+    75	      {/* Dark / Light Mode Toggle Card */}
+    76	      {onToggleDarkMode && (
+    77	        <div className="bg-[#1C201C] p-4 rounded-[20px] border border-[#34332D] space-y-3">
+    78	          <div className="flex items-center justify-between">
+    79	            <div className="flex items-center gap-3">
+    80	              <div className="p-2.5 bg-[#272822] text-[#D6A875] rounded-xl border border-[#34332D]">
+    81	                <Palette className="w-5 h-5" />
+    82	              </div>
+    83	              <div>
+    84	                <h3 className="text-xs font-bold text-[#F1E8DC] uppercase tracking-wider">Farbschema & Modus</h3>
+    85	                <p className="text-[11px] text-[#918577]">Wechsle zwischen Dunkel- und Hellmodus</p>
+    86	              </div>
+    87	            </div>
+    88	
+    89	            <button
+    90	              onClick={onToggleDarkMode}
+    91	              className={`w-14 h-7 rounded-full p-1 transition-all duration-300 relative cursor-pointer ${
+    92	                isDarkMode ? 'bg-[#34332D] border border-[#4A3B2F]' : 'bg-[#7D8B55] border border-[#97B89A]'
+    93	              }`}
+    94	              aria-label="Farbschema umschalten"
+    95	            >
+    96	              <div
+    97	                className={`w-5 h-5 rounded-full flex items-center justify-center transition-transform duration-300 shadow-sm ${
+    98	                  isDarkMode
+    99	                    ? 'translate-x-0 bg-[#D6A875] text-[#2B211A]'
+   100	                    : 'translate-x-7 bg-[#E9F4EA] text-[#3B4A3B]'
+   101	                }`}
+   102	              >
+   103	                {isDarkMode ? <Moon className="w-3 h-3" /> : <Sun className="w-3 h-3" />}
+   104	              </div>
+   105	            </button>
+   106	          </div>
+   107	
+   108	          <div className="grid grid-cols-2 gap-2 pt-1">
+   109	            <button
+   110	              onClick={() => isDarkMode || onToggleDarkMode()}
+   111	              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+   112	                isDarkMode
+   113	                  ? 'bg-[#272822] text-[#D6A875] border-[#D6A875]/60 shadow-sm'
+   114	                  : 'bg-[#141713] text-[#918577] border-[#34332D] hover:text-[#F1E8DC]'
+   115	              }`}
+   116	            >
+   117	              <Moon className="w-3.5 h-3.5" />
+   118	              <span>Dunkelmodus</span>
+   119	            </button>
+   120	
+   121	            <button
+   122	              onClick={() => isDarkMode && onToggleDarkMode()}
+   123	              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+   124	                !isDarkMode
+   125	                  ? 'bg-[#E9F4EA] text-[#3B4A3B] border-[#7D8B55] shadow-sm'
+   126	                  : 'bg-[#141713] text-[#918577] border-[#34332D] hover:text-[#F1E8DC]'
+   127	              }`}
+   128	            >
+   129	              <Sun className="w-3.5 h-3.5 text-[#A6631E]" />
+   130	              <span>Hellmodus (#E9F4EA)</span>
+   131	            </button>
+   132	          </div>
+   133	        </div>
+   134	      )}
+   135	
+   136	      {/* Interactive Tour & Onboarding Section */}
+   137	      <div className="bg-[#1C201C] p-4 rounded-[20px] border border-[#34332D] space-y-3">
+   138	        <div className="flex items-center gap-3">
+   139	          <div className="p-2.5 bg-[#272822] text-[#D6A875] rounded-xl border border-[#34332D]">
+   140	            <Compass className="w-5 h-5" />
+   141	          </div>
+   142	          <div>
+   143	            <h3 className="text-xs font-bold text-[#F1E8DC] uppercase tracking-wider">App-Einführung</h3>
+   144	            <p className="text-[11px] text-[#918577]">Interaktiver Rundgang durch Navigation & Funktionen</p>
+   145	          </div>
+   146	        </div>
+   147	
+   148	        <button
+   149	          onClick={onStartOnboarding}
+   150	          className="w-full py-2.5 px-4 rounded-xl bg-[#D6A875] hover:bg-[#c39766] text-[#2B211A] text-xs font-bold flex items-center justify-center gap-2 active:scale-98 transition-all"
+   151	        >
+   152	          <Compass className="w-4 h-4" />
+   153	          <span>Einführungs-Tour neu starten</span>
+   154	        </button>
+   155	      </div>
+   156	
+   157	      {/* Offline Mode Switch Card */}
+   158	      <div className="bg-[#1C201C] p-4 rounded-[20px] border border-[#34332D] space-y-3">
+   159	        <div className="flex items-center justify-between">
+   160	          <div className="flex items-center gap-2">
+   161	            <WifiOff className="w-5 h-5 text-[#C48A4A]" />
+   162	            <div>
+   163	              <h3 className="text-xs font-bold text-[#F1E8DC] uppercase tracking-wider">Demo Offline-Modus</h3>
+   164	              <p className="text-[11px] text-[#918577]">Simuliert fehlende Netzverbindung im Feld</p>
+   165	            </div>
+   166	          </div>
+   167	
+   168	          <button
+   169	            onClick={onToggleOffline}
+   170	            className={`w-12 h-6 rounded-full p-1 transition-colors relative ${
+   171	              isOffline ? 'bg-[#B8413D]' : 'bg-[#34332D]'
+   172	            }`}
+   173	            aria-label="Offline Mode Toggle"
+   174	          >
+   175	            <div
+   176	              className={`w-4 h-4 rounded-full bg-[#F1E8DC] transition-transform ${
+   177	                isOffline ? 'translate-x-6' : 'translate-x-0'
+   178	              }`}
+   179	            />
+   180	          </button>
+   181	        </div>
+   182	
+   183	        {isOffline ? (
+   184	          <div className="p-3 bg-[#B8413D]/15 border border-[#B8413D]/50 rounded-xl space-y-1 text-xs text-[#F1E8DC]">
+   185	            <div className="flex items-center gap-1.5 font-bold text-[#B8413D]">
+   186	              <WifiOff className="w-4 h-4" />
+   187	              <span>Offline – Daten lokal gespeichert</span>
+   188	            </div>
+   189	            <p className="text-[11px] text-[#C2B3A0]">
+   190	              Einsatzpläne und Kontakte bleiben lesbar. Synchronisiert automatisch bei Netzempfang.
+   191	            </p>
+   192	          </div>
+   193	        ) : (
+   194	          <div className="p-2.5 bg-[#141713] rounded-xl border border-[#34332D] text-[11px] text-[#7D8B55] flex items-center gap-2">
+   195	            <CheckCircle2 className="w-4 h-4 text-[#7D8B55] shrink-0" />
+   196	            <span>Online – Live-Synchronisation aktiv ({currentUser.lastSynced})</span>
+   197	          </div>
+   198	        )}
+   199	      </div>
+   200	
+   201	      {/* System Info */}
+   202	      <div className="bg-[#1C201C] p-4 rounded-[20px] border border-[#34332D] space-y-3">
+   203	        <h3 className="text-xs font-bold text-[#F1E8DC] uppercase tracking-wider">System & Installierbarkeit</h3>
+   204	
+   205	        <div className="space-y-2 text-xs font-mono">
+   206	          <div className="flex justify-between p-2.5 bg-[#141713] rounded-xl border border-[#34332D]">
+   207	            <span className="text-[#918577]">App-Version:</span>
+   208	            <span className="text-[#F1E8DC] font-bold">{currentUser.appVersion}</span>
+   209	          </div>
+   210	
+   211	          <div className="flex justify-between p-2.5 bg-[#141713] rounded-xl border border-[#34332D]">
+   212	            <span className="text-[#918577]">PWA Status:</span>
+   213	            <span className="text-[#7D8B55] font-bold">Installierbar (Offline PWA)</span>
+   214	          </div>
+   215	        </div>
+   216	      </div>
+   217	
+   218	      {/* Demo Reset Action */}
+   219	      <div className="pt-2">
+   220	        <button
+   221	          onClick={onResetDemoState}
+   222	          className="w-full py-2.5 px-4 rounded-xl bg-[#1C201C] hover:bg-[#272822] border border-[#34332D] text-xs font-bold text-[#C48A4A] flex items-center justify-center gap-2 active:scale-98 transition-all"
+   223	        >
+   224	          <RotateCcw className="w-4 h-4" />
+   225	          <span>Demo-Zustände zurücksetzen</span>
+   226	        </button>
+   227	      </div>
+   228	    </div>
+   229	  );
+   230	};
+   231	
+=== APP TimerWidget ===
+     1	import React from 'react';
+     2	import { Play, Square, Clock, AlertCircle } from 'lucide-react';
+     3	import { TimerState } from '../types';
+     4	
+     5	interface TimerWidgetProps {
+     6	  timer: TimerState;
+     7	  isOffline: boolean;
+     8	  onStartTimer: () => void;
+     9	  onStopTimer: () => void;
+    10	}
+    11	
+    12	export const TimerWidget: React.FC<TimerWidgetProps> = ({
+    13	  timer,
+    14	  isOffline,
+    15	  onStartTimer,
+    16	  onStopTimer
+    17	}) => {
+    18	  const formatSeconds = (totalSec: number) => {
+    19	    const hours = Math.floor(totalSec / 3600);
+    20	    const minutes = Math.floor((totalSec % 3600) / 60);
+    21	    const seconds = totalSec % 60;
+    22	    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    23	  };
+    24	
+    25	  if (!timer.isRunning && timer.history.length === 0) {
+    26	    return (
+    27	      <div className="charred-wood-card p-4 rounded-2xl relative overflow-hidden">
+    28	        <div className="flex items-center justify-between mb-2">
+    29	          <div className="flex items-center gap-2">
+    30	            <Clock className="w-4 h-4 text-[#D6A875]" />
+    31	            <span className="text-xs font-bold text-[#F1E8DC] uppercase tracking-wider">Arbeitszeiterfassung</span>
+    32	          </div>
+    33	          <span className="text-[11px] text-[#918577]">Bereit für Einsatz</span>
+    34	        </div>
+    35	
+    36	        <p className="text-xs text-[#C2B3A0] mb-3">
+    37	          Starte den Timer bei Beginn deiner Tätigkeit auf der Baustelle.
+    38	        </p>
+    39	
+    40	        <button
+    41	          onClick={onStartTimer}
+    42	          disabled={isOffline}
+    43	          className={`w-full min-h-[48px] py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all ${
+    44	            isOffline
+    45	              ? 'bg-[#272822] text-[#918577] border border-[#34332D] cursor-not-allowed'
+    46	              : 'bg-[#55735B] hover:bg-[#55735B]/90 text-[#F1E8DC] active:scale-98'
+    47	          }`}
+    48	        >
+    49	          <Play className="w-4 h-4 fill-current" />
+    50	          <span>Arbeitszeit starten</span>
+    51	        </button>
+    52	        {isOffline && (
+    53	          <p className="text-[11px] text-[#B8413D] mt-1.5 flex items-center gap-1">
+    54	            <AlertCircle className="w-3 h-3 shrink-0" />
+    55	            <span>Offline-Modus aktiv: Zeiterfassung gesperrt</span>
+    56	          </p>
+    57	        )}
+    58	      </div>
+    59	    );
+    60	  }
+    61	
+    62	  return (
+    63	    <div className="charred-wood-card p-4 rounded-2xl relative overflow-hidden border border-[#D6A875]/30">
+    64	      {/* Background subtle glow when timer is running */}
+    65	      {timer.isRunning && (
+    66	        <div className="absolute -right-8 -top-8 w-24 h-24 bg-[#55735B]/10 rounded-full blur-xl pointer-events-none" />
+    67	      )}
+    68	
+    69	      <div className="flex items-center justify-between mb-3">
+    70	        <div className="flex items-center gap-2">
+    71	          <span className="relative flex h-2.5 w-2.5">
+    72	            {timer.isRunning ? (
+    73	              <>
+    74	                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#55735B] opacity-75" />
+    75	                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#55735B]" />
+    76	              </>
+    77	            ) : (
+    78	              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#C48A4A]" />
+    79	            )}
+    80	          </span>
+    81	          <span className="text-xs font-bold text-[#F1E8DC] uppercase tracking-wider">
+    82	            {timer.isRunning ? 'Laufender Einsatz' : 'Einsatz beendet'}
+    83	          </span>
+    84	        </div>
+    85	
+    86	        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+    87	          timer.isRunning
+    88	            ? 'bg-[#55735B]/20 text-[#D6A875] border-[#55735B]/40'
+    89	            : 'bg-[#C48A4A]/20 text-[#C48A4A] border-[#C48A4A]/40'
+    90	        }`}>
+    91	          {timer.isRunning ? 'Aktiv' : 'Zur Freigabe'}
+    92	        </span>
+    93	      </div>
+    94	
+    95	      <div className="bg-[#141713] p-3 rounded-xl border border-[#34332D] mb-3">
+    96	        <div className="flex items-baseline justify-between mb-1">
+    97	          <span className="text-xs text-[#C2B3A0] font-medium truncate">
+    98	            {timer.siteName || 'Park Sanssouci'}
+    99	          </span>
+   100	          <span className="text-[11px] text-[#918577] font-mono">
+   101	            Start: {timer.startTime || '08:00 Uhr'}
+   102	          </span>
+   103	        </div>
+   104	
+   105	        {/* Live ticking display in IBM Plex / Mono font */}
+   106	        <div className="text-3xl font-mono font-extrabold text-[#F1E8DC] tracking-wider my-1 text-center py-1 bg-[#0B0C0B] rounded-lg border border-[#272822]">
+   107	          {formatSeconds(timer.elapsedSeconds)}
+   108	        </div>
+   109	      </div>
+   110	
+   111	      <div className="flex items-center justify-between gap-2 mb-2">
+   112	        <span className="text-[11px] text-[#918577] flex items-center gap-1">
+   113	          <AlertCircle className="w-3 h-3 text-[#D6A875] shrink-0" />
+   114	          Nur ein Timer kann gleichzeitig laufen.
+   115	        </span>
+   116	      </div>
+   117	
+   118	      {timer.isRunning ? (
+   119	        <button
+   120	          onClick={onStopTimer}
+   121	          disabled={isOffline}
+   122	          className={`w-full min-h-[48px] py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all ${
+   123	            isOffline
+   124	              ? 'bg-[#272822] text-[#918577] border border-[#34332D] cursor-not-allowed'
+   125	              : 'bg-[#B8413D] hover:bg-[#B8413D]/90 text-[#F1E8DC] active:scale-98'
+   126	          }`}
+   127	        >
+   128	          <Square className="w-4 h-4 fill-current" />
+   129	          <span>Arbeitszeit stoppen</span>
+   130	        </button>
+   131	      ) : (
+   132	        <button
+   133	          onClick={onStartTimer}
+   134	          disabled={isOffline}
+   135	          className={`w-full min-h-[48px] py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all ${
+   136	            isOffline
+   137	              ? 'bg-[#272822] text-[#918577] border border-[#34332D] cursor-not-allowed'
+   138	              : 'bg-[#55735B] hover:bg-[#55735B]/90 text-[#F1E8DC] active:scale-98'
+   139	          }`}
+   140	        >
+   141	          <Play className="w-4 h-4 fill-current" />
+   142	          <span>Neuen Einsatz starten</span>
+   143	        </button>
+   144	      )}
+   145	
+   146	      {/* History log summary if any completed timers */}
+   147	      {timer.history.length > 0 && (
+   148	        <div className="mt-3 pt-3 border-t border-[#34332D]">
+   149	          <span className="text-[11px] text-[#C2B3A0] font-semibold block mb-1">
+   150	            Heute erfasst ({timer.history.length}):
+   151	          </span>
+   152	          {timer.history.map((item) => (
+   153	            <div key={item.id} className="text-[11px] text-[#918577] flex items-center justify-between py-0.5">
+   154	              <span>{item.startTime} – {item.endTime} ({item.durationStr})</span>
+   155	              <span className="text-[#55735B] font-medium">{item.status}</span>
+   156	            </div>
+   157	          ))}
+   158	        </div>
+   159	      )}
+   160	    </div>
+   161	  );
+   162	};
+=== APP types ===
+     1	export interface TeamMember {
+     2	  id: string;
+     3	  name: string;
+     4	  role: string;
+     5	  isLead?: boolean;
+     6	  phone?: string;
+     7	  avatarInitials: string;
+     8	}
+     9	
+    10	export interface Resource {
+    11	  id: string;
+    12	  name: string;
+    13	  code: string;
+    14	  category: 'Fahrzeug' | 'Hubarbeitsbühne' | 'Häcksler' | 'Motorsäge' | 'Gerät';
+    15	  status: 'OK' | 'Eingeschränkt' | 'Sperrung';
+    16	  details?: string;
+    17	}
+    18	
+    19	export interface WeatherSegment {
+    20	  timeSlot: '05–08 Uhr' | '08–11 Uhr' | '11–14 Uhr' | '14–18 Uhr' | '18–22 Uhr' | '22–05 Uhr';
+    21	  condition: string;
+    22	  iconType: 'cloudy' | 'partly-cloudy' | 'rain' | 'wind' | 'sun';
+    23	  tempMin: number;
+    24	  tempMax: number;
+    25	  rainProb: number;
+    26	  rainAmountMm: number;
+    27	  windKmH: number;
+    28	  gustsKmH: number;
+    29	  isAssignmentTime?: boolean;
+    30	}
+    31	
+    32	export interface WeatherWarning {
+    33	  id: string;
+    34	  event: string;
+    35	  level: 1 | 2 | 3 | 4;
+    36	  levelColor: 'gelb' | 'orange' | 'rot' | 'violett';
+    37	  validFrom: string;
+    38	  validTo: string;
+    39	  source: string;
+    40	  description: string;
+    41	  informativeOnly: boolean;
+    42	}
+    43	
+    44	export interface WeatherData {
+    45	  condition: string;
+    46	  tempCurrent: number;
+    47	  tempMin: number;
+    48	  tempMax: number;
+    49	  humidityPct: number;
+    50	  rainProbPct: number;
+    51	  rainAmountMm: number;
+    52	  windKmH: number;
+    53	  gustsKmH: number;
+    54	  ozoneForecast: string; // e.g. "118 µg/m³"
+    55	  updatedAt: string; // e.g. "heute, 06:10 Uhr"
+    56	  status: 'aktuell' | 'veraltet' | 'nicht_verfuegbar';
+    57	  warning?: WeatherWarning;
+    58	  segmentsToday: WeatherSegment[];
+    59	  segmentsTomorrow: WeatherSegment[];
+    60	}
+    61	
+    62	export interface Assignment {
+    63	  id: string;
+    64	  siteCode: string; // e.g. "PS"
+    65	  siteName: string; // e.g. "Park Sanssouci"
+    66	  activity: string; // e.g. "Kronenpflege und Baumkontrolle"
+    67	  task: string; // e.g. "Totholzentnahme und Sichtkontrolle der Lindenreihe"
+    68	  date: string; // "Montag, 27. Juli 2026"
+    69	  dateISO: string; // "2026-07-27"
+    70	  startTime: string; // "08:00"
+    71	  endTime: string; // "15:30"
+    72	  address: string; // "Zur Historischen Mühle 1, 14469 Potsdam"
+    73	  drivingMinutes: number; // 24
+    74	  status: 'veröffentlicht' | 'geändert' | 'abgesagt';
+    75	  confirmationStatus: 'bestätigt' | 'offen' | 'abgelehnt';
+    76	  urgency: 'normal' | 'dringend';
+    77	  team: TeamMember[];
+    78	  resources: Resource[];
+    79	  briefingNotes: string[];
+    80	  weather: WeatherData;
+    81	}
+    82	
+    83	export interface WeekDayPlan {
+    84	  id: string;
+    85	  dayName: string; // "Montag", "Dienstag", ...
+    86	  dateStr: string; // "27.07."
+    87	  dateISO: string;
+    88	  siteCode?: string;
+    89	  siteName?: string;
+    90	  activity?: string;
+    91	  timeRange?: string;
+    92	  status: 'bestätigt' | 'offen' | 'geändert' | 'dringend' | 'frei' | 'abwesend' | 'abgelehnt';
+    93	  isChanged?: boolean;
+    94	  assignmentId?: string;
+    95	  rejectionReasonCategory?: string;
+    96	  rejectionReasonText?: string;
+    97	}
+    98	
+    99	export interface ChecklistItem {
+   100	  id: string;
+   101	  title: string;
+   102	  completed: boolean;
+   103	}
+   104	
+   105	export interface NotificationItem {
+   106	  id: string;
+   107	  category: 'Planung' | 'Wetter' | 'Arbeitszeit' | 'Schäden';
+   108	  title: string;
+   109	  timestamp: string;
+   110	  description: string;
+   111	  read: boolean;
+   112	  targetView?: 'heute' | 'woche' | 'baustelle' | 'meldungen' | 'abwesenheit' | 'profil';
+   113	}
+   114	
+   115	export interface DamageReport {
+   116	  id: string;
+   117	  resourceId: string;
+   118	  resourceName: string;
+   119	  siteName: string;
+   120	  timestamp: string;
+   121	  description: string;
+   122	  incident: string;
+   123	  damageType: string;
+   124	  affectedArea: string;
+   125	  severity: 'leicht' | 'mittel' | 'schwer' | 'sicherheitskritisch';
+   126	  usable: 'ja' | 'eingeschränkt' | 'nein';
+   127	  photoUrl?: string;
+   128	  voiceTranscript?: string;
+   129	  voiceChecked: boolean;
+   130	  statusText: string;
+   131	}
+   132	
+   133	export interface AbsenceRequest {
+   134	  id: string;
+   135	  type: 'Urlaub' | 'Krankheit' | 'Sonstige';
+   136	  startDate: string;
+   137	  endDate: string;
+   138	  isFullDay: boolean;
+   139	  note?: string;
+   140	  status: 'beantragt' | 'genehmigt' | 'abgelehnt' | 'nicht_verfuegbar';
+   141	  submittedAt: string;
+   142	}
+   143	
+   144	export interface TimerState {
+   145	  isRunning: boolean;
+   146	  startTime: string | null;
+   147	  elapsedSeconds: number;
+   148	  siteName: string | null;
+   149	  activityName: string | null;
+   150	  history: {
+   151	    id: string;
+   152	    siteName: string;
+   153	    date: string;
+   154	    startTime: string;
+   155	    endTime: string;
+   156	    durationStr: string;
+   157	    status: 'Zur Freigabe' | 'Freigegeben';
+   158	  }[];
+   159	}
+=== UIUX conflict engine ===
+     1	import {
+     2	  WorksiteAssignment,
+     3	  Employee,
+     4	  Absence,
+     5	  Worksite,
+     6	  Equipment,
+     7	  Vehicle,
+     8	  PlanningConflict,
+     9	} from '../types';
+    10	
+    11	/**
+    12	 * Calculates hours from HH:mm to HH:mm string.
+    13	 * Example: "07:00" to "15:30" => 8.5 hours.
+    14	 */
+    15	export function calculateHours(startTime: string, endTime: string): number {
+    16	  if (!startTime || !endTime) return 8; // default 8h
+    17	  const [startH, startM] = startTime.split(':').map(Number);
+    18	  const [endH, endM] = endTime.split(':').map(Number);
+    19	
+    20	  const startDecimal = startH + (startM || 0) / 60;
+    21	  const endDecimal = endH + (endM || 0) / 60;
+    22	
+    23	  let diff = endDecimal - startDecimal;
+    24	  if (diff <= 0) diff += 24; // boundary fallback
+    25	  return Math.max(0, Math.round(diff * 10) / 10);
+    26	}
+    27	
+    28	/**
+    29	 * Checks time overlap between two time slots on the same day.
+    30	 */
+    31	export function isTimeOverlapping(
+    32	  start1: string,
+    33	  end1: string,
+    34	  start2: string,
+    35	  end2: string
+    36	): boolean {
+    37	  const parse = (t: string) => {
+    38	    const [h, m] = t.split(':').map(Number);
+    39	    return h * 60 + (m || 0);
+    40	  };
+    41	  const s1 = parse(start1);
+    42	  const e1 = parse(end1);
+    43	  const s2 = parse(start2);
+    44	  const e2 = parse(end2);
+    45	
+    46	  return Math.max(s1, s2) < Math.min(e1, e2);
+    47	}
+    48	
+    49	/**
+    50	 * Core conflict detection engine for workforce planning.
+    51	 */
+    52	export function detectConflicts(
+    53	  assignments: WorksiteAssignment[],
+    54	  employees: Employee[],
+    55	  absences: Absence[],
+    56	  worksites: Worksite[],
+    57	  equipment: Equipment[],
+    58	  vehicles: Vehicle[]
+    59	): PlanningConflict[] {
+    60	  const conflicts: PlanningConflict[] = [];
+    61	
+    62	  // Helper maps
+    63	  const employeeMap = new Map<string, Employee>(employees.map((e) => [e.id, e]));
+    64	  const worksiteMap = new Map<string, Worksite>(worksites.map((w) => [w.id, w]));
+    65	  const equipmentMap = new Map<string, Equipment>(equipment.map((eq) => [eq.id, eq]));
+    66	  const vehicleMap = new Map<string, Vehicle>(vehicles.map((v) => [v.id, v]));
+    67	
+    68	  // 1. ABSENCE CONFLICTS
+    69	  // Check if an assigned employee is absent on that day
+    70	  for (const asg of assignments) {
+    71	    for (const empId of asg.assignedEmployeeIds) {
+    72	      const matchingAbsence = absences.find(
+    73	        (abs) =>
+    74	          abs.employeeId === empId &&
+    75	          abs.status === 'genehmigt' &&
+    76	          asg.date >= abs.startDate &&
+    77	          asg.date <= abs.endDate
+    78	      );
+    79	
+    80	      if (matchingAbsence) {
+    81	        const emp = employeeMap.get(empId);
+    82	        const site = worksiteMap.get(asg.worksiteId);
+    83	        const empName = emp ? `${emp.firstName} ${emp.lastName}` : 'Mitarbeiter';
+    84	        const siteName = site ? site.name : 'Baustelle';
+    85	
+    86	        conflicts.push({
+    87	          id: `conf-abs-${asg.id}-${empId}`,
+    88	          type: 'absence_conflict',
+    89	          severity: 'blocking',
+    90	          title: 'Mitarbeiter im Urlaub/Abwesend',
+    91	          message: `${empName} ist am ${asg.date} (${matchingAbsence.type}) abwesend, aber auf Baustelle "${siteName}" eingeplant.`,
+    92	          affectedDate: asg.date,
+    93	          affectedEmployeeIds: [empId],
+    94	          affectedWorksiteId: asg.worksiteId,
+    95	          suggestedFix: `Entferne ${empName} am ${asg.date} oder ersetze die Person.`,
+    96	        });
+    97	      }
+    98	    }
+    99	  }
+   100	
+   101	  // 2. DOUBLE BOOKINGS (Employee scheduled on multiple overlapping assignments)
+   102	  const assignmentsByDate = new Map<string, WorksiteAssignment[]>();
+   103	  for (const asg of assignments) {
+   104	    const list = assignmentsByDate.get(asg.date) || [];
+   105	    list.push(asg);
+   106	    assignmentsByDate.set(asg.date, list);
+   107	  }
+   108	
+   109	  assignmentsByDate.forEach((dayAssignments, date) => {
+   110	    for (let i = 0; i < dayAssignments.length; i++) {
+   111	      for (let j = i + 1; j < dayAssignments.length; j++) {
+   112	        const a1 = dayAssignments[i];
+   113	        const a2 = dayAssignments[j];
+   114	
+   115	        if (isTimeOverlapping(a1.startTime, a1.endTime, a2.startTime, a2.endTime)) {
+   116	          // Check common employees
+   117	          const commonEmps = a1.assignedEmployeeIds.filter((id) =>
+   118	            a2.assignedEmployeeIds.includes(id)
+   119	          );
+   120	
+   121	          for (const empId of commonEmps) {
+   122	            const emp = employeeMap.get(empId);
+   123	            const w1 = worksiteMap.get(a1.worksiteId);
+   124	            const w2 = worksiteMap.get(a2.worksiteId);
+   125	            const empName = emp ? `${emp.firstName} ${emp.lastName}` : 'Mitarbeiter';
+   126	
+   127	            conflicts.push({
+   128	              id: `conf-db-${date}-${empId}-${a1.id}-${a2.id}`,
+   129	              type: 'double_booking',
+   130	              severity: 'blocking',
+   131	              title: 'Doppelbelegung Mitarbeiter',
+   132	              message: `${empName} ist am ${date} zeitgleich auf "${w1?.name || 'Baustelle 1'}" (${a1.startTime}-${a1.endTime}) und "${w2?.name || 'Baustelle 2'}" (${a2.startTime}-${a2.endTime}) eingeplant.`,
+   133	              affectedDate: date,
+   134	              affectedEmployeeIds: [empId],
+   135	              affectedWorksiteId: a1.worksiteId,
+   136	              suggestedFix: `Verschiebe die Einsatzzeit oder entferne ${empName} von einer Baustelle.`,
+   137	            });
+   138	          }
+   139	
+   140	          // Check common EXCLUSIVE equipment
+   141	          const commonEquipment = a1.assignedEquipmentIds.filter((id) =>
+   142	            a2.assignedEquipmentIds.includes(id)
+   143	          );
+   144	
+   145	          for (const eqId of commonEquipment) {
+   146	            const eq = equipmentMap.get(eqId);
+   147	            if (eq && eq.isExclusive) {
+   148	              const w1 = worksiteMap.get(a1.worksiteId);
+   149	              const w2 = worksiteMap.get(a2.worksiteId);
+   150	
+   151	              conflicts.push({
+   152	                id: `conf-eqdb-${date}-${eqId}-${a1.id}-${a2.id}`,
+   153	                type: 'resource_double_booking',
+   154	                severity: 'blocking',
+   155	                title: 'Doppelreservierung Spezialgerät',
+   156	                message: `Exklusives Gerät "${eq.name}" ist am ${date} zeitgleich auf "${w1?.name}" und "${w2?.name}" reserviert.`,
+   157	                affectedDate: date,
+   158	                affectedWorksiteId: a1.worksiteId,
+   159	                affectedResourceId: eqId,
+   160	                suggestedFix: `Weise ein alternatives Gerät zu oder passe die Einsatzzeiten an.`,
+   161	              });
+   162	            }
+   163	          }
+   164	
+   165	          // Check common vehicles
+   166	          const commonVehicles = a1.assignedVehicleIds.filter((id) =>
+   167	            a2.assignedVehicleIds.includes(id)
+   168	          );
+   169	
+   170	          for (const vehId of commonVehicles) {
+   171	            const veh = vehicleMap.get(vehId);
+   172	            const w1 = worksiteMap.get(a1.worksiteId);
+   173	            const w2 = worksiteMap.get(a2.worksiteId);
+   174	
+   175	            conflicts.push({
+   176	              id: `conf-vehdb-${date}-${vehId}-${a1.id}-${a2.id}`,
+   177	              type: 'resource_double_booking',
+   178	              severity: 'blocking',
+   179	              title: 'Doppelreservierung Fahrzeug',
+   180	              message: `Fahrzeug "${veh?.name || 'Fahrzeug'}" (${veh?.licensePlate}) ist am ${date} doppelt reserviert für "${w1?.name}" und "${w2?.name}".`,
+   181	              affectedDate: date,
+   182	              affectedWorksiteId: a1.worksiteId,
+   183	              affectedResourceId: vehId,
+   184	              suggestedFix: `Ändere die Fahrzeugzuordnung für eine der Baustellen.`,
+   185	            });
+   186	          }
+   187	        }
+   188	      }
+   189	    }
+   190	  });
+   191	
+   192	  // 3. EMPLOYEE WEEKLY OVERTIME / CAPACITY EXCEEDED
+   193	  const employeeWeeklyHours = new Map<string, number>();
+   194	  for (const asg of assignments) {
+   195	    const duration = calculateHours(asg.startTime, asg.endTime);
+   196	    for (const empId of asg.assignedEmployeeIds) {
+   197	      const current = employeeWeeklyHours.get(empId) || 0;
+   198	      employeeWeeklyHours.set(empId, current + duration);
+   199	    }
+   200	  }
+   201	
+   202	  employeeWeeklyHours.forEach((plannedHours, empId) => {
+   203	    const emp = employeeMap.get(empId);
+   204	    if (emp) {
+   205	      if (plannedHours > emp.maxWeeklyHours + 4) {
+   206	        // Hard overtime warning
+   207	        conflicts.push({
+   208	          id: `conf-cap-exceed-${empId}`,
+   209	          type: 'capacity_exceeded',
+   210	          severity: 'blocking',
+   211	          title: 'Kritische Überplanung (>44h)',
+   212	          message: `${emp.firstName} ${emp.lastName} ist mit ${plannedHours}h deutlich über der vertraglichen Wochenarbeitszeit (${emp.maxWeeklyHours}h) eingeplant.`,
+   213	          affectedDate: 'Ganze Woche',
+   214	          affectedEmployeeIds: [empId],
+   215	          suggestedFix: `Reduziere die Schichten von ${emp.firstName} ${emp.lastName} um ${plannedHours - emp.maxWeeklyHours} Stunden.`,
+   216	        });
+   217	      } else if (plannedHours > emp.maxWeeklyHours) {
+   218	        // Soft overtime warning
+   219	        conflicts.push({
+   220	          id: `conf-cap-warn-${empId}`,
+   221	          type: 'overtime_warning',
+   222	          severity: 'warning',
+   223	          title: 'Überstundenwarnung',
+   224	          message: `${emp.firstName} ${emp.lastName} ist mit ${plannedHours}h leicht über der Sollzeit von ${emp.maxWeeklyHours}h.`,
+   225	          affectedDate: 'Ganze Woche',
+   226	          affectedEmployeeIds: [empId],
+   227	          suggestedFix: `Prüfe, ob der Überstundenaufbau genehmigt ist.`,
+   228	        });
+   229	      }
+   230	    }
+   231	  });
+   232	
+   233	  // 4. MISSING SKILLS ON WORKSITE
+   234	  for (const asg of assignments) {
+   235	    const worksite = worksiteMap.get(asg.worksiteId);
+   236	    if (worksite && worksite.requiredSkills && worksite.requiredSkills.length > 0) {
+   237	      const teamEmployees = asg.assignedEmployeeIds
+   238	        .map((id) => employeeMap.get(id))
+   239	        .filter((e): e is Employee => Boolean(e));
+   240	
+   241	      const teamSkills = new Set(teamEmployees.flatMap((e) => e.skills));
+   242	
+   243	      for (const reqSkill of worksite.requiredSkills) {
+   244	        if (!teamSkills.has(reqSkill)) {
+   245	          conflicts.push({
+   246	            id: `conf-skill-${asg.id}-${reqSkill}`,
+   247	            type: 'missing_skill',
+   248	            severity: 'warning',
+   249	            title: 'Fehlende Fähigkeit im Team',
+   250	            message: `Auf Baustelle "${worksite.name}" am ${asg.date} fehlt die geforderte Qualifikation "${reqSkill}".`,
+   251	            affectedDate: asg.date,
+   252	            affectedWorksiteId: asg.worksiteId,
+   253	            suggestedFix: `Weise einen Mitarbeiter mit Qualifikation "${reqSkill}" zu.`,
+   254	          });
+   255	        }
+   256	      }
+   257	    }
+   258	
+   259	    // 5. UNASSIGNED / EMPTY TEAM WARNING
+   260	    if (asg.assignedEmployeeIds.length === 0) {
+   261	      const worksite = worksiteMap.get(asg.worksiteId);
+   262	      conflicts.push({
+   263	        id: `conf-unassigned-${asg.id}`,
+   264	        type: 'unassigned_team',
+   265	        severity: 'warning',
+   266	        title: 'Unbesetzte Baustelle',
+   267	        message: `Baustelle "${worksite?.name || 'Baustelle'}" hat am ${asg.date} noch keine Mitarbeiter zugewiesen.`,
+   268	        affectedDate: asg.date,
+   269	        affectedWorksiteId: asg.worksiteId,
+   270	        suggestedFix: `Füge der Baustelle ein Team hinzu.`,
+   271	      });
+   272	    }
+   273	
+   274	    // 6. WEATHER WARNING ON ASSIGNMENT
+   275	    if (asg.weatherWarning) {
+   276	      const worksite = worksiteMap.get(asg.worksiteId);
+   277	      conflicts.push({
+   278	        id: `conf-weather-${asg.id}`,
+   279	        type: 'weather_warning',
+   280	        severity: 'warning',
+   281	        title: 'Wetterwarnung',
+   282	        message: `Wetterhinweis für "${worksite?.name}" am ${asg.date}: ${asg.weatherWarning}`,
+   283	        affectedDate: asg.date,
+   284	        affectedWorksiteId: asg.worksiteId,
+   285	        suggestedFix: `Prüfe die Sicherheit bei Baumkletter- und Steigereinsätzen.`,
+   286	      });
+   287	    }
+   288	  }
+   289	
+   290	  return conflicts;
+   291	}
+=== UIUX capacity engine ===
+     1	import {
+     2	  WorksiteAssignment,
+     3	  Employee,
+     4	  Absence,
+     5	  Worksite,
+     6	  Vehicle,
+     7	  Equipment,
+     8	  EmployeeCapacitySummary,
+     9	  ResourceUtilizationSummary,
+    10	} from '../types';
+    11	import { calculateHours } from './conflictEngine';
+    12	
+    13	/**
+    14	 * Calculates capacity summaries for all employees in a week.
+    15	 */
+    16	export function getEmployeeCapacitySummaries(
+    17	  employees: Employee[],
+    18	  assignments: WorksiteAssignment[],
+    19	  absences: Absence[],
+    20	  weekStartDate: string,
+    21	  weekEndDate: string
+    22	): EmployeeCapacitySummary[] {
+    23	  return employees.map((emp) => {
+    24	    // Check if absent during week
+    25	    const isAbsentThisWeek = absences.some(
+    26	      (abs) =>
+    27	        abs.employeeId === emp.id &&
+    28	        abs.status === 'genehmigt' &&
+    29	        abs.startDate <= weekEndDate &&
+    30	        abs.endDate >= weekStartDate
+    31	    );
+    32	
+    33	    // Sum planned hours
+    34	    let plannedHours = 0;
+    35	    let assignmentsCount = 0;
+    36	
+    37	    assignments.forEach((asg) => {
+    38	      if (
+    39	        asg.date >= weekStartDate &&
+    40	        asg.date <= weekEndDate &&
+    41	        asg.assignedEmployeeIds.includes(emp.id)
+    42	      ) {
+    43	        plannedHours += calculateHours(asg.startTime, asg.endTime);
+    44	        assignmentsCount++;
+    45	      }
+    46	    });
+    47	
+    48	    const overtimeHours = Math.max(0, plannedHours - emp.maxWeeklyHours);
+    49	    const isOverCapacity = plannedHours > emp.maxWeeklyHours;
+    50	
+    51	    return {
+    52	      employeeId: emp.id,
+    53	      plannedHours: Math.round(plannedHours * 10) / 10,
+    54	      maxHours: emp.maxWeeklyHours,
+    55	      overtimeHours: Math.round(overtimeHours * 10) / 10,
+    56	      assignmentsCount,
+    57	      isOverCapacity,
+    58	      isAbsentThisWeek,
+    59	    };
+    60	  });
+    61	}
+    62	
+    63	/**
+    64	 * Calculates person-hours per worksite for a week or single assignment.
+    65	 */
+    66	export function getWorksitePersonHours(
+    67	  worksiteId: string,
+    68	  assignments: WorksiteAssignment[]
+    69	): { totalPersonHours: number; totalAssignments: number; totalAssignedPeople: number } {
+    70	  let totalPersonHours = 0;
+    71	  let totalAssignments = 0;
+    72	  const uniquePeople = new Set<string>();
+    73	
+    74	  assignments.forEach((asg) => {
+    75	    if (asg.worksiteId === worksiteId) {
+    76	      totalAssignments++;
+    77	      const duration = calculateHours(asg.startTime, asg.endTime);
+    78	      const peopleCount = asg.assignedEmployeeIds.length;
+    79	      totalPersonHours += duration * peopleCount;
+    80	      asg.assignedEmployeeIds.forEach((id) => uniquePeople.add(id));
+    81	    }
+    82	  });
+    83	
+    84	  return {
+    85	    totalPersonHours: Math.round(totalPersonHours * 10) / 10,
+    86	    totalAssignments,
+    87	    totalAssignedPeople: uniquePeople.size,
+    88	  };
+    89	}
+    90	
+    91	/**
+    92	 * Calculates resource utilization for vehicles and equipment across a week.
+    93	 */
+    94	export function getResourceUtilization(
+    95	  vehicles: Vehicle[],
+    96	  equipment: Equipment[],
+    97	  assignments: WorksiteAssignment[],
+    98	  worksites: Worksite[]
+    99	): ResourceUtilizationSummary[] {
+   100	  const worksiteMap = new Map<string, Worksite>(worksites.map((w) => [w.id, w]));
+   101	
+   102	  const vehicleSummaries: ResourceUtilizationSummary[] = vehicles.map((veh) => {
+   103	    const datesReserved = new Set<string>();
+   104	    const worksiteNames = new Set<string>();
+   105	    let reservationInstances = 0;
+   106	
+   107	    assignments.forEach((asg) => {
+   108	      if (asg.assignedVehicleIds.includes(veh.id)) {
+   109	        datesReserved.add(asg.date);
+   110	        reservationInstances++;
+   111	        const site = worksiteMap.get(asg.worksiteId);
+   112	        if (site) worksiteNames.add(site.name);
+   113	      }
+   114	    });
+   115	
+   116	    return {
+   117	      resourceId: veh.id,
+   118	      name: veh.name,
+   119	      category: 'vehicle',
+   120	      isExclusive: true,
+   121	      totalDaysInWeek: 5,
+   122	      reservedDaysCount: datesReserved.size,
+   123	      isDoubleBooked: reservationInstances > datesReserved.size,
+   124	      assignedWorksites: Array.from(worksiteNames),
+   125	    };
+   126	  });
+   127	
+   128	  const equipmentSummaries: ResourceUtilizationSummary[] = equipment.map((eq) => {
+   129	    const datesReserved = new Set<string>();
+   130	    const worksiteNames = new Set<string>();
+   131	    let reservationInstances = 0;
+   132	
+   133	    assignments.forEach((asg) => {
+   134	      if (asg.assignedEquipmentIds.includes(eq.id)) {
+   135	        datesReserved.add(asg.date);
+   136	        reservationInstances++;
+   137	        const site = worksiteMap.get(asg.worksiteId);
+   138	        if (site) worksiteNames.add(site.name);
+   139	      }
+   140	    });
+   141	
+   142	    return {
+   143	      resourceId: eq.id,
+   144	      name: eq.name,
+   145	      category: 'equipment',
+   146	      isExclusive: eq.isExclusive,
+   147	      totalDaysInWeek: 5,
+   148	      reservedDaysCount: datesReserved.size,
+   149	      isDoubleBooked: eq.isExclusive && reservationInstances > datesReserved.size,
+   150	      assignedWorksites: Array.from(worksiteNames),
+   151	    };
+   152	  });
+   153	
+   154	  return [...vehicleSummaries, ...equipmentSummaries];
+   155	}
+   156	
+   157	/**
+   158	 * Top Bento Summary Tile Data
+   159	 */
+   160	export interface BentoSummaryMetrics {
+   161	  totalEmployees: number;
+   162	  plannedEmployeesCount: number;
+   163	  unplannedEmployeesCount: number;
+   164	  absentEmployeesCount: number;
+   165	  activeWorksitesCount: number;
+   166	  incompleteWorksitesCount: number;
+   167	  totalPlannedHours: number;
+   168	  totalCapacityHours: number;
+   169	  vehiclesInUseCount: number;
+   170	  totalVehicles: number;
+   171	  equipmentReservedCount: number;
+   172	  totalEquipment: number;
+   173	  resourceBottlenecksCount: number;
+   174	  blockingConflictsCount: number;
+   175	  warningsCount: number;
+   176	}
+   177	
+   178	export function computeBentoMetrics(
+   179	  employees: Employee[],
+   180	  assignments: WorksiteAssignment[],
+   181	  absences: Absence[],
+   182	  worksites: Worksite[],
+   183	  vehicles: Vehicle[],
+   184	  equipment: Equipment[],
+   185	  conflicts: any[],
+   186	  weekStartDate: string,
+   187	  weekEndDate: string
+   188	): BentoSummaryMetrics {
+   189	  const capacities = getEmployeeCapacitySummaries(
+   190	    employees,
+   191	    assignments,
+   192	    absences,
+   193	    weekStartDate,
+   194	    weekEndDate
+   195	  );
+   196	
+   197	  const plannedEmployeesCount = capacities.filter((c) => c.plannedHours > 0).length;
+   198	  const absentEmployeesCount = capacities.filter((c) => c.isAbsentThisWeek).length;
+   199	  const unplannedEmployeesCount = capacities.filter(
+   200	    (c) => c.plannedHours === 0 && !c.isAbsentThisWeek
+   201	  ).length;
+   202	
+   203	  const activeWorksiteIds = new Set(
+   204	    assignments
+   205	      .filter((a) => a.date >= weekStartDate && a.date <= weekEndDate)
+   206	      .map((a) => a.worksiteId)
+   207	  );
+   208	
+   209	  const incompleteWorksitesCount = worksites.filter((w) => {
+   210	    if (!activeWorksiteIds.has(w.id)) return false;
+   211	    const siteAssignments = assignments.filter(
+   212	      (a) => a.worksiteId === w.id && a.date >= weekStartDate && a.date <= weekEndDate
+   213	    );
+   214	    return siteAssignments.some((a) => a.assignedEmployeeIds.length === 0);
+   215	  }).length;
+   216	
+   217	  let totalPlannedHours = 0;
+   218	  capacities.forEach((c) => {
+   219	    totalPlannedHours += c.plannedHours;
+   220	  });
+   221	
+   222	  const totalCapacityHours = employees.reduce((sum, e) => sum + e.maxWeeklyHours, 0);
+   223	
+   224	  const utilizations = getResourceUtilization(vehicles, equipment, assignments, worksites);
+   225	  const vehiclesInUseCount = utilizations.filter(
+   226	    (u) => u.category === 'vehicle' && u.reservedDaysCount > 0
+   227	  ).length;
+   228	  const equipmentReservedCount = utilizations.filter(
+   229	    (u) => u.category === 'equipment' && u.reservedDaysCount > 0
+   230	  ).length;
+   231	
+   232	  const resourceBottlenecksCount = utilizations.filter((u) => u.isDoubleBooked).length;
+   233	
+   234	  const blockingConflictsCount = conflicts.filter((c) => c.severity === 'blocking').length;
+   235	  const warningsCount = conflicts.filter((c) => c.severity === 'warning').length;
+   236	
+   237	  return {
+   238	    totalEmployees: employees.length,
+   239	    plannedEmployeesCount,
+   240	    unplannedEmployeesCount,
+   241	    absentEmployeesCount,
+   242	    activeWorksitesCount: activeWorksiteIds.size,
+   243	    incompleteWorksitesCount,
+   244	    totalPlannedHours: Math.round(totalPlannedHours),
+   245	    totalCapacityHours,
+   246	    vehiclesInUseCount,
+   247	    totalVehicles: vehicles.length,
+   248	    equipmentReservedCount,
+   249	    totalEquipment: equipment.length,
+   250	    resourceBottlenecksCount,
+   251	    blockingConflictsCount,
+   252	    warningsCount,
+   253	  };
+   254	}
+=== UIUX types ===
+     1	/**
+     2	 * Arboscus Workforce Planning Domain Types
+     3	 */
+     4	
+     5	export type WorksiteColorKey =
+     6	  | 'site-blue'
+     7	  | 'site-green'
+     8	  | 'site-orange'
+     9	  | 'site-violet'
+    10	  | 'site-teal'
+    11	  | 'site-red'
+    12	  | 'site-yellow'
+    13	  | 'site-slate';
+    14	
+    15	export interface Employee {
+    16	  id: string;
+    17	  firstName: string;
+    18	  lastName: string;
+    19	  role: 'Teamleiter' | 'SKT-Kletterer' | 'Baumpfleger' | 'Maschinist' | 'Auszubildender' | 'Facharbeiter';
+    20	  isLeader: boolean;
+    21	  skills: string[];
+    22	  maxWeeklyHours: number;
+    23	  initials: string;
+    24	  avatarUrl?: string;
+    25	  email: string;
+    26	  phone: string;
+    27	}
+    28	
+    29	export interface Absence {
+    30	  id: string;
+    31	  employeeId: string;
+    32	  startDate: string; // YYYY-MM-DD
+    33	  endDate: string; // YYYY-MM-DD
+    34	  type: 'Urlaub' | 'Krankheit' | 'Schulung' | 'Elternzeit';
+    35	  status: 'genehmigt' | 'ausstehend';
+    36	  note?: string;
+    37	}
+    38	
+    39	export interface Worksite {
+    40	  id: string;
+    41	  code: string;
+    42	  name: string;
+    43	  location: string; // District/City e.g. "Potsdam", "Berlin-Mitte"
+    44	  address: string;
+    45	  meetingPoint: string;
+    46	  colorKey: WorksiteColorKey;
+    47	  hexColor: string;
+    48	  description: string;
+    49	  requiredSkills: string[];
+    50	}
+    51	
+    52	export interface Vehicle {
+    53	  id: string;
+    54	  name: string;
+    55	  type: 'LKW' | 'Transporter' | 'Unimog' | 'Anhänger';
+    56	  licensePlate: string;
+    57	  status: 'verfügbar' | 'reserviert' | 'wartung';
+    58	  notes?: string;
+    59	}
+    60	
+    61	export interface Equipment {
+    62	  id: string;
+    63	  name: string;
+    64	  category: 'Hubarbeitsbühne' | 'Häcksler' | 'Großsäge' | 'Fräse' | 'Spezialgerät';
+    65	  isExclusive: boolean;
+    66	  status: 'verfügbar' | 'reserviert' | 'wartung';
+    67	  serialNumber?: string;
+    68	}
+    69	
+    70	export type AssignmentStatus = 'draft' | 'published' | 'modified';
+    71	
+    72	export interface WorksiteAssignment {
+    73	  id: string;
+    74	  worksiteId: string;
+    75	  date: string; // YYYY-MM-DD
+    76	  startTime: string; // e.g. "07:00"
+    77	  endTime: string; // e.g. "15:30"
+    78	  activityName: string;
+    79	  assignedEmployeeIds: string[];
+    80	  assignedVehicleIds: string[];
+    81	  assignedEquipmentIds: string[];
+    82	  status: AssignmentStatus;
+    83	  confirmationStatus?: Record<string, 'bestätigt' | 'ausstehend' | 'abgelehnt'>;
+    84	  weatherWarning?: string;
+    85	  notes?: string;
+    86	}
+    87	
+    88	export type ConflictType =
+    89	  | 'double_booking'
+    90	  | 'absence_conflict'
+    91	  | 'resource_double_booking'
+    92	  | 'capacity_exceeded'
+    93	  | 'missing_skill'
+    94	  | 'unassigned_team'
+    95	  | 'overtime_warning'
+    96	  | 'weather_warning';
+    97	
+    98	export type ConflictSeverity = 'blocking' | 'warning';
+    99	
+   100	export interface PlanningConflict {
+   101	  id: string;
+   102	  type: ConflictType;
+   103	  severity: ConflictSeverity;
+   104	  title: string;
+   105	  message: string;
+   106	  affectedDate: string;
+   107	  affectedEmployeeIds?: string[];
+   108	  affectedWorksiteId?: string;
+   109	  affectedResourceId?: string;
+   110	  suggestedFix?: string;
+   111	}
+   112	
+   113	export interface PlanningWeek {
+   114	  weekNumber: number;
+   115	  year: number;
+   116	  startDate: string; // YYYY-MM-DD (Monday)
+   117	  endDate: string; // YYYY-MM-DD (Friday or Sunday)
+   118	  isPublished: boolean;
+   119	  draftChangesCount: number;
+   120	  lastModified: string;
+   121	}
+   122	
+   123	export interface WeatherSummary {
+   124	  location: string;
+   125	  date: string; // YYYY-MM-DD
+   126	  condition: 'sunny' | 'cloudy' | 'rainy' | 'stormy' | 'windy';
+   127	  tempHigh: number; // Celsius
+   128	  tempLow: number;
+   129	  precipitationProb: number; // Percentage 0-100
+   130	  maxWindKmH: number;
+   131	  warningText?: string;
+   132	  updatedAt: string;
+   133	}
+   134	
+   135	export interface EmployeeCapacitySummary {
+   136	  employeeId: string;
+   137	  plannedHours: number;
+   138	  maxHours: number;
+   139	  overtimeHours: number;
+   140	  assignmentsCount: number;
+   141	  isOverCapacity: boolean;
+   142	  isAbsentThisWeek: boolean;
+   143	}
+   144	
+   145	export interface ResourceUtilizationSummary {
+   146	  resourceId: string;
+   147	  name: string;
+   148	  category: 'vehicle' | 'equipment';
+   149	  isExclusive: boolean;
+   150	  totalDaysInWeek: number;
+   151	  reservedDaysCount: number;
+   152	  isDoubleBooked: boolean;
+   153	  assignedWorksites: string[];
+   154	}
+   155	
+   156	export interface CalendarFilters {
+   157	  disabledWorksiteIds: string[];
+   158	  hideEmployees: boolean;
+   159	  hideResources: boolean;
+   160	  hideWeekendsAndBBHolidays: boolean;
+   161	  selectedResourceIds?: string[];
+   162	}
+   163	
+   164	export interface FilterOptions {
+   165	  searchTerm: string;
+   166	  selectedRole?: string;
+   167	  selectedSkill?: string;
+   168	  selectedWorksiteId?: string;
+   169	  onlyConflicts: boolean;
+   170	  onlyUnassigned: boolean;
+   171	  onlyAbsent: boolean;
+   172	  onlyWarnings: boolean;
+   173	}
+   174	
+   175	export interface PlanningState {
+   176	  currentWeekIndex: number; // 0, 1, 2, 3 in 4-week window
+   177	  currentMonthDate: string; // e.g. "2026-09"
+   178	  weeks: PlanningWeek[];
+   179	  employees: Employee[];
+   180	  absences: Absence[];
+   181	  worksites: Worksite[];
+   182	  vehicles: Vehicle[];
+   183	  equipment: Equipment[];
+   184	  assignments: WorksiteAssignment[];
+   185	  weatherData: WeatherSummary[];
+   186	  filters: FilterOptions;
+   187	  calendarFilters: CalendarFilters;
+   188	  selectedWorksiteId: string | null;
+   189	  selectedAssignmentId: string | null;
+   190	  historyStack: WorksiteAssignment[][];
+   191	  futureStack: WorksiteAssignment[][];
+   192	  activeView: 'MONTH' | '1W' | '4W';
+   193	  simulatedRole: 'ADMINISTRATOR' | 'GESCHÄFTSFÜHRUNG';
+   194	  isDarkMode: boolean;
+   195	}
+=== UIUX new worksite ===
+     1	import React, { useState } from 'react';
+     2	import { Worksite, WorksiteColorKey } from '../../types';
+     3	import { X, MapPin, Building, Sparkles, Check, Tag, Info, ShieldCheck } from 'lucide-react';
+     4	import { WorksiteLocationPicker } from '../common/WorksiteLocationPicker';
+     5	
+     6	interface NewWorksiteModalProps {
+     7	  isOpen: boolean;
+     8	  onClose: () => void;
+     9	  onAddWorksite: (worksite: Worksite) => void;
+    10	  isDarkMode?: boolean;
+    11	}
+    12	
+    13	const COLOR_OPTIONS: { key: WorksiteColorKey; hex: string; label: string }[] = [
+    14	  { key: 'site-blue', hex: '#3B82F6', label: 'Blau' },
+    15	  { key: 'site-green', hex: '#10B981', label: 'Grün' },
+    16	  { key: 'site-orange', hex: '#F97316', label: 'Orange' },
+    17	  { key: 'site-violet', hex: '#8B5CF6', label: 'Violett' },
+    18	  { key: 'site-teal', hex: '#14B8A6', label: 'Türkis' },
+    19	  { key: 'site-red', hex: '#EF4444', label: 'Rot' },
+    20	  { key: 'site-yellow', hex: '#EAB308', label: 'Gelb' },
+    21	  { key: 'site-slate', hex: '#64748B', label: 'Grau' },
+    22	];
+    23	
+    24	const AVAILABLE_SKILLS = [
+    25	  'SKT-A',
+    26	  'SKT-B',
+    27	  'ASBaum1',
+    28	  'ASBaum2',
+    29	  'Baumpfleger',
+    30	  'Maschinist',
+    31	  'Großsägenschein',
+    32	  'Pflanzung',
+    33	];
+    34	
+    35	export const NewWorksiteModal: React.FC<NewWorksiteModalProps> = ({
+    36	  isOpen,
+    37	  onClose,
+    38	  onAddWorksite,
+    39	  isDarkMode = true,
+    40	}) => {
+    41	  const [name, setName] = useState('');
+    42	  const [code, setCode] = useState('');
+    43	  const [location, setLocation] = useState('Potsdam');
+    44	  const [address, setAddress] = useState('');
+    45	  const [meetingPoint, setMeetingPoint] = useState('');
+    46	  const [description, setDescription] = useState('');
+    47	  const [selectedColorKey, setSelectedColorKey] = useState<WorksiteColorKey>('site-green');
+    48	  const [selectedHex, setSelectedHex] = useState('#10B981');
+    49	  const [requiredSkills, setRequiredSkills] = useState<string[]>(['ASBaum1']);
+    50	
+    51	  // Map position (default to Potsdam / Berlin Brandenburg area)
+    52	  const [lat, setLat] = useState(52.4009);
+    53	  const [lng, setLng] = useState(13.0591);
+    54	
+    55	  if (!isOpen) return null;
+    56	
+    57	  // Auto-generate site code from name if code is empty or untouched
+    58	  const handleNameChange = (val: string) => {
+    59	    setName(val);
+    60	    if (!code || code.length <= 6) {
+    61	      const initials = val
+    62	        .split(' ')
+    63	        .filter(Boolean)
+    64	        .map((w) => w[0]?.toUpperCase())
+    65	        .join('');
+    66	      const randomNum = Math.floor(Math.random() * 90 + 10);
+    67	      setCode(initials ? `BS-${initials}-${randomNum}` : `BS-${randomNum}`);
+    68	    }
+    69	  };
+    70	
+    71	  const handleLocationSelect = (newLat: number, newLng: number, newAddr?: string, city?: string) => {
+    72	    setLat(newLat);
+    73	    setLng(newLng);
+    74	    if (newAddr) {
+    75	      setAddress(newAddr);
+    76	    }
+    77	    if (city) {
+    78	      setLocation(city);
+    79	    }
+    80	  };
+    81	
+    82	  const toggleSkill = (skill: string) => {
+    83	    setRequiredSkills((prev) =>
+    84	      prev.includes(skill) ? prev.filter((s) => s !== skill) : [...prev, skill]
+    85	    );
+    86	  };
+    87	
+    88	  const handleSubmit = (e: React.FormEvent) => {
+    89	    e.preventDefault();
+    90	    if (!name.trim()) return;
+    91	
+    92	    const newWorksite: Worksite = {
+    93	      id: `ws_${Date.now()}`,
+    94	      code: code.trim() || `BS-${Math.floor(Math.random() * 900 + 100)}`,
+    95	      name: name.trim(),
+    96	      location: location.trim() || 'Brandenburg',
+    97	      address: address.trim() || 'Adresse nicht definiert',
+    98	      meetingPoint: meetingPoint.trim() || 'Zufahrt Haupttor',
+    99	      colorKey: selectedColorKey,
+   100	      hexColor: selectedHex,
+   101	      description: description.trim() || 'Keine Zusatzangaben hinterlegt.',
+   102	      requiredSkills,
+   103	    };
+   104	
+   105	    onAddWorksite(newWorksite);
+   106	    onClose();
+   107	  };
+   108	
+   109	  return (
+   110	    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
+   111	      <div
+   112	        className={`w-full max-w-2xl rounded-2xl shadow-2xl border overflow-hidden transition-colors ${
+   113	          isDarkMode
+   114	            ? 'bg-[var(--wood-panel)] border-[var(--wood-border)] text-[var(--wood-text-primary)] wood-grain-v'
+   115	            : 'bg-white border-[#97B89A] text-[#3B4A3B]'
+   116	        }`}
+   117	      >
+   118	        {/* Header */}
+   119	        <div
+   120	          className={`flex items-center justify-between px-6 py-4 border-b ${
+   121	            isDarkMode
+   122	              ? 'border-[var(--wood-border)] bg-[var(--wood-base)] wood-burnt-edge'
+   123	              : 'border-[#97B89A] bg-[#CDE7CC]'
+   124	          }`}
+   125	          style={{ borderTop: `4px solid ${selectedHex}` }}
+   126	        >
+   127	          <div className="flex items-center space-x-3">
+   128	            <div
+   129	              className="p-2 rounded-lg text-white font-bold flex items-center justify-center shadow-xs"
+   130	              style={{ backgroundColor: selectedHex }}
+   131	            >
+   132	              <Building className="w-5 h-5" />
+   133	            </div>
+   134	            <div>
+   135	              <h2 className="text-base font-bold tracking-tight">Neue Baustelle anlegen</h2>
+   136	              <p className={`text-xs ${isDarkMode ? 'text-[var(--wood-text-muted)]' : 'text-[#6E8B6E]'}`}>
+   137	                Ort per Adresse oder Karte festlegen und Stammdaten erfassen
+   138	              </p>
+   139	            </div>
+   140	          </div>
+   141	          <button
+   142	            onClick={onClose}
+   143	            className={`p-1.5 rounded-lg transition-colors ${
+   144	              isDarkMode
+   145	                ? 'hover:bg-[var(--wood-raised)] text-[var(--wood-text-muted)] hover:text-white'
+   146	                : 'hover:bg-[#E9F4EA] text-[#6E8B6E] hover:text-[#3B4A3B]'
+   147	            }`}
+   148	          >
+   149	            <X className="w-5 h-5" />
+   150	          </button>
+   151	        </div>
+   152	
+   153	        {/* Form Body */}
+   154	        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[82vh] overflow-y-auto custom-scrollbar">
+   155	          {/* Name & Code */}
+   156	          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   157	            <div className="sm:col-span-2">
+   158	              <label
+   159	                className={`block text-xs font-semibold mb-1 flex items-center gap-1.5 ${
+   160	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   161	                }`}
+   162	              >
+   163	                <Building className="w-3.5 h-3.5 text-[var(--wood-info)]" />
+   164	                <span>Name / Bezeichnung der Baustelle *</span>
+   165	              </label>
+   166	              <input
+   167	                type="text"
+   168	                value={name}
+   169	                onChange={(e) => handleNameChange(e.target.value)}
+   170	                placeholder="z.B. Baumpflege Park Sanssouci, Kronensicherung Villa"
+   171	                required
+   172	                className={`w-full px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+   173	                  isDarkMode
+   174	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   175	                    : 'bg-white border-slate-300 text-slate-900'
+   176	                }`}
+   177	              />
+   178	            </div>
+   179	
+   180	            <div>
+   181	              <label
+   182	                className={`block text-xs font-semibold mb-1 flex items-center gap-1.5 ${
+   183	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   184	                }`}
+   185	              >
+   186	                <Tag className="w-3.5 h-3.5 text-[var(--wood-resin)]" />
+   187	                <span>Kürzel / Code *</span>
+   188	              </label>
+   189	              <input
+   190	                type="text"
+   191	                value={code}
+   192	                onChange={(e) => setCode(e.target.value.toUpperCase())}
+   193	                placeholder="z.B. BS-SAN-01"
+   194	                required
+   195	                className={`w-full px-3 py-2 rounded-lg text-xs font-mono font-bold uppercase border transition-colors ${
+   196	                  isDarkMode
+   197	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   198	                    : 'bg-white border-slate-300 text-slate-900'
+   199	                }`}
+   200	              />
+   201	            </div>
+   202	          </div>
+   203	
+   204	          {/* Location / OpenStreetMap Search & Interactive Map */}
+   205	          <div>
+   206	            <label
+   207	              className={`block text-xs font-semibold mb-1.5 flex items-center justify-between ${
+   208	                isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   209	              }`}
+   210	            >
+   211	              <div className="flex items-center gap-1.5">
+   212	                <MapPin className="w-3.5 h-3.5 text-[var(--wood-moss)]" />
+   213	                <span>Ort & Position (OpenStreetMap / Geocoding)</span>
+   214	              </div>
+   215	              <span className="text-[10px] text-[var(--wood-text-muted)]">
+   216	                📍 Karte oder Adresse durchsuchen
+   217	              </span>
+   218	            </label>
+   219	
+   220	            <WorksiteLocationPicker
+   221	              lat={lat}
+   222	              lng={lng}
+   223	              onLocationSelect={handleLocationSelect}
+   224	              isDarkMode={isDarkMode}
+   225	            />
+   226	          </div>
+   227	
+   228	          {/* Address details & Meeting point */}
+   229	          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   230	            <div>
+   231	              <label
+   232	                className={`block text-xs font-semibold mb-1 ${
+   233	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   234	                }`}
+   235	              >
+   236	                Exakte Adresse
+   237	              </label>
+   238	              <input
+   239	                type="text"
+   240	                value={address}
+   241	                onChange={(e) => setAddress(e.target.value)}
+   242	                placeholder="Maulbeerallee 1, 14469 Potsdam"
+   243	                required
+   244	                className={`w-full px-3 py-2 rounded-lg text-xs border font-medium transition-colors ${
+   245	                  isDarkMode
+   246	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   247	                    : 'bg-white border-slate-300 text-slate-900'
+   248	                }`}
+   249	              />
+   250	            </div>
+   251	
+   252	            <div>
+   253	              <label
+   254	                className={`block text-xs font-semibold mb-1 ${
+   255	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   256	                }`}
+   257	              >
+   258	                Stadt / Ortsteil
+   259	              </label>
+   260	              <input
+   261	                type="text"
+   262	                value={location}
+   263	                onChange={(e) => setLocation(e.target.value)}
+   264	                placeholder="Potsdam, Berlin-Mitte, etc."
+   265	                required
+   266	                className={`w-full px-3 py-2 rounded-lg text-xs border font-medium transition-colors ${
+   267	                  isDarkMode
+   268	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   269	                    : 'bg-white border-slate-300 text-slate-900'
+   270	                }`}
+   271	              />
+   272	            </div>
+   273	          </div>
+   274	
+   275	          {/* Meeting Point & Color Selector */}
+   276	          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   277	            <div>
+   278	              <label
+   279	                className={`block text-xs font-semibold mb-1 ${
+   280	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   281	                }`}
+   282	              >
+   283	                Treffpunkt / Anfahrtshinweis
+   284	              </label>
+   285	              <input
+   286	                type="text"
+   287	                value={meetingPoint}
+   288	                onChange={(e) => setMeetingPoint(e.target.value)}
+   289	                placeholder="z.B. Parkplatz Nord, Haupteingang Zufahrt 2"
+   290	                className={`w-full px-3 py-2 rounded-lg text-xs border font-medium transition-colors ${
+   291	                  isDarkMode
+   292	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   293	                    : 'bg-white border-slate-300 text-slate-900'
+   294	                }`}
+   295	              />
+   296	            </div>
+   297	
+   298	            <div>
+   299	              <label
+   300	                className={`block text-xs font-semibold mb-1 ${
+   301	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   302	                }`}
+   303	              >
+   304	                Farbkennzeichnung
+   305	              </label>
+   306	              <div className="flex flex-wrap gap-1.5">
+   307	                {COLOR_OPTIONS.map((c) => {
+   308	                  const isSel = selectedColorKey === c.key;
+   309	                  return (
+   310	                    <button
+   311	                      key={c.key}
+   312	                      type="button"
+   313	                      onClick={() => {
+   314	                        setSelectedColorKey(c.key);
+   315	                        setSelectedHex(c.hex);
+   316	                      }}
+   317	                      className={`w-6 h-6 rounded-full border-2 transition-transform flex items-center justify-center ${
+   318	                        isSel ? 'scale-110 ring-2 ring-white border-black' : 'border-transparent opacity-80 hover:opacity-100'
+   319	                      }`}
+   320	                      style={{ backgroundColor: c.hex }}
+   321	                      title={c.label}
+   322	                    >
+   323	                      {isSel && <Check className="w-3 h-3 text-white stroke-[3]" />}
+   324	                    </button>
+   325	                  );
+   326	                })}
+   327	              </div>
+   328	            </div>
+   329	          </div>
+   330	
+   331	          {/* Required Skills */}
+   332	          <div>
+   333	            <label
+   334	              className={`block text-xs font-semibold mb-1.5 flex items-center gap-1.5 ${
+   335	                isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   336	              }`}
+   337	            >
+   338	              <ShieldCheck className="w-3.5 h-3.5 text-[var(--wood-moss)]" />
+   339	              <span>Benötigte Qualifikationen</span>
+   340	            </label>
+   341	            <div className="flex flex-wrap gap-1.5">
+   342	              {AVAILABLE_SKILLS.map((sk) => {
+   343	                const isSelected = requiredSkills.includes(sk);
+   344	                return (
+   345	                  <button
+   346	                    key={sk}
+   347	                    type="button"
+   348	                    onClick={() => toggleSkill(sk)}
+   349	                    className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all ${
+   350	                      isSelected
+   351	                        ? 'bg-[var(--wood-moss)]/20 text-[var(--wood-moss)] border-[var(--wood-moss)]/50 font-bold'
+   352	                        : isDarkMode
+   353	                        ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-muted)] hover:text-white'
+   354	                        : 'bg-slate-100 border-slate-200 text-slate-600'
+   355	                    }`}
+   356	                  >
+   357	                    {sk}
+   358	                  </button>
+   359	                );
+   360	              })}
+=== UIUX location picker ===
+     1	import React, { useEffect, useRef, useState } from 'react';
+     2	import L from 'leaflet';
+     3	import { Search, MapPin, Loader2 } from 'lucide-react';
+     4	
+     5	interface WorksiteLocationPickerProps {
+     6	  lat: number;
+     7	  lng: number;
+     8	  onLocationSelect: (lat: number, lng: number, address?: string, city?: string) => void;
+     9	  isDarkMode?: boolean;
+    10	}
+    11	
+    12	interface NominatimResult {
+    13	  place_id: number;
+    14	  lat: string;
+    15	  lon: string;
+    16	  display_name: string;
+    17	  address?: {
+    18	    road?: string;
+    19	    house_number?: string;
+    20	    postcode?: string;
+    21	    city?: string;
+    22	    town?: string;
+    23	    village?: string;
+    24	    suburb?: string;
+    25	    county?: string;
+    26	    state?: string;
+    27	  };
+    28	}
+    29	
+    30	export const WorksiteLocationPicker: React.FC<WorksiteLocationPickerProps> = ({
+    31	  lat,
+    32	  lng,
+    33	  onLocationSelect,
+    34	  isDarkMode = true,
+    35	}) => {
+    36	  const mapContainerRef = useRef<HTMLDivElement>(null);
+    37	  const mapRef = useRef<L.Map | null>(null);
+    38	  const markerRef = useRef<L.Marker | null>(null);
+    39	
+    40	  const [searchQuery, setSearchQuery] = useState('');
+    41	  const [searchResults, setSearchResults] = useState<NominatimResult[]>([]);
+    42	  const [isSearching, setIsSearching] = useState(false);
+    43	  const [showResults, setShowResults] = useState(false);
+    44	
+    45	  useEffect(() => {
+    46	    if (!mapContainerRef.current) return;
+    47	
+    48	    if (!mapRef.current) {
+    49	      // Fix default Leaflet marker assets in bundler
+    50	      delete (L.Icon.Default.prototype as any)._getIconUrl;
+    51	      L.Icon.Default.mergeOptions({
+    52	        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    53	        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    54	        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    55	      });
+    56	
+    57	      const map = L.map(mapContainerRef.current, {
+    58	        zoomControl: true,
+    59	        scrollWheelZoom: true,
+    60	      }).setView([lat, lng], 13);
+    61	
+    62	      const tileUrl = isDarkMode
+    63	        ? 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+    64	        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    65	
+    66	      L.tileLayer(tileUrl, {
+    67	        attribution: '&copy; OpenStreetMap contributors',
+    68	        maxZoom: 19,
+    69	      }).addTo(map);
+    70	
+    71	      const marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+    72	
+    73	      const handleReverseGeocode = async (targetLat: number, targetLng: number) => {
+    74	        try {
+    75	          const res = await fetch(
+    76	            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${targetLat}&lon=${targetLng}&addressdetails=1`,
+    77	            { headers: { 'Accept-Language': 'de' } }
+    78	          );
+    79	          if (res.ok) {
+    80	            const data: NominatimResult = await res.json();
+    81	            const fullAddress = data.display_name || `${targetLat.toFixed(5)}, ${targetLng.toFixed(5)}`;
+    82	            const city =
+    83	              data.address?.city ||
+    84	              data.address?.town ||
+    85	              data.address?.village ||
+    86	              data.address?.suburb ||
+    87	              data.address?.county ||
+    88	              '';
+    89	            onLocationSelect(targetLat, targetLng, fullAddress, city);
+    90	          } else {
+    91	            onLocationSelect(targetLat, targetLng);
+    92	          }
+    93	        } catch {
+    94	          onLocationSelect(targetLat, targetLng);
+    95	        }
+    96	      };
+    97	
+    98	      marker.on('dragend', () => {
+    99	        const pos = marker.getLatLng();
+   100	        handleReverseGeocode(pos.lat, pos.lng);
+   101	      });
+   102	
+   103	      map.on('click', (e: L.LeafletMouseEvent) => {
+   104	        const { lat: clickLat, lng: clickLng } = e.latlng;
+   105	        marker.setLatLng([clickLat, clickLng]);
+   106	        handleReverseGeocode(clickLat, clickLng);
+   107	      });
+   108	
+   109	      mapRef.current = map;
+   110	      markerRef.current = marker;
+   111	    } else {
+   112	      mapRef.current.setView([lat, lng], mapRef.current.getZoom());
+   113	      if (markerRef.current) {
+   114	        markerRef.current.setLatLng([lat, lng]);
+   115	      }
+   116	    }
+   117	  }, [lat, lng, isDarkMode]);
+   118	
+   119	  useEffect(() => {
+   120	    return () => {
+   121	      if (mapRef.current) {
+   122	        mapRef.current.remove();
+   123	        mapRef.current = null;
+   124	      }
+   125	    };
+   126	  }, []);
+   127	
+   128	  // Search Address via OpenStreetMap Nominatim
+   129	  const handleSearchSubmit = async (e?: React.FormEvent) => {
+   130	    if (e) e.preventDefault();
+   131	    if (!searchQuery.trim()) return;
+   132	
+   133	    setIsSearching(true);
+   134	    try {
+   135	      const query = encodeURIComponent(searchQuery.trim());
+   136	      const res = await fetch(
+   137	        `https://nominatim.openstreetmap.org/search?format=json&q=${query}&addressdetails=1&limit=5&countrycodes=de`,
+   138	        { headers: { 'Accept-Language': 'de' } }
+   139	      );
+   140	      if (res.ok) {
+   141	        const data: NominatimResult[] = await res.json();
+   142	        setSearchResults(data);
+   143	        setShowResults(true);
+   144	      }
+   145	    } catch (err) {
+   146	      console.error('Nominatim search failed', err);
+   147	    } finally {
+   148	      setIsSearching(false);
+   149	    }
+   150	  };
+   151	
+   152	  const selectSearchResult = (item: NominatimResult) => {
+   153	    const itemLat = parseFloat(item.lat);
+   154	    const itemLng = parseFloat(item.lon);
+   155	
+   156	    const city =
+   157	      item.address?.city ||
+   158	      item.address?.town ||
+   159	      item.address?.village ||
+   160	      item.address?.suburb ||
+   161	      item.address?.county ||
+   162	      '';
+   163	
+   164	    onLocationSelect(itemLat, itemLng, item.display_name, city);
+   165	
+   166	    if (mapRef.current) {
+   167	      mapRef.current.setView([itemLat, itemLng], 15);
+   168	      if (markerRef.current) {
+   169	        markerRef.current.setLatLng([itemLat, itemLng]);
+   170	      }
+   171	    }
+   172	
+   173	    setShowResults(false);
+   174	    setSearchQuery('');
+   175	  };
+   176	
+   177	  return (
+   178	    <div className="space-y-2">
+   179	      {/* Search Input Bar */}
+   180	      <div className="relative">
+   181	        <form onSubmit={handleSearchSubmit} className="flex gap-2">
+   182	          <div className="relative flex-1">
+   183	            <Search className="w-4 h-4 absolute left-3 top-2.5 text-[var(--wood-text-muted)]" />
+   184	            <input
+   185	              type="text"
+   186	              value={searchQuery}
+   187	              onChange={(e) => setSearchQuery(e.target.value)}
+   188	              placeholder="Ort oder Adresse suchen (z.B. Parkallee Potsdam, Berlin Mitte)..."
+   189	              className={`w-full pl-9 pr-3 py-2 rounded-lg text-xs border font-medium transition-colors ${
+   190	                isDarkMode
+   191	                  ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   192	                  : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
+   193	              }`}
+   194	            />
+   195	          </div>
+   196	          <button
+   197	            type="submit"
+   198	            disabled={isSearching}
+   199	            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1 border transition-colors ${
+   200	              isDarkMode
+   201	                ? 'bg-[var(--wood-base)] border-[var(--wood-border)] text-[var(--wood-text-primary)] hover:bg-[var(--wood-raised)]'
+   202	                : 'bg-slate-100 border-slate-300 text-slate-800 hover:bg-slate-200'
+   203	            }`}
+   204	          >
+   205	            {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>Suchen</span>}
+   206	          </button>
+   207	        </form>
+   208	
+   209	        {/* Autocomplete dropdown results */}
+   210	        {showResults && searchResults.length > 0 && (
+   211	          <div
+   212	            className={`absolute left-0 right-0 top-11 z-[500] rounded-xl border shadow-xl max-h-48 overflow-y-auto p-1.5 space-y-1 ${
+   213	              isDarkMode
+   214	                ? 'bg-[var(--wood-panel)] border-[var(--wood-border)] text-[var(--wood-text-primary)]'
+   215	                : 'bg-white border-slate-200 text-slate-900'
+   216	            }`}
+   217	          >
+   218	            {searchResults.map((item) => (
+   219	              <button
+   220	                key={item.place_id}
+   221	                type="button"
+   222	                onClick={() => selectSearchResult(item)}
+   223	                className={`w-full text-left p-2 rounded-lg text-xs transition-colors flex items-start gap-2 ${
+   224	                  isDarkMode
+   225	                    ? 'hover:bg-[var(--wood-raised)] text-[var(--wood-text-secondary)] hover:text-white'
+   226	                    : 'hover:bg-slate-100 text-slate-700'
+   227	                }`}
+   228	              >
+   229	                <MapPin className="w-4 h-4 text-[var(--wood-moss)] shrink-0 mt-0.5" />
+   230	                <span className="line-clamp-2 leading-tight">{item.display_name}</span>
+   231	              </button>
+   232	            ))}
+   233	          </div>
+   234	        )}
+   235	      </div>
+   236	
+   237	      {/* Map Display */}
+   238	      <div className="relative w-full h-52 rounded-xl overflow-hidden border border-[var(--wood-border)] shadow-inner">
+   239	        <div ref={mapContainerRef} className="w-full h-full z-0" />
+   240	        <div className="absolute bottom-2 right-2 z-[400] bg-black/80 text-white text-[10px] px-2.5 py-1 rounded-md backdrop-blur-xs font-mono border border-white/10 flex items-center gap-1.5 shadow-md">
+   241	          <MapPin className="w-3 h-3 text-[var(--wood-moss)]" />
+   242	          <span>Klicken oder Marker ziehen zum Positionieren</span>
+   243	        </div>
+   244	      </div>
+   245	    </div>
+   246	  );
+   247	};
+=== UIUX publish modal ===
+     1	import React from 'react';
+     2	import { X, Send, AlertTriangle, CheckCircle2, ShieldAlert, BellRing } from 'lucide-react';
+     3	import { PlanningConflict, PlanningWeek, Employee } from '../../types';
+     4	
+     5	interface PublishModalProps {
+     6	  currentWeek: PlanningWeek;
+     7	  conflicts: PlanningConflict[];
+     8	  assignedEmployeesCount: number;
+     9	  onClose: () => void;
+    10	  onConfirmPublish: () => void;
+    11	}
+    12	
+    13	export const PublishModal: React.FC<PublishModalProps> = ({
+    14	  currentWeek,
+    15	  conflicts,
+    16	  assignedEmployeesCount,
+    17	  onClose,
+    18	  onConfirmPublish,
+    19	}) => {
+    20	  const blockingConflicts = conflicts.filter((c) => c.severity === 'blocking');
+    21	  const warningConflicts = conflicts.filter((c) => c.severity === 'warning');
+    22	
+    23	  const canPublish = blockingConflicts.length === 0;
+    24	
+    25	  return (
+    26	    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-fade-in">
+    27	      <div className="w-full max-w-lg bg-[#171717] border border-[#45474D] rounded-2xl shadow-2xl overflow-hidden select-none">
+    28	        {/* MODAL HEADER */}
+    29	        <div className="px-5 py-4 bg-[#202124] border-b border-[#45474D] flex items-center justify-between">
+    30	          <div className="flex items-center gap-2">
+    31	            <Send className="w-5 h-5 text-sky-400" />
+    32	            <h3 className="text-lg font-bold text-neutral-100">
+    33	              Plan veröffentlichen · KW {currentWeek.weekNumber}
+    34	            </h3>
+    35	          </div>
+    36	          <button
+    37	            onClick={onClose}
+    38	            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-[#32343A]"
+    39	          >
+    40	            <X className="w-5 h-5" />
+    41	          </button>
+    42	        </div>
+    43	
+    44	        {/* MODAL CONTENT */}
+    45	        <div className="p-6 space-y-4 text-xs text-neutral-200">
+    46	          {/* BLOCKING CONFLICTS WARNING */}
+    47	          {blockingConflicts.length > 0 ? (
+    48	            <div className="p-4 bg-rose-950/80 border border-rose-700 rounded-xl space-y-3 text-rose-200">
+    49	              <div className="flex items-center gap-2 font-bold text-sm text-rose-300">
+    50	                <AlertTriangle className="w-5 h-5 text-rose-400 animate-bounce" />
+    51	                <span>Veröffentlichung durch {blockingConflicts.length} Konflikte blockiert!</span>
+    52	              </div>
+    53	              <p className="text-xs opacity-90">
+    54	                Folgende kritische Fehler müssen zuerst behoben werden, bevor der Wochenplan an Mitarbeiter übermittelt werden kann:
+    55	              </p>
+    56	
+    57	              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+    58	                {blockingConflicts.map((c) => (
+    59	                  <div
+    60	                    key={c.id}
+    61	                    className="p-2.5 bg-black/40 rounded-lg border border-rose-800/80 text-xs"
+    62	                  >
+    63	                    <div className="font-semibold text-rose-200">{c.title}</div>
+    64	                    <div className="text-[11px] opacity-80">{c.message}</div>
+    65	                  </div>
+    66	                ))}
+    67	              </div>
+    68	            </div>
+    69	          ) : (
+    70	            <div className="p-4 bg-emerald-950/60 border border-emerald-700 rounded-xl space-y-2 text-emerald-200">
+    71	              <div className="flex items-center gap-2 font-bold text-sm text-emerald-300">
+    72	                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+    73	                <span>Plan freigegeben zur Veröffentlichung</span>
+    74	              </div>
+    75	              <p className="text-xs opacity-90">
+    76	                Es wurden keine blockierenden Konflikte festgestellt.
+    77	              </p>
+    78	            </div>
+    79	          )}
+    80	
+    81	          {/* WARNINGS LIST IF ANY */}
+    82	          {warningConflicts.length > 0 && (
+    83	            <div className="p-3 bg-amber-950/40 border border-amber-800 rounded-xl text-amber-200 space-y-2">
+    84	              <div className="font-semibold flex items-center gap-1.5 text-xs text-amber-300">
+    85	                <AlertTriangle className="w-4 h-4 text-amber-400" />
+    86	                <span>{warningConflicts.length} Hinweise (Nicht-blockierend):</span>
+    87	              </div>
+    88	              <ul className="list-disc list-inside space-y-1 text-[11px] opacity-90 max-h-28 overflow-y-auto">
+    89	                {warningConflicts.map((w) => (
+    90	                  <li key={w.id}>
+    91	                    <strong className="text-amber-200">{w.title}:</strong> {w.message}
+    92	                  </li>
+    93	                ))}
+    94	              </ul>
+    95	            </div>
+    96	          )}
+    97	
+    98	          {/* PUBLICATION SUMMARY & SIMULATION NOTICE */}
+    99	          <div className="p-3 bg-[#202124] rounded-xl border border-[#32343A] space-y-2 text-neutral-300">
+   100	            <div className="flex items-center justify-between text-xs">
+   101	              <span>Betroffene Mitarbeiter:</span>
+   102	              <span className="font-bold text-neutral-100">{assignedEmployeesCount} Personen</span>
+   103	            </div>
+   104	            <div className="flex items-center justify-between text-xs">
+   105	              <span>Planungszeitraum:</span>
+   106	              <span className="font-bold text-neutral-100">
+   107	                {currentWeek.startDate} – {currentWeek.endDate}
+   108	              </span>
+   109	            </div>
+   110	
+   111	            <div className="pt-2 border-t border-[#292A2E] flex items-center gap-2 text-[11px] text-sky-300 italic">
+   112	              <BellRing className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+   113	              <span>
+   114	                (Klickprototyp: Die Benachrichtigung der Mitarbeiter wird simuliert.)
+   115	              </span>
+   116	            </div>
+   117	          </div>
+   118	        </div>
+   119	
+   120	        {/* MODAL FOOTER */}
+   121	        <div className="px-5 py-3.5 bg-[#202124] border-t border-[#45474D] flex items-center justify-end gap-3">
+   122	          <button
+   123	            onClick={onClose}
+   124	            className="px-4 py-2 bg-[#292A2E] hover:bg-[#32343A] text-neutral-200 border border-[#45474D] rounded-lg text-xs font-semibold"
+   125	          >
+   126	            Abbrechen
+   127	          </button>
+   128	
+   129	          <button
+   130	            onClick={onConfirmPublish}
+   131	            disabled={!canPublish}
+   132	            className={`px-5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 shadow-md ${
+   133	              canPublish
+   134	                ? 'bg-emerald-600 hover:bg-emerald-500 text-neutral-950'
+   135	                : 'bg-neutral-800 text-neutral-500 border border-neutral-700 cursor-not-allowed'
+   136	            }`}
+   137	          >
+   138	            <Send className="w-4 h-4" />
+   139	            <span>Jetzt veröffentlichen</span>
+   140	          </button>
+   141	        </div>
+   142	      </div>
+   143	    </div>
+   144	  );
+   145	};
+=== UIUX App ===
+     1	/**
+     2	 * Arboscus Teamplaner - Administration & Management Workforce Planner
+     3	 */
+     4	
+     5	import React, { useState, useMemo, useCallback, useEffect } from 'react';
+     6	import {
+     7	  PlanningState,
+     8	  WorksiteAssignment,
+     9	  Worksite,
+    10	  Employee,
+    11	  Vehicle,
+    12	  Equipment,
+    13	  FilterOptions,
+    14	  CalendarFilters,
+    15	} from './types';
+    16	import {
+    17	  INITIAL_EMPLOYEES,
+    18	  INITIAL_ABSENCES,
+    19	  INITIAL_WORKSITES,
+    20	  INITIAL_VEHICLES,
+    21	  INITIAL_EQUIPMENT,
+    22	  INITIAL_WEEKS,
+    23	  INITIAL_WEATHER,
+    24	  INITIAL_ASSIGNMENTS,
+    25	} from './data/mockData';
+    26	import { detectConflicts } from './domain/conflictEngine';
+    27	import { computeBentoMetrics } from './domain/capacityEngine';
+    28	import { exportWeekAssignmentsToCSV } from './utils/csvExport';
+    29	import { TopCommandBar } from './components/layout/TopCommandBar';
+    30	import { SummaryTiles } from './components/layout/SummaryTiles';
+    31	import { MonthCalendarView } from './components/planner/MonthCalendarView';
+    32	import { WeeklyPlanner } from './components/planner/WeeklyPlanner';
+    33	import { FourWeekPlanner } from './components/planner/FourWeekPlanner';
+    34	import { WorksiteDetailDrawer } from './components/details/WorksiteDetailDrawer';
+    35	import { PublishModal } from './components/modals/PublishModal';
+    36	import { FilterModal } from './components/modals/FilterModal';
+    37	import { QuickAddModal } from './components/modals/QuickAddModal';
+    38	
+    39	export default function App() {
+    40	  // MASTER PLANNING STATE
+    41	  const [currentWeekIndex, setCurrentWeekIndex] = useState<number>(0);
+    42	  const [currentMonthDate, setCurrentMonthDate] = useState<string>('2026-09');
+    43	  const [weeks, setWeeks] = useState(INITIAL_WEEKS);
+    44	  const [employees] = useState<Employee[]>(INITIAL_EMPLOYEES);
+    45	  const [absences] = useState(INITIAL_ABSENCES);
+    46	  const [worksites, setWorksites] = useState<Worksite[]>(INITIAL_WORKSITES);
+    47	  const [vehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);
+    48	  const [equipment] = useState<Equipment[]>(INITIAL_EQUIPMENT);
+    49	  const [assignments, setAssignments] = useState<WorksiteAssignment[]>(INITIAL_ASSIGNMENTS);
+    50	  const [weatherData] = useState(INITIAL_WEATHER);
+    51	
+    52	  // ADD NEW WORKSITE HANDLER
+    53	  const handleAddWorksite = useCallback((newWs: Worksite) => {
+    54	    setWorksites((prev) => [newWs, ...prev]);
+    55	  }, []);
+    56	
+    57	  // THEME & VIEW STATES
+    58	  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    59	    const stored = localStorage.getItem('arboscus_dark_mode');
+    60	    return stored !== null ? stored === 'true' : true;
+    61	  });
+    62	
+    63	  const [activeView, setActiveView] = useState<'MONTH' | '1W' | '4W'>(() => {
+    64	    const stored = localStorage.getItem('arboscus_active_view');
+    65	    if (stored === 'MONTH' || stored === '1W' || stored === '4W') {
+    66	      return stored;
+    67	    }
+    68	    return 'MONTH';
+    69	  });
+    70	
+    71	  const [simulatedRole, setSimulatedRole] = useState<'ADMINISTRATOR' | 'GESCHÄFTSFÜHRUNG'>('ADMINISTRATOR');
+    72	  const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
+    73	
+    74	  // MODAL STATES
+    75	  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+    76	  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+    77	  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+    78	  const [quickAddDefaultDate, setQuickAddDefaultDate] = useState<string>('2026-09-14');
+    79	
+    80	  // UNDO / REDO STACKS
+    81	  const [pastAssignments, setPastAssignments] = useState<WorksiteAssignment[][]>([]);
+    82	  const [futureAssignments, setFutureAssignments] = useState<WorksiteAssignment[][]>([]);
+    83	
+    84	  // CALENDAR & BOARD FILTERS
+    85	  const DEFAULT_FILTERS: FilterOptions = {
+    86	    searchTerm: '',
+    87	    onlyConflicts: false,
+    88	    onlyUnassigned: false,
+    89	    onlyAbsent: false,
+    90	    onlyWarnings: false,
+    91	  };
+    92	
+    93	  const DEFAULT_CALENDAR_FILTERS: CalendarFilters = {
+    94	    disabledWorksiteIds: [],
+    95	    hideEmployees: false,
+    96	    hideResources: false,
+    97	    hideWeekendsAndBBHolidays: false,
+    98	    selectedResourceIds: [],
+    99	  };
+   100	
+   101	  const [filters, setFilters] = useState<FilterOptions>(() => {
+   102	    const stored = localStorage.getItem('arboscus_filters');
+   103	    if (stored) {
+   104	      try {
+   105	        return { ...DEFAULT_FILTERS, ...JSON.parse(stored) };
+   106	      } catch (e) {
+   107	        console.error('Failed to parse stored filters', e);
+   108	      }
+   109	    }
+   110	    return DEFAULT_FILTERS;
+   111	  });
+   112	
+   113	  const [calendarFilters, setCalendarFilters] = useState<CalendarFilters>(() => {
+   114	    const stored = localStorage.getItem('arboscus_calendar_filters');
+   115	    if (stored) {
+   116	      try {
+   117	        return { ...DEFAULT_CALENDAR_FILTERS, ...JSON.parse(stored) };
+   118	      } catch (e) {
+   119	        console.error('Failed to parse stored calendar filters', e);
+   120	      }
+   121	    }
+   122	    return DEFAULT_CALENDAR_FILTERS;
+   123	  });
+   124	
+   125	  // PERSISTENCE EFFECTS
+   126	  useEffect(() => {
+   127	    localStorage.setItem('arboscus_active_view', activeView);
+   128	  }, [activeView]);
+   129	
+   130	  useEffect(() => {
+   131	    localStorage.setItem('arboscus_filters', JSON.stringify(filters));
+   132	  }, [filters]);
+   133	
+   134	  useEffect(() => {
+   135	    localStorage.setItem('arboscus_calendar_filters', JSON.stringify(calendarFilters));
+   136	  }, [calendarFilters]);
+   137	
+   138	  useEffect(() => {
+   139	    if (isDarkMode) {
+   140	      document.documentElement.classList.add('dark');
+   141	      document.documentElement.classList.remove('light');
+   142	    } else {
+   143	      document.documentElement.classList.add('light');
+   144	      document.documentElement.classList.remove('dark');
+   145	    }
+   146	  }, [isDarkMode]);
+   147	
+   148	  const currentWeek = weeks[currentWeekIndex] || weeks[0];
+   149	
+   150	  // TOGGLE DARK MODE
+   151	  const handleToggleDarkMode = () => {
+   152	    setIsDarkMode((prev) => {
+   153	      const next = !prev;
+   154	      localStorage.setItem('arboscus_dark_mode', String(next));
+   155	      return next;
+   156	    });
+   157	  };
+   158	
+   159	  // SAVE SNAPSHOT BEFORE MODIFICATION
+   160	  const pushHistory = useCallback(() => {
+   161	    setPastAssignments((prev) => [...prev, JSON.parse(JSON.stringify(assignments))]);
+   162	    setFutureAssignments([]); // Clear redo stack on new action
+   163	  }, [assignments]);
+   164	
+   165	  // UNDO ACTION
+   166	  const handleUndo = useCallback(() => {
+   167	    if (pastAssignments.length === 0) return;
+   168	    const previousState = pastAssignments[pastAssignments.length - 1];
+   169	    setPastAssignments((prev) => prev.slice(0, prev.length - 1));
+   170	    setFutureAssignments((prev) => [...prev, JSON.parse(JSON.stringify(assignments))]);
+   171	    setAssignments(previousState);
+   172	  }, [pastAssignments, assignments]);
+   173	
+   174	  // REDO ACTION
+   175	  const handleRedo = useCallback(() => {
+   176	    if (futureAssignments.length === 0) return;
+   177	    const nextState = futureAssignments[futureAssignments.length - 1];
+   178	    setFutureAssignments((prev) => prev.slice(0, prev.length - 1));
+   179	    setPastAssignments((prev) => [...prev, JSON.parse(JSON.stringify(assignments))]);
+   180	    setAssignments(nextState);
+   181	  }, [futureAssignments, assignments]);
+   182	
+   183	  // GLOBAL KEYBOARD SHORTCUTS FOR UNDO / REDO
+   184	  useEffect(() => {
+   185	    const handleKeyDown = (e: KeyboardEvent) => {
+   186	      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+   187	        if (e.shiftKey) {
+   188	          e.preventDefault();
+   189	          handleRedo();
+   190	        } else {
+   191	          e.preventDefault();
+   192	          handleUndo();
+   193	        }
+   194	      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+   195	        e.preventDefault();
+   196	        handleRedo();
+   197	      }
+   198	    };
+   199	
+   200	    window.addEventListener('keydown', handleKeyDown);
+   201	    return () => window.removeEventListener('keydown', handleKeyDown);
+   202	  }, [handleUndo, handleRedo]);
+   203	
+   204	  // DETECT CONFLICTS
+   205	  const allConflicts = useMemo(() => {
+   206	    return detectConflicts(
+   207	      assignments,
+   208	      employees,
+   209	      absences,
+   210	      worksites,
+   211	      equipment,
+   212	      vehicles
+   213	    );
+   214	  }, [assignments, employees, absences, worksites, equipment, vehicles]);
+   215	
+   216	  // WEEKLY CONFLICTS FILTERED BY CURRENT WEEK DATES
+   217	  const weeklyConflicts = useMemo(() => {
+   218	    return allConflicts.filter(
+   219	      (c) =>
+   220	        c.affectedDate === 'Ganze Woche' ||
+   221	        (c.affectedDate >= currentWeek.startDate && c.affectedDate <= currentWeek.endDate)
+   222	    );
+   223	  }, [allConflicts, currentWeek.startDate, currentWeek.endDate]);
+   224	
+   225	  const blockingConflictsCount = useMemo(() => {
+   226	    return weeklyConflicts.filter((c) => c.severity === 'blocking').length;
+   227	  }, [weeklyConflicts]);
+   228	
+   229	  // BENTO SUMMARY TILES METRICS
+   230	  const metrics = useMemo(() => {
+   231	    return computeBentoMetrics(
+   232	      employees,
+   233	      assignments,
+   234	      absences,
+   235	      worksites,
+   236	      vehicles,
+   237	      equipment,
+   238	      weeklyConflicts,
+   239	      currentWeek.startDate,
+   240	      currentWeek.endDate
+   241	    );
+   242	  }, [
+   243	    employees,
+   244	    assignments,
+   245	    absences,
+   246	    worksites,
+   247	    vehicles,
+   248	    equipment,
+   249	    weeklyConflicts,
+   250	    currentWeek.startDate,
+   251	    currentWeek.endDate,
+   252	  ]);
+   253	
+   254	  // FILTERED ASSIGNMENTS
+   255	  const filteredAssignments = useMemo(() => {
+   256	    return assignments.filter((asg) => {
+   257	      if (activeView === '1W' && (asg.date < currentWeek.startDate || asg.date > currentWeek.endDate)) {
+   258	        return false;
+   259	      }
+   260	
+   261	      // Filter by search term
+   262	      if (filters.searchTerm) {
+   263	        const term = filters.searchTerm.toLowerCase();
+   264	        const worksite = worksites.find((w) => w.id === asg.worksiteId);
+   265	        const matchesWorksite = worksite && (worksite.name.toLowerCase().includes(term) || worksite.location.toLowerCase().includes(term));
+   266	        const matchesActivity = asg.activityName.toLowerCase().includes(term);
+   267	        const matchesEmps = asg.assignedEmployeeIds.some((id) => {
+   268	          const emp = employees.find((e) => e.id === id);
+   269	          return emp && `${emp.firstName} ${emp.lastName}`.toLowerCase().includes(term);
+   270	        });
+   271	
+   272	        if (!matchesWorksite && !matchesActivity && !matchesEmps) return false;
+   273	      }
+   274	
+   275	      // Filter by specific worksite
+   276	      if (filters.selectedWorksiteId && asg.worksiteId !== filters.selectedWorksiteId) {
+   277	        return false;
+   278	      }
+   279	
+   280	      // Filter by role or skill
+   281	      if (filters.selectedRole || filters.selectedSkill) {
+   282	        const assignedEmps = asg.assignedEmployeeIds
+   283	          .map((id) => employees.find((e) => e.id === id))
+   284	          .filter(Boolean);
+   285	
+   286	        if (filters.selectedRole && !assignedEmps.some((e) => e?.role === filters.selectedRole)) {
+   287	          return false;
+   288	        }
+   289	
+   290	        if (
+   291	          filters.selectedSkill &&
+   292	          !assignedEmps.some((e) => e?.skills.includes(filters.selectedSkill!))
+   293	        ) {
+   294	          return false;
+   295	        }
+   296	      }
+   297	
+   298	      // Filter by conflicts only
+   299	      if (filters.onlyConflicts) {
+   300	        const hasConflict = allConflicts.some(
+   301	          (c) => c.affectedWorksiteId === asg.worksiteId && c.affectedDate === asg.date
+   302	        );
+   303	        if (!hasConflict) return false;
+   304	      }
+   305	
+   306	      // Filter by unassigned only
+   307	      if (filters.onlyUnassigned && asg.assignedEmployeeIds.length > 0) {
+   308	        return false;
+   309	      }
+   310	
+   311	      return true;
+   312	    });
+   313	  }, [assignments, activeView, currentWeek, filters, worksites, employees, allConflicts]);
+   314	
+   315	  // CURRENTLY SELECTED ASSIGNMENT FOR DRAWER
+   316	  const selectedAssignment = useMemo(() => {
+   317	    return assignments.find((a) => a.id === selectedAssignmentId) || null;
+   318	  }, [assignments, selectedAssignmentId]);
+   319	
+   320	  const selectedWorksite = useMemo(() => {
+   321	    if (!selectedAssignment) return null;
+   322	    return worksites.find((w) => w.id === selectedAssignment.worksiteId) || null;
+   323	  }, [selectedAssignment, worksites]);
+   324	
+   325	  const selectedAssignedEmployees = useMemo(() => {
+   326	    if (!selectedAssignment) return [];
+   327	    return selectedAssignment.assignedEmployeeIds
+   328	      .map((id) => employees.find((e) => e.id === id))
+   329	      .filter((e): e is Employee => Boolean(e));
+   330	  }, [selectedAssignment, employees]);
+   331	
+   332	  const selectedAssignedVehicles = useMemo(() => {
+   333	    if (!selectedAssignment) return [];
+   334	    return selectedAssignment.assignedVehicleIds
+   335	      .map((id) => vehicles.find((v) => v.id === id))
+   336	      .filter((v): v is Vehicle => Boolean(v));
+   337	  }, [selectedAssignment, vehicles]);
+   338	
+   339	  const selectedAssignedEquipment = useMemo(() => {
+   340	    if (!selectedAssignment) return [];
+   341	    return selectedAssignment.assignedEquipmentIds
+   342	      .map((id) => equipment.find((eq) => eq.id === id))
+   343	      .filter((eq): eq is Equipment => Boolean(eq));
+   344	  }, [selectedAssignment, equipment]);
+   345	
+   346	  const selectedWeather = useMemo(() => {
+   347	    if (!selectedAssignment || !selectedWorksite) return undefined;
+   348	    return weatherData.find(
+   349	      (w) => w.date === selectedAssignment.date && (w.location.includes(selectedWorksite.location) || selectedWorksite.location.includes(w.location))
+   350	    ) || weatherData.find((w) => w.date === selectedAssignment.date);
+   351	  }, [selectedAssignment, selectedWorksite, weatherData]);
+   352	
+   353	  // ACTIONS & HANDLERS
+   354	  const handlePrevWeek = () => {
+   355	    if (activeView === 'MONTH') {
+   356	      const [y, m] = currentMonthDate.split('-').map(Number);
+   357	      let newM = m - 1;
+   358	      let newY = y;
+   359	      if (newM < 1) {
+   360	        newM = 12;
+   361	        newY -= 1;
+   362	      }
+   363	      setCurrentMonthDate(`${newY}-${String(newM).padStart(2, '0')}`);
+   364	    } else {
+   365	      setCurrentWeekIndex((prev) => Math.max(0, prev - 1));
+   366	    }
+   367	  };
+   368	
+   369	  const handleNextWeek = () => {
+   370	    if (activeView === 'MONTH') {
+   371	      const [y, m] = currentMonthDate.split('-').map(Number);
+   372	      let newM = m + 1;
+   373	      let newY = y;
+   374	      if (newM > 12) {
+   375	        newM = 1;
+   376	        newY += 1;
+   377	      }
+   378	      setCurrentMonthDate(`${newY}-${String(newM).padStart(2, '0')}`);
+   379	    } else {
+   380	      setCurrentWeekIndex((prev) => Math.min(weeks.length - 1, prev + 1));
+   381	    }
+   382	  };
+   383	
+   384	  const handleToday = () => {
+   385	    setCurrentWeekIndex(0);
+   386	    setCurrentMonthDate('2026-09');
+   387	  };
+   388	
+   389	  const handleOpenQuickAdd = (date?: string) => {
+   390	    setQuickAddDefaultDate(date || '2026-09-14');
+   391	    setIsQuickAddOpen(true);
+   392	  };
+   393	
+   394	  const handleQuickAddSubmit = (newAssignmentData: Omit<WorksiteAssignment, 'id'>) => {
+   395	    pushHistory();
+   396	
+   397	    const newAsg: WorksiteAssignment = {
+   398	      ...newAssignmentData,
+   399	      id: `asg-quick-${Date.now()}`,
+   400	      status: 'draft', // Created as draft initially as required
+   401	    };
+   402	
+   403	    setAssignments((prev) => [...prev, newAsg]);
+   404	    setSelectedAssignmentId(newAsg.id);
+   405	
+   406	    // Update draft changes count
+   407	    setWeeks((prevWeeks) =>
+   408	      prevWeeks.map((w, idx) =>
+   409	        idx === currentWeekIndex
+   410	          ? { ...w, draftChangesCount: w.draftChangesCount + 1, isPublished: false }
+   411	          : w
+   412	      )
+   413	    );
+   414	  };
+   415	
+   416	  const handleAddAssignment = (date: string) => {
+   417	    handleOpenQuickAdd(date);
+   418	  };
+   419	
+   420	  const handleAddEmployeeToAssignment = (employeeId: string) => {
+   421	    if (!selectedAssignmentId) return;
+   422	    pushHistory();
+   423	
+   424	    setAssignments((prev) =>
+   425	      prev.map((a) => {
+   426	        if (a.id === selectedAssignmentId && !a.assignedEmployeeIds.includes(employeeId)) {
+   427	          return {
+   428	            ...a,
+   429	            assignedEmployeeIds: [...a.assignedEmployeeIds, employeeId],
+   430	            status: 'modified',
+   431	          };
+   432	        }
+   433	        return a;
+   434	      })
+   435	    );
+   436	
+   437	    setWeeks((prev) =>
+   438	      prev.map((w, idx) =>
+   439	        idx === currentWeekIndex
+   440	          ? { ...w, draftChangesCount: w.draftChangesCount + 1, isPublished: false }
+   441	          : w
+   442	      )
+   443	    );
+   444	  };
+   445	
+   446	  const handleRemoveEmployeeFromAssignment = (employeeId: string) => {
+   447	    if (!selectedAssignmentId) return;
+   448	    pushHistory();
+   449	
+   450	    setAssignments((prev) =>
+   451	      prev.map((a) => {
+   452	        if (a.id === selectedAssignmentId) {
+   453	          return {
+   454	            ...a,
+   455	            assignedEmployeeIds: a.assignedEmployeeIds.filter((id) => id !== employeeId),
+   456	            status: 'modified',
+   457	          };
+   458	        }
+   459	        return a;
+   460	      })
+   461	    );
+   462	  };
+   463	
+   464	  const handleAddVehicleToAssignment = (vehicleId: string) => {
+   465	    if (!selectedAssignmentId) return;
+   466	    pushHistory();
+   467	
+   468	    setAssignments((prev) =>
+   469	      prev.map((a) => {
+   470	        if (a.id === selectedAssignmentId && !a.assignedVehicleIds.includes(vehicleId)) {
+   471	          return {
+   472	            ...a,
+   473	            assignedVehicleIds: [...a.assignedVehicleIds, vehicleId],
+   474	            status: 'modified',
+   475	          };
+   476	        }
+   477	        return a;
+   478	      })
+   479	    );
+   480	  };
+   481	
+   482	  const handleRemoveVehicleFromAssignment = (vehicleId: string) => {
+   483	    if (!selectedAssignmentId) return;
+   484	    pushHistory();
+   485	
+   486	    setAssignments((prev) =>
+   487	      prev.map((a) => {
+   488	        if (a.id === selectedAssignmentId) {
+   489	          return {
+   490	            ...a,
+   491	            assignedVehicleIds: a.assignedVehicleIds.filter((id) => id !== vehicleId),
+   492	            status: 'modified',
+   493	          };
+   494	        }
+   495	        return a;
+   496	      })
+   497	    );
+   498	  };
+   499	
+   500	  const handleAddEquipmentToAssignment = (equipmentId: string) => {
+   501	    if (!selectedAssignmentId) return;
+   502	    pushHistory();
+   503	
+   504	    setAssignments((prev) =>
+   505	      prev.map((a) => {
+   506	        if (a.id === selectedAssignmentId && !a.assignedEquipmentIds.includes(equipmentId)) {
+   507	          return {
+   508	            ...a,
+   509	            assignedEquipmentIds: [...a.assignedEquipmentIds, equipmentId],
+   510	            status: 'modified',
+   511	          };
+   512	        }
+   513	        return a;
+   514	      })
+   515	    );
+   516	  };
+   517	
+   518	  const handleRemoveEquipmentFromAssignment = (equipmentId: string) => {
+   519	    if (!selectedAssignmentId) return;
+   520	    pushHistory();
+=== UIUX tests ===
+     1	import { describe, it, expect } from 'vitest';
+     2	import { detectConflicts, calculateHours } from '../domain/conflictEngine';
+     3	import {
+     4	  getEmployeeCapacitySummaries,
+     5	  getWorksitePersonHours,
+     6	  getResourceUtilization,
+     7	} from '../domain/capacityEngine';
+     8	import {
+     9	  INITIAL_EMPLOYEES,
+    10	  INITIAL_ABSENCES,
+    11	  INITIAL_WORKSITES,
+    12	  INITIAL_VEHICLES,
+    13	  INITIAL_EQUIPMENT,
+    14	  INITIAL_ASSIGNMENTS,
+    15	  INITIAL_WEEKS,
+    16	} from '../data/mockData';
+    17	import { WorksiteAssignment } from '../types';
+    18	
+    19	describe('Arboscus Workforce Planning - Domain Rules Tests', () => {
+    20	  it('should accurately calculate assignment hours from start and end times', () => {
+    21	    expect(calculateHours('07:00', '15:30')).toBe(8.5);
+    22	    expect(calculateHours('07:30', '16:00')).toBe(8.5);
+    23	    expect(calculateHours('07:00', '14:00')).toBe(7.0);
+    24	  });
+    25	
+    26	  it('should detect an absence conflict when an absent employee is assigned', () => {
+    27	    // Thomas Berger (emp-7) is absent on 2026-09-14
+    28	    const testAssignments: WorksiteAssignment[] = [
+    29	      {
+    30	        id: 'test-asg-1',
+    31	        worksiteId: 'site-1',
+    32	        date: '2026-09-14',
+    33	        startTime: '07:00',
+    34	        endTime: '15:30',
+    35	        activityName: 'Test Activity',
+    36	        assignedEmployeeIds: ['emp-7'], // Thomas Berger on leave
+    37	        assignedVehicleIds: [],
+    38	        assignedEquipmentIds: [],
+    39	        status: 'draft',
+    40	      },
+    41	    ];
+    42	
+    43	    const conflicts = detectConflicts(
+    44	      testAssignments,
+    45	      INITIAL_EMPLOYEES,
+    46	      INITIAL_ABSENCES,
+    47	      INITIAL_WORKSITES,
+    48	      INITIAL_EQUIPMENT,
+    49	      INITIAL_VEHICLES
+    50	    );
+    51	
+    52	    const absConflict = conflicts.find((c) => c.type === 'absence_conflict');
+    53	    expect(absConflict).toBeDefined();
+    54	    expect(absConflict?.severity).toBe('blocking');
+    55	    expect(absConflict?.affectedEmployeeIds).toContain('emp-7');
+    56	  });
+    57	
+    58	  it('should detect a double-booking conflict when an employee is on two overlapping assignments', () => {
+    59	    const testAssignments: WorksiteAssignment[] = [
+    60	      {
+    61	        id: 'test-asg-1',
+    62	        worksiteId: 'site-1',
+    63	        date: '2026-09-15',
+    64	        startTime: '07:00',
+    65	        endTime: '15:30',
+    66	        activityName: 'Site 1 Work',
+    67	        assignedEmployeeIds: ['emp-1'], // Martin Schuster
+    68	        assignedVehicleIds: [],
+    69	        assignedEquipmentIds: [],
+    70	        status: 'draft',
+    71	      },
+    72	      {
+    73	        id: 'test-asg-2',
+    74	        worksiteId: 'site-2',
+    75	        date: '2026-09-15',
+    76	        startTime: '08:00',
+    77	        endTime: '16:00',
+    78	        activityName: 'Site 2 Work',
+    79	        assignedEmployeeIds: ['emp-1'], // Martin Schuster assigned again
+    80	        assignedVehicleIds: [],
+    81	        assignedEquipmentIds: [],
+    82	        status: 'draft',
+    83	      },
+    84	    ];
+    85	
+    86	    const conflicts = detectConflicts(
+    87	      testAssignments,
+    88	      INITIAL_EMPLOYEES,
+    89	      INITIAL_ABSENCES,
+    90	      INITIAL_WORKSITES,
+    91	      INITIAL_EQUIPMENT,
+    92	      INITIAL_VEHICLES
+    93	    );
+    94	
+    95	    const dbConflict = conflicts.find((c) => c.type === 'double_booking');
+    96	    expect(dbConflict).toBeDefined();
+    97	    expect(dbConflict?.severity).toBe('blocking');
+    98	    expect(dbConflict?.affectedEmployeeIds).toContain('emp-1');
+    99	  });
+   100	
+   101	  it('should detect a resource double-booking for exclusive equipment', () => {
+   102	    const testAssignments: WorksiteAssignment[] = [
+   103	      {
+   104	        id: 'test-asg-1',
+   105	        worksiteId: 'site-1',
+   106	        date: '2026-09-16',
+   107	        startTime: '07:00',
+   108	        endTime: '15:30',
+   109	        activityName: 'Site 1 Work',
+   110	        assignedEmployeeIds: ['emp-1'],
+   111	        assignedVehicleIds: [],
+   112	        assignedEquipmentIds: ['eq-1'], // Ruthmann Hubarbeitsbühne (Exclusive)
+   113	        status: 'draft',
+   114	      },
+   115	      {
+   116	        id: 'test-asg-2',
+   117	        worksiteId: 'site-2',
+   118	        date: '2026-09-16',
+   119	        startTime: '07:00',
+   120	        endTime: '15:30',
+   121	        activityName: 'Site 2 Work',
+   122	        assignedEmployeeIds: ['emp-2'],
+   123	        assignedVehicleIds: [],
+   124	        assignedEquipmentIds: ['eq-1'], // Same Exclusive Equipment
+   125	        status: 'draft',
+   126	      },
+   127	    ];
+   128	
+   129	    const conflicts = detectConflicts(
+   130	      testAssignments,
+   131	      INITIAL_EMPLOYEES,
+   132	      INITIAL_ABSENCES,
+   133	      INITIAL_WORKSITES,
+   134	      INITIAL_EQUIPMENT,
+   135	      INITIAL_VEHICLES
+   136	    );
+   137	
+   138	    const eqConflict = conflicts.find((c) => c.type === 'resource_double_booking');
+   139	    expect(eqConflict).toBeDefined();
+   140	    expect(eqConflict?.severity).toBe('blocking');
+   141	    expect(eqConflict?.affectedResourceId).toBe('eq-1');
+   142	  });
+   143	
+   144	  it('should correctly sum planned weekly hours and calculate person-hours per site', () => {
+   145	    const capacities = getEmployeeCapacitySummaries(
+   146	      INITIAL_EMPLOYEES,
+   147	      INITIAL_ASSIGNMENTS,
+   148	      INITIAL_ABSENCES,
+   149	      '2026-09-14',
+   150	      '2026-09-18'
+   151	    );
+   152	
+   153	    const martinCap = capacities.find((c) => c.employeeId === 'emp-1');
+   154	    expect(martinCap).toBeDefined();
+   155	    expect(martinCap?.plannedHours).toBeGreaterThan(0);
+   156	
+   157	    const site1Hours = getWorksitePersonHours('site-1', INITIAL_ASSIGNMENTS);
+   158	    expect(site1Hours.totalPersonHours).toBeGreaterThan(0);
+   159	    expect(site1Hours.totalAssignedPeople).toBeGreaterThan(0);
+   160	  });
+   161	
+   162	  it('should verify that four-week horizon contains exactly 4 weeks', () => {
+   163	    expect(INITIAL_WEEKS.length).toBe(4);
+   164	    expect(INITIAL_WEEKS[0].weekNumber).toBe(38);
+   165	    expect(INITIAL_WEEKS[1].weekNumber).toBe(39);
+   166	    expect(INITIAL_WEEKS[2].weekNumber).toBe(40);
+   167	    expect(INITIAL_WEEKS[3].weekNumber).toBe(41);
+   168	  });
+   169	
+   170	  it('should verify that domain models contain NO cost or monetary fields in MVP', () => {
+   171	    const sampleEmployee = INITIAL_EMPLOYEES[0] as any;
+   172	    expect(sampleEmployee.hourlyRate).toBeUndefined();
+   173	    expect(sampleEmployee.wage).toBeUndefined();
+   174	    expect(sampleEmployee.cost).toBeUndefined();
+   175	
+   176	    const sampleWorksite = INITIAL_WORKSITES[0] as any;
+   177	    expect(sampleWorksite.budget).toBeUndefined();
+   178	    expect(sampleWorksite.revenue).toBeUndefined();
+   179	  });
+   180	});

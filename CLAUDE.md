@@ -67,12 +67,29 @@ pnpm exec supabase test db              # pgTAP (supabase/tests/*.sql)
 pnpm exec supabase status               # local URLs/keys
 ```
 
+Tenant suites take their connection from their own variables, not from `DATABASE_URL`:
+`EASYTREE_TEST_DB_URL` (default `postgresql://postgres:postgres@127.0.0.1:54322/postgres`) and
+`EASYTREE_TEST_POOLER_URL` (Supavisor; CI derives it from the running container, so locally you
+must build it yourself — user `postgres.<pooler-tenant-id>`, port 54329). Against a running
+stack, the **direct-connection half** of the CI gate is:
+
+```bash
+pnpm --filter @easytree/config build      # exec bypasses turbo's ^build; dist/ must exist
+EASYTREE_TENANT_TESTS=required \
+  pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts
+```
+
+That is **not** the whole gate: `db-gates` also runs `test/tenant-pooling.integration.test.ts`
+against the transaction pooler with `EASYTREE_TEST_POOLER_URL` set, and asserts a
+`[tenant-pooling] mode=required executed=… skipped=0` line. Only the CI run covers both.
+
 Runtime smokes and branch protection:
 
 ```bash
 NODE_ENV=test API_PORT=3001 EXPECT_READY=200 DATABASE_URL=... SUPABASE_URL=... \
   SUPABASE_ANON_KEY=... bash scripts/smoke-api.sh    # boots dist, /health, /ready, SIGTERM
 bash scripts/smoke-worker.sh                         # worker opens no port, shuts down clean
+                                                     # (same strict test-preset env as above)
 bash scripts/verify-branch-protection.sh             # reads effective GitHub ruleset (gh CLI)
 ```
 
@@ -103,6 +120,16 @@ defaults, `test` has **no** connection defaults, `production` has no defaults _a
 localhost URLs. `ConfigValidationError` names variables only, never values — do not attach
 the ZodError or log raw config; use `redact()`.
 
+The canonical variable set is exactly six: `NODE_ENV`, `DATABASE_URL`, `SUPABASE_URL`,
+`SUPABASE_ANON_KEY`, `API_PORT`, `LOG_LEVEL`. Because the schema is strict _and_ the `test`
+preset has no defaults, **adding or renaming one touches every site below** — miss any and the
+build or a whole suite fails: `packages/config/src/schema.ts` (`ENV_VAR_META` _and_ all three
+presets _and_ the `AppConfig` interface), the mapping at the end of
+`packages/config/src/load.ts`, `apps/api/test/setup.ts` (sets every variable explicitly),
+`.env.example`, and the `env:` blocks of the `db-gates` job in `.github/workflows/ci.yml` plus
+`scripts/smoke-api.sh` / `scripts/smoke-worker.sh`. `EASYTREE_*` variables are _not_ part of
+this set — they steer tests, never the app, and must never enter `ENV_VAR_META`.
+
 **Web never talks to Supabase or bare `fetch`.** Components get an `ApiClient` from React
 context (`lib/api-client-provider.tsx`); the single construction site is `app/providers.tsx`
 (`NEXT_PUBLIC_API_URL`). `apps/web/test/no-supabase-import.test.ts` is a static guard that
@@ -130,7 +157,9 @@ defense-in-depth; normal runtime credentials must never bypass RLS. See
   via the Supabase dashboard/Studio are forbidden, including "just to try it". Merged
   migrations are append-only — fix forward with a new migration, never edit or delete.
   `supabase/seed.sql` holds synthetic data with fixed UUIDs only. Definition of done: two
-  consecutive `db reset` runs plus green `supabase test db`. See
+  consecutive `db reset` runs plus green `supabase test db`. Filenames follow
+  `<timestamp>_NNNN_<slug>.sql` (`20260723222457_0002_tenancy.sql`); `supabase migration new`
+  emits only the timestamp, so **rename the new file to continue the `NNNN` sequence**. See
   [`docs/runbooks/database-workflow.md`](docs/runbooks/database-workflow.md).
 - **Tests fail closed.** Tenant suites read `EASYTREE_TENANT_TESTS`: `local` (default) skips
   with a warning on an unreachable DB; `required` (CI job `db-gates`) errors on an unreachable
@@ -187,7 +216,11 @@ the running container, not hardcoded), then the API/worker process smokes.
 - `apps/web` and `packages/ui` run in jsdom; web sets `oxc.jsx.runtime = "automatic"` because
   Next's tsconfig uses `jsx: "preserve"`.
 - Playwright (`apps/web/e2e/`) runs against the production build (`next start` on 3000) with
-  axe; it is not part of `pnpm test`.
+  axe; it is not part of `pnpm test`. It starts that server itself
+  (`reuseExistingServer: false`), so port 3000 must be free.
+- `scripts/smoke-worker.sh` detects listening sockets via `ss` or `/proc/net/tcp*` — **on macOS
+  neither exists, so the "no open port" assertion passes vacuously**. Only the Linux CI run
+  (`db-gates`) is evidence for that claim.
 - Automated a11y lives in `apps/web/test/a11y.test.tsx` (jsdom + axe) and, since Sprint 2, in
   `apps/web/e2e/shell-smoke.spec.ts` (real Chromium, CI job `web-smoke`). In
   `docs/runbooks/a11y-checklist.md`, items 1–6 are passed and regression-guarded; only item 7
@@ -207,3 +240,10 @@ the running container, not hardcoded), then the API/worker process smokes.
   tooling, not project source) and `_sprint2-transfer/` holds git bundles. Neither is
   prettier-ignored, so `pnpm format` locally may report files CI never sees — scope with
   `pnpm exec prettier --check apps packages docs` when that gets noisy.
+- The working tree also carries **untracked root copies** of four documents that now live in
+  `docs/`: `ADR-001-boilerplate-architecture.md`, `VALIDATION.md`, `agent_handoff_v1.3.md`
+  (byte-identical to their `docs/` counterparts) and
+  `jira_epic_post_mvp_planungsoekonomie_maschinenverleih.md` (**diverged** from
+  `docs/backlog/post-mvp/jira_epic_planungsoekonomie_maschinenverleih.md`). A root-level grep
+  therefore returns doubled hits; the tracked `docs/` file is authoritative in every case.
+  Never edit or cite the root copies.

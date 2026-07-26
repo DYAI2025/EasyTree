@@ -1,0 +1,7 @@
+Local environment evidence on 2026-07-26 Europe/Berlin:
+- Node.js and npm are available.
+- pnpm and bun are not installed.
+- Corepack could not download pnpm because outbound registry access failed (EAI_AGAIN).
+- The ZIPs contain no node_modules and no .git history.
+- Therefore project builds, linters, typechecks, tests, browser flows, dependency scans, and production behavior were NOT re-executed.
+- All implementation and gap claims are source-inspected unless explicitly classified otherwise.
