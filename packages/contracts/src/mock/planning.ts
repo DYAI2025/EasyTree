@@ -22,14 +22,27 @@ import type {
   ValidatePlanCommand,
 } from "../planning/schemas.js";
 
+/**
+ * Zustand einer einzelnen Woche.
+ *
+ * Bewusst je Woche und nicht global: eine einzige `publishedVersionId` fuer den
+ * ganzen Mock haette die Version aus Woche 32 auch fuer Woche 40 gemeldet, und
+ * eine Veroeffentlichung in Woche 40 haette das Ergebnis aus Woche 32 geliefert.
+ * Die Stale-Version-Semantik ist aber ausdruecklich pro Planungsfenster — ein
+ * Mock, der das vermischt, laesst die Shell einen Zustand ueben, den es nicht gibt.
+ */
+export interface MockWeekState {
+  readonly assignments: readonly AssignmentDto[];
+  readonly publishedVersionId: string | null;
+  readonly publishResult: PublishedPlanVersion;
+}
+
 export interface MockPlanningState {
   readonly timeZone: string;
-  /** Wochenschluessel -> Einsaetze. Fehlt der Schluessel, ist die Woche leer. */
-  readonly weeks: ReadonlyMap<string, readonly AssignmentDto[]>;
-  readonly publishedVersionId: string | null;
+  /** Wochenschluessel -> Wochenzustand. Fehlt der Schluessel, ist die Woche leer und unveroeffentlicht. */
+  readonly weeks: ReadonlyMap<string, MockWeekState>;
   /** Fest verdrahtete Antwort der Validierung — der Mock rechnet NICHT. */
   readonly validation: PlanValidationResult;
-  readonly publishResult: PublishedPlanVersion;
   /** Erzeugte Id fuer `createAssignment`. Kein Zufall, damit Tests reproduzierbar bleiben. */
   readonly nextAssignmentId: string;
 }
@@ -61,12 +74,13 @@ export class MockPlanningGateway implements PlanningGateway {
   getPlanningWindow(input: PlanningWindowQuery): Promise<GatewayResult<PlanningWindow>> {
     const failed = this.#maybeFail<PlanningWindow>();
     if (failed !== null) return Promise.resolve(failed);
+    const week = this.state.weeks.get(input.weekKey);
     return Promise.resolve(
       gatewayOk({
         weekKey: input.weekKey,
         timeZone: this.state.timeZone,
-        assignments: [...(this.state.weeks.get(input.weekKey) ?? [])],
-        publishedVersionId: this.state.publishedVersionId,
+        assignments: [...(week?.assignments ?? [])],
+        publishedVersionId: week?.publishedVersionId ?? null,
       }),
     );
   }
@@ -101,9 +115,12 @@ export class MockPlanningGateway implements PlanningGateway {
   publishPlan(input: PublishPlanCommand): Promise<GatewayResult<PublishedPlanVersion>> {
     const failed = this.#maybeFail<PublishedPlanVersion>();
     if (failed !== null) return Promise.resolve(failed);
-    // Stale-Version-Erkennung ist auch im Mock echt: sonst koennte die Shell den
-    // Zustand nie zeigen, den sie behandeln muss.
-    if (input.expectedVersionId !== this.state.publishedVersionId) {
+    const week = this.state.weeks.get(input.weekKey);
+    // Stale-Version-Erkennung ist auch im Mock echt und PRO WOCHE: sonst koennte
+    // die Shell den Zustand nie zeigen, den sie behandeln muss — und ein
+    // wochenuebergreifender Vergleich wuerde einen Konflikt melden, den es in
+    // der angefragten Woche gar nicht gibt.
+    if (input.expectedVersionId !== (week?.publishedVersionId ?? null)) {
       return Promise.resolve(
         gatewayFailed<PublishedPlanVersion>("STALE_VERSION", {
           type: "about:blank",
@@ -114,6 +131,17 @@ export class MockPlanningGateway implements PlanningGateway {
         }),
       );
     }
-    return Promise.resolve(gatewayOk(this.state.publishResult));
+    if (week === undefined) {
+      return Promise.resolve(
+        gatewayFailed<PublishedPlanVersion>("REJECTED", {
+          type: "about:blank",
+          title: "Unbekanntes Planungsfenster",
+          status: 404,
+          detail: `Fuer ${input.weekKey} ist im Clickdummy kein Zustand hinterlegt.`,
+          correlationId: "mock-correlation-id",
+        }),
+      );
+    }
+    return Promise.resolve(gatewayOk(week.publishResult));
   }
 }

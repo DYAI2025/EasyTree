@@ -33,6 +33,14 @@ export const InstantSchema = z
     INSTANT_PATTERN,
     "Zeitpunkt muss UTC mit drei Nachkommastellen sein, z. B. 2026-08-03T06:00:00.000Z",
   )
+  // Das Muster prueft nur die FORM. "2026-99-99T29:61:61.000Z" hat die richtige
+  // Form und ist trotzdem kein Zeitpunkt. Der Rueckweg ueber Date faengt das:
+  // ein ungueltiges Datum ergibt NaN, und toISOString liefert genau dann denselben
+  // String zurueck, wenn der Wert kanonisch UTC mit drei Nachkommastellen ist.
+  .refine((value) => {
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+  }, "Kein gueltiger Zeitpunkt im gregorianischen Kalender")
   .describe("UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z");
 
 export type Instant = z.infer<typeof InstantSchema>;

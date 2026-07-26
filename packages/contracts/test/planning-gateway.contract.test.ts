@@ -32,28 +32,45 @@ function makeMock(): MockPlanningGateway {
     weeks: new Map([
       [
         "2026-W32",
-        [
-          {
-            id: ASSIGNMENT_ID,
-            employeeId: EMPLOYEE_ID,
-            worksiteId: WORKSITE_ID,
-            interval: INTERVAL,
+        {
+          assignments: [
+            {
+              id: ASSIGNMENT_ID,
+              employeeId: EMPLOYEE_ID,
+              worksiteId: WORKSITE_ID,
+              interval: INTERVAL,
+            },
+          ],
+          publishedVersionId: VERSION_ID,
+          publishResult: {
+            versionId: VERSION_ID,
+            weekKey: "2026-W32",
+            publishedAtUtc: "2026-08-01T09:00:00.000Z",
+            assignmentIds: [ASSIGNMENT_ID],
           },
-        ],
+        },
+      ],
+      [
+        // Zweite, noch unveroeffentlichte Woche. Ohne sie waere nicht pruefbar,
+        // dass Version und Publish-Ergebnis pro Fenster gelten.
+        "2026-W33",
+        {
+          assignments: [],
+          publishedVersionId: null,
+          publishResult: {
+            versionId: "3f2504e0-4f89-41d3-9a0c-0305e82c3399",
+            weekKey: "2026-W33",
+            publishedAtUtc: "2026-08-08T09:00:00.000Z",
+            assignmentIds: [],
+          },
+        },
       ],
     ]),
-    publishedVersionId: VERSION_ID,
     validation: {
       conflicts: [
         { code: "EMPLOYEE_WEEKLY_CAPACITY", blocking: false, message: "32 h in dieser Woche" },
       ],
       publishable: true,
-    },
-    publishResult: {
-      versionId: VERSION_ID,
-      weekKey: "2026-W32",
-      publishedAtUtc: "2026-08-01T09:00:00.000Z",
-      assignmentIds: [ASSIGNMENT_ID],
     },
     nextAssignmentId: "3f2504e0-4f89-41d3-9a0c-0305e82c3304",
   });
@@ -156,5 +173,40 @@ describe("Mock-Ehrlichkeit", () => {
     };
     void mock.validateDraft(command);
     expect(mock.lastValidated).toEqual(command);
+  });
+});
+
+describe("Planversion gilt pro Woche", () => {
+  it("meldet fuer eine unveroeffentlichte Woche keine fremde Version", async () => {
+    const gateway = makeMock();
+    const w33 = await gateway.getPlanningWindow({ weekKey: "2026-W33" });
+    expect(w33.ok).toBe(true);
+    if (!w33.ok) return;
+    expect(w33.value.publishedVersionId).toBeNull();
+  });
+
+  it("veroeffentlicht in Woche 33 das Ergebnis von Woche 33", async () => {
+    const gateway = makeMock();
+    const published = await gateway.publishPlan({ weekKey: "2026-W33", expectedVersionId: null });
+    expect(published.ok).toBe(true);
+    if (!published.ok) return;
+    expect(published.value.weekKey).toBe("2026-W33");
+  });
+
+  it("meldet Stale-Version anhand der ANGEFRAGTEN Woche", async () => {
+    const gateway = makeMock();
+    // Die Version aus Woche 32 ist fuer Woche 33 kein gueltiger Erwartungswert.
+    const wrong = await gateway.publishPlan({ weekKey: "2026-W33", expectedVersionId: VERSION_ID });
+    expect(wrong.ok).toBe(false);
+    if (wrong.ok) return;
+    expect(wrong.failure).toBe("STALE_VERSION");
+  });
+
+  it("lehnt ein unbekanntes Planungsfenster ab, statt eine fremde Version zu liefern", async () => {
+    const gateway = makeMock();
+    const unknown = await gateway.publishPlan({ weekKey: "2026-W40", expectedVersionId: null });
+    expect(unknown.ok).toBe(false);
+    if (unknown.ok) return;
+    expect(unknown.failure).toBe("REJECTED");
   });
 });

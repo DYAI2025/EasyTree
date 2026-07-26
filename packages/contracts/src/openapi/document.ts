@@ -39,7 +39,7 @@ import {
   TimeIntervalDtoSchema,
   ValidatePlanCommandSchema,
 } from "../planning/schemas.js";
-import { IDEMPOTENCY_HEADER, ProblemDocumentSchema } from "../primitives.js";
+import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, ProblemDocumentSchema } from "../primitives.js";
 
 /** Vertragsversion. Aenderungen hier sind eine bewusste Entscheidung, kein Nebeneffekt. */
 export const API_VERSION = "1.0.0";
@@ -99,7 +99,7 @@ const idempotencyHeader = {
   required: true,
   description:
     "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
-  schema: { type: "string", minLength: 8, maxLength: 128 },
+  schema: z.toJSONSchema(IdempotencyKeySchema, { target: "openapi-3.0" }),
 } as const;
 
 const weekKeyParam = {

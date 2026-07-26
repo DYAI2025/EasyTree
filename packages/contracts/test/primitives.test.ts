@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { AssignmentDtoSchema, PlanningWindowSchema } from "../src/planning/schemas.js";
+import {
+  AssignmentDtoSchema,
+  PlanningWindowSchema,
+  TimeIntervalDtoSchema,
+} from "../src/planning/schemas.js";
 import { IdempotencyKeySchema, InstantSchema, ProblemDocumentSchema } from "../src/primitives.js";
 
 describe("InstantSchema — genau eine Schreibweise", () => {
@@ -80,5 +84,38 @@ describe("IdempotencyKey", () => {
 
   it.each(["kurz", "hat leerzeichen", "hat/slash"])("lehnt %s ab", (value) => {
     expect(IdempotencyKeySchema.safeParse(value).success).toBe(false);
+  });
+});
+
+describe("Formgueltig ist nicht zeitgueltig", () => {
+  it.each([
+    "2026-99-99T06:00:00.000Z",
+    "2026-02-30T06:00:00.000Z",
+    "2026-08-03T29:61:61.000Z",
+    "2026-13-01T06:00:00.000Z",
+  ])("lehnt %s ab, obwohl das Muster passt", (value) => {
+    expect(InstantSchema.safeParse(value).success).toBe(false);
+  });
+
+  it("nimmt den 29. Februar eines Schaltjahres an", () => {
+    expect(InstantSchema.safeParse("2028-02-29T06:00:00.000Z").success).toBe(true);
+  });
+});
+
+describe("TimeIntervalDto erzwingt die Reihenfolge", () => {
+  const base = { startUtc: "2026-08-03T14:00:00.000Z", endUtc: "2026-08-03T06:00:00.000Z" };
+
+  it("lehnt ein verkehrtes Intervall ab", () => {
+    expect(TimeIntervalDtoSchema.safeParse(base).success).toBe(false);
+  });
+
+  it("lehnt ein Nulllaengen-Intervall ab", () => {
+    const point = { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T06:00:00.000Z" };
+    expect(TimeIntervalDtoSchema.safeParse(point).success).toBe(false);
+  });
+
+  it("nimmt ein aufsteigendes Intervall an", () => {
+    const ok = { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T14:00:00.000Z" };
+    expect(TimeIntervalDtoSchema.safeParse(ok).success).toBe(true);
   });
 });

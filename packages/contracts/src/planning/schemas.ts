@@ -22,11 +22,28 @@ import { z } from "zod";
 
 import { IdSchema, InstantSchema } from "../primitives.js";
 
-/** Halb-offenes Intervall als Transportform. Entspricht `TimeInterval` der Domain. */
-export const TimeIntervalDtoSchema = z.strictObject({
-  startUtc: InstantSchema,
-  endUtc: InstantSchema,
-});
+/**
+ * Halb-offenes Intervall als Transportform. Entspricht `TimeInterval` der Domain.
+ *
+ * Die Reihenfolge wird hier geprüft, nicht erst bei der Umwandlung in die
+ * Domain: sonst gälte ein Kommando mit `endUtc <= startUtc` als vertragskonform
+ * und schlüge erst tief im Server fehl. Genau das war der Prototypfehler
+ * (`FIND-004`) — nur eine Schicht höher.
+ *
+ * **Grenze der Veröffentlichung:** JSON Schema kann „Ende nach Beginn" nicht
+ * ausdrücken. Das erzeugte OpenAPI-Dokument trägt die Regel deshalb nicht; ein
+ * generierter Client kann ein verkehrtes Intervall senden. Abgelehnt wird es
+ * trotzdem — von diesem Schema zur Laufzeit.
+ */
+export const TimeIntervalDtoSchema = z
+  .strictObject({
+    startUtc: InstantSchema,
+    endUtc: InstantSchema,
+  })
+  .refine((interval) => interval.endUtc > interval.startUtc, {
+    message: "endUtc muss nach startUtc liegen (halb-offenes Intervall)",
+    path: ["endUtc"],
+  });
 
 export type TimeIntervalDto = z.infer<typeof TimeIntervalDtoSchema>;
 
