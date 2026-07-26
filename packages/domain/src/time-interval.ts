@@ -108,7 +108,26 @@ export class TimeInterval {
   readonly #startMs: number;
   readonly #endMs: number;
 
+  /**
+   * `private` ist eine reine TypeScript-Angabe und wird beim Emit geloescht —
+   * aus JavaScript oder ueber Reflection bleibt `new TimeInterval(ende, start)`
+   * moeglich, und so ein Objekt besteht jeden `instanceof`-Test. Die Invariante
+   * steht deshalb hier, nicht nur in {@link TimeInterval.create}: sie ist eine
+   * Eigenschaft jeder Instanz, unabhaengig vom Weg dorthin.
+   *
+   * Wirft statt ein Ergebnis zurueckzugeben, weil dieser Pfad kein erwarteter
+   * Fehlerfall ist, sondern ein Programmierfehler. Den erwarteten Fall bedient
+   * {@link TimeInterval.create} mit einem Fehlercode.
+   */
   private constructor(startMs: number, endMs: number) {
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+      throw new RangeError("TimeInterval verlangt endliche Millisekundenwerte.");
+    }
+    if (endMs <= startMs) {
+      throw new RangeError(
+        `TimeInterval verlangt start < end (halb-offen), erhalten start=${startMs} end=${endMs}.`,
+      );
+    }
     this.#startMs = startMs;
     this.#endMs = endMs;
     Object.freeze(this);

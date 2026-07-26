@@ -337,3 +337,31 @@ describe("hasAnyOverlap gegen einen Brute-Force-Orakel", () => {
     expect(compared).toBeGreaterThan(500);
   });
 });
+
+describe("Konstruktor haelt die Invariante auch aus JavaScript", () => {
+  // `private constructor` ist reine TypeScript-Erasure. Aus JS oder ueber
+  // Reflection bleibt `new TimeInterval(ende, start)` moeglich, und so ein
+  // Objekt besteht jeden instanceof-Test — der Laufzeit-Guard haette es also
+  // durchgelassen. Deshalb steht die Invariante im Konstruktor selbst.
+  const Ctor = TimeInterval as unknown as new (startMs: number, endMs: number) => TimeInterval;
+  const base = Date.UTC(2026, 7, 3, 8, 0, 0);
+
+  it("lehnt eine verkehrte Reihenfolge ab", () => {
+    expect(() => new Ctor(base + 3_600_000, base)).toThrow(RangeError);
+  });
+
+  it("lehnt ein Nulllaengen-Intervall ab", () => {
+    expect(() => new Ctor(base, base)).toThrow(RangeError);
+  });
+
+  it("lehnt nicht endliche Werte ab", () => {
+    expect(() => new Ctor(Number.NaN, base)).toThrow(RangeError);
+    expect(() => new Ctor(base, Number.POSITIVE_INFINITY)).toThrow(RangeError);
+  });
+
+  it("akzeptiert eine gueltige Reihenfolge", () => {
+    const direct = new Ctor(base, base + 60_000);
+    expect(durationMinutes(direct)).toBe(1);
+    expect(direct).toBeInstanceOf(TimeInterval);
+  });
+});
