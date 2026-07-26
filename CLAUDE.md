@@ -210,7 +210,24 @@ the running container, not hardcoded), then the API/worker process smokes.
 ## Testing notes
 
 - Vitest per package; `test/**/*.test.ts(x)`. Files under `test/` without a `.test.ts` suffix
-  (e.g. `tenant-context.helper.ts`) are shared helpers, not suites.
+  (e.g. `tenant-context.helper.ts`, `test/architecture/{scan,rules}.ts`) are shared helpers,
+  not suites.
+- **Architecture boundaries are enforced by a test, not by convention** (EYT-46).
+  `apps/api/test/architecture.test.ts` scans every `.ts(x)` under `apps/` and `packages/`,
+  extracts imports with `ts.preProcessFile` (regex would miss `export *`, dynamic `import()`
+  and type-only forms) and applies the rules in `test/architecture/rules.ts`. It runs inside
+  the existing `unit-tests` job — deliberately no new required check, so the ruleset needs no
+  admin re-apply. `domain-allowlist` is an **allowlist**: domain code may import only relative
+  paths inside its own `domain/` layer plus `@easytree/domain`. A blocklist cannot express
+  ADR-001's universal ban — `http`, `pg-pool`, `kysely/dist/esm/index.js`, `rxjs` and `typeorm`
+  all slip past the obvious patterns. Scope is registry-driven via `SCAFFOLDED_MODULES`
+  (`apps/api/src/modules/module-catalogue.ts`), and each rule asserts it saw ≥1 file, so a
+  rename or a bad glob turns the suite red instead of silently green. `architecture-red-case.test.ts`
+  proves each rule fires, against a synthetic tree in `os.tmpdir()` — never the real one.
+- **Module table ownership is documentation, not enforcement.** `TABLE_OWNERSHIP` records
+  intent; at runtime there is exactly one application role (`authenticated`) and RLS filters by
+  tenant, not by module, so any module's code can write any table inside its tenant. Do not
+  report ADR-001's "Tabellenbesitzregeln werden in CI geprüft" as satisfied.
 - `apps/api` transforms with **SWC**, not esbuild/oxc — NestJS needs legacy decorators plus
   `design:paramtypes` metadata (`apps/api/vitest.config.ts`).
 - `apps/web` and `packages/ui` run in jsdom; web sets `oxc.jsx.runtime = "automatic"` because

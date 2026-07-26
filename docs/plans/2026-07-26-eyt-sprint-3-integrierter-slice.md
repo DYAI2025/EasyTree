@@ -219,6 +219,14 @@ Konventionen: eigener Branch `feat/eyt-<nr>-<slug>`, ein PR je Aufgabe, Commit-P
   Tabellen; Querzugriff nur über `index.ts`; `packages/shared` bleibt verboten.
 - **Abnahmeevidenz:** ein absichtlich verbotener Import lässt den Architekturtest rot werden —
   Nachweis im PR, danach zurückgenommen.
+- **Planabweichung (bei Umsetzung entschieden, EYT-46):** _kein_ neuer CI-Job. Der Wächter läuft
+  im bestehenden Pflichtjob `unit-tests`. Grund: ein neuer Pflichtcheck verlangt ein erneutes
+  `setup-branch-protection.sh` mit Adminrechten. Wird der PR vor dem Ruleset-Update gemergt, ist
+  der Check unverbindlich; wird das Ruleset zuerst aktualisiert, wartet GitHub bei
+  `bypass_actors: []` auf einen Kontext, den noch kein Workflow erzeugt, und **jeder** PR wird
+  dauerhaft unmergebar. Der Wächter im bestehenden Job hat dieselbe Blockwirkung ohne dieses
+  Risiko. Ebenfalls entschieden: Modulgerüst nur für die drei Module, die Sprint 3 wirklich
+  benutzt — leere Modulordner sind keine Grenzen (ADR-001 Z. 33).
 
 ---
 

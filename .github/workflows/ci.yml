@@ -112,8 +112,14 @@ jobs:
         run: |
           pnpm exec supabase stop
           pnpm exec supabase start -x studio
+      # ALLE Workspace-Abhaengigkeiten von @easytree/api, nicht eine namentlich
+      # genannte. Die frueher hier hartkodierte Liste (@easytree/config) waere in
+      # dem Moment still veraltet, in dem apps/api eine zweite Workspace-Abhaengigkeit
+      # bekommt — und genau das passiert mit @easytree/domain (EYT-46). Die Folge
+      # waere kein sichtbarer Fehler, sondern ein fail-closed Tenant-Gate, das an
+      # einem ungebauten dist/ scheitert.
       - name: Build workspace deps for api tests
-        run: pnpm --filter @easytree/config build
+        run: pnpm --filter @easytree/api^... build
       - name: Tenant isolation gate (fail-closed, direct connection)
         env:
           EASYTREE_TENANT_TESTS: required

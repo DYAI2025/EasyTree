@@ -49,6 +49,52 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 
+# --- Drift-Pruefung der EIGENEN Pflichtcheck-Liste (EYT-46) ----------------
+# Dieses Skript fuehrt eine zweite Kopie von REQUIRED_CHECKS, unabhaengig von
+# scripts/setup-branch-protection.sh. Dort wird die Liste beidseitig gegen
+# ci.yml geprueft, hier bislang gar nicht: ein neuer CI-Job, der nur in `setup`
+# nachgezogen wird, haette `verify` weiterhin "PASS" ueber eine veraltete Liste
+# melden lassen — eine Verifikation, die den Fall bestaetigt, den sie pruefen
+# soll. Beide Listen sind damit transitiv an ci.yml gebunden.
+workflow_file="${WORKFLOW_FILE:-.github/workflows/ci.yml}"
+if [ -f "$workflow_file" ]; then
+  workflow_jobs="$(
+    awk '
+        /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+        in_jobs && /^[^[:space:]]/ { in_jobs = 0 }
+        in_jobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+          line = $0
+          gsub(/[[:space:]]/, "", line)
+          sub(/:$/, "", line)
+          print line
+        }
+      ' "$workflow_file"
+  )"
+  drift=""
+  while IFS= read -r job; do
+    [ -n "$job" ] || continue
+    printf '%s\n' "$REQUIRED_CHECKS" | grep -qx -- "$job" || drift="${drift}+${job} "
+  done <<EOF
+$workflow_jobs
+EOF
+  while IFS= read -r want; do
+    [ -n "$want" ] || continue
+    printf '%s\n' "$workflow_jobs" | grep -qx -- "$want" || drift="${drift}-${want} "
+  done <<EOF
+$REQUIRED_CHECKS
+EOF
+  if [ -n "$drift" ]; then
+    printf 'FEHLER: REQUIRED_CHECKS in diesem Skript weicht von %s ab: %s\n' \
+      "$workflow_file" "$drift" >&2
+    printf '        (+ = Job ohne Pflichtcheck, - = Pflichtcheck ohne Job)\n' >&2
+    exit 2
+  fi
+else
+  printf 'FEHLER: %s nicht gefunden — die Pflichtcheck-Liste ist damit unbelegbar.\n' \
+    "$workflow_file" >&2
+  exit 2
+fi
+
 repo_json="$(gh api "repos/${REPO}")"
 default_branch="$(printf '%s' "$repo_json" | jq -r '.default_branch')"
 visibility="$(printf '%s' "$repo_json" | jq -r '.visibility')"
