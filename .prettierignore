@@ -4,3 +4,7 @@ dist
 .turbo
 coverage
 pnpm-lock.yaml
+
+# Verbatim uebernommene Fremdanalyse (EYT-78, ADR-002). Evidenz wird nicht
+# umformatiert, damit Zitate und Zeilenbezuege pruefbar bleiben.
+docs/audit

@@ -1,0 +1,19 @@
+Archive:  easytree-three-repo-audit.zip
+    testing: easytree-three-repo-audit/   OK
+    testing: easytree-three-repo-audit/evidence/   OK
+    testing: easytree-three-repo-audit/evidence/evidence-ledger.jsonl   OK
+    testing: easytree-three-repo-audit/evidence/command-outputs/   OK
+    testing: easytree-three-repo-audit/evidence/command-outputs/validation-limitations.txt   OK
+    testing: easytree-three-repo-audit/evidence/command-outputs/local-import-check.txt   OK
+    testing: easytree-three-repo-audit/evidence/command-outputs/repo-stats.json   OK
+    testing: easytree-three-repo-audit/evidence/command-outputs/key-evidence.txt   OK
+    testing: easytree-three-repo-audit/evidence/command-outputs/key-ui-evidence.txt   OK
+    testing: easytree-three-repo-audit/TASK_BACKLOG.csv   OK
+    testing: easytree-three-repo-audit/MVP_PRD_GAP_ANALYSIS.md   OK
+    testing: easytree-three-repo-audit/README.md   OK
+    testing: easytree-three-repo-audit/INTEGRATION_ARCHITECTURE.md   OK
+    testing: easytree-three-repo-audit/REPOSITORY_PROFILES.md   OK
+    testing: easytree-three-repo-audit/CLICKDUMMY_SCOPE_MATRIX.md   OK
+    testing: easytree-three-repo-audit/AUDIT_REPORT.md   OK
+    testing: easytree-three-repo-audit/TASK_BACKLOG.md   OK
+No errors detected in compressed data of easytree-three-repo-audit.zip.

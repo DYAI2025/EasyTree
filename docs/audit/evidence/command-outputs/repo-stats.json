@@ -1,0 +1,227 @@
+{
+  "easytree-master": {
+    "root": "/mnt/data/easytree-audit-work/repos/easytree-master/EasyTree-master",
+    "file_count": 124,
+    "approx_text_loc": 20493,
+    "extensions": {
+      ".ts": 39,
+      ".md": 29,
+      ".json": 16,
+      ".tsx": 11,
+      "<none>": 5,
+      ".sql": 5,
+      ".sh": 4,
+      ".png": 3,
+      ".yaml": 2,
+      ".csv": 2,
+      ".yml": 2,
+      ".mjs": 1,
+      ".example": 1,
+      ".txt": 1,
+      ".toml": 1,
+      ".css": 1,
+      ".svg": 1
+    },
+    "test_files": [
+      "packages/ui/test/primitives.test.tsx",
+      "packages/config/test/load.test.ts",
+      "packages/config/test/index.test.ts",
+      "packages/config/test/redact.test.ts",
+      "supabase/tests/0002_rls_isolation.sql",
+      "supabase/tests/0001_smoke.sql",
+      "apps/api/test/tenant-pooling.integration.test.ts",
+      "apps/api/test/shutdown.test.ts",
+      "apps/api/test/health.e2e.test.ts",
+      "apps/api/test/worker.test.ts",
+      "apps/api/test/tenant-isolation.integration.test.ts",
+      "apps/api/test/pg-database-ping.test.ts",
+      "apps/api/test/tenant-gate.fail-closed.test.ts",
+      "apps/api/test/tenant-context.helper.ts",
+      "apps/api/test/correlation-id.e2e.test.ts",
+      "apps/api/test/setup.ts",
+      "apps/api/test/http-exception-filter.e2e.test.ts",
+      "apps/web/e2e/shell-smoke.spec.ts",
+      "apps/web/test/api-client.test.ts",
+      "apps/web/test/a11y.test.tsx",
+      "apps/web/test/no-supabase-import.test.ts"
+    ],
+    "manifests": [
+      "package.json",
+      "pnpm-lock.yaml",
+      "turbo.json",
+      "README.md"
+    ],
+    "external_url_refs": [
+      {
+        "file": "packages/config/src/schema.ts",
+        "url": "http://localhost:54321"
+      },
+      {
+        "file": "packages/config/test/load.test.ts",
+        "url": "http://localhost:54321"
+      },
+      {
+        "file": "packages/config/test/load.test.ts",
+        "url": "https://project-ref.supabase.co"
+      },
+      {
+        "file": "packages/config/test/load.test.ts",
+        "url": "http://127.0.0.1:54321"
+      },
+      {
+        "file": "packages/config/test/redact.test.ts",
+        "url": "http://localhost:54321"
+      },
+      {
+        "file": "apps/web/playwright.config.ts",
+        "url": "http://127.0.0.1:3000"
+      },
+      {
+        "file": "apps/web/playwright.config.ts",
+        "url": "http://127.0.0.1:3000"
+      },
+      {
+        "file": "apps/api/test/setup.ts",
+        "url": "http://localhost:54321"
+      },
+      {
+        "file": "apps/web/e2e/shell-smoke.spec.ts",
+        "url": "http://localhost:3001"
+      },
+      {
+        "file": "apps/web/app/providers.tsx",
+        "url": "http://localhost:3001"
+      },
+      {
+        "file": "apps/web/test/api-client.test.ts",
+        "url": "http://api.test"
+      },
+      {
+        "file": "apps/web/test/api-client.test.ts",
+        "url": "http://api.test/health"
+      },
+      {
+        "file": "apps/web/test/api-client.test.ts",
+        "url": "http://api.test"
+      },
+      {
+        "file": "apps/web/test/api-client.test.ts",
+        "url": "http://api.test"
+      },
+      {
+        "file": "apps/web/test/api-client.test.ts",
+        "url": "http://api.test"
+      },
+      {
+        "file": "apps/web/test/a11y.test.tsx",
+        "url": "http://api.test"
+      }
+    ],
+    "localstorage_files": [],
+    "api_reference_files": [
+      "apps/api/src/health/readiness.ts",
+      "apps/api/test/setup.ts",
+      "apps/api/test/tenant-context.helper.ts",
+      "apps/api/test/tenant-isolation.integration.test.ts",
+      "apps/api/test/tenant-pooling.integration.test.ts",
+      "apps/web/lib/api-client.ts",
+      "apps/web/test/no-supabase-import.test.ts",
+      "packages/config/src/load.ts",
+      "packages/config/src/redact.ts",
+      "packages/config/src/schema.ts",
+      "packages/config/test/load.test.ts",
+      "packages/config/test/redact.test.ts"
+    ]
+  },
+  "easytree-app-ui": {
+    "root": "/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main",
+    "file_count": 35,
+    "approx_text_loc": 5476,
+    "extensions": {
+      ".tsx": 19,
+      ".json": 4,
+      ".ts": 4,
+      "<none>": 3,
+      ".example": 1,
+      ".js": 1,
+      ".lock": 1,
+      ".html": 1,
+      ".css": 1
+    },
+    "test_files": [],
+    "manifests": [
+      "package.json"
+    ],
+    "external_url_refs": [
+      {
+        "file": "src/views/DamageReportModal.tsx",
+        "url": "https://actions.google.com/sounds/v1/vehicles/car_engine_idle.ogg"
+      },
+      {
+        "file": "src/views/DamageReportModal.tsx",
+        "url": "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=400&q=80"
+      }
+    ],
+    "localstorage_files": [
+      "src/App.tsx"
+    ],
+    "api_reference_files": []
+  },
+  "easytree-uiux": {
+    "root": "/mnt/data/easytree-audit-work/repos/easytree-uiux/EasyTree-UIUX-main",
+    "file_count": 37,
+    "approx_text_loc": 8158,
+    "extensions": {
+      ".tsx": 20,
+      ".ts": 8,
+      ".json": 3,
+      "<none>": 2,
+      ".example": 1,
+      ".lock": 1,
+      ".html": 1,
+      ".css": 1
+    },
+    "test_files": [
+      "src/tests/domain.test.ts"
+    ],
+    "manifests": [
+      "package.json"
+    ],
+    "external_url_refs": [
+      {
+        "file": "src/components/common/WorksiteLocationPicker.tsx",
+        "url": "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png"
+      },
+      {
+        "file": "src/components/common/WorksiteLocationPicker.tsx",
+        "url": "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png"
+      },
+      {
+        "file": "src/components/common/WorksiteLocationPicker.tsx",
+        "url": "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png"
+      },
+      {
+        "file": "src/components/common/WorksiteLocationPicker.tsx",
+        "url": "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+      },
+      {
+        "file": "src/components/common/WorksiteLocationPicker.tsx",
+        "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      },
+      {
+        "file": "src/components/common/WorksiteLocationPicker.tsx",
+        "url": "https://nominatim.openstreetmap.org/reverse?format=json&lat=${targetLat}&lon=${targetLng}&addressdetails=1`,"
+      },
+      {
+        "file": "src/components/common/WorksiteLocationPicker.tsx",
+        "url": "https://nominatim.openstreetmap.org/search?format=json&q=${query}&addressdetails=1&limit=5&countrycodes=de`,"
+      }
+    ],
+    "localstorage_files": [
+      "src/App.tsx"
+    ],
+    "api_reference_files": [
+      "src/components/common/WorksiteLocationPicker.tsx"
+    ]
+  }
+}

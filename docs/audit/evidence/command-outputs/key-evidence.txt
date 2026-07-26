@@ -1,0 +1,1422 @@
+=== MASTER README/package ===
+     1	# easyTree
+     2	
+     3	TypeScript-Monorepo für easyTree (pnpm + Turborepo). Architekturentscheidungen und
+     4	Leitplanken sind in [ADR-001](docs/architecture/ADR-001-boilerplate-architecture.md)
+     5	festgehalten — bitte vor Änderungen lesen. Der ausführbare Sprintplan liegt in
+     6	[`docs/plans/2026-07-23-eyt-sprint-1-foundation.md`](docs/plans/2026-07-23-eyt-sprint-1-foundation.md).
+     7	
+     8	## Toolversionen
+     9	
+    10	| Tool       | Version                     |
+    11	| ---------- | --------------------------- |
+    12	| Node.js    | 22 (LTS, siehe `.nvmrc`)    |
+    13	| pnpm       | 10.28.0 (`packageManager`)  |
+    14	| Turborepo  | ^2.10.6                     |
+    15	| TypeScript | ^5.9.3                      |
+    16	| Vitest     | ^4.1.10                     |
+    17	| ESLint     | ^10.7.0 (typescript-eslint) |
+    18	| Prettier   | ^3.9.6                      |
+    19	
+    20	## Installation
+    21	
+    22	```bash
+    23	nvm use            # Node 22 aktivieren (oder anderweitig Node 22 bereitstellen)
+    24	corepack enable    # stellt die gepinnte pnpm-Version bereit
+    25	pnpm install       # bzw. pnpm install --frozen-lockfile für deterministische Installs
+    26	```
+    27	
+    28	## Befehle (Workspace-Root)
+    29	
+    30	```bash
+    31	pnpm format       # Prettier-Check (pnpm format:fix zum Schreiben)
+    32	pnpm lint         # ESLint über alle Pakete (turbo run lint)
+    33	pnpm typecheck    # tsc --noEmit über alle Pakete
+    34	pnpm test         # Vitest über alle Pakete
+    35	pnpm build        # Build aller Pakete (dist/**, .next/**)
+    36	```
+    37	
+    38	Einzelne Pakete lassen sich filtern, z. B. `pnpm --filter @easytree/config test`.
+    39	
+    40	## CI & Pflichtchecks
+    41	
+    42	Jeder Pull Request gegen `master` durchläuft den GitHub-Actions-Workflow
+    43	[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Die Installation läuft
+    44	ausschließlich mit `pnpm install --frozen-lockfile` (Composite-Action
+    45	[`.github/actions/setup-pnpm`](.github/actions/setup-pnpm/action.yml)).
+    46	
+    47	Zwei getrennte Aussagen, jede mit eigenem Beleg (EYT-67):
+    48	
+    49	1. **Konfiguriert:** Alle neun Jobs sind im Repository-Ruleset `19718704`
+    50	   (`enforcement: active`, `bypass_actors: []`, Ziel `~DEFAULT_BRANCH`) als
+    51	   `required_status_checks` eingetragen, zusammen mit `pull_request`,
+    52	   `non_fast_forward` und `deletion`. Nachprüfbar read-only gegen die von GitHub
+    53	   gemeldete Ist-Wirkung: `bash scripts/verify-branch-protection.sh`.
+    54	2. **Wirksam:** Negativ-PR [#7](https://github.com/DYAI2025/EasyTree/pull/7) trug einen
+    55	   absichtlich unformatierten Commit. Ergebnis: Job `format` = `failure`,
+    56	   `mergeable_state` = `blocked`, und der Merge-Versuch wurde serverseitig abgelehnt
+    57	   (`the base branch policy prohibits the merge`). Der PR wurde ohne Merge geschlossen.
+    58	
+    59	Details, Tarifgrenzen und Rollback: [`docs/runbooks/branch-protection.md`](docs/runbooks/branch-protection.md).
+    60	
+    61	| Job           | Zweck                                                                     | merge-blockierend |
+    62	| ------------- | ------------------------------------------------------------------------- | ----------------- |
+    63	| `format`      | Prettier-Check über das gesamte Repo (`pnpm format`)                      | ja                |
+    64	| `lint`        | ESLint über alle Pakete (`pnpm lint`)                                     | ja                |
+    65	| `typecheck`   | `tsc --noEmit` über alle Pakete (`pnpm typecheck`)                        | ja                |
+    66	| `unit-tests`  | Vitest über alle Pakete (`pnpm test`)                                     | ja                |
+    67	| `build-web`   | Produktions-Build der Web-Shell inkl. Abhängigkeiten                      | ja                |
+    68	| `build-api`   | Produktions-Build von API/Worker inkl. Abhängigkeiten                     | ja                |
+    69	| `secret-scan` | gitleaks (gepinnt, `--redact`) + Checks auf getrackte `.env`-/Key-Dateien | ja                |
+    70	| `db-gates`    | Migrationen, pgTAP und fail-closed Tenant-Gates auf echtem Supabase-Stack | ja — verifiziert  |
+    71	| `web-smoke`   | Browser-Smoke (Playwright/Chromium) inkl. Accessibility                   | ja — verifiziert  |
+    72	
+    73	„verifiziert" heißt: der Job ist implementiert **und** real grün gelaufen — alle neun Jobs
+    74	inklusive `db-gates` und `web-smoke` in Run
+    75	[`30133452629`](https://github.com/DYAI2025/EasyTree/actions/runs/30133452629) (Commit
+    76	`d497bc9`, PR #5). Kein Job ist mehr „geplant".
+    77	
+    78	Hinweise: Die Tenant-Integrationstests skippen im Job `unit-tests` ohne erreichbare
+    79	Datenbank mit Warnung (Local-Mode); das verbindliche, fail-closed geprüfte Gate dafür
+    80	ist der Job `db-gates`. Keiner der Pflichtchecks verwendet `continue-on-error`.
+    81	
+    82	## Struktur
+    83	
+    84	```
+    85	apps/api          # @easytree/api — NestJS-Backend, ein Codepaket, zwei Entrypoints (EYT-42)
+    86	apps/web          # @easytree/web — Next.js-Web-/PWA-Shell mit A11y-Baseline (EYT-41)
+    87	packages/config   # @easytree/config — validierte Env-Konfiguration (Platzhalter, EYT-43)
+    88	packages/ui       # @easytree/ui — domänenfreie UI-Primitives (Button, Card, VisuallyHidden)
+    89	supabase/         # Lokaler Supabase-Stack: config.toml, Migrationen, Seed, pgTAP-Tests
+    90	docs/             # ADRs, Pläne, Runbooks
+    91	```
+    92	
+    93	## Backend (API + Worker)
+    94	
+    95	`apps/api` ist **ein** NestJS-Codepaket mit **zwei** Entrypoints (ADR-001 §2):
+    96	
+    97	- `src/main.ts` — HTTP-API auf `API_PORT` (aus `@easytree/config`), mit `GET /health`
+    98	  (Liveness) und `GET /ready` (Readiness, 503 bei nicht bereiten Abhängigkeiten).
+    99	- `src/worker.ts` — Hintergrund-Worker via `NestFactory.createApplicationContext`;
+   100	  identische Module/DI/Konfiguration, aber **kein** HTTP-Listener und kein Port.
+   101	
+   102	Querschnitt: `x-correlation-id` wird pro Request übernommen oder als UUID erzeugt und in
+   103	der Response gespiegelt; Fehler werden als RFC-7807-artiges JSON (`type`/`title`/`status`/
+   104	`detail`/`correlationId`) ohne Stacktraces oder Secretwerte ausgegeben; SIGTERM führt über
+   105	`enableShutdownHooks()` zu einem sauberen Shutdown.
+   106	
+   107	```bash
+   108	pnpm --filter @easytree/api test          # Vitest (SWC-Transform für Nest-Decorators)
+   109	pnpm --filter @easytree/api build         # tsc → apps/api/dist
+   110	node apps/api/dist/main.js                # API starten (Env gemäß .env.example)
+   111	node apps/api/dist/worker.js              # Worker starten (öffnet keinen Port)
+   112	```
+   113	
+   114	## Web (PWA-Shell)
+   115	
+   116	`apps/web` ist die Next.js-Shell (App Router, Next 16, React 19) für easyTree (EYT-41,
+   117	ADR-001 §1/§5):
+   118	
+   119	- **Shell & A11y-Baseline:** semantische Landmarks (`header`/`nav`/`main`/`footer`),
+   120	  Skip-Link als erstes fokussierbares Element (Ziel `#hauptinhalt`), sichtbare
+   121	  Fokusstile, `html lang="de"`, mobile-first Layout, System-Font-Stack (keine
+   122	  Google-Font-Imports — der Build funktioniert offline). Statusanzeigen sind nie nur
+   123	  über Farbe kodiert (immer Text + Symbol).
+   124	- **PWA:** `app/manifest.ts` liefert `/manifest.webmanifest` (name `easyTree`,
+   125	  `display: standalone`, Platzhalter-Icons unter `public/icons/`). Ausdrücklich
+   126	  **kein** Service Worker und **keine** Offline-Schreib-/Sync-Queue.
+   127	- **API-Zugriff nur über Injektion:** `lib/api-client.ts` (`createApiClient(baseUrl,
+   128	fetchImpl)`) + `lib/api-client-provider.tsx` (React-Context). Die einzige
+   129	  Konstruktionsstelle ist die Kompositionswurzel `app/providers.tsx`
+   130	  (`NEXT_PUBLIC_API_URL`, Default `http://localhost:3001`); Komponenten konstruieren
+   131	  nie selbst einen Client, ohne Provider wirft `useApiClient()` einen verständlichen
+   132	  Fehler. Ein statischer Guard-Test stellt sicher, dass `apps/web` nirgends das
+   133	  Supabase-JS-SDK importiert.
+   134	- **UI-Primitives:** `packages/ui` (`@easytree/ui`) liefert domänenfreie Bausteine
+   135	  (`Button`, `Card`, `VisuallyHidden`) ohne Fachlogik; das Styling gehört der App
+   136	  (`app/globals.css`).
+   137	
+   138	```bash
+   139	pnpm --filter @easytree/web dev     # Dev-Server auf http://localhost:3000
+   140	pnpm --filter @easytree/web build   # next build (Turbopack)
+   141	pnpm --filter @easytree/web start   # Produktionsserver nach Build
+   142	pnpm --filter @easytree/web test    # Vitest: api-client, a11y (axe), Supabase-Guard
+   143	pnpm --filter @easytree/ui test     # Vitest: Primitives
+   144	```
+   145	
+   146	Automatisierte A11y-Checks (axe: 0 Violations, Skip-Link erstes Tab-Ziel,
+   147	`main`-Landmark, `lang`) laufen in `apps/web/test/a11y.test.tsx`; die **manuelle**
+   148	Checkliste (Tastatur, Fokusreihenfolge, 200 %-Zoom, non-color Status, Kontrast,
+   149	Screenreader) liegt in
+   150	[`docs/runbooks/a11y-checklist.md`](docs/runbooks/a11y-checklist.md) — Status:
+   151	manuell noch offen.
+   152	
+   153	## Datenbank
+   154	
+   155	Lokaler Supabase-Stack (Postgres 17, Auth, Storage) via Docker; die Supabase CLI ist als
+   156	devDependency versioniert (`pnpm exec supabase …`). SQL-Migrationen unter
+   157	`supabase/migrations/` sind die **einzige** Schemaquelle — Schemaänderungen über das
+   158	Supabase-Dashboard sind verboten. Details, Reset-Workflow und Reviewpflicht:
+   159	[`docs/runbooks/database-workflow.md`](docs/runbooks/database-workflow.md).
+   160	
+   161	```bash
+   162	pnpm exec supabase start     # Stack starten (erstmalig: Docker-Images ziehen)
+   163	pnpm exec supabase db reset  # DB aus Migrationen + supabase/seed.sql neu aufbauen
+   164	pnpm exec supabase test db   # pgTAP-Tests (supabase/tests/*.sql)
+   165	pnpm exec supabase stop      # Stack stoppen
+   166	```
+   167	
+   168	Hinweise: pnpm ist der einzige zulässige Paketmanager (keine `package-lock.json`/`yarn.lock`);
+   169	Umgebungsdateien (`.env*`) werden nie committet — nur `.env.example` mit Platzhalterwerten.
+=== MASTER PRD key sections ===
+1:# Arboscus Teamplaner – Current PRD v1.3
+7:## 1. Produktziel
+9:Der Arboscus Teamplaner ist eine mobile-first, installierbare Web-App für die visuelle Planung von Mitarbeitern, Baustellen, Tätigkeiten, Fähigkeiten, Abwesenheiten, Geräten, Fahrzeugen, Zustandsmeldungen und persönlichen Arbeitszeiten.
+15:Die Wochenansicht ist die wichtigste operative Ansicht. Ergänzend bestehen Monatsansicht und rollierende Vier-Wochen-Planung.
+17:## 2. Rollen
+19:### Mitarbeiter
+22:- sieht Teammitglieder nur für gemeinsamen Ort und Zeitraum;
+23:- bestätigt eine veröffentlichte Woche oder lehnt einen Termin begründet ab;
+24:- erfasst Abwesenheiten, Arbeitszeit und Zustandsmeldungen;
+27:### Administrator
+29:- verwaltet Benutzer, Mitarbeiter, Rollen, atomare Berechtigungen und Stammdaten;
+34:### Geschäftsführung
+39:Jeder Benutzer besitzt genau eine Rolle. Rechte werden serverseitig geprüft und können später granular angepasst werden.
+41:## 3. Kern-MVP
+45:- Rollen und atomare Berechtigungen;
+46:- Wochen-, Monats- und Vier-Wochen-Planung;
+50:- Entwurf, Veröffentlichung und Planversionen;
+51:- Konfliktprüfung für Doppelbelegung, genehmigte Abwesenheit, aktivierte Kapazität und exklusive Ressourcen;
+52:- Wochenbestätigung und terminbezogene Neubestätigung bei wesentlichen Änderungen;
+53:- Ablehnung mit Kategorie und Pflichttext;
+54:- In-App- und E-Mail-Benachrichtigung;
+56:- Urlaub, Krankheit und weitere Abwesenheiten;
+58:- eindeutige Geräte und Fahrzeuge, Reservierung, Verfügbarkeit und Zustandsmeldung;
+61:- Zeitfreigabe und begründete administrative Korrektur unter Erhalt des Originals;
+63:- baustellenbezogenes Wetter für heute und morgen.
+65:## 4. Wetter
+67:Wetter wird aus der sichtbaren Baustellenzuweisung abgeleitet. Es erfolgt kein Mitarbeitertracking, kein Geofencing und keine Hintergrundortung.
+71:- Wetterzustand;
+90:Direkte und regionale Warnungen müssen unterscheidbar sein. Gewitter-, Sturm- und Unwetterwarnungen werden auffällig, aber nicht ausschließlich über Farbe dargestellt. Im MVP ist Wetter informativ und löst keine automatische Absage, Veröffentlichungsblockade oder Arbeitsstopp-Anweisung aus.
+94:- Prognose und Ozon über einen austauschbaren Wetteradapter;
+99:## 5. Erweiterter Bestandteil des ersten Releases
+110:- begrenzter CSV-Import mit Vorschau, Fehlerliste und Bestätigung.
+112:## 6. Post-MVP: Planungsökonomie und Maschinenverleih
+114:Das Modul wird dokumentiert und in Jira vorbereitet, ist aber weder Teil der MVP-Implementierung noch der MVP-Abnahme.
+121:- individuelle Netto-Stunden- oder Tagessätze je Mitarbeiter, freiem Mitarbeiter, Gerät, Maschine oder Fahrzeug;
+122:- keine Standardsätze nach Rolle oder Ressourcentyp;
+129:- Auswertung nach Einsatz, Baustelle, Tag, Woche und freiem Zeitraum.
+133:## 7. Technische Leitentscheidungen
+137:- Supabase Auth als bevorzugte Authentifizierung;
+145:## 8. Datenschutz und Sicherheit
+149:- minimale Verarbeitung von Abwesenheits-, Arbeitszeit-, Adress-, Foto- und Audiodaten;
+156:## 9. Umsetzungsphasen
+164:7. separat freizugebendes Post-MVP-Modul Planungsökonomie/Maschinenverleih
+166:## 10. MVP-Abnahme
+168:Der MVP ist fachlich abnahmefähig, wenn unter anderem:
+171:- unzulässige Doppelbelegungen und genehmigte Abwesenheiten Veröffentlichung blockieren;
+173:- relevante Baustelleninformationen, Ressourcen und Wetter verfügbar sind;
+174:- Zeitbuchungen, Freigaben und Korrekturen nachvollziehbar bleiben;
+175:- Rollen- und Datenzugriffe serverseitig abgesichert sind;
+178:- das Post-MVP-Wirtschaftsmodul deaktiviert bleibt.
+180:## 11. Offene Entscheidungen
+185:- verbindliche Wetterprovider-Kombination;
+186:- zusätzliche Push-/E-Mail-Eskalation für neue Wetterwarnungen;
+190:## 12. Releaseentscheidung
+=== CLICKDUMMY INPUTS ===
+     1	# Clickdummy- und Mobile-UX-Eingaben
+     2	
+     3	## Ziel
+     4	
+     5	Vor der Implementierung werden die zentralen mobilen Nutzerreisen als interaktiver Clickdummy getestet. Der Clickdummy dient der fachlichen und gestalterischen Validierung, nicht als Nachweis einer implementierten Anwendung.
+     6	
+     7	## Zu prototypisierende Ansichten
+     8	
+     9	1. Login und Passwort-Reset
+    10	2. Mobile Startseite mit heutigem beziehungsweise nächstem Einsatz
+    11	3. Wochenansicht
+    12	4. Monats- und Vier-Wochen-Orientierung
+    13	5. Baustellendetail mit Adresse, Navigation, Tätigkeit, Team, Treffpunkt, Notizen und Ressourcen
+    14	6. Wetterverlauf und amtliche Warnungen
+    15	7. Wochenbestätigung
+    16	8. begründete Terminablehnung
+    17	9. Abwesenheit und Urlaubsantrag
+    18	10. Arbeitszeit Start/Stop
+    19	11. Arbeitszeitfreigabe und Korrektur
+    20	12. Geräte-/Fahrzeugansicht und Zustandsmeldung
+    21	13. Rollen- und Berechtigungseditor
+    22	14. Planeransicht für Konflikte und Veröffentlichung
+    23	
+    24	## Mobile Startseite
+    25	
+    26	Priorisierte Inhalte:
+    27	
+    28	- aktueller oder nächster Einsatz;
+    29	- Datum, Start-/Endzeit und Baustellenname;
+    30	- Adresse und Navigationsaktion;
+    31	- Tätigkeit und kurzer Auftragshinweis;
+    32	- Teammitglieder für gemeinsamen Zeitraum;
+    33	- benötigte beziehungsweise zugeordnete Ressourcen;
+    34	- Wetter für die Einsatzzeit und auffällige Warnhinweise;
+    35	- Bestätigungsstatus;
+    36	- Timeraktion nur für den geplanten eigenen Einsatz.
+    37	
+    38	## UX-Leitplanken
+    39	
+    40	- mobile-first, keine klassische Tabellenoptik;
+    41	- große Touch-Ziele und ausreichende Abstände;
+    42	- verständliche Sprache und geringe Interaktionsdichte;
+    43	- zentrale Aktion pro Screen klar priorisiert;
+    44	- kritische Information nie nur über Farbe;
+    45	- lesbar bei wechselnden Lichtverhältnissen;
+    46	- Tastatur-, Fokus-, Zoom- und Screenreader-Prüfung für Webansichten;
+    47	- Fehler müssen konkret erklären, was fehlt und wie es korrigiert wird.
+    48	
+    49	## Validierung
+    50	
+    51	Der Clickdummy wird mindestens mit folgenden Gruppen getestet:
+    52	
+    53	- Geschäftsführung;
+    54	- Administration beziehungsweise Planung;
+    55	- operative Mitarbeiter.
+    56	
+    57	Zu dokumentieren sind:
+    58	
+    59	- Aufgaben und Szenarien;
+    60	- beobachtete Abbrüche und Missverständnisse;
+    61	- Dauer und Fehler je Kernreise;
+    62	- offene Entscheidungen;
+    63	- Änderungen am PRD;
+    64	- explizite Freigabe oder Blockade für die Implementierungsphase.
+    65	
+    66	## Nicht im Clickdummy vorwegnehmen
+    67	
+    68	- nicht entschiedene Providerdetails;
+    69	- automatische wetterbasierte Entscheidungen;
+    70	- Post-MVP-Kosten- und Erlösansichten als Bestandteil des MVP;
+    71	- Funktionen ohne fachliche Anforderung;
+    72	- technische Umsetzung als bereits vorhanden darstellen.
+=== VALIDATION ===
+     1	# PRD v1.3 – Validierungsstatus
+     2	
+     3	Datum: 23.07.2026
+     4	
+     5	## Bestand
+     6	
+     7	- deutsches fachliches PRD v1.3;
+     8	- kanonisches agentenfähiges PRD;
+     9	- maschinenlesbarer JSON-Spiegel;
+    10	- Traceability-Matrix;
+    11	- Coding-Agent-Handoff;
+    12	- Jira-Epic für Post-MVP-Planungsökonomie;
+    13	- Architektur-, Pilot- und Retention-Empfehlungen.
+    14	
+    15	## Durchgeführte Prüfungen
+    16	
+    17	- PRD-JSON gegen das vorgesehene Schema geprüft;
+    18	- erforderliche Top-Level-Reihenfolge geprüft;
+    19	- alle kanonischen PRD-Sektionen befüllt;
+    20	- IDs auf Eindeutigkeit geprüft;
+    21	- funktionale Anforderungen mit Akzeptanzkriterien und Tests verknüpft;
+    22	- Traceability-Matrix mit dem strukturierten PRD abgeglichen;
+    23	- Artefakt-Policy geprüft;
+    24	- Post-MVP-Anforderungen aus dem MVP-Scope ausgeschlossen.
+    25	
+    26	## Version 1.3
+    27	
+    28	Zusätzlich geprüft wurden:
+    29	
+    30	- Repository und Supabase als Projektentscheidungen;
+    31	- Wetterfelder, Tagesabschnitte, Warnungsdarstellung und No-Tracking-Grenze;
+    32	- Trennung von Prognose/Ozon und amtlichen DWD-Warnungen;
+    33	- Mitarbeiterlebenszyklus;
+    34	- Pilot mit mindestens zwölf Nutzern und drei parallelen Baustellen;
+    35	- Post-MVP-Zugriffsgrenzen;
+    36	- effektive Satzversionen;
+    37	- historische Reproduzierbarkeit;
+    38	- Trennung von interner Übersicht und Buchhaltung beziehungsweise Faktura.
+    39	
+    40	## Ergebnis
+    41	
+    42	- Fachliche PRD-Freigabe: **PASS**
+    43	- Clickdummy-Bereitschaft: **PASS**
+    44	- Implementierungsplanung: **PASS_WITH_OPEN_ADRS**
+    45	- Produktionsfreigabe: **BLOCKED_PENDING_TECHNICAL_AND_LEGAL_GATES**
+    46	
+    47	## Verbleibende Blocker für Produktion
+    48	
+    49	- verbindlicher Architektur- und Hosting-ADR;
+    50	- E-Mail- und Wetterproviderentscheidung;
+    51	- rechtlich geprüfte Aufbewahrungs- und Löschfristen;
+    52	- Security- und Accessibility-Nachweise;
+    53	- Backup-/Restore-Nachweis;
+    54	- Pilot- und Lastnachweise;
+    55	- Monitoring, Runbooks und Rollback;
+    56	- reale Implementierungs- und Deployment-Evidenz.
+=== ARCH DECISION identity/stack ===
+7:- Repository: `DYAI2025/Arborga`
+8:- Datenbankplattform: Supabase Postgres
+9:- Zielregion: Central EU / Frankfurt
+19:Web/PWA und serverseitige API
+20:  ├─ Supabase Postgres, Auth und private Storage-Buckets
+25:  └─ Python-Worker
+32:Startpunkt ist ein TypeScript-first modularer Monolith. Ein separater Python-Worker wird nur für klar begründete Aufgaben eingesetzt. Microservices, Kubernetes, Event Sourcing oder zusätzliche Laufzeiten sind keine Defaults.
+34:## Supabase
+37:- Supabase Auth als bevorzugte Authentifizierung;
+=== APP UI local storage/timer/PWA claims ===
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:42:  OFFLINE: 'arboscus_offline_mode_v1',
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:52:    const saved = localStorage.getItem(STORAGE_KEYS.THEME);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:57:    localStorage.setItem(STORAGE_KEYS.THEME, isDarkMode ? 'dark' : 'light');
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:78:    return localStorage.getItem(STORAGE_KEYS.ONBOARDING) !== 'true';
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:83:    const saved = localStorage.getItem(STORAGE_KEYS.TIMER);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:89:      startTime: null,
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:90:      elapsedSeconds: 0,
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:98:    const saved = localStorage.getItem(STORAGE_KEYS.WEEK);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:106:    const saved = localStorage.getItem(STORAGE_KEYS.CHECKLIST);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:114:    const saved = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:122:    const saved = localStorage.getItem(STORAGE_KEYS.DAMAGES);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:130:    const saved = localStorage.getItem(STORAGE_KEYS.ABSENCES);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:138:    return localStorage.getItem(STORAGE_KEYS.OFFLINE) === 'true';
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:146:    localStorage.setItem(STORAGE_KEYS.TIMER, JSON.stringify(timer));
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:150:    localStorage.setItem(STORAGE_KEYS.WEEK, JSON.stringify(weekPlan));
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:154:    localStorage.setItem(STORAGE_KEYS.CHECKLIST, JSON.stringify(checklist));
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:158:    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:162:    localStorage.setItem(STORAGE_KEYS.DAMAGES, JSON.stringify(damageReports));
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:166:    localStorage.setItem(STORAGE_KEYS.ABSENCES, JSON.stringify(absences));
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:170:    localStorage.setItem(STORAGE_KEYS.OFFLINE, String(isOffline));
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:177:      interval = setInterval(() => {
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:180:          elapsedSeconds: prev.elapsedSeconds + 1
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:202:    localStorage.setItem(STORAGE_KEYS.ONBOARDING, 'true');
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:207:    localStorage.setItem(STORAGE_KEYS.ONBOARDING, 'true');
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:226:      startTime: prev.startTime || nowStr,
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:240:    const hours = Math.floor(timer.elapsedSeconds / 3600);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:241:    const minutes = Math.floor((timer.elapsedSeconds % 3600) / 60);
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:248:      startTime: timer.startTime || '08:00 Uhr',
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:352:      triggerToast('Online-Modus aktiv', 'Verbindung wiederhergestellt. Synchronisiert.');
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:358:    localStorage.clear();
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:361:      startTime: null,
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/App.tsx:362:      elapsedSeconds: 0,
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/views/ProfileView.tsx:190:              Einsatzpläne und Kontakte bleiben lesbar. Synchronisiert automatisch bei Netzempfang.
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/views/ProfileView.tsx:203:        <h3 className="text-xs font-bold text-[#F1E8DC] uppercase tracking-wider">System & Installierbarkeit</h3>
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/views/ProfileView.tsx:212:            <span className="text-[#918577]">PWA Status:</span>
+/mnt/data/easytree-audit-work/repos/easytree-app-ui/EasyTree-App-UI-main/src/views/ProfileView.tsx:213:            <span className="text-[#7D8B55] font-bold">Installierbar (Offline PWA)</span>
+=== APP UI damage fake URLs ===
+     1	import React, { useState, useRef, useEffect } from 'react';
+     2	import {
+     3	  AlertTriangle,
+     4	  Camera,
+     5	  Mic,
+     6	  MicOff,
+     7	  Square,
+     8	  Play,
+     9	  Pause,
+    10	  Volume2,
+    11	  Trash2,
+    12	  CheckCircle2,
+    13	  X,
+    14	  Upload,
+    15	  Send,
+    16	  FileText,
+    17	  Info,
+    18	  Sparkles,
+    19	  RotateCcw,
+    20	  Radio
+    21	} from 'lucide-react';
+    22	import { Resource, DamageReport } from '../types';
+    23	import { vibrateSubmitDamage, vibrateRecordVoice } from '../utils/haptics';
+    24	
+    25	interface DamageReportModalProps {
+    26	  resources: Resource[];
+    27	  siteName: string;
+    28	  isOffline: boolean;
+    29	  onClose: () => void;
+    30	  onSubmit: (report: DamageReport) => void;
+    31	  onTriggerToast: (title: string, message?: string, type?: 'success' | 'warning' | 'info') => void;
+    32	}
+    33	
+    34	export const DamageReportModal: React.FC<DamageReportModalProps> = ({
+    35	  resources,
+    36	  siteName,
+    37	  isOffline,
+    38	  onClose,
+    39	  onSubmit,
+    40	  onTriggerToast
+    41	}) => {
+    42	  const [resourceId, setResourceId] = useState<string>(resources[0]?.id || 'res-4');
+    43	  const [description, setDescription] = useState<string>('');
+    44	  const [incident, setIncident] = useState<string>('');
+    45	  const [damageType, setDamageType] = useState<string>('Mechanischer Defekt');
+    46	  const [affectedArea, setAffectedArea] = useState<string>('');
+    47	  const [severity, setSeverity] = useState<DamageReport['severity']>('mittel');
+    48	  const [usable, setUsable] = useState<DamageReport['usable']>('eingeschränkt');
+    49	  const [photoUrl, setPhotoUrl] = useState<string | undefined>(undefined);
+    50	
+    51	  // Voice Recording State & Audio Player
+    52	  const [isRecording, setIsRecording] = useState<boolean>(false);
+    53	  const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
+    54	  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+    55	  const [recordedDurationText, setRecordedDurationText] = useState<string>('');
+    56	  const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+    57	  const [voiceDraft, setVoiceDraft] = useState<string>('');
+    58	  const [voiceChecked, setVoiceChecked] = useState<boolean>(false);
+    59	
+    60	  const timerRef = useRef<NodeJS.Timeout | null>(null);
+    61	  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    62	  const audioChunksRef = useRef<Blob[]>([]);
+    63	  const audioRef = useRef<HTMLAudioElement | null>(null);
+    64	
+    65	  // Clean up recording timer and audio on unmount
+    66	  useEffect(() => {
+    67	    return () => {
+    68	      if (timerRef.current) clearInterval(timerRef.current);
+    69	      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    70	        mediaRecorderRef.current.stop();
+    71	      }
+    72	    };
+    73	  }, []);
+    74	
+    75	  // Format seconds to MM:SS
+    76	  const formatTime = (secs: number) => {
+    77	    const mins = Math.floor(secs / 60);
+    78	    const remainingSecs = secs % 60;
+    79	    return `${mins.toString().padStart(2, '0')}:${remainingSecs.toString().padStart(2, '0')}`;
+    80	  };
+    81	
+    82	  // Start Voice Note Recording
+    83	  const startVoiceRecording = async () => {
+    84	    vibrateRecordVoice();
+    85	    setRecordedAudioUrl(null);
+    86	    setVoiceDraft('');
+    87	    setVoiceChecked(false);
+    88	    setRecordingSeconds(0);
+    89	    audioChunksRef.current = [];
+    90	
+    91	    setIsRecording(true);
+    92	    onTriggerToast('Aufnahme gestartet', 'Spreche jetzt deutlich deine Schadensmeldung ein...');
+    93	
+    94	    // Timer ticker
+    95	    timerRef.current = setInterval(() => {
+    96	      setRecordingSeconds((prev) => prev + 1);
+    97	    }, 1000);
+    98	
+    99	    // Try real MediaRecorder microphone access
+   100	    try {
+   101	      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+   102	        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+   103	        const mediaRecorder = new MediaRecorder(stream);
+   104	        mediaRecorderRef.current = mediaRecorder;
+   105	
+   106	        mediaRecorder.ondataavailable = (e) => {
+   107	          if (e.data.size > 0) {
+   108	            audioChunksRef.current.push(e.data);
+   109	          }
+   110	        };
+   111	
+   112	        mediaRecorder.onstop = () => {
+   113	          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+   114	          const url = URL.createObjectURL(audioBlob);
+   115	          setRecordedAudioUrl(url);
+   116	          // Stop track streams
+   117	          stream.getTracks().forEach((track) => track.stop());
+   118	        };
+   119	
+   120	        mediaRecorder.start();
+   121	      }
+   122	    } catch {
+   123	      // If mic blocked or in restricted iframe preview, use seamless audio fallback
+   124	      console.log('Verwende geführten Mikrofon-Simulationsmodus');
+   125	    }
+   126	  };
+   127	
+   128	  // Stop Voice Note Recording
+   129	  const stopVoiceRecording = () => {
+   130	    vibrateRecordVoice();
+   131	    if (timerRef.current) {
+   132	      clearInterval(timerRef.current);
+   133	      timerRef.current = null;
+   134	    }
+   135	
+   136	    const duration = recordingSeconds || 1;
+   137	    const durationStr = formatTime(duration);
+   138	    setRecordedDurationText(durationStr);
+   139	
+   140	    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+   141	      mediaRecorderRef.current.stop();
+   142	    } else if (!recordedAudioUrl) {
+   143	      // Fallback dummy audio URL for playback demo
+   144	      setRecordedAudioUrl('https://actions.google.com/sounds/v1/vehicles/car_engine_idle.ogg');
+   145	    }
+   146	
+   147	    setIsRecording(false);
+   148	
+   149	    // Auto-generate realistic context-aware transcription
+   150	    const selectedRes = resources.find((r) => r.id === resourceId);
+   151	    const resName = selectedRes ? selectedRes.name : 'Gerät';
+   152	    const transcriptText = `Akustische Schadensmeldung zu ${resName} (${damageType}): Bei der Benutzung trat im Bereich '${affectedArea || 'Hauptaggregat'}' ein unregelmäßiges Störgeräusch auf. Gerät schaltet verzögert ab. Dringende Funktions- und Sicherheitsprüfung erforderlich.`;
+   153	
+   154	    setVoiceDraft(transcriptText);
+   155	    onTriggerToast('Aufnahme beendet', `Sprachnotiz (${durationStr} Min.) erfolgreich transkribiert.`);
+   156	  };
+   157	
+   158	  // Delete current recording
+   159	  const deleteRecording = () => {
+   160	    if (isPlayingAudio && audioRef.current) {
+   161	      audioRef.current.pause();
+   162	      setIsPlayingAudio(false);
+   163	    }
+   164	    setRecordedAudioUrl(null);
+   165	    setVoiceDraft('');
+   166	    setVoiceChecked(false);
+   167	    setRecordingSeconds(0);
+   168	    onTriggerToast('Sprachnotiz gelöscht', 'Du kannst eine neue Aufnahme starten.');
+   169	  };
+   170	
+   171	  // Toggle Audio Playback
+   172	  const togglePlayAudio = () => {
+   173	    if (!recordedAudioUrl) return;
+   174	
+   175	    if (!audioRef.current) {
+   176	      audioRef.current = new Audio(recordedAudioUrl);
+   177	      audioRef.current.onended = () => setIsPlayingAudio(false);
+   178	    }
+   179	
+   180	    if (isPlayingAudio) {
+   181	      audioRef.current.pause();
+   182	      setIsPlayingAudio(false);
+   183	    } else {
+   184	      audioRef.current.play().catch(() => {
+   185	        // Fallback tone preview if browser blocks CORS
+   186	      });
+   187	      setIsPlayingAudio(true);
+   188	    }
+   189	  };
+   190	
+   191	  // Mandatory photo requirement rule check
+   192	  const isPhotoRequired = severity === 'schwer' || severity === 'sicherheitskritisch';
+   193	  const canSubmit = Boolean(
+   194	    resourceId &&
+   195	    description.trim() &&
+   196	    (!isPhotoRequired || photoUrl) &&
+   197	    !isOffline
+   198	  );
+   199	
+   200	  const handleSimulatePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+   201	    const file = e.target.files?.[0];
+   202	    if (file) {
+   203	      const reader = new FileReader();
+   204	      reader.onloadend = () => {
+   205	        setPhotoUrl(reader.result as string);
+   206	        onTriggerToast('Foto hinzugefügt', 'Schadensfoto als lokale Vorschau erfasst.');
+   207	      };
+   208	      reader.readAsDataURL(file);
+   209	    } else {
+   210	      // Dummy photo fallback if direct select without camera file
+   211	      setPhotoUrl('https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=400&q=80');
+   212	      onTriggerToast('Beispielfoto geladen', 'Demo-Schadensfoto hinzugefügt.');
+   213	    }
+   214	  };
+   215	
+   216	  const handleInsertVoiceDraft = () => {
+   217	    if (!voiceChecked) return;
+   218	    setDescription((prev) => (prev ? `${prev}\n\n[Sprachnotiz-Transkription]: ${voiceDraft}` : voiceDraft));
+   219	    onTriggerToast('Text übernommen', 'Transkription in Schadensbeschreibung eingefügt.');
+   220	  };
+   221	
+   222	  const handleSubmit = (e: React.FormEvent) => {
+   223	    e.preventDefault();
+   224	    if (!canSubmit) return;
+   225	
+   226	    vibrateSubmitDamage();
+   227	
+   228	    const selectedRes = resources.find(r => r.id === resourceId);
+   229	    const newReport: DamageReport = {
+   230	      id: `DMG-2026-${Math.floor(100 + Math.random() * 900)}`,
+   231	      resourceId,
+   232	      resourceName: selectedRes ? selectedRes.name : 'Gerät',
+   233	      siteName,
+   234	      timestamp: new Date().toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' Uhr',
+   235	      description,
+   236	      incident,
+   237	      damageType,
+   238	      affectedArea,
+   239	      severity,
+   240	      usable,
+   241	      photoUrl,
+   242	      voiceTranscript: voiceDraft || undefined,
+   243	      voiceChecked,
+   244	      statusText: 'Meldung eingegangen (Zur Prüfung)'
+   245	    };
+   246	
+   247	    onSubmit(newReport);
+   248	  };
+   249	
+   250	  return (
+   251	    <div className="fixed inset-0 z-50 bg-[#0B0C0B]/85 backdrop-blur-md flex items-end sm:items-center justify-center p-2 sm:p-4">
+   252	      <div className="w-full max-w-[430px] bg-[#141713] border border-[#34332D] rounded-2xl p-4 space-y-4 max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom-8 duration-200">
+   253	        {/* Modal Header */}
+   254	        <div className="flex items-center justify-between border-b border-[#34332D] pb-3">
+   255	          <div className="flex items-center gap-2">
+   256	            <div className="p-2 bg-[#C48A4A]/20 text-[#C48A4A] rounded-xl border border-[#C48A4A]/40">
+   257	              <AlertTriangle className="w-5 h-5" />
+   258	            </div>
+   259	            <div>
+   260	              <span className="text-[10px] font-mono uppercase text-[#D6A875] font-bold">Meldewesen</span>
+=== UIUX conflict engine ===
+=== UIUX capacity engine ===
+=== UIUX map picker ===
+     1	import React, { useEffect, useRef, useState } from 'react';
+     2	import L from 'leaflet';
+     3	import { Search, MapPin, Loader2 } from 'lucide-react';
+     4	
+     5	interface WorksiteLocationPickerProps {
+     6	  lat: number;
+     7	  lng: number;
+     8	  onLocationSelect: (lat: number, lng: number, address?: string, city?: string) => void;
+     9	  isDarkMode?: boolean;
+    10	}
+    11	
+    12	interface NominatimResult {
+    13	  place_id: number;
+    14	  lat: string;
+    15	  lon: string;
+    16	  display_name: string;
+    17	  address?: {
+    18	    road?: string;
+    19	    house_number?: string;
+    20	    postcode?: string;
+    21	    city?: string;
+    22	    town?: string;
+    23	    village?: string;
+    24	    suburb?: string;
+    25	    county?: string;
+    26	    state?: string;
+    27	  };
+    28	}
+    29	
+    30	export const WorksiteLocationPicker: React.FC<WorksiteLocationPickerProps> = ({
+    31	  lat,
+    32	  lng,
+    33	  onLocationSelect,
+    34	  isDarkMode = true,
+    35	}) => {
+    36	  const mapContainerRef = useRef<HTMLDivElement>(null);
+    37	  const mapRef = useRef<L.Map | null>(null);
+    38	  const markerRef = useRef<L.Marker | null>(null);
+    39	
+    40	  const [searchQuery, setSearchQuery] = useState('');
+    41	  const [searchResults, setSearchResults] = useState<NominatimResult[]>([]);
+    42	  const [isSearching, setIsSearching] = useState(false);
+    43	  const [showResults, setShowResults] = useState(false);
+    44	
+    45	  useEffect(() => {
+    46	    if (!mapContainerRef.current) return;
+    47	
+    48	    if (!mapRef.current) {
+    49	      // Fix default Leaflet marker assets in bundler
+    50	      delete (L.Icon.Default.prototype as any)._getIconUrl;
+    51	      L.Icon.Default.mergeOptions({
+    52	        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    53	        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    54	        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    55	      });
+    56	
+    57	      const map = L.map(mapContainerRef.current, {
+    58	        zoomControl: true,
+    59	        scrollWheelZoom: true,
+    60	      }).setView([lat, lng], 13);
+    61	
+    62	      const tileUrl = isDarkMode
+    63	        ? 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+    64	        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    65	
+    66	      L.tileLayer(tileUrl, {
+    67	        attribution: '&copy; OpenStreetMap contributors',
+    68	        maxZoom: 19,
+    69	      }).addTo(map);
+    70	
+    71	      const marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+    72	
+    73	      const handleReverseGeocode = async (targetLat: number, targetLng: number) => {
+    74	        try {
+    75	          const res = await fetch(
+    76	            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${targetLat}&lon=${targetLng}&addressdetails=1`,
+    77	            { headers: { 'Accept-Language': 'de' } }
+    78	          );
+    79	          if (res.ok) {
+    80	            const data: NominatimResult = await res.json();
+    81	            const fullAddress = data.display_name || `${targetLat.toFixed(5)}, ${targetLng.toFixed(5)}`;
+    82	            const city =
+    83	              data.address?.city ||
+    84	              data.address?.town ||
+    85	              data.address?.village ||
+    86	              data.address?.suburb ||
+    87	              data.address?.county ||
+    88	              '';
+    89	            onLocationSelect(targetLat, targetLng, fullAddress, city);
+    90	          } else {
+    91	            onLocationSelect(targetLat, targetLng);
+    92	          }
+    93	        } catch {
+    94	          onLocationSelect(targetLat, targetLng);
+    95	        }
+    96	      };
+    97	
+    98	      marker.on('dragend', () => {
+    99	        const pos = marker.getLatLng();
+   100	        handleReverseGeocode(pos.lat, pos.lng);
+   101	      });
+   102	
+   103	      map.on('click', (e: L.LeafletMouseEvent) => {
+   104	        const { lat: clickLat, lng: clickLng } = e.latlng;
+   105	        marker.setLatLng([clickLat, clickLng]);
+   106	        handleReverseGeocode(clickLat, clickLng);
+   107	      });
+   108	
+   109	      mapRef.current = map;
+   110	      markerRef.current = marker;
+   111	    } else {
+   112	      mapRef.current.setView([lat, lng], mapRef.current.getZoom());
+   113	      if (markerRef.current) {
+   114	        markerRef.current.setLatLng([lat, lng]);
+   115	      }
+   116	    }
+   117	  }, [lat, lng, isDarkMode]);
+   118	
+   119	  useEffect(() => {
+   120	    return () => {
+   121	      if (mapRef.current) {
+   122	        mapRef.current.remove();
+   123	        mapRef.current = null;
+   124	      }
+   125	    };
+   126	  }, []);
+   127	
+   128	  // Search Address via OpenStreetMap Nominatim
+   129	  const handleSearchSubmit = async (e?: React.FormEvent) => {
+   130	    if (e) e.preventDefault();
+   131	    if (!searchQuery.trim()) return;
+   132	
+   133	    setIsSearching(true);
+   134	    try {
+   135	      const query = encodeURIComponent(searchQuery.trim());
+   136	      const res = await fetch(
+   137	        `https://nominatim.openstreetmap.org/search?format=json&q=${query}&addressdetails=1&limit=5&countrycodes=de`,
+   138	        { headers: { 'Accept-Language': 'de' } }
+   139	      );
+   140	      if (res.ok) {
+   141	        const data: NominatimResult[] = await res.json();
+   142	        setSearchResults(data);
+   143	        setShowResults(true);
+   144	      }
+   145	    } catch (err) {
+   146	      console.error('Nominatim search failed', err);
+   147	    } finally {
+   148	      setIsSearching(false);
+   149	    }
+   150	  };
+   151	
+   152	  const selectSearchResult = (item: NominatimResult) => {
+   153	    const itemLat = parseFloat(item.lat);
+   154	    const itemLng = parseFloat(item.lon);
+   155	
+   156	    const city =
+   157	      item.address?.city ||
+   158	      item.address?.town ||
+   159	      item.address?.village ||
+   160	      item.address?.suburb ||
+   161	      item.address?.county ||
+   162	      '';
+   163	
+   164	    onLocationSelect(itemLat, itemLng, item.display_name, city);
+   165	
+   166	    if (mapRef.current) {
+   167	      mapRef.current.setView([itemLat, itemLng], 15);
+   168	      if (markerRef.current) {
+   169	        markerRef.current.setLatLng([itemLat, itemLng]);
+   170	      }
+   171	    }
+   172	
+   173	    setShowResults(false);
+   174	    setSearchQuery('');
+   175	  };
+   176	
+   177	  return (
+   178	    <div className="space-y-2">
+   179	      {/* Search Input Bar */}
+   180	      <div className="relative">
+   181	        <form onSubmit={handleSearchSubmit} className="flex gap-2">
+   182	          <div className="relative flex-1">
+   183	            <Search className="w-4 h-4 absolute left-3 top-2.5 text-[var(--wood-text-muted)]" />
+   184	            <input
+   185	              type="text"
+   186	              value={searchQuery}
+   187	              onChange={(e) => setSearchQuery(e.target.value)}
+   188	              placeholder="Ort oder Adresse suchen (z.B. Parkallee Potsdam, Berlin Mitte)..."
+   189	              className={`w-full pl-9 pr-3 py-2 rounded-lg text-xs border font-medium transition-colors ${
+   190	                isDarkMode
+   191	                  ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   192	                  : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
+   193	              }`}
+   194	            />
+   195	          </div>
+   196	          <button
+   197	            type="submit"
+   198	            disabled={isSearching}
+   199	            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1 border transition-colors ${
+   200	              isDarkMode
+   201	                ? 'bg-[var(--wood-base)] border-[var(--wood-border)] text-[var(--wood-text-primary)] hover:bg-[var(--wood-raised)]'
+   202	                : 'bg-slate-100 border-slate-300 text-slate-800 hover:bg-slate-200'
+   203	            }`}
+   204	          >
+   205	            {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>Suchen</span>}
+   206	          </button>
+   207	        </form>
+   208	
+   209	        {/* Autocomplete dropdown results */}
+   210	        {showResults && searchResults.length > 0 && (
+   211	          <div
+   212	            className={`absolute left-0 right-0 top-11 z-[500] rounded-xl border shadow-xl max-h-48 overflow-y-auto p-1.5 space-y-1 ${
+   213	              isDarkMode
+   214	                ? 'bg-[var(--wood-panel)] border-[var(--wood-border)] text-[var(--wood-text-primary)]'
+   215	                : 'bg-white border-slate-200 text-slate-900'
+   216	            }`}
+   217	          >
+   218	            {searchResults.map((item) => (
+   219	              <button
+   220	                key={item.place_id}
+   221	                type="button"
+   222	                onClick={() => selectSearchResult(item)}
+   223	                className={`w-full text-left p-2 rounded-lg text-xs transition-colors flex items-start gap-2 ${
+   224	                  isDarkMode
+   225	                    ? 'hover:bg-[var(--wood-raised)] text-[var(--wood-text-secondary)] hover:text-white'
+   226	                    : 'hover:bg-slate-100 text-slate-700'
+   227	                }`}
+   228	              >
+   229	                <MapPin className="w-4 h-4 text-[var(--wood-moss)] shrink-0 mt-0.5" />
+   230	                <span className="line-clamp-2 leading-tight">{item.display_name}</span>
+   231	              </button>
+   232	            ))}
+   233	          </div>
+   234	        )}
+   235	      </div>
+   236	
+   237	      {/* Map Display */}
+   238	      <div className="relative w-full h-52 rounded-xl overflow-hidden border border-[var(--wood-border)] shadow-inner">
+   239	        <div ref={mapContainerRef} className="w-full h-full z-0" />
+   240	        <div className="absolute bottom-2 right-2 z-[400] bg-black/80 text-white text-[10px] px-2.5 py-1 rounded-md backdrop-blur-xs font-mono border border-white/10 flex items-center gap-1.5 shadow-md">
+   241	          <MapPin className="w-3 h-3 text-[var(--wood-moss)]" />
+   242	          <span>Klicken oder Marker ziehen zum Positionieren</span>
+   243	        </div>
+   244	      </div>
+   245	    </div>
+   246	  );
+   247	};
+=== UIUX new worksite modal ===
+     1	import React, { useState } from 'react';
+     2	import { Worksite, WorksiteColorKey } from '../../types';
+     3	import { X, MapPin, Building, Sparkles, Check, Tag, Info, ShieldCheck } from 'lucide-react';
+     4	import { WorksiteLocationPicker } from '../common/WorksiteLocationPicker';
+     5	
+     6	interface NewWorksiteModalProps {
+     7	  isOpen: boolean;
+     8	  onClose: () => void;
+     9	  onAddWorksite: (worksite: Worksite) => void;
+    10	  isDarkMode?: boolean;
+    11	}
+    12	
+    13	const COLOR_OPTIONS: { key: WorksiteColorKey; hex: string; label: string }[] = [
+    14	  { key: 'site-blue', hex: '#3B82F6', label: 'Blau' },
+    15	  { key: 'site-green', hex: '#10B981', label: 'Grün' },
+    16	  { key: 'site-orange', hex: '#F97316', label: 'Orange' },
+    17	  { key: 'site-violet', hex: '#8B5CF6', label: 'Violett' },
+    18	  { key: 'site-teal', hex: '#14B8A6', label: 'Türkis' },
+    19	  { key: 'site-red', hex: '#EF4444', label: 'Rot' },
+    20	  { key: 'site-yellow', hex: '#EAB308', label: 'Gelb' },
+    21	  { key: 'site-slate', hex: '#64748B', label: 'Grau' },
+    22	];
+    23	
+    24	const AVAILABLE_SKILLS = [
+    25	  'SKT-A',
+    26	  'SKT-B',
+    27	  'ASBaum1',
+    28	  'ASBaum2',
+    29	  'Baumpfleger',
+    30	  'Maschinist',
+    31	  'Großsägenschein',
+    32	  'Pflanzung',
+    33	];
+    34	
+    35	export const NewWorksiteModal: React.FC<NewWorksiteModalProps> = ({
+    36	  isOpen,
+    37	  onClose,
+    38	  onAddWorksite,
+    39	  isDarkMode = true,
+    40	}) => {
+    41	  const [name, setName] = useState('');
+    42	  const [code, setCode] = useState('');
+    43	  const [location, setLocation] = useState('Potsdam');
+    44	  const [address, setAddress] = useState('');
+    45	  const [meetingPoint, setMeetingPoint] = useState('');
+    46	  const [description, setDescription] = useState('');
+    47	  const [selectedColorKey, setSelectedColorKey] = useState<WorksiteColorKey>('site-green');
+    48	  const [selectedHex, setSelectedHex] = useState('#10B981');
+    49	  const [requiredSkills, setRequiredSkills] = useState<string[]>(['ASBaum1']);
+    50	
+    51	  // Map position (default to Potsdam / Berlin Brandenburg area)
+    52	  const [lat, setLat] = useState(52.4009);
+    53	  const [lng, setLng] = useState(13.0591);
+    54	
+    55	  if (!isOpen) return null;
+    56	
+    57	  // Auto-generate site code from name if code is empty or untouched
+    58	  const handleNameChange = (val: string) => {
+    59	    setName(val);
+    60	    if (!code || code.length <= 6) {
+    61	      const initials = val
+    62	        .split(' ')
+    63	        .filter(Boolean)
+    64	        .map((w) => w[0]?.toUpperCase())
+    65	        .join('');
+    66	      const randomNum = Math.floor(Math.random() * 90 + 10);
+    67	      setCode(initials ? `BS-${initials}-${randomNum}` : `BS-${randomNum}`);
+    68	    }
+    69	  };
+    70	
+    71	  const handleLocationSelect = (newLat: number, newLng: number, newAddr?: string, city?: string) => {
+    72	    setLat(newLat);
+    73	    setLng(newLng);
+    74	    if (newAddr) {
+    75	      setAddress(newAddr);
+    76	    }
+    77	    if (city) {
+    78	      setLocation(city);
+    79	    }
+    80	  };
+    81	
+    82	  const toggleSkill = (skill: string) => {
+    83	    setRequiredSkills((prev) =>
+    84	      prev.includes(skill) ? prev.filter((s) => s !== skill) : [...prev, skill]
+    85	    );
+    86	  };
+    87	
+    88	  const handleSubmit = (e: React.FormEvent) => {
+    89	    e.preventDefault();
+    90	    if (!name.trim()) return;
+    91	
+    92	    const newWorksite: Worksite = {
+    93	      id: `ws_${Date.now()}`,
+    94	      code: code.trim() || `BS-${Math.floor(Math.random() * 900 + 100)}`,
+    95	      name: name.trim(),
+    96	      location: location.trim() || 'Brandenburg',
+    97	      address: address.trim() || 'Adresse nicht definiert',
+    98	      meetingPoint: meetingPoint.trim() || 'Zufahrt Haupttor',
+    99	      colorKey: selectedColorKey,
+   100	      hexColor: selectedHex,
+   101	      description: description.trim() || 'Keine Zusatzangaben hinterlegt.',
+   102	      requiredSkills,
+   103	    };
+   104	
+   105	    onAddWorksite(newWorksite);
+   106	    onClose();
+   107	  };
+   108	
+   109	  return (
+   110	    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
+   111	      <div
+   112	        className={`w-full max-w-2xl rounded-2xl shadow-2xl border overflow-hidden transition-colors ${
+   113	          isDarkMode
+   114	            ? 'bg-[var(--wood-panel)] border-[var(--wood-border)] text-[var(--wood-text-primary)] wood-grain-v'
+   115	            : 'bg-white border-[#97B89A] text-[#3B4A3B]'
+   116	        }`}
+   117	      >
+   118	        {/* Header */}
+   119	        <div
+   120	          className={`flex items-center justify-between px-6 py-4 border-b ${
+   121	            isDarkMode
+   122	              ? 'border-[var(--wood-border)] bg-[var(--wood-base)] wood-burnt-edge'
+   123	              : 'border-[#97B89A] bg-[#CDE7CC]'
+   124	          }`}
+   125	          style={{ borderTop: `4px solid ${selectedHex}` }}
+   126	        >
+   127	          <div className="flex items-center space-x-3">
+   128	            <div
+   129	              className="p-2 rounded-lg text-white font-bold flex items-center justify-center shadow-xs"
+   130	              style={{ backgroundColor: selectedHex }}
+   131	            >
+   132	              <Building className="w-5 h-5" />
+   133	            </div>
+   134	            <div>
+   135	              <h2 className="text-base font-bold tracking-tight">Neue Baustelle anlegen</h2>
+   136	              <p className={`text-xs ${isDarkMode ? 'text-[var(--wood-text-muted)]' : 'text-[#6E8B6E]'}`}>
+   137	                Ort per Adresse oder Karte festlegen und Stammdaten erfassen
+   138	              </p>
+   139	            </div>
+   140	          </div>
+   141	          <button
+   142	            onClick={onClose}
+   143	            className={`p-1.5 rounded-lg transition-colors ${
+   144	              isDarkMode
+   145	                ? 'hover:bg-[var(--wood-raised)] text-[var(--wood-text-muted)] hover:text-white'
+   146	                : 'hover:bg-[#E9F4EA] text-[#6E8B6E] hover:text-[#3B4A3B]'
+   147	            }`}
+   148	          >
+   149	            <X className="w-5 h-5" />
+   150	          </button>
+   151	        </div>
+   152	
+   153	        {/* Form Body */}
+   154	        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[82vh] overflow-y-auto custom-scrollbar">
+   155	          {/* Name & Code */}
+   156	          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   157	            <div className="sm:col-span-2">
+   158	              <label
+   159	                className={`block text-xs font-semibold mb-1 flex items-center gap-1.5 ${
+   160	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   161	                }`}
+   162	              >
+   163	                <Building className="w-3.5 h-3.5 text-[var(--wood-info)]" />
+   164	                <span>Name / Bezeichnung der Baustelle *</span>
+   165	              </label>
+   166	              <input
+   167	                type="text"
+   168	                value={name}
+   169	                onChange={(e) => handleNameChange(e.target.value)}
+   170	                placeholder="z.B. Baumpflege Park Sanssouci, Kronensicherung Villa"
+   171	                required
+   172	                className={`w-full px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+   173	                  isDarkMode
+   174	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   175	                    : 'bg-white border-slate-300 text-slate-900'
+   176	                }`}
+   177	              />
+   178	            </div>
+   179	
+   180	            <div>
+   181	              <label
+   182	                className={`block text-xs font-semibold mb-1 flex items-center gap-1.5 ${
+   183	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   184	                }`}
+   185	              >
+   186	                <Tag className="w-3.5 h-3.5 text-[var(--wood-resin)]" />
+   187	                <span>Kürzel / Code *</span>
+   188	              </label>
+   189	              <input
+   190	                type="text"
+   191	                value={code}
+   192	                onChange={(e) => setCode(e.target.value.toUpperCase())}
+   193	                placeholder="z.B. BS-SAN-01"
+   194	                required
+   195	                className={`w-full px-3 py-2 rounded-lg text-xs font-mono font-bold uppercase border transition-colors ${
+   196	                  isDarkMode
+   197	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   198	                    : 'bg-white border-slate-300 text-slate-900'
+   199	                }`}
+   200	              />
+   201	            </div>
+   202	          </div>
+   203	
+   204	          {/* Location / OpenStreetMap Search & Interactive Map */}
+   205	          <div>
+   206	            <label
+   207	              className={`block text-xs font-semibold mb-1.5 flex items-center justify-between ${
+   208	                isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   209	              }`}
+   210	            >
+   211	              <div className="flex items-center gap-1.5">
+   212	                <MapPin className="w-3.5 h-3.5 text-[var(--wood-moss)]" />
+   213	                <span>Ort & Position (OpenStreetMap / Geocoding)</span>
+   214	              </div>
+   215	              <span className="text-[10px] text-[var(--wood-text-muted)]">
+   216	                📍 Karte oder Adresse durchsuchen
+   217	              </span>
+   218	            </label>
+   219	
+   220	            <WorksiteLocationPicker
+   221	              lat={lat}
+   222	              lng={lng}
+   223	              onLocationSelect={handleLocationSelect}
+   224	              isDarkMode={isDarkMode}
+   225	            />
+   226	          </div>
+   227	
+   228	          {/* Address details & Meeting point */}
+   229	          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   230	            <div>
+   231	              <label
+   232	                className={`block text-xs font-semibold mb-1 ${
+   233	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   234	                }`}
+   235	              >
+   236	                Exakte Adresse
+   237	              </label>
+   238	              <input
+   239	                type="text"
+   240	                value={address}
+   241	                onChange={(e) => setAddress(e.target.value)}
+   242	                placeholder="Maulbeerallee 1, 14469 Potsdam"
+   243	                required
+   244	                className={`w-full px-3 py-2 rounded-lg text-xs border font-medium transition-colors ${
+   245	                  isDarkMode
+   246	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   247	                    : 'bg-white border-slate-300 text-slate-900'
+   248	                }`}
+   249	              />
+   250	            </div>
+   251	
+   252	            <div>
+   253	              <label
+   254	                className={`block text-xs font-semibold mb-1 ${
+   255	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   256	                }`}
+   257	              >
+   258	                Stadt / Ortsteil
+   259	              </label>
+   260	              <input
+   261	                type="text"
+   262	                value={location}
+   263	                onChange={(e) => setLocation(e.target.value)}
+   264	                placeholder="Potsdam, Berlin-Mitte, etc."
+   265	                required
+   266	                className={`w-full px-3 py-2 rounded-lg text-xs border font-medium transition-colors ${
+   267	                  isDarkMode
+   268	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   269	                    : 'bg-white border-slate-300 text-slate-900'
+   270	                }`}
+   271	              />
+   272	            </div>
+   273	          </div>
+   274	
+   275	          {/* Meeting Point & Color Selector */}
+   276	          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   277	            <div>
+   278	              <label
+   279	                className={`block text-xs font-semibold mb-1 ${
+   280	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   281	                }`}
+   282	              >
+   283	                Treffpunkt / Anfahrtshinweis
+   284	              </label>
+   285	              <input
+   286	                type="text"
+   287	                value={meetingPoint}
+   288	                onChange={(e) => setMeetingPoint(e.target.value)}
+   289	                placeholder="z.B. Parkplatz Nord, Haupteingang Zufahrt 2"
+   290	                className={`w-full px-3 py-2 rounded-lg text-xs border font-medium transition-colors ${
+   291	                  isDarkMode
+   292	                    ? 'bg-[var(--wood-seam)] border-[var(--wood-border)] text-[var(--wood-text-primary)] focus:border-[var(--wood-info)]'
+   293	                    : 'bg-white border-slate-300 text-slate-900'
+   294	                }`}
+   295	              />
+   296	            </div>
+   297	
+   298	            <div>
+   299	              <label
+   300	                className={`block text-xs font-semibold mb-1 ${
+   301	                  isDarkMode ? 'text-[var(--wood-text-secondary)]' : 'text-slate-700'
+   302	                }`}
+   303	              >
+   304	                Farbkennzeichnung
+   305	              </label>
+   306	              <div className="flex flex-wrap gap-1.5">
+   307	                {COLOR_OPTIONS.map((c) => {
+   308	                  const isSel = selectedColorKey === c.key;
+   309	                  return (
+   310	                    <button
+   311	                      key={c.key}
+   312	                      type="button"
+   313	                      onClick={() => {
+   314	                        setSelectedColorKey(c.key);
+   315	                        setSelectedHex(c.hex);
+   316	                      }}
+   317	                      className={`w-6 h-6 rounded-full border-2 transition-transform flex items-center justify-center ${
+   318	                        isSel ? 'scale-110 ring-2 ring-white border-black' : 'border-transparent opacity-80 hover:opacity-100'
+   319	                      }`}
+   320	                      style={{ backgroundColor: c.hex }}
+=== UIUX publish simulation ===
+/mnt/data/easytree-audit-work/repos/easytree-uiux/EasyTree-UIUX-main/src/utils/csvExport.ts:98:      asg.status === 'published'
+/mnt/data/easytree-audit-work/repos/easytree-uiux/EasyTree-UIUX-main/src/types/index.ts:70:export type AssignmentStatus = 'draft' | 'published' | 'modified';
+/mnt/data/easytree-audit-work/repos/easytree-uiux/EasyTree-UIUX-main/src/App.tsx:598:              lastModified: 'Soeben veröffentlicht',
+/mnt/data/easytree-audit-work/repos/easytree-uiux/EasyTree-UIUX-main/src/App.tsx:607:          ? { ...a, status: 'published' }
+/mnt/data/easytree-audit-work/repos/easytree-uiux/EasyTree-UIUX-main/src/components/modals/PublishModal.tsx:114:                (Klickprototyp: Die Benachrichtigung der Mitarbeiter wird simuliert.)
+/mnt/data/easytree-audit-work/repos/easytree-uiux/EasyTree-UIUX-main/src/components/layout/TopCommandBar.tsx:275:          title="Klick zum Wechseln der simulierten Berechtigung"
+=== UIUX tests ===
+     1	import { describe, it, expect } from 'vitest';
+     2	import { detectConflicts, calculateHours } from '../domain/conflictEngine';
+     3	import {
+     4	  getEmployeeCapacitySummaries,
+     5	  getWorksitePersonHours,
+     6	  getResourceUtilization,
+     7	} from '../domain/capacityEngine';
+     8	import {
+     9	  INITIAL_EMPLOYEES,
+    10	  INITIAL_ABSENCES,
+    11	  INITIAL_WORKSITES,
+    12	  INITIAL_VEHICLES,
+    13	  INITIAL_EQUIPMENT,
+    14	  INITIAL_ASSIGNMENTS,
+    15	  INITIAL_WEEKS,
+    16	} from '../data/mockData';
+    17	import { WorksiteAssignment } from '../types';
+    18	
+    19	describe('Arboscus Workforce Planning - Domain Rules Tests', () => {
+    20	  it('should accurately calculate assignment hours from start and end times', () => {
+    21	    expect(calculateHours('07:00', '15:30')).toBe(8.5);
+    22	    expect(calculateHours('07:30', '16:00')).toBe(8.5);
+    23	    expect(calculateHours('07:00', '14:00')).toBe(7.0);
+    24	  });
+    25	
+    26	  it('should detect an absence conflict when an absent employee is assigned', () => {
+    27	    // Thomas Berger (emp-7) is absent on 2026-09-14
+    28	    const testAssignments: WorksiteAssignment[] = [
+    29	      {
+    30	        id: 'test-asg-1',
+    31	        worksiteId: 'site-1',
+    32	        date: '2026-09-14',
+    33	        startTime: '07:00',
+    34	        endTime: '15:30',
+    35	        activityName: 'Test Activity',
+    36	        assignedEmployeeIds: ['emp-7'], // Thomas Berger on leave
+    37	        assignedVehicleIds: [],
+    38	        assignedEquipmentIds: [],
+    39	        status: 'draft',
+    40	      },
+    41	    ];
+    42	
+    43	    const conflicts = detectConflicts(
+    44	      testAssignments,
+    45	      INITIAL_EMPLOYEES,
+    46	      INITIAL_ABSENCES,
+    47	      INITIAL_WORKSITES,
+    48	      INITIAL_EQUIPMENT,
+    49	      INITIAL_VEHICLES
+    50	    );
+    51	
+    52	    const absConflict = conflicts.find((c) => c.type === 'absence_conflict');
+    53	    expect(absConflict).toBeDefined();
+    54	    expect(absConflict?.severity).toBe('blocking');
+    55	    expect(absConflict?.affectedEmployeeIds).toContain('emp-7');
+    56	  });
+    57	
+    58	  it('should detect a double-booking conflict when an employee is on two overlapping assignments', () => {
+    59	    const testAssignments: WorksiteAssignment[] = [
+    60	      {
+    61	        id: 'test-asg-1',
+    62	        worksiteId: 'site-1',
+    63	        date: '2026-09-15',
+    64	        startTime: '07:00',
+    65	        endTime: '15:30',
+    66	        activityName: 'Site 1 Work',
+    67	        assignedEmployeeIds: ['emp-1'], // Martin Schuster
+    68	        assignedVehicleIds: [],
+    69	        assignedEquipmentIds: [],
+    70	        status: 'draft',
+    71	      },
+    72	      {
+    73	        id: 'test-asg-2',
+    74	        worksiteId: 'site-2',
+    75	        date: '2026-09-15',
+    76	        startTime: '08:00',
+    77	        endTime: '16:00',
+    78	        activityName: 'Site 2 Work',
+    79	        assignedEmployeeIds: ['emp-1'], // Martin Schuster assigned again
+    80	        assignedVehicleIds: [],
+    81	        assignedEquipmentIds: [],
+    82	        status: 'draft',
+    83	      },
+    84	    ];
+    85	
+    86	    const conflicts = detectConflicts(
+    87	      testAssignments,
+    88	      INITIAL_EMPLOYEES,
+    89	      INITIAL_ABSENCES,
+    90	      INITIAL_WORKSITES,
+    91	      INITIAL_EQUIPMENT,
+    92	      INITIAL_VEHICLES
+    93	    );
+    94	
+    95	    const dbConflict = conflicts.find((c) => c.type === 'double_booking');
+    96	    expect(dbConflict).toBeDefined();
+    97	    expect(dbConflict?.severity).toBe('blocking');
+    98	    expect(dbConflict?.affectedEmployeeIds).toContain('emp-1');
+    99	  });
+   100	
+   101	  it('should detect a resource double-booking for exclusive equipment', () => {
+   102	    const testAssignments: WorksiteAssignment[] = [
+   103	      {
+   104	        id: 'test-asg-1',
+   105	        worksiteId: 'site-1',
+   106	        date: '2026-09-16',
+   107	        startTime: '07:00',
+   108	        endTime: '15:30',
+   109	        activityName: 'Site 1 Work',
+   110	        assignedEmployeeIds: ['emp-1'],
+   111	        assignedVehicleIds: [],
+   112	        assignedEquipmentIds: ['eq-1'], // Ruthmann Hubarbeitsbühne (Exclusive)
+   113	        status: 'draft',
+   114	      },
+   115	      {
+   116	        id: 'test-asg-2',
+   117	        worksiteId: 'site-2',
+   118	        date: '2026-09-16',
+   119	        startTime: '07:00',
+   120	        endTime: '15:30',
+   121	        activityName: 'Site 2 Work',
+   122	        assignedEmployeeIds: ['emp-2'],
+   123	        assignedVehicleIds: [],
+   124	        assignedEquipmentIds: ['eq-1'], // Same Exclusive Equipment
+   125	        status: 'draft',
+   126	      },
+   127	    ];
+   128	
+   129	    const conflicts = detectConflicts(
+   130	      testAssignments,
+   131	      INITIAL_EMPLOYEES,
+   132	      INITIAL_ABSENCES,
+   133	      INITIAL_WORKSITES,
+   134	      INITIAL_EQUIPMENT,
+   135	      INITIAL_VEHICLES
+   136	    );
+   137	
+   138	    const eqConflict = conflicts.find((c) => c.type === 'resource_double_booking');
+   139	    expect(eqConflict).toBeDefined();
+   140	    expect(eqConflict?.severity).toBe('blocking');
+   141	    expect(eqConflict?.affectedResourceId).toBe('eq-1');
+   142	  });
+   143	
+   144	  it('should correctly sum planned weekly hours and calculate person-hours per site', () => {
+   145	    const capacities = getEmployeeCapacitySummaries(
+   146	      INITIAL_EMPLOYEES,
+   147	      INITIAL_ASSIGNMENTS,
+   148	      INITIAL_ABSENCES,
+   149	      '2026-09-14',
+   150	      '2026-09-18'
+   151	    );
+   152	
+   153	    const martinCap = capacities.find((c) => c.employeeId === 'emp-1');
+   154	    expect(martinCap).toBeDefined();
+   155	    expect(martinCap?.plannedHours).toBeGreaterThan(0);
+   156	
+   157	    const site1Hours = getWorksitePersonHours('site-1', INITIAL_ASSIGNMENTS);
+   158	    expect(site1Hours.totalPersonHours).toBeGreaterThan(0);
+   159	    expect(site1Hours.totalAssignedPeople).toBeGreaterThan(0);
+   160	  });
+   161	
+   162	  it('should verify that four-week horizon contains exactly 4 weeks', () => {
+   163	    expect(INITIAL_WEEKS.length).toBe(4);
+   164	    expect(INITIAL_WEEKS[0].weekNumber).toBe(38);
+   165	    expect(INITIAL_WEEKS[1].weekNumber).toBe(39);
+   166	    expect(INITIAL_WEEKS[2].weekNumber).toBe(40);
+   167	    expect(INITIAL_WEEKS[3].weekNumber).toBe(41);
+   168	  });
+   169	
+   170	  it('should verify that domain models contain NO cost or monetary fields in MVP', () => {
+   171	    const sampleEmployee = INITIAL_EMPLOYEES[0] as any;
+   172	    expect(sampleEmployee.hourlyRate).toBeUndefined();
+   173	    expect(sampleEmployee.wage).toBeUndefined();
+   174	    expect(sampleEmployee.cost).toBeUndefined();
+   175	
+   176	    const sampleWorksite = INITIAL_WORKSITES[0] as any;
+   177	    expect(sampleWorksite.budget).toBeUndefined();
+   178	    expect(sampleWorksite.revenue).toBeUndefined();
+   179	  });
+   180	});

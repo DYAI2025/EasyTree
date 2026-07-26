@@ -132,7 +132,8 @@ Ausgeschlossen bleiben Lohnabrechnung, Rechnungen, Umsatzsteuerberechnung, Brutt
 
 ## 7. Technische Leitentscheidungen
 
-- kanonisches Repository: `DYAI2025/Arborga`;
+- kanonisches Repository: `DYAI2025/EasyTree` (bis 25.07.2026 `DYAI2025/Arborga`; siehe
+  [ADR-002](../architecture/ADR-002-integration-canonical-repo.md));
 - Datenbankplattform: Supabase Postgres;
 - Supabase Auth als bevorzugte Authentifizierung;
 - private Storage-Buckets mit Row Level Security;
