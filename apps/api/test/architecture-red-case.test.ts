@@ -164,6 +164,39 @@ describe("Rot-Fall", () => {
     write("apps/api/src/modules/workforce/index.ts", "export const marker = 1;\n");
   });
 
+  it("faengt einen echten Import trotz gleichnamiger Moduldeklaration", () => {
+    // Ein Namensfilter fuer `declare module` wuerde hier den echten rxjs-Import
+    // mitverwerfen und den Verstoss unsichtbar machen. Deshalb filtert der
+    // Scanner nach Position, nicht nach Name.
+    write(
+      "apps/api/src/modules/planning/domain/augmented.ts",
+      [
+        'import { firstValueFrom } from "rxjs";',
+        'declare module "rxjs" {',
+        "  interface Observable<T> {",
+        "    eytMarker?: T;",
+        "  }",
+        "}",
+        "export const used = firstValueFrom;",
+      ].join("\n") + "\n",
+    );
+    const found = violationsFor().violations.filter((v) => v.rule === "domain-allowlist");
+    expect(found.some((v) => v.message.includes('"rxjs"'))).toBe(true);
+    rmSync(join(root, "apps/api/src/modules/planning"), { recursive: true, force: true });
+  });
+
+  it("faengt eine unbekannte Schicht, statt die Richtungsregel abzuschalten", () => {
+    // Ohne diese Behandlung genuegte ein Verzeichnis `services/`, um die
+    // Richtungspruefung fuer alle seine Importe stillzulegen — fail-open.
+    write(
+      "apps/api/src/modules/workforce/services/sneaky.ts",
+      'import { repo } from "../infrastructure/repo";\nexport const sneaky = repo;\n',
+    );
+    const found = violationsFor().violations.filter((v) => v.rule === "layer-direction");
+    expect(found.some((v) => v.message.includes("Unbekannte Schicht"))).toBe(true);
+    rmSync(join(root, "apps/api/src/modules/workforce/services"), { recursive: true, force: true });
+  });
+
   it("ist am sauberen Baum gruen — der Rot-Fall kommt von den Verstoessen, nicht vom Aufbau", () => {
     expect(violationsFor().violations).toEqual([]);
   });

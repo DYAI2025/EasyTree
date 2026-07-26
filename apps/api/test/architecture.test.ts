@@ -11,14 +11,19 @@
  * Ticket seinen Code geschrieben hat, und der Test verlangt daraufhin echte
  * Dateien — er belohnt nicht das Anlegen leerer Dateien, um einen Zähler zu heben.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { SCAFFOLDED_MODULES } from "../src/modules/module-catalogue";
-import { evaluate, findStarReExports, moduleOf, RULES } from "./architecture/rules";
-import { collectSourceFiles, extractImports, findRepoRoot } from "./architecture/scan";
+import { MODULE_SLUGS, SCAFFOLDED_MODULES } from "../src/modules/module-catalogue";
+import { evaluate, findStarReExports, RULES } from "./architecture/rules";
+import {
+  collectFilesNamed,
+  collectSourceFiles,
+  extractImports,
+  findRepoRoot,
+} from "./architecture/scan";
 
 // Nicht `import.meta.dirname`: apps/api baut nach CommonJS (NodeNext ohne
 // "type": "module"), dort ist das ein harter Compilerfehler (TS1470). Vitest
@@ -29,6 +34,11 @@ const repoRoot = findRepoRoot(process.cwd());
 const files = [
   ...collectSourceFiles(repoRoot, "apps"),
   ...collectSourceFiles(repoRoot, "packages"),
+];
+const tsconfigFiles = [
+  ...collectFilesNamed(repoRoot, "apps", /^tsconfig(\..+)?\.json$/),
+  ...collectFilesNamed(repoRoot, "packages", /^tsconfig(\..+)?\.json$/),
+  "tsconfig.base.json",
 ];
 const refs = extractImports(repoRoot, files);
 const { violations, scopeCounts } = evaluate(refs);
@@ -77,9 +87,15 @@ describe("Architekturgrenzen", () => {
     // saehe aus wie ein Paketname und liefe an jeder pfadbasierten Pruefung
     // vorbei. Die Regeln setzen die Abwesenheit voraus — also wird sie geprueft,
     // nicht kommentiert.
-    const withPaths = files
-      .filter((file) => file.endsWith("tsconfig.json") || file.endsWith("tsconfig.build.json"))
-      .filter((file) => /"paths"\s*:/.test(readFileSync(resolve(repoRoot, file), "utf8")));
+    //
+    // Die tsconfigs kommen NICHT aus `files`: `collectSourceFiles` sammelt nur
+    // Quelltextendungen, JSON ist nicht dabei. Ein Filter ueber `files` waere
+    // immer leer und diese Zusicherung damit selbst der leere Haken, den sie
+    // verhindern soll.
+    expect(tsconfigFiles.length, "keine tsconfig gefunden — Suche kaputt").toBeGreaterThan(4);
+    const withPaths = tsconfigFiles.filter((file) =>
+      /"paths"\s*:/.test(readFileSync(resolve(repoRoot, file), "utf8")),
+    );
     expect(withPaths).toEqual([]);
   });
 
@@ -105,10 +121,18 @@ describe("Architekturgrenzen", () => {
     expect(rendered).toEqual([]);
   });
 
-  it("ordnet jede Moduldatei einem bekannten Modul zu", () => {
-    const orphans = files
-      .filter((file) => file.startsWith("apps/api/src/modules/") && file.includes("/"))
-      .filter((file) => moduleOf(file) === null && !file.endsWith("module-catalogue.ts"));
-    expect(orphans).toEqual([]);
+  it("kennt jedes Modulverzeichnis aus dem Katalog", () => {
+    // `moduleOf` liefert das erste Verzeichnissegment unter `modules/` — auch
+    // fuer einen Tippfehler wie `workfroce/`. Ohne diese Pruefung waere ein
+    // solches Verzeichnis ein vollwertiges Modul, das keine der
+    // registergetriebenen Zusicherungen erfasst: der Katalog waere Dekoration.
+    const known = new Set<string>(MODULE_SLUGS);
+    const onDisk = readdirSync(resolve(repoRoot, "apps/api/src/modules"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+
+    expect(onDisk.filter((dir) => !known.has(dir))).toEqual([]);
+    // Jedes geruestete Modul muss auch wirklich auf der Platte liegen.
+    expect([...SCAFFOLDED_MODULES].filter((slug) => !onDisk.includes(slug))).toEqual([]);
   });
 });

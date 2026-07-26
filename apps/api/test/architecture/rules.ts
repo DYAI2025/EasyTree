@@ -142,7 +142,15 @@ export const RULES: readonly Rule[] = [
       if (fromLayer === null || toLayer === null) return null;
       const fromRank = LAYER_RANK[fromLayer];
       const toRank = LAYER_RANK[toLayer];
-      if (fromRank === undefined || toRank === undefined) return null;
+      // Eine unbekannte Schicht darf die Regel NICHT abschalten. Sonst genuegte
+      // ein Verzeichnis `planning/services/`, um die Richtungspruefung fuer
+      // seine Importe stillzulegen — fail-open genau dort, wo sie wirken soll.
+      if (fromRank === undefined) {
+        return `Unbekannte Schicht "${fromLayer}". Erlaubt sind ausschliesslich ${Object.keys(LAYER_RANK).join(", ")} (ADR-001 Z. 65-69).`;
+      }
+      if (toRank === undefined) {
+        return `Import nach unbekannter Schicht "${toLayer}". Erlaubt sind ausschliesslich ${Object.keys(LAYER_RANK).join(", ")} (ADR-001 Z. 65-69).`;
+      }
       if (toRank <= fromRank) return null;
       return `Schicht "${fromLayer}" darf nicht nach "${toLayer}" importieren — erlaubt ist nur von aussen nach innen (ADR-001 Z. 65-69).`;
     },

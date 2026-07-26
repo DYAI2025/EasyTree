@@ -87,6 +87,35 @@ function toPosix(p: string): string {
 }
 
 /**
+ * Dateien nach Namensmuster, unabhaengig von {@link SOURCE_EXTENSIONS}.
+ *
+ * Gebraucht fuer `tsconfig*.json`: die Alias-Zusicherung darf sich nicht aus
+ * der Quelltextliste bedienen, weil dort per Definition kein JSON steht — der
+ * Filter waere immer leer und die Zusicherung wertlos.
+ */
+export function collectFilesNamed(repoRoot: string, dir: string, pattern: RegExp): string[] {
+  const out: string[] = [];
+  const absDir = resolve(repoRoot, dir);
+  if (!existsSync(absDir)) return out;
+
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const abs = join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) walk(abs);
+        continue;
+      }
+      if (entry.isFile() && pattern.test(entry.name)) {
+        out.push(toPosix(relative(repoRoot, abs)));
+      }
+    }
+  };
+
+  walk(absDir);
+  return out.sort();
+}
+
+/**
  * Auflösung relativer Spezifizierer. Muss drei Modulstile abdecken, die im
  * Repo gleichzeitig vorkommen: `apps/api` (NodeNext, endungslos), die
  * ESM-Pakete (`.js`-Endung, Ziel ist `.ts`) und `apps/web`
@@ -149,14 +178,23 @@ export function extractImports(repoRoot: string, files: readonly string[]): Impo
     const source = readFileSync(abs, "utf8");
     const info = ts.preProcessFile(source, true, true);
 
-    const declaredModules = new Set<string>();
-    for (const match of source.matchAll(/declare\s+module\s+["']([^"']+)["']/g)) {
-      const name = match[1];
-      if (name !== undefined) declaredModules.add(name);
+    // Positionen — NICHT Namen — der Spezifizierer in `declare module "x"`.
+    // Ein Namensfilter würde in einer Datei, die `import "rxjs"` UND
+    // `declare module "rxjs"` enthält, auch den echten Import verwerfen und
+    // damit ausgerechnet den Verstoss unsichtbar machen, den die Regel sucht.
+    const declarationSpans: Array<readonly [number, number]> = [];
+    for (const match of source.matchAll(/declare\s+module\s+(["'])([^"']+)\1/g)) {
+      const specifier = match[2];
+      if (match.index === undefined || specifier === undefined) continue;
+      const quoteAt = source.indexOf(match[1] ?? '"', match.index);
+      if (quoteAt < 0) continue;
+      declarationSpans.push([quoteAt, quoteAt + specifier.length + 2]);
     }
+    const insideDeclaration = (pos: number): boolean =>
+      declarationSpans.some(([start, end]) => pos >= start && pos <= end);
 
     for (const imported of info.importedFiles) {
-      if (declaredModules.has(imported.fileName)) continue;
+      if (insideDeclaration(imported.pos)) continue;
       refs.push({
         from: file,
         specifier: imported.fileName,
