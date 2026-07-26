@@ -23,3 +23,17 @@ export type {
   WorksiteId,
 } from "./identifiers.js";
 export { IDENTIFIER_BRANDS, unsafeIdentifier } from "./identifiers.js";
+
+export type { MaybeInstant, TimeIntervalError, TimeIntervalResult } from "./time-interval.js";
+// TimeInterval ist eine Klasse mit privaten Feldern und wird als Wert exportiert:
+// nur so ist `TimeInterval.create` erreichbar, und nur die nominale Typisierung
+// verhindert, dass ein strukturell gleiches Objekt als geprueftes Intervall gilt.
+export {
+  durationMinutes,
+  durationMs,
+  hasAnyOverlap,
+  isAdjacent,
+  overlaps,
+  TIME_INTERVAL_ERRORS,
+  TimeInterval,
+} from "./time-interval.js";
