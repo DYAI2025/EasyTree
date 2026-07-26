@@ -37,3 +37,36 @@ export {
   TIME_INTERVAL_ERRORS,
   TimeInterval,
 } from "./time-interval.js";
+
+export type {
+  IanaTimeZone,
+  LocalBusinessDate,
+  PlanningWeek,
+  TimeZoneResult,
+} from "./planning-week.js";
+export {
+  createTimeZone,
+  EUROPE_BERLIN,
+  isoWeekOfLocalDate,
+  isSameWeek,
+  localBusinessDate,
+  planningWeekKey,
+  planningWeekOf,
+} from "./planning-week.js";
+
+export type {
+  CapacityEntry,
+  CapacityFinding,
+  CapacityLimit,
+  CapacityVerdict,
+  WeeklyLoad,
+} from "./weekly-capacity.js";
+export {
+  aggregateWeeklyLoad,
+  blocksPublication,
+  CAPACITY_VERDICTS,
+  evaluateCapacity,
+  findCapacityIssues,
+  NO_CAPACITY_LIMIT,
+  projectWeeks,
+} from "./weekly-capacity.js";
