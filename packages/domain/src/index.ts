@@ -23,3 +23,19 @@ export type {
   WorksiteId,
 } from "./identifiers.js";
 export { IDENTIFIER_BRANDS, unsafeIdentifier } from "./identifiers.js";
+
+export type {
+  MaybeInstant,
+  TimeInterval,
+  TimeIntervalError,
+  TimeIntervalResult,
+} from "./time-interval.js";
+export {
+  createTimeInterval,
+  durationMinutes,
+  durationMs,
+  hasAnyOverlap,
+  isAdjacent,
+  overlaps,
+  TIME_INTERVAL_ERRORS,
+} from "./time-interval.js";
