@@ -330,9 +330,17 @@ Konventionen: eigener Branch `feat/eyt-<nr>-<slug>`, ein PR je Aufgabe, Commit-P
   Confirmation/Rejection/Notification; AbsenceRequest/AbsenceDecision;
   ActiveTimeEntry/TimeEntry/TimeApproval/TimeCorrection; WeatherSnapshot/WeatherWarning; Audit;
   Outbox.
-- **Regeln:** `org_id NOT NULL` überall; Composite-`unique (id, org_id)` als FK-Ziel; UTC-Instant
-  - IANA-Zeitzone + lokales Geschäftsdatum; Effective Dates; RLS fail-closed; keine
-    Personendaten im Seed.
+- **Regeln:**
+  - `org_id NOT NULL` auf **jeder tenant-owned Tabelle** — nicht global. ADR-001 Z. 82 formuliert
+    die Regel bewusst eng („Jede tenant-owned Zeile"). Ausgenommen sind die bereits bestehenden
+    globalen bzw. identitätsnahen Tabellen: `public.organizations` (**ist** der Mandant, hat
+    naturgemäß kein `org_id`) und `public.users` (1:1-Abbildung auf `auth.users`, RLS „nur
+    self", kein `org_id` — beide Migrationen belegen das). Eine Zuordnung Benutzer ↔ Organisation
+    erfolgt ausschließlich über `public.memberships`. Jede weitere globale Tabelle ist in der
+    Migration ausdrücklich als solche zu kommentieren und zu begründen.
+  - Composite-`unique (id, org_id)` als Ziel tenant-gebundener Fremdschlüssel.
+  - Zeitwerte als UTC-Instant **plus** IANA-Zeitzone **plus** lokales Geschäftsdatum.
+  - Effective Dates; RLS fail-closed; keine Personendaten im Seed.
 - **Schnitt:** mehrere vertikale Teilmigrationen, **keine** Monstermigration.
 - **Abnahmeevidenz:** zweimal `supabase db reset` + zweimal grünes `supabase test db`
   (`docs/runbooks/database-workflow.md`); CI-Job `db-gates` grün.

@@ -70,13 +70,18 @@ pnpm exec supabase status               # local URLs/keys
 Tenant suites take their connection from their own variables, not from `DATABASE_URL`:
 `EASYTREE_TEST_DB_URL` (default `postgresql://postgres:postgres@127.0.0.1:54322/postgres`) and
 `EASYTREE_TEST_POOLER_URL` (Supavisor; CI derives it from the running container, so locally you
-must build it yourself — user `postgres.<pooler-tenant-id>`, port 54329). To reproduce the CI
-gate locally against a running stack:
+must build it yourself — user `postgres.<pooler-tenant-id>`, port 54329). Against a running
+stack, the **direct-connection half** of the CI gate is:
 
 ```bash
+pnpm --filter @easytree/config build      # exec bypasses turbo's ^build; dist/ must exist
 EASYTREE_TENANT_TESTS=required \
   pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts
 ```
+
+That is **not** the whole gate: `db-gates` also runs `test/tenant-pooling.integration.test.ts`
+against the transaction pooler with `EASYTREE_TEST_POOLER_URL` set, and asserts a
+`[tenant-pooling] mode=required executed=… skipped=0` line. Only the CI run covers both.
 
 Runtime smokes and branch protection:
 
