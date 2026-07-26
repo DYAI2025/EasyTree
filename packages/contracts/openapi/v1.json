@@ -1,0 +1,1385 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "easyTree API",
+    "version": "1.0.0",
+    "description": "Vertrag zwischen Web-Shells und Backend. Erzeugt aus den Zod-Schemata in @easytree/contracts; nicht von Hand bearbeiten."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/planung/fenster": {
+      "get": {
+        "operationId": "getPlanningWindow",
+        "summary": "Planungsfenster einer Woche lesen",
+        "parameters": [
+          {
+            "name": "weekKey",
+            "in": "query",
+            "required": true,
+            "description": "ISO-Woche im Format 2026-W32",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-W\\d{2}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Planungsfenster",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningWindow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/planung/entwuerfe/validierung": {
+      "post": {
+        "operationId": "validateDraft",
+        "summary": "Entwurf gegen den Bestand pruefen",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidatePlanCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pruefergebnis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanValidationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/planung/einsaetze": {
+      "post": {
+        "operationId": "createAssignment",
+        "summary": "Einsatz anlegen",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAssignmentCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegter Einsatz",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/planung/versionen": {
+      "post": {
+        "operationId": "publishPlan",
+        "summary": "Planversion veroeffentlichen",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishPlanCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Veroeffentlichte Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedPlanVersion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/einsatz/plan": {
+      "get": {
+        "operationId": "getMySchedule",
+        "summary": "Eigenen veroeffentlichten Plan lesen",
+        "parameters": [
+          {
+            "name": "weekKey",
+            "in": "query",
+            "required": true,
+            "description": "ISO-Woche im Format 2026-W32",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-W\\d{2}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eigener Plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmployeeSchedule"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/einsatz/bestaetigungen": {
+      "post": {
+        "operationId": "confirmPlan",
+        "summary": "Planversion bestaetigen",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPlanCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Bestaetigung",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Confirmation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/einsatz/ablehnungen": {
+      "post": {
+        "operationId": "rejectAssignment",
+        "summary": "Einsatz begruendet ablehnen",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectAssignmentCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ablehnung",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rejection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/einsatz/zeiten/start": {
+      "post": {
+        "operationId": "startTime",
+        "summary": "Arbeitszeit starten",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartTimeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Laufende Buchung",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveTimeEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/einsatz/zeiten/stopp": {
+      "post": {
+        "operationId": "stopTime",
+        "summary": "Arbeitszeit stoppen",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StopTimeCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Eingereichte Buchung",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmittedTimeEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ProblemDocument": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "detail": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "TimeIntervalDto": {
+        "type": "object",
+        "properties": {
+          "startUtc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          },
+          "endUtc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          }
+        },
+        "required": [
+          "startUtc",
+          "endUtc"
+        ],
+        "additionalProperties": false
+      },
+      "PlanningConflictDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "EMPLOYEE_INTERVAL_OVERLAP",
+              "EMPLOYEE_WEEKLY_CAPACITY",
+              "EMPLOYEE_INACTIVE",
+              "WORKSITE_NOT_PUBLISHABLE"
+            ]
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "blocking",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "AssignmentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "employeeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "worksiteId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "interval": {
+            "type": "object",
+            "properties": {
+              "startUtc": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+              },
+              "endUtc": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+              }
+            },
+            "required": [
+              "startUtc",
+              "endUtc"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "employeeId",
+          "worksiteId",
+          "interval"
+        ],
+        "additionalProperties": false
+      },
+      "PlanningWindow": {
+        "type": "object",
+        "properties": {
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W\\d{2}$"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "employeeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "worksiteId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "interval": {
+                  "type": "object",
+                  "properties": {
+                    "startUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    },
+                    "endUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    }
+                  },
+                  "required": [
+                    "startUtc",
+                    "endUtc"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "employeeId",
+                "worksiteId",
+                "interval"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "publishedVersionId": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          }
+        },
+        "required": [
+          "weekKey",
+          "timeZone",
+          "assignments",
+          "publishedVersionId"
+        ],
+        "additionalProperties": false
+      },
+      "CreateAssignmentCommand": {
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "worksiteId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "interval": {
+            "type": "object",
+            "properties": {
+              "startUtc": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+              },
+              "endUtc": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+              }
+            },
+            "required": [
+              "startUtc",
+              "endUtc"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "employeeId",
+          "worksiteId",
+          "interval"
+        ],
+        "additionalProperties": false
+      },
+      "ValidatePlanCommand": {
+        "type": "object",
+        "properties": {
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W\\d{2}$"
+          },
+          "draft": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "description": "UUID"
+              },
+              "worksiteId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "description": "UUID"
+              },
+              "interval": {
+                "type": "object",
+                "properties": {
+                  "startUtc": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                    "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                  },
+                  "endUtc": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                    "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                  }
+                },
+                "required": [
+                  "startUtc",
+                  "endUtc"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "employeeId",
+              "worksiteId",
+              "interval"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "weekKey",
+          "draft"
+        ],
+        "additionalProperties": false
+      },
+      "PlanValidationResult": {
+        "type": "object",
+        "properties": {
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "EMPLOYEE_INTERVAL_OVERLAP",
+                    "EMPLOYEE_WEEKLY_CAPACITY",
+                    "EMPLOYEE_INACTIVE",
+                    "WORKSITE_NOT_PUBLISHABLE"
+                  ]
+                },
+                "blocking": {
+                  "type": "boolean"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "blocking",
+                "message"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "publishable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "conflicts",
+          "publishable"
+        ],
+        "additionalProperties": false
+      },
+      "PublishPlanCommand": {
+        "type": "object",
+        "properties": {
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W\\d{2}$"
+          },
+          "expectedVersionId": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          }
+        },
+        "required": [
+          "weekKey",
+          "expectedVersionId"
+        ],
+        "additionalProperties": false
+      },
+      "PublishedPlanVersion": {
+        "type": "object",
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W\\d{2}$"
+          },
+          "publishedAtUtc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          },
+          "assignmentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "description": "UUID"
+            }
+          }
+        },
+        "required": [
+          "versionId",
+          "weekKey",
+          "publishedAtUtc",
+          "assignmentIds"
+        ],
+        "additionalProperties": false
+      },
+      "EmployeeSchedule": {
+        "type": "object",
+        "properties": {
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W\\d{2}$"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "publishedVersionId": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "employeeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "worksiteId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "interval": {
+                  "type": "object",
+                  "properties": {
+                    "startUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    },
+                    "endUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    }
+                  },
+                  "required": [
+                    "startUtc",
+                    "endUtc"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "employeeId",
+                "worksiteId",
+                "interval"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "confirmationRequired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "weekKey",
+          "timeZone",
+          "publishedVersionId",
+          "assignments",
+          "confirmationRequired"
+        ],
+        "additionalProperties": false
+      },
+      "ConfirmPlanCommand": {
+        "type": "object",
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          }
+        },
+        "required": [
+          "versionId"
+        ],
+        "additionalProperties": false
+      },
+      "Confirmation": {
+        "type": "object",
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "confirmedAtUtc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          }
+        },
+        "required": [
+          "versionId",
+          "confirmedAtUtc"
+        ],
+        "additionalProperties": false
+      },
+      "RejectAssignmentCommand": {
+        "type": "object",
+        "properties": {
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "assignmentId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "Rejection": {
+        "type": "object",
+        "properties": {
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rejectedAtUtc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          }
+        },
+        "required": [
+          "assignmentId",
+          "reason",
+          "rejectedAtUtc"
+        ],
+        "additionalProperties": false
+      },
+      "StartTimeCommand": {
+        "type": "object",
+        "properties": {
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          }
+        },
+        "required": [
+          "assignmentId"
+        ],
+        "additionalProperties": false
+      },
+      "ActiveTimeEntry": {
+        "type": "object",
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "startedAtUtc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          }
+        },
+        "required": [
+          "entryId",
+          "assignmentId",
+          "startedAtUtc"
+        ],
+        "additionalProperties": false
+      },
+      "StopTimeCommand": {
+        "type": "object",
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          }
+        },
+        "required": [
+          "entryId"
+        ],
+        "additionalProperties": false
+      },
+      "SubmittedTimeEntry": {
+        "type": "object",
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "startedAtUtc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          },
+          "stoppedAtUtc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          },
+          "durationMinutes": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "entryId",
+          "assignmentId",
+          "startedAtUtc",
+          "stoppedAtUtc",
+          "durationMinutes"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

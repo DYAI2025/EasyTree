@@ -1,0 +1,36 @@
+{
+  "name": "@easytree/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "easyTree Transportvertrag — Zod-Schemata, DTOs, Gateway-Ports und OpenAPI v1 (EYT-47, EYT-79)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "openapi"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "openapi:write": "tsc -p tsconfig.build.json && node dist/openapi/cli.js --write"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "eslint": "^10.7.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

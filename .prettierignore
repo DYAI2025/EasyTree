@@ -8,3 +8,7 @@ pnpm-lock.yaml
 # Verbatim uebernommene Fremdanalyse (EYT-78, ADR-002). Evidenz wird nicht
 # umformatiert, damit Zitate und Zeilenbezuege pruefbar bleiben.
 docs/audit
+
+# Generiert aus den Zod-Schemata (EYT-47). Der Generator ist die einzige Quelle;
+# ein nachtraeglich formatierendes Werkzeug wuerde die Byte-Drift-Pruefung brechen.
+packages/contracts/openapi
