@@ -201,6 +201,20 @@ export const RULES: readonly Rule[] = [
     },
   },
   {
+    // EYT-47 AK 5 + ADR-002 §5 — packages/contracts ist transport-only.
+    //
+    // TimeInterval ist eine Klasse mit privaten Feldern, die Bezeichner sind
+    // nominal gebrandet: keiner von beiden kann ueber die Leitung. Duerfte der
+    // Vertrag Domaintypen fuehren, waere die Trennung eine Konvention. So ist
+    // sie eine Importregel, die im Pflichtjob unit-tests scheitert.
+    id: "contracts-transport-only",
+    inScope: (file): boolean => file.startsWith("packages/contracts/"),
+    check: (ref): string | null =>
+      ref.specifier === "@easytree/domain" || ref.resolved?.startsWith("packages/domain/") === true
+        ? `packages/contracts darf "${ref.specifier}" nicht importieren — der Transportvertrag bleibt frei von Domaintypen (EYT-47 AK 5, ADR-002 §5).`
+        : null,
+  },
+  {
     // ADR-002 §5 — Prototype-Fixtures sind ausschliesslich Clickdummy-/Testdaten.
     id: "no-fixtures-in-production-code",
     inScope: (file): boolean => !/(^|\/)(test|e2e|__tests__)\//.test(file),

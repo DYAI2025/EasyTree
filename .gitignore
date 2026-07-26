@@ -19,3 +19,10 @@ playwright-report/
 # Logs & misc
 *.log
 .DS_Store
+
+# Untracked Arbeitsverzeichnisse im Repo-Root (siehe CLAUDE.md, Konventionen).
+# penpot ist ein eigener Upstream-Clone, _sprint2-transfer haelt Git-Bundles.
+# Ohne diese Eintraege nimmt ein `git add -A` beide versehentlich mit — einmal
+# passiert, als penpot als Gitlink im Index landete.
+penpot/
+_sprint2-transfer/

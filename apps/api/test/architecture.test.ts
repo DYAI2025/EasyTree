@@ -108,6 +108,33 @@ describe("Architekturgrenzen", () => {
     expect(scripts["test"]).toContain("turbo run test");
   });
 
+  it("laesst kein Workspace-Paket ohne echte Testaufgabe zurueck", () => {
+    // `turbo run test` fuehrt nur Aufgaben aus, die EXISTIEREN — ein Paket ohne
+    // `test`-Skript wird still uebersprungen, nicht rot. Eine einzige geloeschte
+    // Zeile in einer package.json wuerde also eine ganze Pflichtpruefung
+    // entfernen, waehrend `pnpm test` weiterhin mit 0 endet. Diese Zusicherung
+    // steht bewusst in apps/api und damit AUSSERHALB der Pakete, die sie schuetzt.
+    const dirs = [
+      ...readdirSync(resolve(repoRoot, "apps"), { withFileTypes: true }).map(
+        (e) => `apps/${e.name}`,
+      ),
+      ...readdirSync(resolve(repoRoot, "packages"), { withFileTypes: true }).map(
+        (e) => `packages/${e.name}`,
+      ),
+    ].filter((dir) => existsSync(resolve(repoRoot, dir, "package.json")));
+
+    expect(dirs.length).toBeGreaterThan(4);
+
+    const offenders = dirs.filter((dir) => {
+      const pkg: unknown = JSON.parse(readFileSync(resolve(repoRoot, dir, "package.json"), "utf8"));
+      const script = (pkg as { scripts?: Record<string, string> }).scripts?.["test"];
+      return (
+        script === undefined || !script.includes("vitest run") || script.includes("passWithNoTests")
+      );
+    });
+    expect(offenders).toEqual([]);
+  });
+
   it("haelt Modul-index.ts frei von Stern-Re-Exporten", () => {
     expect(starReExports.map((v) => `${v.file}:${v.line}`)).toEqual([]);
   });
