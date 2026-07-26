@@ -1,15 +1,15 @@
-# Arboscus Teamplaner – Coding Agent Handoff v1.3
+# Arboscus Teamplaner — Coding Agent Handoff v1.3
 
-**Source of truth:** `docs/prd/CURRENT_PRD_v1.3.md` and the validated PRD artifacts  
-**Canonical repository:** `DYAI2025/Arborga`
+**Source of truth:** `prd_report_v1.3.md` / `prd_report_v1.3.json`
+**Canonical repository:** `https://github.com/DYAI2025/Arborga.git`
 
 ## Active scope
 
-Implement only the approved MVP phases 1–6. The Post-MVP Planungsökonomie und Maschinenverleih capability is documented for Jira and architecture continuity but is not active implementation scope.
+Implement only the approved MVP phases 1-6. The post-MVP Planning Economics and Machine Rental capability is documented for Jira and architecture continuity but is not active implementation scope.
 
-## Post-MVP boundary
+## Post-MVP economics boundary
 
-Do not implement the future economic module unless the user explicitly starts that phase.
+Do not implement `FR-062` through `FR-070`, `DATA-023` through `DATA-026`, `API-019` through `API-021`, `PHASE-007`, or `TASK-032` through `TASK-036` unless the user explicitly starts that phase.
 
 When separately approved:
 
@@ -17,49 +17,17 @@ When separately approved:
 - employee access is denied server-side;
 - rates are individual, net EUR, hourly or daily, and effective-dated;
 - historical calculations retain applied rate-version IDs;
-- planned values use planned assignments and reservations;
-- confirmed values use approved time and confirmed resource usage only;
+- planned costs use planned assignments/reservations;
+- actual costs use approved time and confirmed resource usage only;
 - revenue is limited to confirmed machine rental;
 - no payroll, invoice, VAT/gross, payment, ledger, tax, or unrelated revenue functionality is permitted.
 
-## Required working method
-
-1. Inspect the repository and current contracts before changing code.
-2. Link every change to Jira and PRD requirement IDs.
-3. Write or update tests before behavior changes.
-4. Use authenticated, authorized domain commands rather than direct operational table writes.
-5. Preserve audit, idempotency, effective dates and rollback paths.
-6. Keep external providers behind adapters.
-7. Report exact files, commands and results.
-
-## Prohibited actions
-
-- bypass authorization or Row Level Security;
-- invent core states, persistent schema, permissions or provider behavior;
-- add payroll, invoicing, continuous GPS, geofencing or full ERP scope;
-- create automatic weather-based work cancellation or work-stop decisions;
-- log private origins, medical details, credentials, tokens, raw audio or sensitive free text;
-- perform destructive migrations without approved rollback and restore evidence;
-- deploy or modify production without explicit permission.
-
 ## Stop conditions
 
-Stop and report evidence when:
+Stop before implementing the future module if permissions, effective-date migration, actual resource-usage confirmation, feature-flag rollout, report/export scope, or rollback are not approved.
 
-- a protected workflow or authorization rule is ambiguous;
-- a schema change is not covered by the PRD or an ADR;
-- a new provider or background job lacks an ADR;
-- repository-specific validation commands are unknown;
-- a destructive migration or production action is required;
-- weather fields, freshness, warning semantics or provider behavior conflict with the PRD;
-- Post-MVP economic requirements would enter MVP code.
+## Validation
 
-## Human review checkpoints
-
-- after clickdummy testing;
-- after architecture and ADR package;
-- before each phase merge;
-- before pilot with real personal data;
-- after security, accessibility and backup/restore tests;
-- before production release;
-- before enabling any Post-MVP economic feature.
+- Validate the PRD JSON before implementation.
+- Add authorization, rate-version, historical-reproducibility, calculation, audit, and scope-boundary tests in the same future slice.
+- Preserve planning, time, resource, and audit source facts during rollback.

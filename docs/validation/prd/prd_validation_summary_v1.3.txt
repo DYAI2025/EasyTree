@@ -1,0 +1,6 @@
+PASS: prd_report_v1.3.json schema and output-order validation
+PASS: artifact policy validation
+PASS: stakeholder and canonical requirement IDs aligned (FR/AC-062 through -070)
+PASS: traceability includes post-MVP requirements, data, APIs, architecture, security, tasks, tests, risks, rollback, and DoD
+PASS: MVP scope gate excludes Planning Economics and Machine Rental from phases 1-6 and MVP acceptance
+PASS: German PRD, canonical PRD, agent handoff, Jira-ready epic, JSON, and CSV are present

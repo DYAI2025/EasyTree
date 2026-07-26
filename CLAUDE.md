@@ -9,10 +9,24 @@ tree-care industry. TypeScript pnpm + Turborepo monorepo implementing the **spli
 from [`docs/architecture/ADR-001-boilerplate-architecture.md`](docs/architecture/ADR-001-boilerplate-architecture.md).
 Read ADR-001 before any structural change — it is the binding architecture contract.
 
-Product source of truth is `docs/prd/CURRENT_PRD_v1.3.md`; agent boundaries and stop
-conditions are in [`docs/handoff/AGENT_HANDOFF_v1.3.md`](docs/handoff/AGENT_HANDOFF_v1.3.md)
-(the root-level `agent_handoff_v1.1.md` is superseded). Work is tracked as Jira `EYT-*`
-tickets; commits and code comments reference those IDs.
+**Every versioned document in this repo is v1.3.** Older revisions (v1.0/v1.1/v1.2) were removed
+on 2026-07-26 — if you find a reference to one, it is stale, and the v1.3 file is authoritative.
+
+Two layers of documents, deliberately not the same thing:
+
+- **Repo root** — raw generator artifacts, large and unedited: `prd_report_v1.3.{md,json}`,
+  `arboscus_teamplaner_finale_prd_de_v1.3.md`, `traceability_matrix_v1.3.csv`,
+  `prd_validation_summary_v1.3.txt`.
+- **`docs/`** — curated, human-maintained condensations of the same material. These are what you
+  read and cite: `docs/prd/CURRENT_PRD_v1.3.md`, `docs/traceability/REQUIREMENT_TO_JIRA_v1.3.csv`,
+  `docs/validation/PRD_VALIDATION_v1.3.md`.
+
+Product source of truth is `docs/prd/CURRENT_PRD_v1.3.md`; agent boundaries and stop conditions
+are in [`docs/handoff/AGENT_HANDOFF_v1.3.md`](docs/handoff/AGENT_HANDOFF_v1.3.md). Architecture is
+split across [ADR-001](docs/architecture/ADR-001-boilerplate-architecture.md) (boilerplate) and
+`docs/architecture/ARCHITECTURE_DECISIONS_v1.3.md` (provider, hosting, retention, pilot) — neither
+supersedes the other. Work is tracked as Jira `EYT-*` tickets; commits and code comments
+reference those IDs.
 
 ## Commands
 

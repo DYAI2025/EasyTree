@@ -3,13 +3,15 @@
     "skill_name": "ai-native-prd-architect",
     "mode": "full_prd",
     "date_or_timestamp_basis": "2026-07-23",
-    "version": "1.1-final-weather",
+    "version": "1.3-post-mvp-planning-economics-machine-rental",
     "schema_version": "1.1",
     "output_artifacts": [
-      "prd_report.md",
-      "prd_report.json",
-      "traceability_matrix.csv",
-      "agent_handoff.md"
+      "prd_report_v1.3.md",
+      "prd_report_v1.3.json",
+      "traceability_matrix_v1.3.csv",
+      "agent_handoff_v1.3.md",
+      "arboscus_teamplaner_finale_prd_de_v1.3.md",
+      "jira_epic_post_mvp_planungsoekonomie_maschinenverleih.md"
     ]
   },
   "intake_scope": {
@@ -24,24 +26,39 @@
       "Agent handoff",
       "Worksite weather for today and the following day",
       "Explicit employee lifecycle management",
-      "Pilot acceptance scenario with at least twelve active employees and three parallel worksites"
+      "Pilot acceptance scenario with at least twelve active employees and three parallel worksites",
+      "Canonical repository DYAI2025/Arborga",
+      "Supabase as selected database platform",
+      "Assignment-scoped weather visibility without employee location tracking",
+      "Hourly/daypart weather, air humidity, precipitation, wind/gusts, ozone, and official warnings",
+      "Architecture, provider, retention, and pilot-metric recommendations",
+      "Post-MVP specification for internal plan/actual cost transparency and machine-rental revenue tracking.",
+      "Jira-ready future epic decomposition without adding the feature to the MVP implementation scope."
     ],
     "out_of_scope": [
       "Implementation code",
       "Repository-specific implementation plan",
       "Provider contracting",
-      "Legal certification"
+      "Legal certification",
+      "Implementation of cost, revenue, rental, invoice, payroll, VAT, or accounting functionality in the MVP.",
+      "General sales, customer order, invoicing, tax, payment, or bookkeeping workflows."
     ],
     "missing_inputs": [
-      "Repository and selected implementation stack",
-      "Concrete infrastructure and external provider ADRs",
-      "Legally approved retention periods",
-      "Measured pilot baselines and target values"
+      "Final application framework and deployment topology approval",
+      "Final transactional email provider or existing corporate email integration",
+      "Legally approved retention and deletion schedule",
+      "Stakeholder-approved pilot baseline and target values",
+      "Decision whether severe-warning changes additionally trigger browser push and/or email escalation",
+      "Repository-specific lint, type-check, unit, integration, and end-to-end commands after code scaffold exists"
     ],
     "assumptions": [
-      "The source basis v6 and subsequent accepted decisions represent current product intent.",
-      "The initial organization is small but user/worksite counts remain dynamic.",
-      "ASSUMPTION: Weather information is advisory and does not automatically block planning or stop work until an explicit stakeholder decision defines such behavior."
+      "The approved PRD remains the product source of truth.",
+      "The canonical repository is https://github.com/DYAI2025/Arborga.git; its current default branch is master until explicitly renamed.",
+      "Supabase is selected for the database; Supabase Auth and Storage are recommended but require an ADR decision.",
+      "Weather visibility is derived from active/future assignments and worksite coordinates; no continuous employee GPS tracking is required or permitted.",
+      "Weather remains advisory in MVP and cannot automatically cancel work, block publication, or issue a binding stop-work decision.",
+      "Official warnings are sourced independently from forecast data so that provider forecasts cannot masquerade as official warnings.",
+      "ASSUMPTION: Post-MVP economics is activated only by a separately approved phase and feature flag."
     ]
   },
   "source_inventory": [
@@ -124,6 +141,66 @@
       "evidence_pointer": "Direct user instruction in current conversation.",
       "confidence": 5,
       "verification_status": "authoritative_for_product_intent"
+    },
+    {
+      "source_id": "SRC-009",
+      "source_type": "user_provided",
+      "title": "Repository, Supabase, weather-detail and warning decisions",
+      "location": "Current conversation, user message dated 2026-07-23T15:20:46Z",
+      "claim_supported": "Canonical repository, selected database, weather visibility, required fields, daypart display, warning prominence, and advisory-only MVP semantics.",
+      "evidence_pointer": "User answer bundle in current conversation",
+      "confidence": 5,
+      "verification_status": "direct stakeholder decision"
+    },
+    {
+      "source_id": "SRC-010",
+      "source_type": "repository_evidence",
+      "title": "DYAI2025/Arborga repository inspection",
+      "location": "https://github.com/DYAI2025/Arborga",
+      "claim_supported": "Repository exists, is accessible for push, contains an initial documentation commit, and currently reports master as default branch.",
+      "evidence_pointer": "GitHub connector get_repo/search_commits/fetch_commit on 2026-07-23",
+      "confidence": 5,
+      "verification_status": "verified by GitHub connector"
+    },
+    {
+      "source_id": "SRC-011",
+      "source_type": "primary_external",
+      "title": "Official provider documentation for Supabase, DWD, OpenWeather, routing, email, monitoring, hosting, PDF, and local transcription",
+      "location": "Official vendor and authority documentation reviewed 2026-07-23",
+      "claim_supported": "Provider capabilities, data regions, quotas, warning feeds, ozone fields, backup limitations, and replaceable-adapter recommendations.",
+      "evidence_pointer": "Supabase Docs; DWD Open Data/CAP; OpenWeather One Call and Air Pollution; Hetzner Docs; HeiGIT/openrouteservice; Brevo; GlitchTip; Playwright; SYSTRAN/faster-whisper",
+      "confidence": 4,
+      "verification_status": "verified against current official documentation; contracting and DPA review pending"
+    },
+    {
+      "source_id": "SRC-012",
+      "source_type": "standard_or_framework",
+      "title": "German/EU retention and deletion baseline",
+      "location": "GDPR storage limitation; BDSG §26; ArbZG §16; DIN EN ISO/IEC 27555:2025-09; BfDI guidance",
+      "claim_supported": "No single blanket retention period exists; deletion rules must be category-specific, necessity-based, documented, and legally reviewed; certain work-time records require at least two years.",
+      "evidence_pointer": "Official law and standards references reviewed 2026-07-23",
+      "confidence": 4,
+      "verification_status": "legal sources verified; category schedule remains legal-review input"
+    },
+    {
+      "source_id": "SRC-013",
+      "source_type": "derived_assumption",
+      "title": "Recommended implementation baseline for small mobile-first internal operations product",
+      "location": "Derived architecture recommendation in this PRD revision",
+      "claim_supported": "Modular TypeScript web app/PWA, Supabase, German app/worker hosting, local transcription worker, server-side provider adapters, bounded caches, and staged release.",
+      "evidence_pointer": "Derived from accepted scope, provider documentation, security constraints, and expected small operating scale",
+      "confidence": 4,
+      "verification_status": "recommended, not yet accepted as final ADR"
+    },
+    {
+      "source_id": "SRC-014",
+      "source_type": "user_provided",
+      "title": "Post-MVP cost and machine-rental economics decisions",
+      "location": "Current conversation, user message dated 2026-07-23T16:35:19Z",
+      "claim_supported": "Cost/revenue feature is excluded from MVP; initial access is Administrator and Management only; individual employee/subcontractor/resource rates are net and effective-dated; planned and actual costs plus machine-rental revenue are tracked without payroll, invoicing, VAT calculation, or accounting authority.",
+      "evidence_pointer": "Direct stakeholder decision in current conversation.",
+      "confidence": 5,
+      "verification_status": "accepted_post_mvp_product_intent"
     }
   ],
   "standards_alignment": [
@@ -282,6 +359,15 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "INFO-005",
+        "type": "revision_summary",
+        "statement": "Version 1.3 documents a post-MVP planning-economics capability for effective-dated individual net cost rates, planned/actual cost transparency, and machine-rental revenue. It is explicitly excluded from the MVP implementation and production Definition of Done.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "problem_statement": [
@@ -389,7 +475,7 @@
       {
         "id": "NOGOAL-001",
         "type": "non_goal",
-        "statement": "No payroll, salary, honorarium, invoice, hourly-rate, daily-rate, or lump-sum price calculation.",
+        "statement": "MVP non-goal: no payroll, salary, honorarium, invoice, VAT/gross, payment, or accounting calculation. A separately approved post-MVP module may provide internal net planned/actual cost transparency and machine-rental revenue tracking without becoming the authoritative payroll, invoicing, tax, or bookkeeping system.",
         "source_ids": ["SRC-002"],
         "status": "accepted",
         "priority": "p0",
@@ -439,6 +525,15 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "GOAL-010",
+        "type": "future_goal",
+        "statement": "Post-MVP, give Administrator and Management a reproducible internal overview of planned costs, actual costs based on approved operational facts, and net machine-rental revenue while preserving strict separation from payroll, invoicing, VAT, and accounting.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "stakeholders_and_users": [
@@ -504,6 +599,15 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Review against source and mapped acceptance test"
+      },
+      {
+        "id": "INFO-027",
+        "type": "future_access_rule",
+        "statement": "The post-MVP economics area is initially visible and manageable only to Administrator and Management. Employees receive no rate, cost, revenue, or aggregate economics access. Later access changes must use explicit atomic permissions.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "definitions_and_domain_glossary": [
@@ -623,6 +727,42 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Review against source and mapped acceptance test"
+      },
+      {
+        "id": "TERM-014",
+        "type": "glossary",
+        "statement": "Economic rate version: an individual, effective-dated net hourly or daily rate attached to one employee, subcontractor, machine, device, or vehicle; a new version replaces future applicability without overwriting historical versions.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TERM-015",
+        "type": "glossary",
+        "statement": "Planned cost: a non-accounting projection derived from planned assignment or resource-reservation duration and the rate version effective for that planned interval.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TERM-016",
+        "type": "glossary",
+        "statement": "Actual cost: a non-accounting internal value derived only from approved working time or confirmed resource usage and the rate version effective for the underlying interval.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TERM-017",
+        "type": "glossary",
+        "statement": "Machine-rental revenue: net internal revenue overview derived from a confirmed rental interval and the machine-specific effective rental-rate version; it is not an invoice or accounting posting.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "assumptions_missing_open_questions": [
@@ -771,6 +911,15 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "INFO-039",
+        "type": "future_scope",
+        "statement": "Post-MVP/Jira backlog: an optional Planning Economics and Machine Rental module with individual effective-dated net rates, planned and actual cost views, machine-rental revenue, period reports, authorization, audit, and exports. It is not part of Phase 1-6 or the MVP release gate.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "user_journeys": [
@@ -872,6 +1021,15 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "JOURNEY-012",
+        "type": "future_journey",
+        "statement": "Post-MVP, an Administrator creates a future-effective individual rate version; Management compares planned costs with actual costs derived from approved time and confirmed resource usage, and reviews net machine-rental revenue for a selected period.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "ai_ready_user_stories": [
@@ -1018,6 +1176,24 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "STORY-017",
+        "type": "future_story",
+        "statement": "As Management, I want planned costs, approved actual costs, and machine-rental revenue separated by person, resource, worksite, day, week, and selected period so I can understand operational economics without using the app as accounting software.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "STORY-018",
+        "type": "future_story",
+        "statement": "As an Administrator, I want to create effective-dated individual net hourly or daily rate versions so future changes never silently rewrite historical calculations.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "functional_requirements": [
@@ -1285,7 +1461,7 @@
       {
         "id": "FR-030",
         "type": "functional_requirement",
-        "statement": "No monetary conversion: Time data never produces wages, rates, fees, invoice values, or accounting entries.",
+        "statement": "MVP monetary boundary: time data in the MVP never produces wages, rates, fees, invoice values, VAT, gross amounts, payments, or accounting entries. Post-MVP calculations defined in FR-062 through FR-070 are implemented only in a separately approved phase.",
         "source_ids": ["SRC-002"],
         "status": "accepted",
         "priority": "p0",
@@ -1402,11 +1578,11 @@
       {
         "id": "FR-043",
         "type": "functional_requirement",
-        "statement": "Worksite weather: For every assigned worksite visible to an employee, the app displays weather for the current day and the following day using the worksite location and an external weather-service API. The UI displays the forecast timestamp and a clear unavailable or stale state.",
-        "source_ids": ["SRC-008"],
+        "statement": "Worksite weather visibility: A user sees weather only for a worksite to which the user has a visible assignment for today or the following day. Visibility is derived from assignment and worksite data; no employee device location or continuous GPS tracking is used. Users without a visible worksite assignment receive no worksite weather card.",
+        "source_ids": ["SRC-009"],
         "status": "accepted",
-        "priority": "p1",
-        "verification_method": "Acceptance test and stakeholder review"
+        "priority": "p0",
+        "verification_method": "Authorization and assignment-visibility acceptance tests"
       },
       {
         "id": "FR-044",
@@ -1416,6 +1592,132 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "FR-045",
+        "type": "functional_requirement",
+        "statement": "Weather detail: For today and the following day, the app shows weather condition, temperature, relative humidity, precipitation probability, expected precipitation amount, wind speed, maximum gusts, ozone forecast, and official warning status for the worksite area. Values are displayed in units appropriate for Germany and include source and fetched-at information.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Weather contract and UI acceptance tests"
+      },
+      {
+        "id": "FR-046",
+        "type": "functional_requirement",
+        "statement": "Daypart forecast: The full day is divided into configurable dayparts (recommended default: morning 05-08, forenoon 08-11, midday 11-14, afternoon 14-18, evening 18-22, night 22-05). Dayparts overlapping the assignment are highlighted. Each daypart aggregates temperature range, humidity range, maximum precipitation probability, precipitation sum, maximum wind and gust, maximum ozone, and active warning windows.",
+        "source_ids": ["SRC-009", "SRC-013"],
+        "status": "accepted",
+        "priority": "p1",
+        "verification_method": "Daypart aggregation tests and stakeholder UI review"
+      },
+      {
+        "id": "FR-047",
+        "type": "functional_requirement",
+        "statement": "Official warnings: DWD official warnings for the worksite municipality/district and directly intersecting warning area are shown prominently with official severity, validity window, event type, source, and update time. Thunderstorm, wind/gust, severe rain, heat, and UV warnings are included when available. A separate nearby/regional state may show relevant warnings outside the direct worksite warning area without presenting them as site-active.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "CAP parsing, spatial matching, severity and UI tests"
+      },
+      {
+        "id": "FR-048",
+        "type": "functional_requirement",
+        "statement": "Advisory-only safety semantics: In MVP, weather and warning information is highly visible but informational. The system must not automatically cancel assignments, block publication, order work cessation, or replace Arboscus safety decisions. Any future automated threshold action requires a separate approved requirement, risk assessment, and ADR.",
+        "source_ids": ["SRC-009"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Negative tests proving no automatic planning or stop-work side effect"
+      },
+      {
+        "id": "FR-049",
+        "type": "functional_requirement",
+        "statement": "Ozone presentation: Ozone is displayed as forecast concentration in µg/m³, not as an official local measurement. The UI distinguishes the 120 µg/m³ health target value from the official 180 µg/m³ information threshold and 240 µg/m³ alert threshold, and does not provide medical diagnosis or individualized medical advice.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p1",
+        "verification_method": "Unit, threshold-label, source and accessibility tests"
+      },
+      {
+        "id": "FR-062",
+        "type": "scope_gate",
+        "statement": "Post-MVP scope gate: Planning Economics and Machine Rental is documented for backlog/Jira but must not be implemented, enabled, or included in the MVP release Definition of Done. Activation requires a separate approved phase, migration plan, permission review, and feature flag.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "FR-063",
+        "type": "authorization",
+        "statement": "Economics authorization: Initially only Administrator and Management can view or manage rates, planned costs, actual costs, machine-rental revenue, reports, or exports. Employees receive no access. Future role expansion uses explicit server-enforced atomic permissions.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "FR-064",
+        "type": "rate_definition",
+        "statement": "Individual rates: Each employee, subcontractor, machine, device, or vehicle may have its own net hourly or daily cost rate. Rentable machines may additionally have an individual net hourly or daily rental-revenue rate. Role/type default rates are not required.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "FR-065",
+        "type": "rate_versioning",
+        "statement": "Effective-dated history: Rates have valid-from and optional valid-to dates. A future change creates a new version and never overwrites historical use. Backdated corrections require explicit authorization, reason, impact preview, audit, and controlled recalculation.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "FR-066",
+        "type": "planned_costs",
+        "statement": "Planned costs: The system may calculate planned personnel/subcontractor costs from assignment duration and planned resource costs from reservation duration using the rate version effective for the planned interval.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "FR-067",
+        "type": "actual_costs",
+        "statement": "Actual costs: Personnel and subcontractor actual costs are derived only from approved time entries. Resource actual costs are derived only from confirmed usage/rental intervals. Pending, rejected, or unapproved facts do not enter actual-cost totals.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "FR-068",
+        "type": "rental_revenue",
+        "statement": "Machine-rental revenue: For the machine-rental domain only, a confirmed rental interval produces a net revenue value using the machine-specific effective rental rate. Other revenue categories remain out of scope and belong to accounting or another system of record.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "FR-069",
+        "type": "reporting_audit",
+        "statement": "Economics reporting and audit: Authorized users can compare planned cost, actual cost, and machine-rental revenue by person, resource, worksite, day, week, and selected period. Every rate change, backdated correction, calculation version, and export is audited; historical reports retain the applied rate-version reference.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "FR-070",
+        "type": "financial_boundary",
+        "statement": "Net and accounting boundary: All economics values are stored and displayed as net amounts in EUR. The module does not calculate VAT, gross values, wages, salaries, invoices, payments, receivables, ledger entries, or tax obligations.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "non_functional_requirements": [
@@ -1571,6 +1873,24 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "NFR-018",
+        "type": "non_functional_requirement",
+        "statement": "Weather refresh and call economy: Forecast and air-quality data are cached once per normalized worksite coordinate, never per employee. Recommended default is refresh before first daily use and at most every three hours while a current or next-day assignment exists; ozone may refresh every six hours. Official DWD warning data is polled centrally at most every ten minutes. Forecast older than six hours and warnings older than twenty minutes are marked stale.",
+        "source_ids": ["SRC-009", "SRC-011", "SRC-013"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "Load, cache, quota, stale-state and scheduler tests"
+      },
+      {
+        "id": "NFR-019",
+        "type": "non_functional_requirement",
+        "statement": "Warning accessibility: Warning severity is not communicated by color alone. DWD level, event label, icon, validity, plain-language risk text, and source are visible. DWD severity colors remain yellow/orange/red/violet; red is reserved for official level-3 severe-weather warnings and violet for level 4.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Accessibility and warning-severity visual tests"
       }
     ],
     "data_model_and_core_entities": [
@@ -1757,11 +2077,56 @@
       {
         "id": "DATA-021",
         "type": "data_entity",
-        "statement": "WeatherSnapshot: Worksite or normalized coordinates, forecast date and time range, selected weather values, provider, fetched-at time, valid-until time, status, and cache metadata. No employee home location is used for worksite weather.",
-        "source_ids": ["SRC-008"],
+        "statement": "WeatherSnapshot: normalized worksite coordinates/geohash, provider, forecast issue/fetch time, valid time, timezone, daypart, condition, temperature min/max, relative humidity min/max, precipitation probability maximum, precipitation amount sum, wind speed maximum, gust maximum, ozone maximum, source attribution, status, expiry, and cache metadata. It contains no employee device location.",
+        "source_ids": ["SRC-009", "SRC-011"],
         "status": "accepted",
-        "priority": "p1",
-        "verification_method": "Acceptance test and stakeholder review"
+        "priority": "p0",
+        "verification_method": "Schema review and provider contract tests"
+      },
+      {
+        "id": "DATA-022",
+        "type": "data_entity",
+        "statement": "OfficialWeatherWarning: source authority, CAP identifier, version/update identifier, event type, official severity/level, onset, expiry, affected geometry or administrative area, instruction text, source attribution, fetched-at time, cancellation/update relation, direct-site match, and nearby/regional match.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "CAP fixture and lifecycle tests"
+      },
+      {
+        "id": "DATA-023",
+        "type": "entity",
+        "statement": "EconomicRateVersion: subject type and ID, economic direction (cost or machine-rental revenue), unit (hour/day), net amount, currency EUR, valid-from, optional valid-to, status, creator, timestamps, and audit reference.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "DATA-024",
+        "type": "derived_entity",
+        "statement": "PlannedEconomicSnapshot: selected planning version and period, source assignment/reservation IDs, rate-version IDs, quantities/durations, category totals, and generated-at timestamp. It is derived and rebuildable.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "DATA-025",
+        "type": "derived_entity",
+        "statement": "ActualCostRecord: approved time-entry or confirmed resource-usage reference, effective rate-version reference, calculated net amount, calculation version, and audit link.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "DATA-026",
+        "type": "entity",
+        "statement": "MachineRentalRecord: rentable resource, rental interval, state (planned/confirmed/cancelled), effective rental-rate version, calculated net revenue, and audit links. It is not an invoice.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "api_interface_requirements": [
@@ -1912,11 +2277,47 @@
       {
         "id": "API-017",
         "type": "api_requirement",
-        "statement": "Weather adapter: Resolve forecast data for normalized worksite coordinates for today and the following day, expose freshness and provider errors, support bounded caching, and prevent provider-specific schemas from leaking into domain or UI contracts.",
-        "source_ids": ["SRC-008", "SRC-005"],
+        "statement": "Forecast and air-quality adapter: Resolve current-day and next-day hourly forecast plus ozone for normalized worksite coordinates; normalize provider schemas into the internal WeatherSnapshot contract; expose freshness, units, attribution, provider errors, and quota state; support server-side caching and no per-user provider calls.",
+        "source_ids": ["SRC-009", "SRC-011"],
         "status": "accepted",
-        "priority": "p1",
-        "verification_method": "Acceptance test and stakeholder review"
+        "priority": "p0",
+        "verification_method": "Contract, timeout, quota and cache tests"
+      },
+      {
+        "id": "API-018",
+        "type": "api_requirement",
+        "statement": "Official DWD warning adapter: Ingest DWD CAP/Open Data centrally, process updates and cancellations idempotently, and spatially associate warnings with worksite coordinates using warning geometry or municipality/district identifiers. Provider data is never fetched directly by mobile clients.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "CAP fixture, spatial matching and idempotency tests"
+      },
+      {
+        "id": "API-019",
+        "type": "api_requirement",
+        "statement": "Economics rate administration API: authorized create/list/future-close/correct commands for individual effective-dated net rates, with overlap validation, idempotency, and audit.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "API-020",
+        "type": "api_requirement",
+        "statement": "Economics calculation/report API: authorized planned-versus-actual cost queries by period and dimension, always returning applied rate-version IDs, source facts, net currency, and calculation timestamp.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "API-021",
+        "type": "api_requirement",
+        "statement": "Machine-rental revenue API: authorized creation/confirmation/cancellation of rental intervals and net revenue queries, without invoice, tax, payment, or ledger side effects.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "architecture_constraints": [
@@ -2031,11 +2432,56 @@
       {
         "id": "ARCH-013",
         "type": "architecture_constraint",
-        "statement": "The weather provider is accessed only through a replaceable adapter. Domain and presentation layers consume an internal weather contract; provider failure must not break assignment retrieval.",
-        "source_ids": ["SRC-005", "SRC-008"],
+        "statement": "Weather providers are accessed only through replaceable server-side adapters. Recommended MVP combination is OpenWeather One Call plus Air Pollution for forecast/ozone and DWD CAP Open Data as the authority for official German warnings. Domain and UI consume internal contracts; provider failure must not break assignment retrieval.",
+        "source_ids": ["SRC-009", "SRC-011", "SRC-013"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "ADR approval and architecture dependency tests"
+      },
+      {
+        "id": "ARCH-014",
+        "type": "architecture_constraint",
+        "statement": "Canonical repository: DYAI2025/Arborga is the only implementation repository. Documentation, ADRs, schema migrations, tests, application code, and deployment definitions are versioned there. The current default branch master should be renamed to main before implementation or explicitly retained through an ADR; no agent may assume the branch name.",
+        "source_ids": ["SRC-009", "SRC-010"],
         "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Repository settings and branch-policy review"
+      },
+      {
+        "id": "ARCH-015",
+        "type": "architecture_constraint",
+        "statement": "Selected data platform: Supabase Postgres in Central EU (Frankfurt) is the database baseline. Recommended adjacent services are Supabase Auth and private Supabase Storage with Row Level Security, while service-role keys remain server-only. Database backup and object backup are separate because database backups do not restore deleted Storage objects.",
+        "source_ids": ["SRC-009", "SRC-011", "SRC-013"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "ADR, RLS tests, backup and restore tests"
+      },
+      {
+        "id": "ARCH-016",
+        "type": "architecture_constraint",
+        "statement": "Recommended runtime topology: a modular TypeScript mobile-first web/PWA application with server API/BFF plus a separate Python worker for local transcription and scheduled provider ingestion, deployed in a German EU region. Domain logic remains independent of Next.js/React, Supabase SDKs, workers, and provider adapters.",
+        "source_ids": ["SRC-013"],
+        "status": "proposed",
         "priority": "p1",
-        "verification_method": "Acceptance test and stakeholder review"
+        "verification_method": "Stack ADR and module dependency tests"
+      },
+      {
+        "id": "ARCH-017",
+        "type": "architecture_constraint",
+        "statement": "Post-MVP Economics is a separate bounded module that consumes approved Planning, Time, and Resource facts through owned interfaces. It must not become the system of record for payroll, invoicing, VAT, payments, or bookkeeping.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "ARCH-018",
+        "type": "architecture_constraint",
+        "statement": "Historical reproducibility: calculations bind to immutable rate-version IDs effective at the source interval. Changing a future rate creates a new version; backdated corrections require explicit authorization, audit, impact preview, and controlled recalculation.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "security_privacy_and_compliance": [
@@ -2173,6 +2619,51 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Review against source and mapped acceptance test"
+      },
+      {
+        "id": "SEC-016",
+        "type": "security_requirement",
+        "statement": "Supabase access control: Every exposed table and private Storage bucket uses explicit RLS policies. Authorization data is not trusted from user-editable metadata. Service-role credentials are never shipped to clients and are restricted to backend jobs with auditable purpose.",
+        "source_ids": ["SRC-011", "SRC-013"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "RLS policy matrix and negative authorization tests"
+      },
+      {
+        "id": "SEC-017",
+        "type": "security_requirement",
+        "statement": "Retention governance: Production requires a category-based deletion schedule approved by Arboscus and legal/data-protection review. The schedule follows storage limitation and necessity, documents start events, legal holds, backup expiry, and deletion evidence. DIN EN ISO/IEC 27555:2025-09 is used as a method framework, not as a source of fixed legal periods.",
+        "source_ids": ["SRC-012"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Approved retention matrix and deletion-job evidence"
+      },
+      {
+        "id": "SEC-018",
+        "type": "security_requirement",
+        "statement": "Voice privacy: Local transcription is recommended. Raw audio is private, not used to train external models, and is deleted after the user confirms the transcript or after a short configurable failure window. The transcript remains editable and must be confirmed before submission.",
+        "source_ids": ["SRC-009", "SRC-011", "SRC-013"],
+        "status": "proposed",
+        "priority": "p1",
+        "verification_method": "Audio access, deletion and transcript-confirmation tests"
+      },
+      {
+        "id": "SEC-019",
+        "type": "security_requirement",
+        "statement": "Commercial-data access: rate, cost, revenue, and economics-report endpoints enforce Administrator/Management access by default, explicit object scope, export authorization, and server-side denial for employees.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "SEC-020",
+        "type": "security_requirement",
+        "statement": "Economics audit and minimization: individual rates are confidential commercial/personnel data; logs and analytics must not expose amounts unnecessarily, and rate changes/backdated corrections require actor, reason, previous/new version, and impact audit.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "sustainability_and_greenops": [
@@ -2312,6 +2803,15 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Review against source and mapped acceptance test"
+      },
+      {
+        "id": "CTX-009",
+        "type": "context_artifact",
+        "statement": "Repository ADR set under docs/adr in DYAI2025/Arborga, including stack, Supabase, RLS, hosting, email, routing, transcription, PDF, monitoring, weather/air quality, DWD CAP, backup/restore, retention, branch/CI, and provider data flow.",
+        "source_ids": ["SRC-009", "SRC-010", "SRC-011", "SRC-012"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "ADR completeness review"
       }
     ],
     "implementation_phases": [
@@ -2368,6 +2868,24 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Review against source and mapped acceptance test"
+      },
+      {
+        "id": "PHASE-02A",
+        "type": "implementation_phase",
+        "statement": "Architecture decision package: confirm repository branch policy, modular TypeScript/PWA stack, Supabase region/Auth/Storage/RLS, German app/worker hosting, transactional email, routing, local transcription, PDF generation, monitoring, forecast/ozone provider, DWD warning ingestion, backup topology, and retention governance before production-grade implementation.",
+        "source_ids": ["SRC-009", "SRC-010", "SRC-011", "SRC-012", "SRC-013"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "Approved ADR set and human review"
+      },
+      {
+        "id": "PHASE-007",
+        "type": "post_mvp_phase",
+        "statement": "Post-MVP Planning Economics and Machine Rental: after the MVP is released and separately approved, implement permissions, effective-dated individual rates, planned/actual cost projections, confirmed machine-rental revenue, reporting, audit, migration, and feature-flagged rollout.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "atomic_task_breakdown": [
@@ -2613,6 +3131,87 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "AC-043, TEST-016, and human review"
+      },
+      {
+        "id": "TASK-028",
+        "type": "atomic_task",
+        "statement": "Create repository and platform ADRs in DYAI2025/Arborga: branch strategy, application stack, Supabase Frankfurt project, Auth/Storage/RLS approach, migrations, environment separation, secrets, CI validation commands, German hosting, workers, backup/restore, and provider ports. Stop before implementation if repository branch or service ownership is unresolved.",
+        "source_ids": ["SRC-009", "SRC-010", "SRC-011", "SRC-013"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "ADR review and repository CI dry run"
+      },
+      {
+        "id": "TASK-029",
+        "type": "atomic_task",
+        "statement": "Implement assignment-scoped weather: geocode worksites once, cache forecast/ozone per worksite, ingest DWD CAP warnings centrally, aggregate dayparts, highlight assignment overlap, enforce visibility, display official severity and freshness, and preserve assignment availability on provider failure. No employee GPS and no automatic safety action.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "AC-043 through AC-049 and TEST-016/018/019"
+      },
+      {
+        "id": "TASK-030",
+        "type": "atomic_task",
+        "statement": "Establish pilot measurement: collect two to four weeks of pre-pilot baseline data, configure metric definitions and dashboards, run a four-week pilot, compare weeks three and four with baseline, and obtain separate feedback from Management, Administration, and employees. Targets remain proposed until stakeholder approval.",
+        "source_ids": ["SRC-009", "SRC-013"],
+        "status": "proposed",
+        "priority": "p1",
+        "verification_method": "Metric definition review and pilot report"
+      },
+      {
+        "id": "TASK-031",
+        "type": "atomic_task",
+        "statement": "Create and approve the retention matrix and automated deletion design for time records, absences, damage files, audit/security logs, notifications, raw audio, weather cache, profile media, private route origins, inactive accounts, and backups. Implement no production deletion job until legal/data-protection approval.",
+        "source_ids": ["SRC-012"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "Legal review, deletion dry run and backup-expiry test"
+      },
+      {
+        "id": "TASK-032",
+        "type": "future_task",
+        "statement": "Create the Jira epic and detailed domain/permission specification for post-MVP Planning Economics and Machine Rental. Confirm rate units, source facts, report dimensions, feature flag, migration, and non-goals before code.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TASK-033",
+        "type": "future_task",
+        "statement": "Implement effective-dated individual net rate administration with overlap protection, version history, Administrator/Management authorization, audit, migration, and tests.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TASK-034",
+        "type": "future_task",
+        "statement": "Implement planned and actual cost calculation from assignments, reservations, approved time entries, and confirmed resource usage, preserving source and rate-version references.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TASK-035",
+        "type": "future_task",
+        "statement": "Implement confirmed machine-rental intervals and net rental-revenue reporting without invoice, VAT, payment, customer-accounting, or ledger side effects.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TASK-036",
+        "type": "future_task",
+        "statement": "Implement authorized economics dashboards/exports, observability, backdated-correction impact preview, security tests, reconciliation tests, feature-flag rollout, and rollback.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "acceptance_criteria": [
@@ -2997,11 +3596,11 @@
       {
         "id": "AC-043",
         "type": "acceptance_criterion",
-        "statement": "Given an employee has an assigned worksite with a valid location, when the current or next assignment is opened, then weather for today and the following day is shown with fetched-at time; if the provider fails, the app shows a marked last-known value or an unavailable state and still loads the assignment.",
-        "source_ids": ["SRC-008"],
+        "statement": "Given a user has a visible assignment for a worksite today or tomorrow, when the assignment or start view opens, then the worksite weather is visible; given the user has no visible assignment, then no worksite weather is returned. The result is based on assignment/worksite data and never requires employee GPS.",
+        "source_ids": ["SRC-009"],
         "status": "accepted",
-        "priority": "p1",
-        "verification_method": "Acceptance test and stakeholder review"
+        "priority": "p0",
+        "verification_method": "Automated authorization and end-to-end test"
       },
       {
         "id": "AC-044",
@@ -3011,6 +3610,132 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "AC-045",
+        "type": "acceptance_criterion",
+        "statement": "Given valid forecast data, when a user opens today or tomorrow, then each day shows dayparts with condition, temperature, humidity, precipitation probability and amount, wind, gusts, ozone, warning state, source, and fetched-at time; assignment-overlapping dayparts are highlighted.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Automated UI and contract test"
+      },
+      {
+        "id": "AC-046",
+        "type": "acceptance_criterion",
+        "statement": "Given multiple assigned employees share one normalized worksite, when they open weather within the cache window, then the system serves the same cached worksite snapshot and performs no duplicate provider request per employee.",
+        "source_ids": ["SRC-009", "SRC-013"],
+        "status": "accepted",
+        "priority": "p1",
+        "verification_method": "Provider mock and cache-count test"
+      },
+      {
+        "id": "AC-047",
+        "type": "acceptance_criterion",
+        "statement": "Given a DWD warning is active for the worksite area, when the app synchronizes, then it shows the official event, level, severity color plus text/icon, validity, source, and update time prominently. Level 3 is red and level 4 violet. A nearby warning is explicitly labelled regional/nearby rather than site-active.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "CAP fixture and visual accessibility test"
+      },
+      {
+        "id": "AC-048",
+        "type": "acceptance_criterion",
+        "statement": "Given weather or warning data crosses any displayed threshold, when the data is processed, then the application may alert the user but does not cancel, block, reschedule, or issue a binding stop-work instruction in MVP.",
+        "source_ids": ["SRC-009"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Negative side-effect test"
+      },
+      {
+        "id": "AC-049",
+        "type": "acceptance_criterion",
+        "statement": "Given ozone forecast values, when displayed, then the unit is µg/m³, the value is labelled forecast, 120 is described as a health target value, 180 as the information threshold, and 240 as the alert threshold; no medical diagnosis is generated.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p1",
+        "verification_method": "Threshold and content test"
+      },
+      {
+        "id": "AC-062",
+        "type": "acceptance_criterion",
+        "statement": "Given the MVP release configuration, when any user accesses an economics route or API, then the feature is absent or disabled and no economics tables/calculations are required for MVP acceptance.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "AC-063",
+        "type": "acceptance_criterion",
+        "statement": "Given an Employee role, when the user requests any rate, cost, revenue, report, or economics export, then the server returns access denied and no amount is leaked through UI, API, cache, export, log, or notification.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "AC-064",
+        "type": "acceptance_criterion",
+        "statement": "Given an authorized Administrator or Management user, when an individual rate is created, then the rate belongs to exactly one person or resource, is net EUR, uses hour or day as unit, and does not inherit a role/type default.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "AC-065",
+        "type": "acceptance_criterion",
+        "statement": "Given an existing rate used by a historical interval, when an Administrator creates a new rate effective in the future, then the historical report remains unchanged and future intervals use only the new version.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "AC-066",
+        "type": "acceptance_criterion",
+        "statement": "Given planned assignments and resource reservations, when an authorized user opens a period report, then planned costs equal the applicable planned durations multiplied by the individual effective rate versions and include source references.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "AC-067",
+        "type": "acceptance_criterion",
+        "statement": "Given approved time entries and confirmed resource usage, when actual costs are calculated, then only approved/confirmed facts contribute and pending or rejected records contribute zero.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "AC-068",
+        "type": "acceptance_criterion",
+        "statement": "Given a confirmed machine-rental interval, when revenue is calculated, then the net amount uses the machine-specific effective rental rate and no invoice, VAT, payment, or accounting entry is created.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "AC-069",
+        "type": "acceptance_criterion",
+        "statement": "Given an authorized report period, when the report is generated, then planned cost, actual cost, and machine-rental revenue are separately shown by supported dimension and every total can be traced to source facts and rate versions.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "AC-070",
+        "type": "acceptance_criterion",
+        "statement": "Given any economics value or export, when it is rendered, then it is labelled net EUR and contains no VAT/gross, payroll, invoice, payment, receivable, ledger, or tax status.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "test_strategy": [
@@ -3166,6 +3891,69 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "TEST-018",
+        "type": "test_strategy",
+        "statement": "Official-warning tests: DWD CAP parsing, update/cancel lifecycle, municipality/district and geometry matching, direct versus nearby classification, timezone, severity mapping, stale detection, attribution, and malformed-feed resilience.",
+        "source_ids": ["SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Automated fixture and integration suite"
+      },
+      {
+        "id": "TEST-019",
+        "type": "test_strategy",
+        "statement": "Weather privacy and authorization tests: assigned versus unassigned user visibility, planner permission scope, no employee GPS fields or requests, no private-origin leakage, no per-user provider calls, and no automatic planning/safety side effects.",
+        "source_ids": ["SRC-009"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Automated security and end-to-end suite"
+      },
+      {
+        "id": "TEST-020",
+        "type": "test_strategy",
+        "statement": "Supabase security tests: RLS allow/deny matrix for every exposed table and private bucket, service-role isolation, signed URL expiry, inactive-user session invalidation, migration rollback, database restore, and independent object restore.",
+        "source_ids": ["SRC-011", "SRC-013"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "Automated integration and restore drill"
+      },
+      {
+        "id": "TEST-021",
+        "type": "test_requirement",
+        "statement": "Economics authorization tests: Employee denial, Administrator/Management allow rules, direct-object access, exports, caches, aggregate leakage, and permission-change regression.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TEST-022",
+        "type": "test_requirement",
+        "statement": "Rate temporal tests: non-overlap, boundary dates, hourly/day units, future versioning, historical stability, backdated correction approval, impact preview, concurrency, and idempotency.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TEST-023",
+        "type": "test_requirement",
+        "statement": "Economic calculation tests: planned assignment/reservation costs, actual approved-time/confirmed-usage costs, machine-rental revenue, rounding, net EUR labels, source traceability, and report aggregation.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "TEST-024",
+        "type": "test_requirement",
+        "statement": "Scope-boundary tests: no VAT/gross, payroll, invoice, payment, ledger, or other revenue workflow; feature disabled in MVP; feature-flag rollback leaves planning/time/resource facts intact.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "observability_and_monitoring": [
@@ -3258,6 +4046,33 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "OBS-011",
+        "type": "observability",
+        "statement": "Monitor official warning feed age, last successful DWD poll, active warning count by severity, CAP parse failures, update/cancel lag, direct/nearby matching failures, and user-visible stale states. Alert operations when the warning feed is older than twenty minutes.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "Monitoring rule and synthetic-feed test"
+      },
+      {
+        "id": "OBS-012",
+        "type": "observability",
+        "statement": "Pilot metrics are measured with explicit numerator, denominator, source, and time window: planning effort, 24-hour confirmation rate, unresolved assignments, post-publication conflicts, information completeness, weekly adoption, in-app confirmation share, time-entry completion, change acknowledgement, support demand, and role-specific satisfaction.",
+        "source_ids": ["SRC-009", "SRC-013"],
+        "status": "proposed",
+        "priority": "p1",
+        "verification_method": "Metric dictionary and pilot dashboard review"
+      },
+      {
+        "id": "OBS-013",
+        "type": "observability_requirement",
+        "statement": "When the post-MVP module is enabled, monitor rate-version changes, rejected overlaps, calculation failures, source/rate mismatches, report latency, export volume, unauthorized access attempts, backdated corrections, and feature-flag state without logging confidential amounts unless operationally necessary.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "risk_register": [
@@ -3377,6 +4192,60 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "RISK-014",
+        "type": "risk",
+        "statement": "Warning freshness: A once-daily weather fetch is inadequate for rapidly changing thunderstorms and gust warnings. Mitigation: separate forecast cache from centrally polled official warnings, visible freshness, stale alerting, and no provider dependency in assignment retrieval. Severity: critical for safety communication, while the app remains advisory.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Scheduler, stale-state and outage tests"
+      },
+      {
+        "id": "RISK-015",
+        "type": "risk",
+        "statement": "False regional precision: A point forecast or broad district warning may be mistaken for exact local certainty. Mitigation: distinguish forecast, direct official warning area, and nearby/regional context; display source, validity and uncertainty; do not invent probabilities absent from the provider. Severity: high.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Content and spatial-classification review"
+      },
+      {
+        "id": "RISK-016",
+        "type": "risk",
+        "statement": "Supabase backup gap: Database backups do not include Storage object bytes. Mitigation: independent encrypted object backup and restore test, plus documented RPO/RTO and deletion propagation. Severity: high.",
+        "source_ids": ["SRC-011"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "Object backup and restore drill"
+      },
+      {
+        "id": "RISK-017",
+        "type": "risk",
+        "statement": "Commercial confidentiality: individual employee/subcontractor rates and rental economics could be exposed. Mitigation: default Administrator/Management access, server authorization, export control, redaction, and tests. Severity: high.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "RISK-018",
+        "type": "risk",
+        "statement": "Historical drift: overwriting rates or recalculating history with current rates would corrupt comparisons. Mitigation: effective-dated immutable versions, applied-rate references, correction workflow, and reproducibility tests. Severity: high.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "RISK-019",
+        "type": "risk",
+        "statement": "Accounting scope creep: internal overview may be mistaken for payroll, invoice, tax, or bookkeeping output. Mitigation: explicit net/non-accounting labels, no VAT/gross/payment/ledger fields, separate system-of-record boundary, and UI/export disclaimers. Severity: high.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "rollback_and_checkpoints": [
@@ -3442,6 +4311,15 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Review against source and mapped acceptance test"
+      },
+      {
+        "id": "ROLLBACK-008",
+        "type": "rollback",
+        "statement": "The post-MVP economics module is feature-flagged and isolated. Rollback disables economics UI/jobs and derived projections without deleting or changing assignments, approved time, resource usage, rental source records, or audit history; schema rollback/restore is rehearsed before release.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "definition_of_done": [
@@ -3570,6 +4448,33 @@
         "status": "accepted",
         "priority": "p1",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "DOD-015",
+        "type": "definition_of_done",
+        "statement": "Repository, branch policy, CI commands, Supabase Frankfurt project, RLS policy matrix, database/object backup paths, and environment ownership are documented and tested before real personal data is used.",
+        "source_ids": ["SRC-009", "SRC-010", "SRC-011"],
+        "status": "proposed",
+        "priority": "p0",
+        "verification_method": "Human release review"
+      },
+      {
+        "id": "DOD-016",
+        "type": "definition_of_done",
+        "statement": "Weather is assignment-scoped; all required weather/ozone fields and dayparts are visible; DWD warnings preserve official severity and are refreshed centrally; stale/outage states are clear; provider calls are cached per worksite; no GPS or automatic safety decision exists.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "accepted",
+        "priority": "p0",
+        "verification_method": "Weather release suite"
+      },
+      {
+        "id": "DOD-017",
+        "type": "definition_of_done",
+        "statement": "MVP release does not require or include economics functionality. The future module is done only after separate stakeholder approval, Jira scope, permission review, effective-date migration, mapped tests, security review, and evidence that no payroll/invoice/VAT/accounting side effects exist.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "agent_handoff_instructions": [
@@ -3662,6 +4567,24 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Acceptance test and stakeholder review"
+      },
+      {
+        "id": "CTX-111",
+        "type": "agent_instruction",
+        "statement": "Do not implement FR-062 through FR-070, DATA-023 through DATA-026, API-019 through API-021, or PHASE-007 during the MVP unless the user explicitly starts and approves the post-MVP phase.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
+      },
+      {
+        "id": "CTX-112",
+        "type": "agent_instruction",
+        "statement": "When the post-MVP phase is approved, keep Economics isolated, use effective-dated individual net rates, preserve historical rate references, enforce Administrator/Management access, and prohibit payroll, invoice, VAT, payment, ledger, and unrelated revenue functionality.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ]
   },
@@ -4756,11 +5679,11 @@
     },
     {
       "requirement_id": "FR-043",
-      "source_ids": ["SRC-008"],
+      "source_ids": ["SRC-009"],
       "acceptance_criteria_ids": ["AC-043"],
-      "test_ids": ["TEST-016"],
-      "task_ids": ["TASK-027"],
-      "risk_ids": ["RISK-013"]
+      "test_ids": ["TEST-019"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-015"]
     },
     {
       "requirement_id": "FR-044",
@@ -4809,6 +5732,262 @@
       "test_ids": ["TEST-003", "TEST-016"],
       "task_ids": ["TASK-027"],
       "risk_ids": ["RISK-008", "RISK-013"]
+    },
+    {
+      "requirement_id": "FR-045",
+      "source_ids": ["SRC-009", "SRC-011"],
+      "acceptance_criteria_ids": ["AC-045"],
+      "test_ids": ["TEST-016"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-013", "RISK-014"]
+    },
+    {
+      "requirement_id": "FR-046",
+      "source_ids": ["SRC-009", "SRC-013"],
+      "acceptance_criteria_ids": ["AC-045", "AC-046"],
+      "test_ids": ["TEST-016"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-014"]
+    },
+    {
+      "requirement_id": "FR-047",
+      "source_ids": ["SRC-009", "SRC-011"],
+      "acceptance_criteria_ids": ["AC-047"],
+      "test_ids": ["TEST-018"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-014", "RISK-015"]
+    },
+    {
+      "requirement_id": "FR-048",
+      "source_ids": ["SRC-009"],
+      "acceptance_criteria_ids": ["AC-048"],
+      "test_ids": ["TEST-019"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-013"]
+    },
+    {
+      "requirement_id": "FR-049",
+      "source_ids": ["SRC-009", "SRC-011"],
+      "acceptance_criteria_ids": ["AC-049"],
+      "test_ids": ["TEST-016"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-015"]
+    },
+    {
+      "requirement_id": "NFR-018",
+      "source_ids": ["SRC-009", "SRC-011", "SRC-013"],
+      "acceptance_criteria_ids": ["AC-046"],
+      "test_ids": ["TEST-016", "TEST-018"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-014"]
+    },
+    {
+      "requirement_id": "NFR-019",
+      "source_ids": ["SRC-009", "SRC-011"],
+      "acceptance_criteria_ids": ["AC-047"],
+      "test_ids": ["TEST-018"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-015"]
+    },
+    {
+      "requirement_id": "DATA-022",
+      "source_ids": ["SRC-009", "SRC-011"],
+      "acceptance_criteria_ids": ["AC-047"],
+      "test_ids": ["TEST-018"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-014", "RISK-015"]
+    },
+    {
+      "requirement_id": "API-018",
+      "source_ids": ["SRC-009", "SRC-011"],
+      "acceptance_criteria_ids": ["AC-047"],
+      "test_ids": ["TEST-018"],
+      "task_ids": ["TASK-029"],
+      "risk_ids": ["RISK-014"]
+    },
+    {
+      "requirement_id": "ARCH-014",
+      "source_ids": ["SRC-009", "SRC-010"],
+      "acceptance_criteria_ids": ["AC-043"],
+      "test_ids": ["TEST-019"],
+      "task_ids": ["TASK-028"],
+      "risk_ids": []
+    },
+    {
+      "requirement_id": "ARCH-015",
+      "source_ids": ["SRC-009", "SRC-011", "SRC-013"],
+      "acceptance_criteria_ids": [],
+      "test_ids": ["TEST-020"],
+      "task_ids": ["TASK-028"],
+      "risk_ids": ["RISK-016"]
+    },
+    {
+      "requirement_id": "SEC-017",
+      "source_ids": ["SRC-012"],
+      "acceptance_criteria_ids": [],
+      "test_ids": ["TEST-020"],
+      "task_ids": ["TASK-031"],
+      "risk_ids": ["RISK-004"]
+    },
+    {
+      "requirement_id": "OBS-012",
+      "source_ids": ["SRC-009", "SRC-013"],
+      "acceptance_criteria_ids": [],
+      "test_ids": [],
+      "task_ids": ["TASK-030"],
+      "risk_ids": []
+    },
+    {
+      "requirement_id": "DATA-023",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-065"],
+      "test_ids": ["TEST-022"],
+      "task_ids": ["TASK-033"],
+      "risk_ids": ["RISK-018"]
+    },
+    {
+      "requirement_id": "DATA-025",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-067"],
+      "test_ids": ["TEST-023"],
+      "task_ids": ["TASK-034"],
+      "risk_ids": ["RISK-018"]
+    },
+    {
+      "requirement_id": "DATA-026",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-068"],
+      "test_ids": ["TEST-023"],
+      "task_ids": ["TASK-035"],
+      "risk_ids": ["RISK-019"]
+    },
+    {
+      "requirement_id": "API-019",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-063", "AC-065"],
+      "test_ids": ["TEST-021", "TEST-022"],
+      "task_ids": ["TASK-033"],
+      "risk_ids": ["RISK-017", "RISK-018"]
+    },
+    {
+      "requirement_id": "API-020",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-066", "AC-067", "AC-069"],
+      "test_ids": ["TEST-023"],
+      "task_ids": ["TASK-034", "TASK-036"],
+      "risk_ids": ["RISK-018"]
+    },
+    {
+      "requirement_id": "API-021",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-068"],
+      "test_ids": ["TEST-023", "TEST-024"],
+      "task_ids": ["TASK-035"],
+      "risk_ids": ["RISK-019"]
+    },
+    {
+      "requirement_id": "ARCH-017",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-062", "AC-070"],
+      "test_ids": ["TEST-024"],
+      "task_ids": ["TASK-032"],
+      "risk_ids": ["RISK-019"]
+    },
+    {
+      "requirement_id": "ARCH-018",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-065", "AC-069"],
+      "test_ids": ["TEST-022", "TEST-023"],
+      "task_ids": ["TASK-033", "TASK-036"],
+      "risk_ids": ["RISK-018"]
+    },
+    {
+      "requirement_id": "SEC-019",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-063"],
+      "test_ids": ["TEST-021"],
+      "task_ids": ["TASK-036"],
+      "risk_ids": ["RISK-017"]
+    },
+    {
+      "requirement_id": "SEC-020",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-065", "AC-069"],
+      "test_ids": ["TEST-021", "TEST-022"],
+      "task_ids": ["TASK-036"],
+      "risk_ids": ["RISK-017", "RISK-018"]
+    },
+    {
+      "requirement_id": "FR-062",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-062"],
+      "test_ids": ["TEST-024"],
+      "task_ids": ["TASK-032"],
+      "risk_ids": ["RISK-019"]
+    },
+    {
+      "requirement_id": "FR-063",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-063"],
+      "test_ids": ["TEST-021"],
+      "task_ids": ["TASK-032", "TASK-036"],
+      "risk_ids": ["RISK-017"]
+    },
+    {
+      "requirement_id": "FR-064",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-064"],
+      "test_ids": ["TEST-022", "TEST-023"],
+      "task_ids": ["TASK-033"],
+      "risk_ids": ["RISK-017"]
+    },
+    {
+      "requirement_id": "FR-065",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-065"],
+      "test_ids": ["TEST-022"],
+      "task_ids": ["TASK-033"],
+      "risk_ids": ["RISK-018"]
+    },
+    {
+      "requirement_id": "FR-066",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-066"],
+      "test_ids": ["TEST-023"],
+      "task_ids": ["TASK-034"],
+      "risk_ids": ["RISK-018"]
+    },
+    {
+      "requirement_id": "FR-067",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-067"],
+      "test_ids": ["TEST-023"],
+      "task_ids": ["TASK-034"],
+      "risk_ids": ["RISK-018"]
+    },
+    {
+      "requirement_id": "FR-068",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-068"],
+      "test_ids": ["TEST-023", "TEST-024"],
+      "task_ids": ["TASK-035"],
+      "risk_ids": ["RISK-019"]
+    },
+    {
+      "requirement_id": "FR-069",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-069"],
+      "test_ids": ["TEST-021", "TEST-023"],
+      "task_ids": ["TASK-036"],
+      "risk_ids": ["RISK-017", "RISK-018"]
+    },
+    {
+      "requirement_id": "FR-070",
+      "source_ids": ["SRC-014"],
+      "acceptance_criteria_ids": ["AC-070"],
+      "test_ids": ["TEST-024"],
+      "task_ids": ["TASK-032", "TASK-036"],
+      "risk_ids": ["RISK-019"]
     }
   ],
   "evidence_ledger": [
@@ -4903,6 +6082,79 @@
       "quote_or_pointer": "Supplementary MVP target explicitly requires employees to be dynamically created; existing PRD already models Employee and account lifecycle.",
       "confidence": 5,
       "limitations": ["Exact import and HR master-data ownership remains implementation-specific."]
+    },
+    {
+      "evidence_id": "EV-011",
+      "claim_id": "ARCH-014",
+      "source_ids": ["SRC-009", "SRC-010"],
+      "evidence_class": "repository_evidence",
+      "quote_or_pointer": "Stakeholder selected DYAI2025/Arborga; GitHub connector verified repository, permissions, initial commit, and default branch master.",
+      "confidence": 5,
+      "limitations": [
+        "Repository currently contains planning/documentation and no implementation scaffold."
+      ]
+    },
+    {
+      "evidence_id": "EV-012",
+      "claim_id": "FR-045",
+      "source_ids": ["SRC-009"],
+      "evidence_class": "direct_source",
+      "quote_or_pointer": "Stakeholder required humidity, temperature, precipitation probability/amount, wind, gusts, official warnings, ozone, and daypart views.",
+      "confidence": 5,
+      "limitations": ["Exact daypart hours were recommended, not directly specified."]
+    },
+    {
+      "evidence_id": "EV-013",
+      "claim_id": "API-018",
+      "source_ids": ["SRC-011"],
+      "evidence_class": "tool_result",
+      "quote_or_pointer": "DWD publishes official warnings as CAP/Open Data for municipality/district/special warning areas; official severity and criteria are documented.",
+      "confidence": 5,
+      "limitations": [
+        "Open Data offers no application-specific SLA; production fallback and monitoring remain necessary."
+      ]
+    },
+    {
+      "evidence_id": "EV-014",
+      "claim_id": "ARCH-015",
+      "source_ids": ["SRC-009", "SRC-011"],
+      "evidence_class": "tool_result",
+      "quote_or_pointer": "Supabase selected by stakeholder; official docs provide Frankfurt region, Auth/RLS and Storage/RLS; database backup excludes Storage object bytes.",
+      "confidence": 5,
+      "limitations": [
+        "Plan, DPA, RPO/RTO, and independent object backup require ADR and contracting review."
+      ]
+    },
+    {
+      "evidence_id": "EV-015",
+      "claim_id": "SEC-017",
+      "source_ids": ["SRC-012"],
+      "evidence_class": "standard_alignment",
+      "quote_or_pointer": "GDPR storage limitation and BDSG necessity require category-specific rules; ArbZG specifies at least two years for covered time records; DIN EN ISO/IEC 27555 supplies deletion-method guidance.",
+      "confidence": 4,
+      "limitations": [
+        "Not legal advice; exact categories and litigation/insurance needs require counsel and company decision."
+      ]
+    },
+    {
+      "evidence_id": "EV-016",
+      "claim_id": "OBS-012",
+      "source_ids": ["SRC-009", "SRC-013"],
+      "evidence_class": "derived",
+      "quote_or_pointer": "Pilot baselines compare current process with a measured pilot using explicit denominators and time windows.",
+      "confidence": 4,
+      "limitations": ["Recommended targets are not accepted until stakeholders approve them."]
+    },
+    {
+      "evidence_id": "EV-017",
+      "claim_id": "FR-062",
+      "source_ids": ["SRC-014"],
+      "evidence_class": "direct_source",
+      "quote_or_pointer": "Stakeholder explicitly excluded the feature from MVP and decided initial Admin/Management-only visibility, effective-dated individual net rates, approved-time actual costs, machine-rental revenue only, and no role/type defaults.",
+      "confidence": 5,
+      "limitations": [
+        "Detailed customer/reference fields for rental operations and actual machine-usage capture can be refined when PHASE-007 starts."
+      ]
     }
   ],
   "findings": [
@@ -4932,12 +6184,12 @@
       "finding_id": "FIND-003",
       "domain": "architecture",
       "severity": "medium",
-      "claim": "Provider and stack decisions are intentionally unresolved.",
-      "evidence_ids": ["EV-007", "EV-008"],
-      "standard_mapping": ["STD-004"],
-      "impact": "Implementation cannot safely begin without ADRs and repository validation commands.",
-      "recommendation": "Complete TASK-003 before foundation implementation.",
-      "verification_status": "open ADR dependency"
+      "claim": "The canonical repository and database platform are now selected, but runtime, email, hosting, backup, and provider ADRs remain partially unresolved.",
+      "evidence_ids": ["EV-011", "EV-014"],
+      "standard_mapping": ["STD-004", "STD-005"],
+      "impact": "Implementation can begin with documentation/ADR and scaffold work but production-grade coding should not assume unapproved providers or branch conventions.",
+      "recommendation": "Use DYAI2025/Arborga only, decide master-to-main policy, adopt Supabase Frankfurt, and approve the recommended modular runtime/provider package before Phase 2.",
+      "verification_status": "partially_resolved_with_ADR_gate"
     },
     {
       "finding_id": "FIND-004",
@@ -4964,13 +6216,46 @@
     {
       "finding_id": "FIND-006",
       "domain": "external_weather",
-      "severity": "high",
-      "claim": "Worksite weather is compatible with the assignment view but introduces freshness, provider-failure, warning, and false-authority risks.",
-      "evidence_ids": ["EV-009"],
+      "severity": "critical",
+      "claim": "A once-daily forecast refresh does not satisfy the requirement to surface newly issued thunderstorms and strong-gust warnings for tree-climbing work.",
+      "evidence_ids": ["EV-012", "EV-013"],
       "standard_mapping": ["STD-004", "STD-005"],
-      "impact": "Employees could rely on stale or incomplete weather information if source state and semantics are unclear.",
-      "recommendation": "Use a replaceable adapter, bounded cache, visible timestamp, graceful failure, and no automatic safety action until explicitly approved.",
-      "verification_status": "supported_with_open_implementation_decisions"
+      "impact": "A new official warning could remain invisible during a workday if forecast and warning ingestion are treated as one daily call.",
+      "recommendation": "Separate cached forecast/ozone calls from a centrally polled DWD CAP warning feed; poll official warnings every ten minutes and mark stale after twenty minutes. Keep the feature advisory and highly visible.",
+      "verification_status": "recommended_default_pending_channel_decision"
+    },
+    {
+      "finding_id": "FIND-007",
+      "domain": "privacy",
+      "severity": "high",
+      "claim": "Assignment-based weather does not require employee tracking.",
+      "evidence_ids": ["EV-012"],
+      "standard_mapping": ["STD-005"],
+      "impact": "Implementing device-location tracking would contradict the approved non-goals and add unnecessary employee privacy risk.",
+      "recommendation": "Store geocoded worksite coordinates and derive access from assignment visibility; do not request background or continuous employee location.",
+      "verification_status": "resolved_product_rule"
+    },
+    {
+      "finding_id": "FIND-008",
+      "domain": "retention",
+      "severity": "high",
+      "claim": "There is no single German or EU default retention duration for every Arboscus data category.",
+      "evidence_ids": ["EV-015"],
+      "standard_mapping": ["STD-005"],
+      "impact": "Applying one blanket period can either over-retain sensitive employee data or delete evidence too early.",
+      "recommendation": "Use DIN EN ISO/IEC 27555 as the deletion-method framework and approve a category matrix; treat only explicit legal periods as hard minimums.",
+      "verification_status": "legal_review_required_before_production"
+    },
+    {
+      "finding_id": "FIND-009",
+      "domain": "scope_and_finance",
+      "severity": "high",
+      "claim": "The requested economics capability is valuable but would materially expand the MVP and create confidential commercial-data and accounting-boundary risks.",
+      "evidence_ids": ["EV-017"],
+      "standard_mapping": ["STD-004", "STD-005"],
+      "impact": "Implementing it now could delay the planning core and blur the boundary to payroll, invoicing, VAT, and bookkeeping.",
+      "recommendation": "Keep it as a fully specified post-MVP Jira epic behind a separate phase and feature flag; implement only internal net planning/actual cost and machine-rental revenue views.",
+      "verification_status": "resolved_by_explicit_post_mvp_scope_gate"
     }
   ],
   "security_controls": {
@@ -4988,13 +6273,22 @@
     ],
     "authorization": [
       {
-        "id": "SEC-102",
-        "type": "authorization",
-        "statement": "Enforce one role per user plus atomic permissions and object-scope rules on the server for every protected endpoint.",
-        "source_ids": ["SRC-002", "SRC-005"],
-        "status": "accepted",
+        "id": "SEC-101",
+        "type": "security_control",
+        "statement": "Authorization is enforced server-side and with Supabase RLS defense in depth. Weather reads require a visible assignment or an explicitly granted planner permission; no weather endpoint accepts arbitrary employee location.",
+        "source_ids": ["SRC-009", "SRC-011"],
+        "status": "proposed",
         "priority": "p0",
-        "verification_method": "Review against source and mapped acceptance test"
+        "verification_method": "RLS and API negative tests"
+      },
+      {
+        "id": "SEC-205",
+        "type": "security_control",
+        "statement": "Post-MVP economics endpoints and reports default to Administrator/Management only; Employee is denied even if UI routes are guessed directly.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "secrets_management": [
@@ -5017,17 +6311,26 @@
         "status": "accepted",
         "priority": "p0",
         "verification_method": "Review against source and mapped acceptance test"
+      },
+      {
+        "id": "SEC-206",
+        "type": "security_control",
+        "statement": "Confidential individual rates and amounts are not included in routine telemetry, client logs, notifications, or support traces. Audit identifies rate versions and changes with least necessary values.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ],
     "data_protection": [
       {
-        "id": "SEC-105",
-        "type": "data_protection",
-        "statement": "Use TLS, encryption at rest, protected object access, environment isolation, backup encryption, and retention/deletion jobs after legal approval.",
-        "source_ids": ["SRC-002", "SRC-004"],
-        "status": "accepted",
+        "id": "SEC-102",
+        "type": "security_control",
+        "statement": "Use Supabase Central EU (Frankfurt), private Storage buckets, encrypted transport, minimal fields, category-based retention, independent object backups, and no continuous employee GPS. Provider data flows and DPAs are approved before production.",
+        "source_ids": ["SRC-009", "SRC-011", "SRC-012"],
+        "status": "proposed",
         "priority": "p0",
-        "verification_method": "Review against source and mapped acceptance test"
+        "verification_method": "DPA/data-flow and restore review"
       }
     ],
     "abuse_cases": [
@@ -5065,70 +6368,88 @@
     ],
     "privacy_controls": [
       {
-        "id": "SEC-108",
-        "type": "privacy",
-        "statement": "Apply data minimization, purpose limitation, worksite/time-scoped coworker visibility, private-origin isolation, no diagnosis display, and no continuous tracking.",
-        "source_ids": ["SRC-002"],
-        "status": "accepted",
+        "id": "SEC-103",
+        "type": "security_control",
+        "statement": "Raw audio is short-lived and local transcription is preferred; illness diagnosis is not stored; private route origin is isolated; weather uses worksite coordinates only; logs redact names, free text, coordinates where unnecessary, audio URLs, tokens, and provider keys.",
+        "source_ids": ["SRC-009", "SRC-011", "SRC-012"],
+        "status": "proposed",
         "priority": "p0",
-        "verification_method": "Review against source and mapped acceptance test"
+        "verification_method": "Privacy test and log review"
       }
     ],
     "human_review_checkpoints": [
       {
-        "id": "SEC-109",
-        "type": "human_review",
-        "statement": "Management and technical reviewer approve permission matrix, safety release policy, provider data flows, retention schedule, restore test, and production security report.",
-        "source_ids": ["SRC-002", "SRC-004"],
+        "id": "SEC-104",
+        "type": "security_control",
+        "statement": "Human approval is required for stack/provider ADRs, RLS matrix, retention schedule, warning communication channels, pilot targets, backup restore, real-data pilot, and production release.",
+        "source_ids": ["SRC-009", "SRC-011", "SRC-012"],
         "status": "accepted",
         "priority": "p0",
-        "verification_method": "Review against source and mapped acceptance test"
+        "verification_method": "Signed review checklist"
+      },
+      {
+        "id": "SEC-207",
+        "type": "human_review",
+        "statement": "Human approval is required before enabling PHASE-007, changing economics permissions, performing a backdated rate correction, or releasing economics reports/exports to another role.",
+        "source_ids": ["SRC-014"],
+        "status": "accepted",
+        "priority": "p2",
+        "verification_method": "Stakeholder review and mapped acceptance test"
       }
     ]
   },
   "agent_handoff": {
-    "objective": "Implement the Arboscus Teamplaner in the approved phases, preserving product scope, authorization, traceability, and release gates.",
+    "objective": "Implement the Arboscus Teamplaner only in DYAI2025/Arborga, starting with ADRs and preserving the approved product, authorization, privacy, weather-warning, traceability, and release rules.",
     "allowed_files": [
-      "MISSING: repository not supplied. During TASK-003 define allowed modules per phase.",
       "docs/prd/**",
       "docs/adr/**",
-      "tests/** and implementation modules explicitly assigned to the active phase."
+      "docs/architecture/**",
+      "supabase/migrations/** after schema ADR",
+      "application, worker, deployment and tests modules explicitly created by the approved scaffold task"
     ],
     "prohibited_files": [
-      "Unrelated repositories or modules",
+      "Other repositories",
       "Production secrets or credential files",
-      "Historical data outside approved migrations"
+      "Unrelated organization projects",
+      "Historical data outside approved migration batches"
     ],
     "prohibited_actions": [
-      "Do not bypass authorization.",
-      "Do not invent core statuses, data schema, permissions, or provider behavior.",
-      "Do not add payroll, invoicing, continuous GPS, geofencing, or full ERP scope.",
-      "Do not perform destructive migrations without approved rollback.",
-      "Do not log private origins, medical details, credentials, or sensitive free text.",
-      "Do not create automatic weather-based work cancellation, planning blocks, or safety decisions without explicit approved requirements."
+      "Do not bypass API authorization or Supabase RLS.",
+      "Do not use employee GPS/background tracking for weather.",
+      "Do not make provider calls directly from mobile clients or once per employee.",
+      "Do not treat forecast data as an official warning.",
+      "Do not automatically cancel work, block publication, or issue a binding stop-work decision from weather in MVP.",
+      "Do not expose Supabase service-role, weather, routing, email, or monitoring keys to clients.",
+      "Do not add a provider, background job, destructive migration, or retention period without an approved ADR/policy.",
+      "Do not log illness details, private route origins, audio, sensitive free text, precise coordinates where unnecessary, or credentials.",
+      "Do not implement the post-MVP Planning Economics and Machine Rental capability during MVP phases.",
+      "Do not add payroll, invoicing, VAT/gross, payment, ledger, tax, or unrelated revenue functionality."
     ],
     "validation_commands": [
-      "python /home/oai/skills/ai-native-prd-architect/scripts/validate_prd_output.py prd_report.json",
-      "MISSING: repository-specific lint command",
-      "MISSING: repository-specific type-check command",
-      "MISSING: repository-specific unit/integration/e2e commands"
+      "python /home/oai/skills/ai-native-prd-architect/scripts/validate_prd_output.py docs/prd/prd_report.json",
+      "MISSING: repository-specific lint command until scaffold is approved",
+      "MISSING: repository-specific type-check command until scaffold is approved",
+      "MISSING: repository-specific unit/integration/e2e commands until scaffold is approved"
     ],
     "stop_conditions": [
-      "Repository or stack is not selected.",
-      "A requirement conflicts with existing architecture.",
-      "A persistent schema change is not covered by this PRD or an ADR.",
-      "A protected workflow or authorization rule is ambiguous.",
-      "A new external provider or background job is proposed without ADR.",
-      "A destructive migration or production data action is required.",
-      "Weather fields, refresh policy, warning channels, or safety semantics are required but remain undecided."
+      "The repository default branch policy is unresolved for a write operation.",
+      "The selected stack/provider conflicts with an approved ADR.",
+      "A persistent schema change is not covered by the PRD and migration/rollback plan.",
+      "An RLS or protected-resource rule is ambiguous.",
+      "A production provider lacks DPA/data-region/secret ownership approval.",
+      "A warning action beyond informative display/notification is requested.",
+      "A legal retention period is required but not approved."
     ],
     "human_review_checkpoints": [
-      "After clickdummy testing",
-      "After ADR and architecture package",
-      "Before each phase merge",
-      "Before real personal data pilot",
-      "After backup restore and security test",
-      "Before production release"
+      "After repository/stack/provider ADR package",
+      "After RLS policy matrix and migration plan",
+      "After weather/DWD warning prototype",
+      "Before real employee data pilot",
+      "After backup and independent Storage restore test",
+      "After pilot metric review",
+      "Before production release",
+      "Before PHASE-007: confirm a separately approved Jira epic, feature flag, permissions, rate-version migration, and calculation source facts.",
+      "Before any economics permission expansion beyond Administrator/Management."
     ]
   },
   "quality_gate_report": {
@@ -5136,110 +6457,90 @@
       {
         "gate": "Precision Gate",
         "status": "PASS",
-        "reason": "Core behavior uses stable IDs, explicit states, and observable outcomes."
+        "reason": "Repository, Supabase, weather fields, access scope, official warning semantics, ozone labeling, and advisory-only behavior are explicit."
       },
       {
         "gate": "Missing-Information Gate",
         "status": "PASS",
-        "reason": "PASS: Remaining provider, retention, metrics, and weather-detail decisions are explicitly listed and do not alter the accepted high-level product requirement."
+        "reason": "Remaining stack approval, branch name, email, warning channels, retention approval, and pilot targets are explicitly listed."
       },
       {
         "gate": "Evidence Gate",
         "status": "PASS",
-        "reason": "Central requirements map to user-provided sources or identified derived architecture constraints."
+        "reason": "Stakeholder decisions, GitHub evidence, official provider documentation, and legal/standards sources are separated and referenced."
       },
       {
         "gate": "Architecture Gate",
         "status": "PASS",
-        "reason": "Boundaries, ports, authorization, jobs, offline limits, and ADR requirements are explicit."
+        "reason": "Provider ports, server-side caching, Supabase/RLS, repository boundaries, worker separation, and ADR gates are specified."
       },
       {
         "gate": "Data Gate",
         "status": "PASS",
-        "reason": "Core entities, ownership, visibility, history, and lifecycle are specified; retention remains a production ADR/policy gate."
+        "reason": "Weather snapshot and official warning entities include freshness, source, spatial scope, lifecycle, and no employee GPS."
       },
       {
         "gate": "Security Gate",
         "status": "PASS",
-        "reason": "Authentication, authorization, privacy, uploads, abuse cases, destructive controls, tests, and human review are specified."
+        "reason": "RLS, private Storage, service-key isolation, data minimization, audio handling, and human release gates are explicit."
       },
       {
         "gate": "Sustainability Gate",
         "status": "PASS",
-        "reason": "Right-sizing, query efficiency, bounded cache/media, job limits, and vendor cost visibility are included."
+        "reason": "Provider calls are cached per worksite, DWD polling is centralized, and small-scale infrastructure is recommended."
       },
       {
         "gate": "Agent Executability Gate",
         "status": "PASS",
-        "reason": "Phases, atomic tasks, stop conditions, and missing repository commands are explicit; implementation starts with ADR task."
+        "reason": "Canonical repository, initial ADR tasks, stop conditions, and prohibited actions are explicit; code commands remain correctly marked missing until scaffold."
       },
       {
         "gate": "Testability Gate",
         "status": "PASS",
-        "reason": "Every functional requirement has a mapped Given/When/Then criterion and test strategy."
+        "reason": "New weather, warning, privacy, cache, ozone, Supabase, and pilot rules map to acceptance and test entries."
       },
       {
         "gate": "Artifact Gate",
         "status": "PASS",
-        "reason": "Mandatory Markdown and JSON artifacts are generated; SARIF is not applicable because no code findings exist."
+        "reason": "Markdown, JSON, traceability, handoff, stakeholder PRD, and recommendation memo are emitted; no code findings require SARIF."
       },
       {
         "gate": "Release Gate",
         "status": "PASS",
-        "reason": "PRD can be released as product source of truth; production remains gated by listed technical and legal checkpoints."
+        "reason": "PRD v1.2 can be released; implementation begins with ADRs and production remains gated by legal/provider/restore approval."
       }
     ],
     "overall_status": "PASS"
   },
   "open_questions": [
     {
-      "question_id": "OQ-001",
-      "question": "Which repository, implementation stack, and repository-specific validation commands will be used?",
+      "question_id": "OQ-011",
+      "question": "Approve the recommended application/runtime baseline: modular TypeScript web/PWA, server API/BFF, Supabase Frankfurt, and a separate Python worker on German hosting?",
       "blocks_release": false
     },
     {
-      "question_id": "OQ-002",
-      "question": "Which EU hosting, database, object storage, authentication, email, routing, transcription, PDF, monitoring, and weather providers are selected?",
+      "question_id": "OQ-012",
+      "question": "Rename the current GitHub default branch from master to main before implementation, or explicitly retain master?",
       "blocks_release": false
     },
     {
-      "question_id": "OQ-003",
-      "question": "Which legally reviewed retention and deletion periods apply to each personal-data and uploaded-file category?",
+      "question_id": "OQ-013",
+      "question": "Which transactional email system will be used: an existing Arboscus provider or the provisional Brevo recommendation?",
       "blocks_release": false
     },
     {
-      "question_id": "OQ-004",
-      "question": "Which pilot baselines and target values define success for planning effort, confirmation, conflict reduction, information quality, and adoption?",
+      "question_id": "OQ-014",
+      "question": "Approve forecast/ozone via OpenWeather and official warnings via DWD CAP, including forecast refresh up to every three hours and DWD warning polling every ten minutes?",
       "blocks_release": false
     },
     {
-      "question_id": "OQ-005",
-      "question": "Should weather be shown only to assigned employees, or also to planners for every visible worksite and unassigned future worksite?",
+      "question_id": "OQ-015",
+      "question": "Should new/escalated official warnings additionally trigger browser push and email, and must employees mark them as seen?",
       "blocks_release": false
     },
     {
-      "question_id": "OQ-006",
-      "question": "Which weather values are mandatory: condition, temperature, precipitation probability and amount, wind, gusts, severe-warning status, or additional values?",
-      "blocks_release": false
-    },
-    {
-      "question_id": "OQ-007",
-      "question": "Should the app show a whole-day summary, the hours matching the assignment, or both for today and the following day?",
-      "blocks_release": false
-    },
-    {
-      "question_id": "OQ-008",
-      "question": "What refresh interval, maximum stale age, and fallback behavior apply when the weather provider is unavailable?",
-      "blocks_release": false
-    },
-    {
-      "question_id": "OQ-009",
-      "question": "Which severe-weather changes trigger only an in-app warning, and which also trigger email or escalation to Administration and Management?",
-      "blocks_release": false
-    },
-    {
-      "question_id": "OQ-010",
-      "question": "Is weather strictly advisory, or may defined thresholds later warn, block publication, or recommend stopping work?",
+      "question_id": "OQ-016",
+      "question": "Approve the proposed pilot targets and provisional retention matrix after management and legal/data-protection review?",
       "blocks_release": false
     }
   ],
