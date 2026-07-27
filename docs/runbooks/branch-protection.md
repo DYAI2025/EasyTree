@@ -1,6 +1,6 @@
 # Runbook: Branch Protection und Pflichtchecks (EYT-67)
 
-Stand: 25.07.2026 · Repository: `DYAI2025/EasyTree` · Default-Branch: `master`
+Stand: 27.07.2026 (read-through ergaenzt, EYT-50) · Repository: `DYAI2025/EasyTree` · Default-Branch: `master`
 
 Dieses Runbook ist die kanonische Quelle dafür, welche GitHub-Checks als Merge-Gate
 verbindlich sind, wie die Regeln gesetzt werden und wie ihre Wirksamkeit nachgewiesen
@@ -44,19 +44,19 @@ Rulesets sind versionierbar, über `bypass_actors` explizit auditierbar und lief
 mit `GET /repos/{owner}/{repo}/rules/branches/{branch}` eine effektive Ist-Sicht,
 die sich unabhängig von der Wunschkonfiguration prüfen lässt.
 
-| Regel                                  | Wert                | Kriterium |
-| -------------------------------------- | ------------------- | --------- |
-| `enforcement`                          | `active`            | AC 1      |
-| `bypass_actors`                        | leer                | AC 1      |
-| `conditions.ref_name.include`          | `~DEFAULT_BRANCH`   | AC 1      |
-| `pull_request`                         | vorhanden           | AC 2      |
-| `required_approving_review_count`      | `0`                 | siehe 3.1 |
-| `dismiss_stale_reviews_on_push`        | `true`              | AC 4      |
-| `required_review_thread_resolution`    | `true`              | AC 5      |
-| `required_status_checks`               | die 9 Checks aus 2. | AC 3      |
-| `strict_required_status_checks_policy` | `true`              | AC 3      |
-| `non_fast_forward`                     | vorhanden           | AC 6      |
-| `deletion`                             | vorhanden           | AC 6      |
+| Regel                                  | Wert                 | Kriterium |
+| -------------------------------------- | -------------------- | --------- |
+| `enforcement`                          | `active`             | AC 1      |
+| `bypass_actors`                        | leer                 | AC 1      |
+| `conditions.ref_name.include`          | `~DEFAULT_BRANCH`    | AC 1      |
+| `pull_request`                         | vorhanden            | AC 2      |
+| `required_approving_review_count`      | `0`                  | siehe 3.1 |
+| `dismiss_stale_reviews_on_push`        | `true`               | AC 4      |
+| `required_review_thread_resolution`    | `true`               | AC 5      |
+| `required_status_checks`               | die 10 Checks aus 2. | AC 3      |
+| `strict_required_status_checks_policy` | `true`               | AC 3      |
+| `non_fast_forward`                     | vorhanden            | AC 6      |
+| `deletion`                             | vorhanden            | AC 6      |
 
 ### 3.1 Bewusste Abweichung: keine Approval-Pflicht
 
