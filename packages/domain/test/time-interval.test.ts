@@ -196,9 +196,18 @@ describe("hasAnyOverlap", () => {
 });
 
 describe("Eigenschaftssweep — deterministisch, ohne Zufall", () => {
-  // Bewusst kein fast-check: das waere eine neue Abhaengigkeit fuer ein Paket,
-  // das ausdruecklich keine hat. Der Sweep ist vollstaendig aufgezaehlt und
-  // damit reproduzierbar ohne Seed.
+  // Dieser Sweep bleibt: er ist vollstaendig aufgezaehlt und damit ohne Seed
+  // reproduzierbar. Was er NICHT kann, ist etwas ausserhalb seines Rasters
+  // finden — er verlaesst den August nie und sagt ueber Zeitumstellungen,
+  // Jahreswechsel oder Millisekundengrenzen nichts.
+  //
+  // Hier stand frueher "Bewusst kein fast-check: das waere eine neue
+  // Abhaengigkeit fuer ein Paket, das ausdruecklich keine hat." Das Argument
+  // galt fuer `dependencies` und nicht fuer `devDependencies`: der
+  // Architekturtest `domain-allowlist` hat als Geltungsbereich
+  // `packages/domain/src/`, nicht `test/`. Das ausgelieferte Paket bleibt
+  // abhaengigkeitsfrei. Die erzeugten Faelle stehen jetzt in
+  // test/time-interval.property.test.ts (EYT-61 AK7).
   const base = Date.UTC(2026, 7, 3, 8, 0, 0);
   const offsets = [-90, -60, -30, -1, 0, 1, 30, 60, 90, 240];
 
