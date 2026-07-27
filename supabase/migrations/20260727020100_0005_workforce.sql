@@ -43,7 +43,19 @@ comment on column public.employees.user_id is
 create index employees_org_active_idx on public.employees (org_id, active);
 
 revoke all on table public.employees from anon;
-grant select, insert, update, delete on table public.employees to authenticated;
+
+-- KEIN delete. Der Tabellenkommentar oben sagt "Loeschen ist nicht vorgesehen —
+-- Deaktivierung ueber active"; ein delete-Grant haette genau das zur blossen
+-- Bitte gemacht. Der FK RESTRICT aus 0007 schuetzt nur BEREITS referenzierte
+-- Personen: eine Person ohne Zuweisung waere fuer jedes aktive Mitglied
+-- physisch loeschbar gewesen — unwiderruflich, und bei personenbezogenen Daten
+-- ohne jede Spur.
+--
+-- Loeschen auf Betroffenenverlangen (DSGVO Art. 17) ist damit NICHT
+-- ausgeschlossen, sondern noch nicht gebaut. Es braucht einen eigenen,
+-- protokollierten Pfad und gehoert zu EYT-14; hier waere es ein Nebeneffekt
+-- eines Grants gewesen, den niemand entschieden hat.
+grant select, insert, update on table public.employees to authenticated;
 
 alter table public.employees enable row level security;
 alter table public.employees force row level security;
@@ -61,6 +73,5 @@ create policy employees_update_in_org on public.employees
   using (org_id in (select app.user_org_ids()))
   with check (org_id in (select app.user_org_ids()));
 
-create policy employees_delete_in_org on public.employees
-  for delete to authenticated
-  using (org_id in (select app.user_org_ids()));
+-- Bewusst KEINE delete-Policy. Sie waere ohne Grant wirkungslos und wuerde
+-- beim Lesen der Datei den Eindruck erwecken, Loeschen sei vorgesehen.

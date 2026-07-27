@@ -10,7 +10,7 @@
 -- Luecke, die hier stillschweigend als geschlossen gilt.
 
 begin;
-select plan(19);
+select plan(23);
 
 -- ===========================================================================
 -- Schemaform: die Zusagen aus der Migration
@@ -147,6 +147,52 @@ select is(
   has_table_privilege('authenticated', 'public.audit_events', 'delete'),
   false,
   'authenticated darf audit_events NICHT loeschen'
+);
+
+-- Beschaeftigte werden deaktiviert, nicht geloescht (0005). Ohne diese Zeile
+-- waere das eine Aussage im Kommentar; der FK RESTRICT aus 0007 schuetzt nur
+-- bereits referenzierte Personen.
+select is(
+  has_table_privilege('authenticated', 'public.employees', 'delete'),
+  false,
+  'authenticated darf employees NICHT loeschen — Deaktivierung laeuft ueber active'
+);
+
+-- ---------------------------------------------------------------------------
+-- Der Akteur einer Auditspur ist gebunden, nicht behauptet
+-- ---------------------------------------------------------------------------
+-- Ohne die Akteursbindung in 0008 koennte A ein Ereignis der eigenen
+-- Organisation einer fremden Person zuschreiben oder es als Systemjob tarnen.
+-- Beides waere in der eigenen Organisation erlaubt gewesen — die org_id stimmt
+-- ja. Genau deshalb reicht der Mandantenfilter hier nicht.
+select throws_ok(
+  $$insert into public.audit_events (org_id, actor_user_id, event_type, subject_type, subject_id)
+    values ('00000000-0000-0000-0000-0000000000a1',
+            '00000000-0000-0000-0000-00000000ccc3',
+            'plan.published', 'plan_version', gen_random_uuid())$$,
+  '42501',
+  'new row violates row-level security policy for table "audit_events"',
+  'A: Auditereignis auf eine FREMDE Person DERSELBEN Organisation wird abgelehnt'
+);
+
+select throws_ok(
+  $$insert into public.audit_events (org_id, actor_user_id, event_type, subject_type, subject_id)
+    values ('00000000-0000-0000-0000-0000000000a1',
+            null,
+            'plan.published', 'plan_version', gen_random_uuid())$$,
+  '42501',
+  'new row violates row-level security policy for table "audit_events"',
+  'A: Auditereignis als Systemjob zu tarnen (actor NULL) wird abgelehnt'
+);
+
+-- Gegenprobe: ohne sie waeren die beiden Ablehnungen oben auch dann gruen,
+-- wenn die Policy schlicht jedes insert verweigert.
+select lives_ok(
+  $$insert into public.audit_events (org_id, actor_user_id, event_type, subject_type, subject_id)
+    values ('00000000-0000-0000-0000-0000000000a1',
+            '00000000-0000-0000-0000-00000000aaa1',
+            'plan.published', 'plan_version', gen_random_uuid())$$,
+  'A: Auditereignis auf die EIGENE Person wird akzeptiert'
 );
 
 -- ---------------------------------------------------------------------------

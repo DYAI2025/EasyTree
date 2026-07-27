@@ -107,9 +107,26 @@ create policy audit_events_select_in_org on public.audit_events
   for select to authenticated
   using (org_id in (select app.user_org_ids()));
 
+-- Der Akteur wird gebunden, nicht geglaubt.
+--
+-- Ohne die zweite Bedingung pruefte die Policy nur die Organisation: jedes
+-- aktive Mitglied koennte ein Auditereignis mit actor_user_id = NULL schreiben
+-- (es laese sich als Systemjob) oder es einer beliebigen bekannten Benutzer-UUID
+-- zuschreiben. Eine Auditspur, deren Urheberangabe der Schreiber frei waehlt,
+-- belegt nichts. Die Anfuegbarkeit war ein Recht, die Zuschreibung war eine
+-- Konvention — das ist der Unterschied, den diese Zeile schliesst.
+--
+-- actor_user_id bleibt nullable, weil ein spaeterer Systemjob keinen Benutzer
+-- hat. Fuer Clients ist NULL dadurch trotzdem unerreichbar: NULL = x ergibt
+-- NULL, nicht true, und WITH CHECK verlangt true. Wenn ein Systemschreiber
+-- entsteht, entscheidet dessen Ticket ueber den Weg — er scheitert dann
+-- sichtbar an dieser Policy, statt sich still als Benutzer auszugeben.
 create policy audit_events_insert_in_org on public.audit_events
   for insert to authenticated
-  with check (org_id in (select app.user_org_ids()));
+  with check (
+    org_id in (select app.user_org_ids())
+    and actor_user_id = app.current_user_id()
+  );
 
 create policy outbox_messages_select_in_org on public.outbox_messages
   for select to authenticated

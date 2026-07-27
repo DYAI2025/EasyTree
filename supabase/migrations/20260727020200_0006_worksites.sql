@@ -34,6 +34,12 @@ comment on column public.worksites.activity_count is
 create index worksites_org_active_idx on public.worksites (org_id, active);
 
 revoke all on table public.worksites from anon;
+
+-- Hier bleibt delete, anders als bei employees (0005). Der Unterschied ist
+-- nicht Bequemlichkeit: eine Baustelle traegt keinen Personenbezug, und die
+-- Auditspur referenziert sie ueber subject_type/subject_id BEWUSST ohne FK,
+-- damit sie ein geloeschtes Objekt ueberlebt (0008). Sobald Zuweisungen
+-- existieren, blockiert der FK RESTRICT aus 0007 das Loeschen ohnehin.
 grant select, insert, update, delete on table public.worksites to authenticated;
 
 alter table public.worksites enable row level security;

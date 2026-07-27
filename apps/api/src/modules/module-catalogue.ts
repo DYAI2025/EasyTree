@@ -143,7 +143,7 @@ export const TABLE_OWNERSHIP: readonly TableOwnership[] = [
     table: "public.employees",
     owner: "workforce",
     tenantOwned: true,
-    note: "Beschaeftigte je Organisation (0005). PERSONENBEZOGEN. user_id ist optional, deshalb eigenstaendiges org_id.",
+    note: "Beschaeftigte je Organisation (0005). PERSONENBEZOGEN. user_id ist optional, deshalb eigenstaendiges org_id. KEIN delete-Grant: Deaktivierung ueber active, Loeschen auf Betroffenenverlangen braucht einen eigenen Pfad (EYT-14).",
   },
   {
     table: "public.worksites",
@@ -167,7 +167,7 @@ export const TABLE_OWNERSHIP: readonly TableOwnership[] = [
     table: "public.audit_events",
     owner: "audit",
     tenantOwned: true,
-    note: "Anfuegbare Auditspur (0008). Kein update/delete-Grant — Anfuegbarkeit ist ein Recht, keine Konvention.",
+    note: "Anfuegbare Auditspur (0008). Kein update/delete-Grant, und die Policy bindet actor_user_id an app.current_user_id() — Anfuegbarkeit UND Zuschreibung sind Rechte, keine Konvention.",
   },
   {
     table: "public.outbox_messages",
