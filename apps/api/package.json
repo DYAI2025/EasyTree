@@ -2,7 +2,7 @@
   "name": "@easytree/api",
   "version": "0.0.0",
   "private": true,
-  "description": "easyTree NestJS backend — one code package, two entrypoints (HTTP API + worker, EYT-42)",
+  "description": "easyTree NestJS backend \u2014 one code package, two entrypoints (HTTP API + worker, EYT-42)",
   "main": "./dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -10,7 +10,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "start": "node dist/main.js",
-    "start:worker": "node dist/worker.js"
+    "start:worker": "node dist/worker.js",
+    "build:harness": "tsc -p tsconfig.harness.json",
+    "start:harness": "node dist-harness/test/harness/main.js"
   },
   "dependencies": {
     "@easytree/config": "workspace:*",

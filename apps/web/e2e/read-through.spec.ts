@@ -23,27 +23,67 @@ const A_ZULETZT_VEROEFFENTLICHT = "aaaa2222-2222-4222-8222-222222222222";
 const A_ZUWEISUNG_ENTWURF = "a5510003-0003-4003-8003-000000000003";
 const B_ZUWEISUNG = "b5510001-0001-4001-8001-000000000001";
 const B_VERSION = "bbbb1111-1111-4111-8111-111111111111";
+const B_EMPLOYEE = "00000000-0000-0000-0000-0000004020b2";
+const B_WORKSITE = "00000000-0000-0000-0000-0000005020b2";
+/** Alles, was aus Organisation B nirgends auftauchen darf. */
+const B_SPUREN = [B_ZUWEISUNG, B_VERSION, B_EMPLOYEE, B_WORKSITE];
+
+/** Die im DOM gerenderten Zuweisungs-Ids, in Reihenfolge. */
+async function sichtbareZuweisungen(seite: import("@playwright/test").Page): Promise<string[]> {
+  return seite
+    .locator("[data-assignment-id]")
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-assignment-id") ?? ""));
+}
+
+/** Die vier Provenienzmerkmale, an denen sich der Serverstand ablesen laesst. */
+async function provenienz(
+  seite: import("@playwright/test").Page,
+): Promise<Record<string, string | null>> {
+  const version = seite.getByTestId("planungsfenster-version");
+  const stand = seite.getByTestId("planungsfenster-stand");
+  return {
+    sourceVersionId: await version.getAttribute("data-source-version-id"),
+    sourceState: await version.getAttribute("data-source-state"),
+    publishedVersionId: await version.getAttribute("data-published-version-id"),
+    stand: await stand.getAttribute("data-stand"),
+  };
+}
 
 test.describe("Read-Through: Browser bis PostgreSQL", () => {
   test("Nachweis 5+6: der Aufruf erreicht ueber die Web-Origin die API, mit Parameter", async ({
     page,
   }) => {
-    const gesehen: string[] = [];
-    page.on("request", (r) => {
-      if (r.url().includes("/api/v1/") || r.url().endsWith("/health")) gesehen.push(r.url());
-    });
+    // Auf die ANTWORT warten, nicht auf das Absenden: ein gesammelter Request
+    // belegt nur, dass der Browser losgelaufen ist. Ob NestJS geantwortet hat
+    // — und was — steht erst in der Response.
+    const antwortVersprechen = page.waitForResponse(
+      (r) => r.url().includes("/api/v1/planung/fenster") && r.request().method() === "GET",
+    );
+    await page.goto(SEITE);
+    const fensterAntwort = await antwortVersprechen;
 
-    const antwort = await page.goto(SEITE);
-    expect(antwort?.ok()).toBe(true);
-
-    // Der Fensteraufruf laeuft relativ ueber die Web-Origin — keine fremde
-    // Origin, also kein CORS noetig.
-    const fenster = gesehen.find((u) => u.includes("/planung/fenster"));
-    expect(fenster, "kein Aufruf an /api/v1/planung/fenster beobachtet").toBeTruthy();
-    const url = new URL(fenster!);
+    expect(fensterAntwort.status()).toBe(200);
+    const url = new URL(fensterAntwort.url());
+    // Same-Origin: der Browser spricht ausschliesslich mit der Web-Origin.
     expect(url.origin).toBe(new URL(page.url()).origin);
     // Nachweis 6: der Parameter ueberlebt das Rewrite.
     expect(url.searchParams.get("weekKey")).toBe(WOCHE);
+
+    // Die Antwort entspricht dem Vertrag und traegt Alpha-Daten.
+    const koerper = (await fensterAntwort.json()) as {
+      weekKey: string;
+      timeZone: string;
+      assignments: { id: string }[];
+      sourceVersion: { id: string; state: string } | null;
+      publishedVersionId: string | null;
+    };
+    expect(koerper.weekKey).toBe(WOCHE);
+    expect(koerper.timeZone.length).toBeGreaterThan(0);
+    expect(koerper.sourceVersion).toEqual({ id: A_ENTWURF, state: "draft" });
+    expect(koerper.publishedVersionId).toBe(A_ZULETZT_VEROEFFENTLICHT);
+
+    // Und der Stand ist danach auch sichtbar.
+    await expect(page.locator(`[data-assignment-id="${A_ZUWEISUNG_ENTWURF}"]`)).toBeVisible();
 
     // /health ueber dieselbe Origin, und es antwortet wirklich NestJS.
     const health = await page.request.get("/health");
@@ -61,14 +101,25 @@ test.describe("Read-Through: Browser bis PostgreSQL", () => {
     // Die Beta-Daten existieren in PostgreSQL (der Seed legt sie an, und
     // e2e/harness/verify-seed.sql belegt es unabhaengig) — hier duerfen sie
     // nicht vorkommen.
-    expect(rohtext).not.toContain(B_ZUWEISUNG);
-    expect(rohtext).not.toContain(B_VERSION);
+    for (const spur of B_SPUREN) {
+      expect(rohtext, `Beta-Spur in der Antwort: ${spur}`).not.toContain(spur);
+    }
     expect(rohtext).toContain(A_ZUWEISUNG_ENTWURF);
 
     await page.goto(SEITE);
+    // ERST auf die gerenderte Alpha-Zuweisung warten. Ohne das waere die
+    // Abwesenheit von Beta auch im Lade-, Fehler- oder Leerzustand gruen —
+    // und genau dann prueft der Test gar nichts.
+    await expect(page.locator(`[data-assignment-id="${A_ZUWEISUNG_ENTWURF}"]`)).toBeVisible();
+
+    // Exakt, nicht "enthaelt": eine zusaetzliche fremde Zeile faellt sonst
+    // durch.
+    expect(await sichtbareZuweisungen(page)).toEqual([A_ZUWEISUNG_ENTWURF]);
+
     const dom = await page.content();
-    expect(dom).not.toContain(B_ZUWEISUNG);
-    expect(dom).not.toContain(B_VERSION);
+    for (const spur of B_SPUREN) {
+      expect(dom, `Beta-Spur im DOM: ${spur}`).not.toContain(spur);
+    }
   });
 
   test("Nachweis 8+9: Zeitstempelgleichstand, Id entscheidet; Entwurf getrennt gemeldet", async ({
