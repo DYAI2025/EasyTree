@@ -199,7 +199,8 @@ jobs:
         shell: bash
         run: |
           pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
-          grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
+          # Prueft executed>=1, passed==executed und skipped==0 (EYT-66/EYT-71).
+          bash scripts/assert-tenant-report.sh tenant-isolation /tmp/tenant-direct.log
       # Nebenlaeufigkeit ist der Teil von EYT-49 AK6, den pgTAP nicht leisten
       # kann: eine Session zeigt Ablehnung, nicht Serialisierung. Diese Suite
       # oeffnet zwei echte Verbindungen und committet bewusst nichts —
@@ -283,7 +284,8 @@ jobs:
         shell: bash
         run: |
           pnpm --filter @easytree/api exec vitest run test/tenant-pooling.integration.test.ts 2>&1 | tee /tmp/tenant-pooled.log
-          grep -E "\[tenant-pooling\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-pooled.log
+          # Gleiche Bedingungen wie beim Direct-Gate (EYT-66/EYT-71).
+          bash scripts/assert-tenant-report.sh tenant-pooling /tmp/tenant-pooled.log
       - name: Tenant report -> step summary
         if: always()
         run: |
