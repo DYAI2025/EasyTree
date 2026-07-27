@@ -12,10 +12,14 @@
  *    waere ein leeres Fenster statt einer Ablehnung. Ein leeres Fenster sieht
  *    aus wie "diese Woche ist nicht geplant"; genau diese Verwechslung soll
  *    hier nicht entstehen.
- * 2. Eingabe. `PlanningWindowQuerySchema` aus dem Vertrag, nicht eine eigene
+ * 2. Berechtigung. Verifiziert heisst nicht berechtigt — `PlanningAccessPolicy`
+ *    entscheidet, und zwar VOR jeder Abfrage. Laege die Entscheidung erst bei
+ *    RLS, kaeme sie zu spaet und waere ausserdem die falsche: RLS kennt den
+ *    Mandanten, nicht die fachliche Rolle.
+ * 3. Eingabe. `PlanningWindowQuerySchema` aus dem Vertrag, nicht eine eigene
  *    Pruefung. Ein zweiter Satz Regeln waere ein zweiter Ableitungspfad.
- * 3. Abfrage.
- * 4. Antwort gegen `PlanningWindowSchema`. Der Server prueft seine EIGENE
+ * 4. Abfrage.
+ * 5. Antwort gegen `PlanningWindowSchema`. Der Server prueft seine EIGENE
  *    Ausgabe, weil ein Vertragsbruch hier entsteht und nicht beim Client — und
  *    weil der Client ihn sonst als CONTRACT_VIOLATION meldet, ohne dass
  *    jemand die Ursache sieht.

@@ -1,4 +1,4 @@
-import { Injectable, Inject, type OnApplicationShutdown } from "@nestjs/common";
+import { Inject, Injectable, Optional, type OnApplicationShutdown } from "@nestjs/common";
 import type { AppConfig } from "@easytree/config";
 
 import { APP_CONFIG } from "../../config/config.module";
@@ -19,8 +19,18 @@ export class TenantQueryRunnerProvider implements TenantQueryRunner, OnApplicati
   readonly #runner: PgTenantQueryRunner;
   #closed = false;
 
-  constructor(@Inject(APP_CONFIG) config: AppConfig) {
-    this.#runner = PgTenantQueryRunner.fromUrl(config.databaseUrl);
+  /**
+   * `runner` ist ein Einspritzpunkt fuer Tests — dieselbe Bauart wie die
+   * Rollenpruefung in `main.ts`. Ohne ihn liesse sich der Lebenszyklus nur
+   * gegen eine echte Datenbank pruefen, und geprueft werden soll hier der
+   * Lebenszyklus, nicht Postgres.
+   *
+   * `@Optional()` ist Pflicht: ein optionaler TypeScript-Parameter bleibt in
+   * den `design:paramtypes`-Metadaten stehen, und Nest versucht ihn sonst
+   * aufzuloesen — der ganze AppModule scheitert dann beim Bauen.
+   */
+  constructor(@Inject(APP_CONFIG) config: AppConfig, @Optional() runner?: PgTenantQueryRunner) {
+    this.#runner = runner ?? PgTenantQueryRunner.fromUrl(config.databaseUrl);
   }
 
   run<T>(context: TenantContext, work: (tx: TenantQuery) => Promise<T>): Promise<T> {

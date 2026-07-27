@@ -133,24 +133,71 @@ export const SourceVersionSchema = z.strictObject({
 
 export type SourceVersion = z.infer<typeof SourceVersionSchema>;
 
-export const PlanningWindowSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
-  /** IANA-Zeitzone, nach der die Woche abgegrenzt wurde. Mitgeliefert, damit die
-   * UI die Wochengrenze nicht selbst raten muss. */
-  timeZone: z.string(),
-  assignments: z.array(AssignmentDtoSchema),
-  /**
-   * Version, ZU DER die `assignments` gehoeren — Entwurf oder veroeffentlicht.
-   * Getrennt von `publishedVersionId`, weil beides gleichzeitig gelten kann.
-   */
-  sourceVersion: SourceVersionSchema.nullable(),
-  /**
-   * Id der zuletzt veröffentlichten Planversion, `null` solange nichts
-   * veröffentlicht ist. Sagt NICHTS darüber, ob die angezeigten Zuweisungen
-   * daher stammen — dafür ist `sourceVersion` da.
-   */
-  publishedVersionId: IdSchema.nullable(),
-});
+export const PlanningWindowSchema = z
+  .strictObject({
+    weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
+    /** IANA-Zeitzone, nach der die Woche abgegrenzt wurde. Mitgeliefert, damit die
+     * UI die Wochengrenze nicht selbst raten muss. */
+    timeZone: z.string(),
+    assignments: z.array(AssignmentDtoSchema),
+    /**
+     * Version, ZU DER die `assignments` gehoeren — Entwurf oder veroeffentlicht.
+     * Getrennt von `publishedVersionId`, weil beides gleichzeitig gelten kann.
+     */
+    sourceVersion: SourceVersionSchema.nullable(),
+    /**
+     * Id der zuletzt veröffentlichten Planversion, `null` solange nichts
+     * veröffentlicht ist. Sagt NICHTS darüber, ob die angezeigten Zuweisungen
+     * daher stammen — dafür ist `sourceVersion` da.
+     */
+    publishedVersionId: IdSchema.nullable(),
+  })
+  .superRefine((fenster, ctx) => {
+    // Feldweise Gueltigkeit genuegt hier nicht: die AUSSAGE steckt in der
+    // Beziehung der Felder. Ohne diese Regeln waeren formal gueltige, fachlich
+    // widerspruechliche Antworten moeglich — und die faenden erst in der
+    // Oberflaeche auf, als "Veroeffentlichte Version X" ueber fremden Daten.
+    if (fenster.sourceVersion === null) {
+      if (fenster.assignments.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["assignments"],
+          message:
+            "Ohne sourceVersion kann es keine Zuweisungen geben — sie haetten keine Herkunft.",
+        });
+      }
+      if (fenster.publishedVersionId !== null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["publishedVersionId"],
+          message:
+            "Eine veroeffentlichte Version existiert, wird aber nicht angezeigt: dann muesste sourceVersion sie nennen.",
+        });
+      }
+      return;
+    }
+
+    if (fenster.sourceVersion.state === "published") {
+      if (fenster.publishedVersionId !== fenster.sourceVersion.id) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["publishedVersionId"],
+          message:
+            "Angezeigt wird eine veroeffentlichte Version — dann ist sie auch die zuletzt veroeffentlichte.",
+        });
+      }
+      return;
+    }
+
+    // state === "draft"
+    if (fenster.publishedVersionId === fenster.sourceVersion.id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceVersion"],
+        message: "Dieselbe Id kann nicht gleichzeitig Entwurf und veroeffentlicht sein.",
+      });
+    }
+  });
 
 export type PlanningWindow = z.infer<typeof PlanningWindowSchema>;
 
