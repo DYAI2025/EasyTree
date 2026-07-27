@@ -10,7 +10,7 @@
 -- Luecke, die hier stillschweigend als geschlossen gilt.
 
 begin;
-select plan(16);
+select plan(19);
 
 -- ===========================================================================
 -- Schemaform: die Zusagen aus der Migration
@@ -21,6 +21,32 @@ select is(
   (select time_zone from public.organizations where id = '00000000-0000-0000-0000-0000000000a1'),
   'Europe/Berlin',
   'Org Alpha hat eine gueltige IANA-Zeitzone'
+);
+
+-- ---------------------------------------------------------------------------
+-- Die Zeitzone ist geprueft, nicht nur getippt
+-- ---------------------------------------------------------------------------
+-- Die Pruefung ist ein Trigger, keine CHECK-Constraint (Begruendung in
+-- 0004_org_settings.sql). Wer sie sucht, findet sie deshalb NICHT in
+-- pg_constraint — daher diese explizite Zusicherung.
+select has_trigger(
+  'public', 'organizations', 'organizations_time_zone_known',
+  'organizations traegt den Zeitzonen-Trigger'
+);
+
+select throws_ok(
+  $$insert into public.organizations (name, time_zone)
+    values ('Zeitzonenprobe', 'Europe/Berlin_gibt_es_nicht')$$,
+  '23514',
+  'Unbekannte IANA-Zeitzone: Europe/Berlin_gibt_es_nicht',
+  'Eine unbekannte Zeitzone wird abgelehnt'
+);
+
+-- Gegenprobe: ohne sie waere ein Trigger, der ALLES ablehnt, ebenfalls gruen.
+select lives_ok(
+  $$insert into public.organizations (name, time_zone)
+    values ('Zeitzonenprobe gueltig', 'Pacific/Auckland')$$,
+  'Eine gueltige, nicht-europaeische Zeitzone wird akzeptiert'
 );
 
 select has_column('public', 'assignments', 'during', 'assignments traegt die generierte Range fuer EYT-49');

@@ -37,12 +37,61 @@ alter table public.organizations
 alter table public.organizations
   alter column time_zone set not null;
 
--- Gueltigkeit gegen die Laufzeit-Zeitzonendatenbank pruefen, nicht gegen eine
--- eigene Liste: pg_timezone_names ist die einzige Quelle, die weiss, welche
--- Zonen dieser Server kennt. Eine gepflegte Liste waere sofort veraltet.
-alter table public.organizations
-  add constraint organizations_time_zone_known
-  check (time_zone in (select name from pg_timezone_names)) not valid;
+-- ---------------------------------------------------------------------------
+-- Gueltigkeit der Zeitzone
+-- ---------------------------------------------------------------------------
+-- Geprueft wird gegen die Laufzeit-Zeitzonendatenbank, nicht gegen eine eigene
+-- Liste: pg_timezone_names ist die einzige Quelle, die weiss, welche Zonen
+-- DIESER Server kennt. Eine gepflegte Liste waere sofort veraltet.
+--
+-- Warum ein Trigger und keine CHECK-Constraint: eine CHECK-Constraint darf
+-- weder eine Subquery enthalten noch eine andere Relation lesen. Der erste
+-- Entwurf dieser Migration versuchte genau das und scheiterte in CI mit
+--   ERROR: cannot use subquery in check constraint (SQLSTATE 0A000)
+-- Das ist keine Formalie: PostgreSQL verlangt, dass eine CHECK-Constraint
+-- allein aus der Zeile entscheidbar ist, damit sie bei jedem Restore und jeder
+-- Revalidierung dasselbe Ergebnis liefert.
+--
+-- Ein IMMUTABLE markierter Wrapper waere der naheliegende Trick und waere
+-- FALSCH: die Zeitzonendatenbank aendert sich mit dem Serverpaket. Eine
+-- Volatilitaetsluege laesst PostgreSQL Ergebnisse zwischenspeichern und in
+-- Indizes einbacken.
+--
+-- Was der Trigger dadurch NICHT kann, und was die weggefallene Constraint
+-- ebenfalls nicht konnte (sie war `not valid`): BESTEHENDE Zeilen pruefen. Er
+-- greift ab jetzt, fuer insert und fuer jedes update, das time_zone anfasst.
+--
+-- Kein security definer: die Funktion liest nur einen fuer alle lesbaren
+-- Katalog und braucht keine fremden Rechte. search_path ist fixiert, deshalb
+-- ist pg_timezone_names voll qualifiziert.
+create or replace function app.assert_known_time_zone()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_timezone_names where name = new.time_zone
+  ) then
+    -- 23514 (check_violation) ist bewusst gewaehlt: fuer den Aufrufer ist das
+    -- eine verletzte Invariante wie jede andere. Ein Fehlercode, den nur diese
+    -- Stelle kennt, wuerde die Anwendung zwingen, den Trigger zu kennen.
+    raise exception 'Unbekannte IANA-Zeitzone: %', new.time_zone
+      using errcode = '23514';
+  end if;
+  return new;
+end
+$$;
+
+comment on function app.assert_known_time_zone() is
+  'Prueft organizations.time_zone gegen pg_timezone_names (EYT-86). Trigger statt CHECK, weil eine CHECK-Constraint keine Relation lesen darf.';
+
+revoke all on function app.assert_known_time_zone() from public;
+
+create trigger organizations_time_zone_known
+  before insert or update of time_zone on public.organizations
+  for each row
+  execute function app.assert_known_time_zone();
 
 comment on column public.organizations.time_zone is
   'IANA-Zeitzone der Organisation (EYT-86). Traegt die Wochen- und Geschaeftstagsabgrenzung aus EYT-74; packages/domain/src/planning-week.ts erwartet sie als expliziten Parameter.';
