@@ -5,6 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
+import { API_BASE_PATH } from "./common/api-base-path";
 import { APP_CONFIG } from "./config/config.module";
 import {
   createRolePrivilegeReader,
@@ -17,11 +18,29 @@ import {
  * HTTP application on the validated `API_PORT` and enables shutdown hooks
  * so SIGTERM/SIGINT close the server gracefully.
  */
-export async function bootstrapApi(
+/**
+ * Die fertig konfigurierte Anwendung — alles ausser `listen`.
+ *
+ * Getrennt von {@link bootstrapApi}, damit Tests GENAU DIESE Verdrahtung
+ * pruefen koennen, ohne einen Port zu belegen. Der Grund ist konkret: solange
+ * `test/openapi-route-conformance.test.ts` das Praefix selbst setzte, waere
+ * jede Zusicherung dort gruen geblieben, wenn jemand `setGlobalPrefix` hier
+ * entfernt — der Test haette den Vertrag geschuetzt und die Verdrahtung nicht.
+ */
+export async function createApiApp(
   /** Einspritzpunkt fuer die Rollenpruefung (EYT-45). Siehe worker.ts. */
   readRolePrivileges: (databaseUrl: string) => RolePrivilegeReader = createRolePrivilegeReader,
 ): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
+  // Der Vertrag nennt "/api/v1" als Basispfad (packages/contracts/openapi/v1.json,
+  // servers[0].url). Bis EYT-50 gab es diesen Pfad serverseitig ueberhaupt nicht —
+  // jeder daraus abgeleitete Client haette ins Leere gezeigt.
+  //
+  // health und ready bleiben unversioniert: sie sind Betriebsschnittstellen,
+  // keine Fachrouten. scripts/smoke-api.sh und die Playwright-Suite fragen sie
+  // unter genau diesen Pfaden ab, und ein Liveness-Endpunkt, der sich mit der
+  // Fachversion verschiebt, ist kein Liveness-Endpunkt.
+  app.setGlobalPrefix(API_BASE_PATH, { exclude: ["health", "ready"] });
   app.enableShutdownHooks();
   const config = app.get<AppConfig>(APP_CONFIG);
   // Vor dem ersten Request: die verbundene Rolle darf RLS nicht umgehen
@@ -32,6 +51,14 @@ export async function bootstrapApi(
     await app.close();
     throw error;
   }
+  return app;
+}
+
+export async function bootstrapApi(
+  readRolePrivileges: (databaseUrl: string) => RolePrivilegeReader = createRolePrivilegeReader,
+): Promise<INestApplication> {
+  const app = await createApiApp(readRolePrivileges);
+  const config = app.get<AppConfig>(APP_CONFIG);
   await app.listen(config.apiPort);
   return app;
 }

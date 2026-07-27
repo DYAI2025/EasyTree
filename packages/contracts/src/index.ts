@@ -76,5 +76,24 @@ export type {
 } from "./employee/schemas.js";
 export type { EmployeeGateway } from "./employee/gateway.js";
 
-export { MockPlanningGateway } from "./mock/planning.js";
-export type { MockPlanningState } from "./mock/planning.js";
+export { HttpPlanningGateway } from "./http/planning-gateway.js";
+export type { FetchLike, HttpPlanningGatewayOptions } from "./http/planning-gateway.js";
+
+/**
+ * Der Mock ist ABSICHTLICH nicht Teil der oeffentlichen Oberflaeche (EYT-50).
+ *
+ * Bis hierher stand `MockPlanningGateway` hier — folgenlos, weil niemand
+ * `@easytree/contracts` benutzte. Mit dem Anschluss von `apps/web` an den
+ * Vertrag waere daraus ein Mock im Produktionsbuendel geworden: importierbar
+ * aus der Hauptdatei, in der Browserauslieferung, einen Tippfehler von der
+ * echten Implementierung entfernt. Genau die Verwechslung, die EYT-50 AK10
+ * ausschliessen soll ("kein Mock- oder LocalStorage-State ist operative
+ * Wahrheit").
+ *
+ * Tests importieren ihn weiter direkt ueber `src/mock/planning.js` — der
+ * einzige bestehende Nutzer tat das ohnehin schon
+ * (`test/planning-gateway.contract.test.ts`).
+ *
+ * `test/public-surface.test.ts` haelt das fest, statt es der Sorgfalt zu
+ * ueberlassen.
+ */

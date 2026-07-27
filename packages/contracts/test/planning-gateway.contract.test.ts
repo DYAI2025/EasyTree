@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { MockPlanningGateway } from "../src/mock/planning.js";
+import { newIdempotencyKey } from "../src/primitives.js";
 import type { PlanningGateway } from "../src/planning/gateway.js";
 import {
   AssignmentDtoSchema,
@@ -116,11 +117,10 @@ describe.each([["MockPlanningGateway", makeMock]])(
     });
 
     it("legt einen vertragskonformen Einsatz an", async () => {
-      const result = await gateway.createAssignment({
-        employeeId: EMPLOYEE_ID,
-        worksiteId: WORKSITE_ID,
-        interval: INTERVAL,
-      });
+      const result = await gateway.createAssignment(
+        { employeeId: EMPLOYEE_ID, worksiteId: WORKSITE_ID, interval: INTERVAL },
+        { idempotencyKey: newIdempotencyKey() },
+      );
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(() => AssignmentDtoSchema.parse(result.value)).not.toThrow();
@@ -128,17 +128,20 @@ describe.each([["MockPlanningGateway", makeMock]])(
     });
 
     it("veroeffentlicht auf dem erwarteten Stand", async () => {
-      const result = await gateway.publishPlan({
-        weekKey: "2026-W32",
-        expectedVersionId: VERSION_ID,
-      });
+      const result = await gateway.publishPlan(
+        { weekKey: "2026-W32", expectedVersionId: VERSION_ID },
+        { idempotencyKey: newIdempotencyKey() },
+      );
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(() => PublishedPlanVersionSchema.parse(result.value)).not.toThrow();
     });
 
     it("lehnt eine Veroeffentlichung auf veraltetem Stand ab", async () => {
-      const result = await gateway.publishPlan({ weekKey: "2026-W32", expectedVersionId: null });
+      const result = await gateway.publishPlan(
+        { weekKey: "2026-W32", expectedVersionId: null },
+        { idempotencyKey: newIdempotencyKey() },
+      );
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.failure).toBe("STALE_VERSION");

@@ -5,6 +5,7 @@ import { APP_FILTER } from "@nestjs/core";
 import { CorrelationIdMiddleware } from "./common/correlation-id.middleware";
 import { HttpExceptionFilter } from "./common/http-exception.filter";
 import { APP_CONFIG, ConfigModule } from "./config/config.module";
+import { TENANT_SUBJECT_RESOLVER, UnauthenticatedSubjectResolver } from "./common/tenant-subject";
 import { HealthController } from "./health/health.controller";
 import { PgDatabasePing } from "./platform/database/pg-database-ping";
 import {
@@ -40,6 +41,19 @@ import {
         { name: "config", isReady: (): boolean => config.nodeEnv !== undefined },
         { name: "database", isReady: (): Promise<boolean> => databasePing.ping() },
       ],
+    },
+    {
+      // Mandantensubjekt (EYT-50). Absichtlich registriert, BEVOR die erste
+      // Fachroute existiert: sonst brauchte die erste Route eine Quelle und
+      // wuerde sich eine schwaechere ausdenken — einen Header, den niemand
+      // prueft, oder eine Organisations-Id aus dem Anfragekoerper.
+      //
+      // Der Default liefert immer null. Fachrouten antworten damit 401, bis
+      // EYT-14 die Tokenpruefung liefert. Tests ersetzen den Token per DI,
+      // genau wie DATABASE_PING — deshalb braucht es keinen
+      // "nur-in-test"-Umgehungsschalter im Produktionscode.
+      provide: TENANT_SUBJECT_RESOLVER,
+      useClass: UnauthenticatedSubjectResolver,
     },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
