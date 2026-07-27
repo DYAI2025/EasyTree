@@ -108,6 +108,67 @@ jobs:
         run: pnpm exec supabase db reset
       - name: pgTAP suite (run 2, must be identical)
         run: pnpm exec supabase test db
+      # Das Metagate in supabase/tests/0005_schema_meta_gate.sql fragt den
+      # Katalog statt Tabellen aufzuzaehlen. Diese Gegenprobe beweist, dass es
+      # nicht selbst vakuoes ist: eine absichtlich offene Tabelle MUSS es rot
+      # machen. Ohne diesen Schritt waere "alles gruen" auch dann moeglich,
+      # wenn das Gate gar nichts prueft.
+      - name: Metagate-Gegenprobe — offene Tabelle muss rot machen (EYT-86)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          PSQL='psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1'
+          $PSQL -c "create table public.eyt_meta_gate_probe (id uuid primary key, org_id uuid not null);"
+          $PSQL -c "grant select, insert on table public.eyt_meta_gate_probe to authenticated;"
+          if pnpm exec supabase test db >/tmp/metagate.log 2>&1; then
+            echo "::error::Metagate blieb gruen, obwohl eine offene Tabelle existiert — es prueft nichts."
+            tail -40 /tmp/metagate.log
+            $PSQL -c "drop table public.eyt_meta_gate_probe;"
+            exit 1
+          fi
+          # Nicht irgendein Fehlschlag: es muss DIESE Tabelle sein.
+          if ! grep -q "eyt_meta_gate_probe" /tmp/metagate.log; then
+            echo "::error::Suite ist rot, aber nicht wegen der offenen Tabelle:"
+            tail -40 /tmp/metagate.log
+            $PSQL -c "drop table public.eyt_meta_gate_probe;"
+            exit 1
+          fi
+          echo "Metagate-Gegenprobe OK: offene Tabelle wurde erkannt."
+          grep -o "eyt_meta_gate_probe" /tmp/metagate.log | head -1
+          $PSQL -c "drop table public.eyt_meta_gate_probe;"
+      # Nach der Gegenprobe ist der Katalog wieder sauber; ein Reset stellt
+      # zusaetzlich den Seed-Stand her, auf dem die Tenant-Gates aufbauen.
+      - name: Reset 3 — nach der Gegenprobe
+        run: pnpm exec supabase db reset
+      # Rollen sind clusterweit, Migration 0003 ist deshalb idempotent. Bewiesen
+      # war bisher nur, dass sie sich wiederholen laesst — nicht, welcher Zweig
+      # lief. Diese Probe schliesst die Luecke: Rolle loeschen, Reset, Existenz
+      # pruefen. Damit ist beides belegt, der create- und der alter-Pfad.
+      - name: Rollen-Probe — 0003 legt easytree_app auch neu an (EYT-86)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          PSQL='psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1'
+          # `postgres` ist in Supabase KEIN Superuser (es traegt BYPASSRLS, das ist
+          # nicht dasselbe). reassign/drop owned by scheitern deshalb mit
+          #   Only roles with privileges of role "easytree_app" may ...
+          # Gebraucht werden sie hier auch nicht: 0003 legt die Rolle an und gibt
+          # ihr Rechte, sie BESITZT kein Objekt. Was DROP ROLE blockiert, ist
+          # ausschliesslich das Datenbankrecht aus 0003:
+          #   role "easytree_app" cannot be dropped because some objects depend on it
+          #   DETAIL: privileges for database postgres
+          # Das darf postgres entziehen, weil postgres es erteilt hat.
+          #
+          # Kein `|| true`: bekaeme easytree_app spaeter Eigentum an einem Objekt,
+          # muss dieser Schritt laut werden statt es zu verschlucken. DROP ROLE
+          # benennt die Abhaengigkeit dann selbst.
+          $PSQL -c "revoke all on database postgres from easytree_app;"
+          $PSQL -c "drop role easytree_app;"
+          test "$($PSQL -Atc "select count(*) from pg_roles where rolname='easytree_app'")" = "0"
+          echo "Rolle geloescht — jetzt muss der Reset sie neu anlegen."
+          pnpm exec supabase db reset
+          test "$($PSQL -Atc "select count(*) from pg_roles where rolname='easytree_app'")" = "1"
+          echo "Rollen-Probe OK: create-Zweig von 0003 belegt."
       - name: Restart stack — re-provision Supavisor tenant (EYT-15)
         run: |
           pnpm exec supabase stop
