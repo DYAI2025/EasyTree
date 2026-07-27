@@ -10,7 +10,7 @@
 -- Verbindungen; EYT-49 AK6 stuetzt sich auf beide Dateien zusammen.
 
 begin;
-select plan(20);
+select plan(22);
 
 -- ===========================================================================
 -- Schemaform
@@ -54,6 +54,22 @@ select is(
   has_column_privilege('authenticated', 'public.assignments', 'starts_at_utc', 'update'),
   true,
   'authenticated darf assignments.starts_at_utc aendern — das Recht existiert, nur nicht auf dem Marker'
+);
+
+-- Dasselbe fuer insert. Ohne den Entzug koennte der Marker beim ANLEGEN
+-- mitgeliefert werden: die Zeile naehme sofort am EXCLUDE teil und waere
+-- danach unveraenderlich und unloeschbar — ein Wert, den niemand mehr
+-- korrigieren kann.
+select is(
+  has_column_privilege('authenticated', 'public.assignments', 'published_at', 'insert'),
+  false,
+  'authenticated darf assignments.published_at NICHT beim Anlegen mitgeben'
+);
+
+select is(
+  has_column_privilege('authenticated', 'public.assignments', 'starts_at_utc', 'insert'),
+  true,
+  'authenticated darf assignments anlegen — nur den Marker nicht mitliefern'
 );
 
 -- ===========================================================================

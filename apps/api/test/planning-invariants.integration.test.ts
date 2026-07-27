@@ -281,4 +281,111 @@ describe("planning invariants under concurrency (EYT-49)", () => {
       await sessionA.query("rollback").catch(() => undefined);
     }
   });
+
+  dbIt("der Marker laesst sich auch beim ANLEGEN nicht mitliefern", async () => {
+    await beginAsPlanner(sessionA);
+    try {
+      const version = await stageDraft(sessionA, WEEK_A, SHIFT_A);
+      let denied: DatabaseError | null = null;
+      try {
+        await sessionA.query(
+          `insert into public.assignments
+             (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc, published_at)
+           values ($1, $2, $3, $4, $5, $6, now())`,
+          [
+            ORG_ALPHA,
+            version,
+            EMPLOYEE_ALPHA,
+            WORKSITE_ALPHA,
+            "2026-09-29T06:00:00Z",
+            "2026-09-29T14:00:00Z",
+          ],
+        );
+      } catch (error) {
+        denied = error as DatabaseError;
+      }
+
+      // Ein gefaelschter Marker beim insert waere schlimmer als beim update:
+      // die Zeile naehme sofort am EXCLUDE teil und waere danach durch 0010
+      // unveraenderlich UND unloeschbar — niemand koennte sie korrigieren.
+      expect(denied, "published_at liess sich beim Anlegen mitgeben").not.toBeNull();
+      expect(denied?.code).toBe("42501");
+    } finally {
+      await sessionA.query("rollback").catch(() => undefined);
+    }
+  });
+
+  dbIt(
+    "eine Zuweisung kann nicht in eine gerade veroeffentlichte Planversion hineinlaufen",
+    async () => {
+      // Die Race, die ein ungesperrtes select durchlaesst: A veroeffentlicht
+      // und haelt offen; B sieht im eigenen Snapshot noch den Entwurf. Der
+      // Fremdschluessel nimmt nur KEY SHARE und kollidiert mit A nicht — ohne
+      // das FOR SHARE in 0010 wuerde B einfach committen, und die
+      // veroeffentlichte Planversion enthielte danach eine Zuweisung mit
+      // published_at = NULL: ausserhalb von Unveraenderlichkeit UND
+      // Ueberlappungspruefung.
+      // Eine GESEEDETE Planversion, keine frisch angelegte: B muss sie sehen
+      // koennen, und Zeilen aus As offener Transaktion sieht B nicht.
+      const SEEDED_DRAFT = "00000000-0000-0000-0000-0000006010a1";
+      await beginAsPlanner(sessionA);
+      await beginAsPlanner(sessionB);
+      try {
+        await sessionA.query(
+          "update public.plan_versions set published_at = now(), published_by = $1 where id = $2",
+          [USER_A, SEEDED_DRAFT],
+        );
+
+        await sessionB.query("set local lock_timeout = '2s'");
+        let blocked: DatabaseError | null = null;
+        try {
+          await sessionB.query(
+            `insert into public.assignments
+               (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+             values ($1, $2, $3, $4, $5, $6)`,
+            [
+              ORG_ALPHA,
+              SEEDED_DRAFT,
+              EMPLOYEE_ALPHA,
+              WORKSITE_ALPHA,
+              "2026-08-05T06:00:00Z",
+              "2026-08-05T14:00:00Z",
+            ],
+          );
+        } catch (error) {
+          blocked = error as DatabaseError;
+        }
+
+        expect(
+          blocked,
+          "B lief durch, obwohl A dieselbe Planversion gerade veroeffentlicht",
+        ).not.toBeNull();
+        expect(blocked?.code).toBe("55P03");
+
+        // Gegenprobe: nimmt A zurueck, ist die Planversion wieder Entwurf und
+        // B darf. Ohne sie waere die Sperre auch bei jedem anderen Haenger gruen.
+        await sessionA.query("rollback");
+        await sessionB.query("rollback");
+        await beginAsPlanner(sessionB);
+        await expect(
+          sessionB.query(
+            `insert into public.assignments
+               (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+             values ($1, $2, $3, $4, $5, $6)`,
+            [
+              ORG_ALPHA,
+              SEEDED_DRAFT,
+              EMPLOYEE_ALPHA,
+              WORKSITE_ALPHA,
+              "2026-08-05T06:00:00Z",
+              "2026-08-05T14:00:00Z",
+            ],
+          ),
+        ).resolves.toBeDefined();
+      } finally {
+        await sessionA.query("rollback").catch(() => undefined);
+        await sessionB.query("rollback").catch(() => undefined);
+      }
+    },
+  );
 });

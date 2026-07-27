@@ -63,12 +63,26 @@ comment on constraint assignments_no_published_overlap on public.assignments is
 -- Geltungsbereich des partiellen EXCLUDE heraus und kann danach beliebig
 -- ueberlappend "veroeffentlichen". Der Constraint waere dann eine Bitte.
 --
--- Das Tabellen-Grant `update` faellt deshalb weg und wird durch ein
--- Spalten-Grant ersetzt. Nicht enthalten sind:
+-- Die Tabellen-Grants `update` UND `insert` fallen deshalb weg und werden
+-- durch Spalten-Grants ersetzt. `insert` mitzunehmen ist nicht Symmetrie
+-- um ihrer selbst willen: bliebe es stehen, koennte ein Client den Marker
+-- beim ANLEGEN mitliefern. Die Zeile naehme sofort am EXCLUDE teil, waere
+-- durch Punkt 4 unveraenderlich und unloeschbar, und die spaetere echte
+-- Veroeffentlichung ihrer Planversion scheiterte an einem Wert, den niemand
+-- mehr entfernen kann.
+--
+-- Nicht enthalten sind in beiden Faellen:
 --   published_at  — abgeleitet aus plan_versions (siehe 3.)
---   org_id        — eine Zeile wandert nicht zwischen Mandanten
---   id, created_at, during — Identitaet, Herkunft, generierter Wert
-revoke update on table public.assignments from authenticated;
+--   created_at    — Herkunft, nicht Nutzdatum
+--   during        — generiert
+-- und beim update zusaetzlich:
+--   id, org_id    — Identitaet und Mandant wandern nicht
+--
+-- `id` ist beim insert erlaubt: ein Aufrufer, der seine Id selbst waehlt,
+-- kann ein wiederholtes Kommando idempotent machen (EYT-61 AK4).
+revoke insert, update on table public.assignments from authenticated;
+grant insert (id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+  on table public.assignments to authenticated;
 grant update (plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
   on table public.assignments to authenticated;
 
@@ -192,19 +206,56 @@ create trigger assignments_published_immutable
 -- Die neue Zuweisung traegt published_at NULL und faellt damit auch aus dem
 -- EXCLUDE aus Punkt 1 heraus. Sie waere also zusaetzlich unsichtbar fuer die
 -- Ueberlappungspruefung.
+-- ---------------------------------------------------------------------------
+-- Warum hier gesperrt wird, und nicht nur gelesen
+-- ---------------------------------------------------------------------------
+-- Ein ungesperrtes `select` entscheidet unter READ COMMITTED auf dem Snapshot
+-- des Statements — und genau daran scheitert die Regel im einzigen Fall, fuer
+-- den sie existiert:
+--
+--   T1 veroeffentlicht: update plan_versions ... (noch NICHT committet).
+--       Das ist ein FOR NO KEY UPDATE auf der Zeile, weil published_at kein
+--       Schluessel ist.
+--   T2 legt gleichzeitig eine Zuweisung in dieselbe Planversion. Ihr Trigger
+--       saehe den ENTWURFSSTAND und liesse sie durch. Der Fremdschluessel
+--       nimmt nur KEY SHARE — das kollidiert mit T1 nicht, T2 blockiert also
+--       nirgends und committet.
+--   Ergebnis: eine veroeffentlichte Planversion enthaelt eine Zuweisung mit
+--       published_at = NULL. Sie faellt damit aus Punkt 4 UND aus Punkt 1
+--       heraus — unveraenderlich ist sie nicht, und am Ueberlappungsindex
+--       nimmt sie auch nicht teil.
+--
+-- `for share` schliesst das in beide Richtungen: es kollidiert mit dem
+-- FOR NO KEY UPDATE des Veroeffentlichers, laesst aber gleichzeitige
+-- Einfuegungen untereinander in Ruhe. Kommt T1 zuerst durch, liest T2 nach
+-- dem Warten die NEUE Zeilenversion (READ COMMITTED holt nach der Sperre
+-- erneut) und lehnt ab. Kommt T2 zuerst durch, wartet T1 und stempelt die
+-- neue Zuweisung mit.
+--
+-- Reihenfolge der Sperren ist in beiden Wegen dieselbe (erst plan_versions,
+-- dann assignments), deshalb entsteht hier kein Deadlock.
 create or replace function app.reject_assignment_in_published_plan()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  v_published_at timestamptz;
 begin
-  if exists (
-    select 1
+  select pv.published_at
+    into v_published_at
     from public.plan_versions pv
-    where pv.id = new.plan_version_id
-      and pv.org_id = new.org_id
-      and pv.published_at is not null
-  ) then
+   where pv.id = new.plan_version_id
+     and pv.org_id = new.org_id
+     for share;
+
+  -- Nicht gefunden heisst: fremder Mandant oder Tippfehler. Diese Entscheidung
+  -- gehoert dem Fremdschluessel (23503), nicht dieser Regel.
+  if not found then
+    return new;
+  end if;
+
+  if v_published_at is not null then
     raise exception 'Planversion % ist veroeffentlicht und nimmt keine Zuweisung mehr auf', new.plan_version_id
       using errcode = '23514';
   end if;
@@ -213,7 +264,7 @@ end
 $$;
 
 comment on function app.reject_assignment_in_published_plan() is
-  'Verhindert Zuweisungen in eine bereits veroeffentlichte Planversion (EYT-49 AK4). Invoker: liest plan_versions unter der RLS des Aufrufers.';
+  'Verhindert Zuweisungen in eine bereits veroeffentlichte Planversion (EYT-49 AK4). Invoker: liest plan_versions unter der RLS des Aufrufers, und zwar mit FOR SHARE — ein ungesperrter Blick entschiede auf einem veralteten Snapshot.';
 
 revoke all on function app.reject_assignment_in_published_plan() from public;
 grant execute on function app.reject_assignment_in_published_plan() to authenticated;
