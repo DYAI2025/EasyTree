@@ -7,6 +7,13 @@ import { HttpExceptionFilter } from "./common/http-exception.filter";
 import { APP_CONFIG, ConfigModule } from "./config/config.module";
 import { TENANT_SUBJECT_RESOLVER, UnauthenticatedSubjectResolver } from "./common/tenant-subject";
 import { HealthController } from "./health/health.controller";
+import {
+  PLANNING_QUERIES_FACTORY,
+  PlanningController,
+  PlanningWindowRepository,
+  type PlanningQueriesFactory,
+} from "./modules/planning";
+import { PgTenantQueryRunner } from "./platform/database/tenant-query-runner";
 import { PgDatabasePing } from "./platform/database/pg-database-ping";
 import {
   DATABASE_PING,
@@ -23,7 +30,7 @@ import {
  */
 @Module({
   imports: [ConfigModule],
-  controllers: [HealthController],
+  controllers: [HealthController, PlanningController],
   providers: [
     {
       // Real database ping (EYT-58): SELECT 1 against the configured
@@ -54,6 +61,17 @@ import {
       // "nur-in-test"-Umgehungsschalter im Produktionscode.
       provide: TENANT_SUBJECT_RESOLVER,
       useClass: UnauthenticatedSubjectResolver,
+    },
+    {
+      // Verbindungspool je Prozess, Repository je Subjekt. Ein Repository mit
+      // fest eingebautem Subjekt waere ein Singleton, das die Identitaet der
+      // ERSTEN Anfrage an alle folgenden weiterreicht.
+      provide: PLANNING_QUERIES_FACTORY,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig): PlanningQueriesFactory => {
+        const runner = PgTenantQueryRunner.fromUrl(config.databaseUrl);
+        return (subjectUserId: string) => new PlanningWindowRepository(runner, subjectUserId);
+      },
     },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
