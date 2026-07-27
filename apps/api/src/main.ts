@@ -18,7 +18,16 @@ import {
  * HTTP application on the validated `API_PORT` and enables shutdown hooks
  * so SIGTERM/SIGINT close the server gracefully.
  */
-export async function bootstrapApi(
+/**
+ * Die fertig konfigurierte Anwendung — alles ausser `listen`.
+ *
+ * Getrennt von {@link bootstrapApi}, damit Tests GENAU DIESE Verdrahtung
+ * pruefen koennen, ohne einen Port zu belegen. Der Grund ist konkret: solange
+ * `test/openapi-route-conformance.test.ts` das Praefix selbst setzte, waere
+ * jede Zusicherung dort gruen geblieben, wenn jemand `setGlobalPrefix` hier
+ * entfernt — der Test haette den Vertrag geschuetzt und die Verdrahtung nicht.
+ */
+export async function createApiApp(
   /** Einspritzpunkt fuer die Rollenpruefung (EYT-45). Siehe worker.ts. */
   readRolePrivileges: (databaseUrl: string) => RolePrivilegeReader = createRolePrivilegeReader,
 ): Promise<INestApplication> {
@@ -42,6 +51,14 @@ export async function bootstrapApi(
     await app.close();
     throw error;
   }
+  return app;
+}
+
+export async function bootstrapApi(
+  readRolePrivileges: (databaseUrl: string) => RolePrivilegeReader = createRolePrivilegeReader,
+): Promise<INestApplication> {
+  const app = await createApiApp(readRolePrivileges);
+  const config = app.get<AppConfig>(APP_CONFIG);
   await app.listen(config.apiPort);
   return app;
 }

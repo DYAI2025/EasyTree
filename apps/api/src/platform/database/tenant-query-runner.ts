@@ -76,6 +76,12 @@ export class PgTenantQueryRunner implements TenantQueryRunner {
 
   async run<T>(context: TenantContext, work: (tx: TenantQuery) => Promise<T>): Promise<T> {
     const client: PoolClient = await this.pool.connect();
+    // Scheitert das ROLLBACK selbst, ist der Zustand der Sitzung unbekannt.
+    // Sie darf dann NICHT in den Pool zurueck: bliebe sie in der Transaktion,
+    // erbte der naechste Entleiher ihr `set local role authenticated` und ihre
+    // request.jwt.claims — also den Mandanten einer fremden Person. Genau die
+    // Isolation, fuer die es diese Klasse gibt, waere damit aufgehoben.
+    let poisoned: unknown = null;
     try {
       await client.query("begin");
       // `true` = transaktionslokal. Ohne das bliebe der Anspruch an der
@@ -96,10 +102,16 @@ export class PgTenantQueryRunner implements TenantQueryRunner {
       await client.query("commit");
       return result;
     } catch (error) {
-      await client.query("rollback").catch(() => undefined);
+      try {
+        await client.query("rollback");
+      } catch (rollbackError) {
+        poisoned = rollbackError;
+      }
       throw error;
     } finally {
-      client.release();
+      // `release(err)` zerstoert die Verbindung, statt sie zurueckzulegen.
+      // Ein neuer Verbindungsaufbau ist der guenstigere Fehler.
+      client.release(poisoned === null ? undefined : (poisoned as Error));
     }
   }
 

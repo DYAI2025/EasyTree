@@ -26,14 +26,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import type { Application } from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { AppModule } from "../src/app.module";
 import { API_BASE_PATH } from "../src/common/api-base-path";
-import { DATABASE_PING, type DatabasePing } from "../src/health/readiness";
+import { createApiApp } from "../src/main";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
 
@@ -130,14 +128,25 @@ describe("Routentabelle gegen OpenAPI-Vertrag (EYT-50)", () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(DATABASE_PING)
-      .useValue({ ping: (): Promise<boolean> => Promise.resolve(true) } satisfies DatabasePing)
-      .compile();
-    app = moduleRef.createNestApplication();
-    // Dasselbe Praefix wie im echten Bootstrap. Stuende hier ein anderes,
-    // pruefte der Test einen Server, den es nicht gibt.
-    app.setGlobalPrefix(API_BASE_PATH, { exclude: ["health", "ready"] });
+    // GENAU die Verdrahtung aus dem Produktionsstart, nur ohne `listen`.
+    //
+    // Ein eigener Testaufbau mit eigenem setGlobalPrefix waere bequemer und
+    // wertlos: er bliebe gruen, wenn jemand das Praefix aus main.ts entfernt.
+    // Der Test soll die BEZIEHUNG Server/Vertrag schuetzen, nicht seine eigene
+    // Nachbildung davon.
+    //
+    // Die Rollenpruefung ist der einzige eingespritzte Teil — sie braucht sonst
+    // eine echte Datenbank. Der zurueckgegebene Stand ist der gewuenschte:
+    // keine Rechte, die RLS umgehen (EYT-45).
+    app = await createApiApp(
+      () => () =>
+        Promise.resolve({
+          role: "easytree_app",
+          isSuperuser: false,
+          bypassesRls: false,
+          inheritsPrivileges: false,
+        }),
+    );
     await app.init();
   });
 
