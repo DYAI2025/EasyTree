@@ -48,6 +48,30 @@ const FAILURE_TEXT: Record<GatewayFailure, string> = {
   REJECTED: "Die Anfrage wurde abgelehnt.",
 };
 
+/**
+ * Die vier Staende, die AK10 sichtbar unterscheiden muss.
+ *
+ * `sourceVersion` und `publishedVersionId` sind getrennt, weil beides
+ * gleichzeitig gelten kann: ein Entwurf ueber einer bereits veroeffentlichten
+ * Woche ist der Normalfall beim Umplanen. Ohne die Unterscheidung stuende
+ * "Veroeffentlichte Version X" ueber Zuweisungen, die nicht zu X gehoeren.
+ */
+type Stand = "ohne-version" | "entwurf" | "veroeffentlicht" | "entwurf-ueber-veroeffentlicht";
+
+const STAND_TEXT: Record<Stand, string> = {
+  "ohne-version": "Für diese Woche existiert noch keine Planversion.",
+  entwurf: "Unveroeffentlichter Entwurf.",
+  veroeffentlicht: "Veroeffentlichter Stand.",
+  "entwurf-ueber-veroeffentlicht":
+    "Entwurf auf Basis einer bereits veroeffentlichten Version — die Anzeige zeigt den ENTWURF.",
+};
+
+function standKennung(fenster: PlanningWindow): Stand {
+  if (fenster.sourceVersion === null) return "ohne-version";
+  if (fenster.sourceVersion.state === "published") return "veroeffentlicht";
+  return fenster.publishedVersionId === null ? "entwurf" : "entwurf-ueber-veroeffentlicht";
+}
+
 export function PlanningWindowView({ weekKey }: { weekKey: string }) {
   const gateway = usePlanningGateway();
   const [state, setState] = useState<ViewState>({ kind: "laedt" });
@@ -92,13 +116,18 @@ export function PlanningWindowView({ weekKey }: { weekKey: string }) {
     <Card>
       <h2 data-testid="planungsfenster-woche">Wochenplan {fenster.weekKey}</h2>
       <p data-testid="planungsfenster-zone">Zeitzone: {fenster.timeZone}</p>
+      <p data-testid="planungsfenster-stand" data-stand={standKennung(fenster)}>
+        {STAND_TEXT[standKennung(fenster)]}
+      </p>
       <p
         data-testid="planungsfenster-version"
+        data-source-version-id={fenster.sourceVersion?.id ?? ""}
+        data-source-state={fenster.sourceVersion?.state ?? ""}
         data-published-version-id={fenster.publishedVersionId ?? ""}
       >
         {fenster.publishedVersionId === null
-          ? "Noch nicht veroeffentlicht"
-          : `Veroeffentlichte Version: ${fenster.publishedVersionId}`}
+          ? "Noch nichts veroeffentlicht"
+          : `Zuletzt veroeffentlicht: ${fenster.publishedVersionId}`}
       </p>
 
       {fenster.assignments.length === 0 ? (

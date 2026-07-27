@@ -21,6 +21,12 @@ export interface AssignmentRow {
   readonly endsAtUtc: Date;
 }
 
+/** Version, ZU DER die angezeigten Zuweisungen gehoeren. */
+export interface SourceVersionRow {
+  readonly id: string;
+  readonly state: "draft" | "published";
+}
+
 export interface PlanningWindowRow {
   readonly weekKey: string;
   /** IANA-Zone der Organisation aus `organizations.time_zone` (Migration 0004). */
@@ -31,6 +37,12 @@ export interface PlanningWindowRow {
    * Begruendung in docs/decisions/2026-07-27-eyt-50-lesesemantik-planungsfenster.md.
    */
   readonly assignments: readonly AssignmentRow[];
+  /**
+   * Herkunft von `assignments`. Getrennt von `publishedVersionId`, weil ein
+   * Entwurf ueber einer bereits veroeffentlichten Version stehen kann — und
+   * die Anzeige sonst "Veroeffentlichte Version X" ueber fremde Daten setzt.
+   */
+  readonly sourceVersion: SourceVersionRow | null;
   /** Zuletzt veroeffentlichte Version derselben Woche, oder `null`. */
   readonly publishedVersionId: string | null;
 }

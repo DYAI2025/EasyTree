@@ -43,6 +43,7 @@ interface OrgRow {
 interface VersionRow {
   readonly id: string;
   readonly published_at: Date | null;
+  readonly created_at: Date;
 }
 
 interface RawAssignmentRow {
@@ -74,11 +75,17 @@ export class PlanningWindowRepository implements PlanningQueries {
       // Alle Versionen dieser Woche. Mehrere veroeffentlichte sind erlaubt
       // (der Unique-Index aus 0007 ist partiell und begrenzt nur Entwuerfe),
       // hoechstens ein Entwurf.
+      // Deterministische Reihenfolge. `published_at` allein genuegt nicht:
+      // zwei Veroeffentlichungen derselben Transaktion tragen denselben
+      // now()-Wert, und PostgreSQL gibt ohne vollstaendige Sortierung keine
+      // stabile Reihenfolge zu. Die Auswahl waere dann von Lauf zu Lauf
+      // verschieden — und die Mitarbeitersicht saehe eine andere Version als
+      // die Planersicht.
       const versions = await tx.query<VersionRow>(
-        `select id, published_at
+        `select id, published_at, created_at
            from public.plan_versions
           where week_key = $1
-          order by published_at asc nulls last`,
+          order by published_at asc nulls last, created_at asc, id asc`,
         [weekKey],
       );
 
@@ -99,6 +106,10 @@ export class PlanningWindowRepository implements PlanningQueries {
           weekKey,
           timeZone: org.time_zone,
           assignments,
+          sourceVersion:
+            source === null || source === undefined
+              ? null
+              : { id: source.id, state: source.published_at === null ? "draft" : "published" },
           publishedVersionId: latestPublished?.id ?? null,
         },
       };

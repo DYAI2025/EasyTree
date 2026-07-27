@@ -21,9 +21,12 @@ export type {
   PlanningQueryProblem,
   PlanningWindowResult,
   PlanningWindowRow,
+  SourceVersionRow,
 } from "./application/planning-queries.port";
 export { PLANNING_QUERIES } from "./application/planning-queries.port";
 export type { PlanningQueriesFactory } from "./application/planning-queries.factory";
 export { PLANNING_QUERIES_FACTORY } from "./application/planning-queries.factory";
 export { PlanningWindowRepository } from "./infrastructure/planning-window.repository";
 export { PlanningController } from "./interface/http/planning.controller";
+export type { PlanningAccessPolicy } from "./application/planning-access.port";
+export { DenyAllPlanningAccess, PLANNING_ACCESS_POLICY } from "./application/planning-access.port";

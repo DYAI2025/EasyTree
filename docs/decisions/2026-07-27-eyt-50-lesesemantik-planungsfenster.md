@@ -16,7 +16,7 @@ berechnet.**
 Das ist keine Bequemlichkeit, sondern die einzige Möglichkeit, die keine neue
 Fehlerquelle aufmacht. Der Alternativweg wäre, aus `2026-W32` einen
 UTC-Zeitbereich zu bilden und `assignments.starts_at_utc` dagegen zu filtern.
-Dafür bräuchte es die Umrechnung *lokale Mitternacht → UTC* — und die gibt es
+Dafür bräuchte es die Umrechnung _lokale Mitternacht → UTC_ — und die gibt es
 im Repository aus zwei Gründen nicht:
 
 - `packages/domain/src/planning-week.ts` kennt ausschließlich die Richtung
@@ -66,7 +66,7 @@ Stand, den sie nicht bearbeiten kann. `0007` sichert über
 **Die zuletzt veröffentlichte Version derselben Woche, nach `published_at`;
 `null`, wenn keine existiert.**
 
-Wichtig: `plan_versions_one_draft_per_week` ist ein *partieller* Index und
+Wichtig: `plan_versions_one_draft_per_week` ist ein _partieller_ Index und
 begrenzt nur Entwürfe. Mehrere veröffentlichte Versionen derselben Woche sind
 erlaubt und entstehen im Normalbetrieb — `supabase/tests/0006` fährt genau das.
 „Die veröffentlichte Version" gibt es also nicht; es gibt die neueste.
@@ -92,16 +92,16 @@ führt bewusst nur `weekKey`.
 RLS filtert über `app.user_org_ids()`. Für `organizations.time_zone` muss aber
 **eine** Organisation feststehen. Drei Fälle:
 
-| aktive Mitgliedschaften | Verhalten |
-| --- | --- |
-| genau eine | normal |
-| keine | 403 — angemeldet, aber ohne Organisation |
-| mehrere | **stabiler Fehler, keine stille Auswahl** |
+| aktive Mitgliedschaften | Verhalten                                 |
+| ----------------------- | ----------------------------------------- |
+| genau eine              | normal                                    |
+| keine                   | 403 — angemeldet, aber ohne Organisation  |
+| mehrere                 | **stabiler Fehler, keine stille Auswahl** |
 
 Der dritte Fall ist der wichtige. Eine Organisation zu „nehmen", weil sie die
 erste in der Liste ist, wäre eine erfundene Mandantenentscheidung — und sie
 fiele niemandem auf, weil das Ergebnis plausibel aussieht. EYT-50 AK1 verlangt
-ohnehin *genau eine* Testorganisation. Die Auswahl unter mehreren ist eine
+ohnehin _genau eine_ Testorganisation. Die Auswahl unter mehreren ist eine
 Produktfrage (Organisationswechsler in der UI) und gehört zu EYT-14.
 
 ## 6. Zeitzone

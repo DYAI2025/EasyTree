@@ -17,7 +17,9 @@ import { API_BASE_PATH } from "../src/common/api-base-path";
 import { TENANT_SUBJECT_RESOLVER, type TenantSubjectResolver } from "../src/common/tenant-subject";
 import { DATABASE_PING, type DatabasePing } from "../src/health/readiness";
 import {
+  PLANNING_ACCESS_POLICY,
   PLANNING_QUERIES_FACTORY,
+  type PlanningAccessPolicy,
   type PlanningQueries,
   type PlanningQueriesFactory,
   type PlanningWindowResult,
@@ -31,6 +33,7 @@ const EMPTY_WINDOW: PlanningWindowResult = {
     weekKey: "2026-W32",
     timeZone: "Europe/Berlin",
     assignments: [],
+    sourceVersion: null,
     publishedVersionId: null,
   },
 };
@@ -42,6 +45,8 @@ async function boot(options: {
   subject: string | null;
   result?: PlanningWindowResult;
   seenSubjects?: string[];
+  /** Default: berechtigt. Der Produktionsstand ist deny (EYT-14). */
+  darfLesen?: boolean;
 }): Promise<INestApplication> {
   const factory: PlanningQueriesFactory = (subjectUserId) => {
     options.seenSubjects?.push(subjectUserId);
@@ -58,6 +63,10 @@ async function boot(options: {
     .useValue({ resolve: (): string | null => options.subject } satisfies TenantSubjectResolver)
     .overrideProvider(PLANNING_QUERIES_FACTORY)
     .useValue(factory)
+    .overrideProvider(PLANNING_ACCESS_POLICY)
+    .useValue({
+      mayReadPlanning: (): Promise<boolean> => Promise.resolve(options.darfLesen ?? true),
+    } satisfies PlanningAccessPolicy)
     .compile();
 
   const built = moduleRef.createNestApplication();
@@ -107,6 +116,7 @@ describe("GET /planung/fenster", () => {
       weekKey: "2026-W32",
       timeZone: "Europe/Berlin",
       assignments: [],
+      sourceVersion: null,
       publishedVersionId: null,
     });
     expect(() => PlanningWindowSchema.parse(response.body)).not.toThrow();
@@ -137,6 +147,10 @@ describe("GET /planung/fenster", () => {
                 endsAtUtc: new Date("2026-08-03T14:00:00.000Z"),
               },
             ],
+            sourceVersion: {
+              id: "55555555-5555-4555-8555-555555555555",
+              state: "draft",
+            },
             publishedVersionId: "44444444-4444-4444-8444-444444444444",
           },
         },
@@ -150,6 +164,14 @@ describe("GET /planung/fenster", () => {
       endUtc: "2026-08-03T14:00:00.000Z",
     });
     expect(response.body.publishedVersionId).toBe("44444444-4444-4444-8444-444444444444");
+    // Der Kern der Provenienz: die Zuweisungen stammen aus einem ENTWURF,
+    // obwohl daneben eine veroeffentlichte Version gemeldet wird. Ohne dieses
+    // Feld saehe die Oberflaeche "Veroeffentlichte Version X" ueber Daten, die
+    // gar nicht zu X gehoeren.
+    expect(response.body.sourceVersion).toEqual({
+      id: "55555555-5555-4555-8555-555555555555",
+      state: "draft",
+    });
   });
 
   it("antwortet bei fehlender Organisation mit 403", async () => {
@@ -167,6 +189,29 @@ describe("GET /planung/fenster", () => {
       await boot({ subject: SUBJECT, result: { ok: false, problem: "AMBIGUOUS_ORGANISATION" } })
     ).getHttpServer();
     await request(server).get(url).query({ weekKey: "2026-W32" }).expect(403);
+  });
+
+  it("lehnt ein verifiziertes, aber nicht berechtigtes Subjekt mit 403 ab", async () => {
+    // Verifiziert heisst nicht berechtigt. Ohne diese Trennung saehe jede
+    // beschaeftigte Person die Wochenplanung ihrer Organisation.
+    const seenSubjects: string[] = [];
+    const server = (
+      await boot({ subject: SUBJECT, darfLesen: false, seenSubjects })
+    ).getHttpServer();
+    await request(server).get(url).query({ weekKey: "2026-W32" }).expect(403);
+    // Und das Repository wurde gar nicht erst gefragt.
+    expect(seenSubjects).toEqual([]);
+  });
+
+  it("lehnt Wochenschluessel ausserhalb 01-53 ab", async () => {
+    const server = (await boot({ subject: SUBJECT })).getHttpServer();
+    for (const weekKey of ["2026-W00", "2026-W54", "2026-W99"]) {
+      await request(server).get(url).query({ weekKey }).expect(400);
+    }
+    // Gegenprobe: die Grenzen selbst sind gueltig.
+    for (const weekKey of ["2026-W01", "2026-W53"]) {
+      await request(server).get(url).query({ weekKey }).expect(200);
+    }
   });
 
   it("laesst health unter dem unversionierten Pfad", async () => {

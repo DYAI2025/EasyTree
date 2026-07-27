@@ -38,6 +38,10 @@ import {
   type TenantSubjectResolver,
 } from "../../../../common/tenant-subject";
 import {
+  PLANNING_ACCESS_POLICY,
+  type PlanningAccessPolicy,
+} from "../../application/planning-access.port";
+import {
   PLANNING_QUERIES_FACTORY,
   type PlanningQueriesFactory,
 } from "../../application/planning-queries.factory";
@@ -49,6 +53,8 @@ export class PlanningController {
     private readonly subjects: TenantSubjectResolver,
     @Inject(PLANNING_QUERIES_FACTORY)
     private readonly queriesFor: PlanningQueriesFactory,
+    @Inject(PLANNING_ACCESS_POLICY)
+    private readonly access: PlanningAccessPolicy,
   ) {}
 
   @Get("fenster")
@@ -61,6 +67,13 @@ export class PlanningController {
       // Kein Detail zur Ursache: ob ein Token fehlte, abgelaufen war oder
       // ungueltig ist, geht den Aufrufer nichts an.
       throw new UnauthorizedException("Kein verifiziertes Subjekt.");
+    }
+
+    // Verifiziert heisst nicht berechtigt. Die Pruefung steht VOR jeder
+    // Abfrage — sonst laege die Entscheidung faktisch bei RLS, und RLS kennt
+    // nur den Mandanten, nicht die fachliche Rolle.
+    if (!(await this.access.mayReadPlanning(subject))) {
+      throw new ForbiddenException("Keine Leseberechtigung fuer die Planung.");
     }
 
     const query = PlanningWindowQuerySchema.safeParse({ weekKey });
@@ -92,6 +105,7 @@ export class PlanningController {
           endUtc: assignment.endsAtUtc.toISOString(),
         },
       })),
+      sourceVersion: result.window.sourceVersion,
       publishedVersionId: result.window.publishedVersionId,
     };
 

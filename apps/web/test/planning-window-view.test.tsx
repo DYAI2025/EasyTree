@@ -40,6 +40,7 @@ const LEERE_WOCHE: PlanningWindow = {
   weekKey: "2026-W32",
   timeZone: "Europe/Berlin",
   assignments: [],
+  sourceVersion: null,
   publishedVersionId: null,
 };
 
@@ -110,6 +111,7 @@ describe("PlanningWindowView", () => {
             },
           },
         ],
+        sourceVersion: { id: "55555555-5555-4555-8555-555555555555", state: "draft" },
         publishedVersionId: "44444444-4444-4444-8444-444444444444",
       },
     });
@@ -122,5 +124,46 @@ describe("PlanningWindowView", () => {
     expect(
       screen.getByTestId("planungsfenster-version").getAttribute("data-published-version-id"),
     ).toBe("44444444-4444-4444-8444-444444444444");
+  });
+
+  it("unterscheidet die vier Staende sichtbar", async () => {
+    // Der eigentliche Befund: ein Entwurf UEBER einer veroeffentlichten
+    // Version. Ohne die Unterscheidung stuende "Veroeffentlichte Version X"
+    // ueber Zuweisungen, die nicht zu X gehoeren.
+    const faelle: { fenster: PlanningWindow; erwartet: string }[] = [
+      { fenster: LEERE_WOCHE, erwartet: "ohne-version" },
+      {
+        fenster: {
+          ...LEERE_WOCHE,
+          sourceVersion: { id: "55555555-5555-4555-8555-555555555555", state: "draft" },
+        },
+        erwartet: "entwurf",
+      },
+      {
+        fenster: {
+          ...LEERE_WOCHE,
+          sourceVersion: { id: "44444444-4444-4444-8444-444444444444", state: "published" },
+          publishedVersionId: "44444444-4444-4444-8444-444444444444",
+        },
+        erwartet: "veroeffentlicht",
+      },
+      {
+        fenster: {
+          ...LEERE_WOCHE,
+          sourceVersion: { id: "55555555-5555-4555-8555-555555555555", state: "draft" },
+          publishedVersionId: "44444444-4444-4444-8444-444444444444",
+        },
+        erwartet: "entwurf-ueber-veroeffentlicht",
+      },
+    ];
+
+    for (const { fenster, erwartet } of faelle) {
+      cleanup();
+      renderWith({ ok: true, value: fenster });
+      await waitFor(() => expect(screen.getByTestId("planungsfenster-stand")).toBeTruthy());
+      expect(screen.getByTestId("planungsfenster-stand").getAttribute("data-stand"), erwartet).toBe(
+        erwartet,
+      );
+    }
   });
 });

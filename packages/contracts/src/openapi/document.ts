@@ -11,11 +11,15 @@
  * ## Ehrlichkeitshinweis
  *
  * Dieses Dokument beschreibt den vereinbarten Vertrag. **Es gibt noch keinen
- * Server, der ihn bedient**: `apps/api` hat ausser `health` keinen Controller.
+ * Server, der ihn VOLLSTAENDIG bedient**: seit EYT-50 existiert die erste
+ * Fachroute (`GET /planung/fenster`); welche Operationen noch offen sind,
+ * fuehrt `apps/api/test/openapi-route-conformance.test.ts` namentlich.
  * Der Konformitaetsnachweis (Route-Tabelle gegen Dokument, Antwortpruefung
  * gegen Schema) gehoert zu EYT-50 und ist hier ausdruecklich nicht erbracht.
  */
 import { z } from "zod";
+
+import { API_BASE_PATH } from "../api-metadata.js";
 
 import {
   ActiveTimeEntrySchema,
@@ -43,7 +47,9 @@ import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, ProblemDocumentSchema } from 
 
 /** Vertragsversion. Aenderungen hier sind eine bewusste Entscheidung, kein Nebeneffekt. */
 export const API_VERSION = "1.0.0";
-export const API_BASE_PATH = "/api/v1";
+// API_BASE_PATH lebt in ../api-metadata.js — dieses Modul laedt alle Schemata,
+// und wer nur den Pfad braucht, soll den Generator nicht mitziehen.
+export { API_BASE_PATH };
 
 const NAMED_SCHEMAS = {
   ProblemDocument: ProblemDocumentSchema,

@@ -31,6 +31,7 @@ export {
   PlanningConflictDtoSchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
+  SourceVersionSchema,
   PublishPlanCommandSchema,
   PublishedPlanVersionSchema,
   TimeIntervalDtoSchema,
@@ -43,6 +44,7 @@ export type {
   PlanningConflictDto,
   PlanningWindow,
   PlanningWindowQuery,
+  SourceVersion,
   PublishPlanCommand,
   PublishedPlanVersion,
   TimeIntervalDto,
@@ -84,7 +86,7 @@ export type { EmployeeGateway } from "./employee/gateway.js";
  * frei gepflegte Kopie war genau die Falle, aus der `/api/v1` serverseitig
  * ueberhaupt nicht existierte, ohne dass etwas rot wurde.
  */
-export { API_BASE_PATH } from "./openapi/document.js";
+export { API_BASE_PATH, API_PATH_VERSION } from "./api-metadata.js";
 
 export { HttpPlanningGateway } from "./http/planning-gateway.js";
 export type { FetchLike, HttpPlanningGatewayOptions } from "./http/planning-gateway.js";

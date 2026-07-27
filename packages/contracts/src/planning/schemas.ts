@@ -92,19 +92,63 @@ export type AssignmentDto = z.infer<typeof AssignmentDtoSchema>;
  * die Doppelimplementierung, die `FIND-003` verursacht hat.
  */
 export const PlanningWindowQuerySchema = z.strictObject({
-  /** ISO-Woche, Format `2026-W32`. */
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/, "Wochenschluessel im Format 2026-W32"),
+  /**
+   * ISO-Woche, Format `2026-W32`.
+   *
+   * Das Muster erzwingt 01–53. Zuvor stand hier `\d{2}`, womit auch `W00`,
+   * `W54` und `W99` durchgingen — ein Wochenschluessel, den es nicht gibt,
+   * haette eine leere Woche geliefert statt einer Ablehnung.
+   *
+   * OFFENER BEFUND: die Datenbank-Constraint in
+   * supabase/migrations/20260727020300_0007_planning.sql traegt weiterhin das
+   * schwache Muster. Sie wird hier NICHT editiert (append-only, CLAUDE.md);
+   * eine Forward-Migration ist vor dem Schreibpfad faellig, sonst kann ein
+   * direkter DB-Schreibvorgang `2026-W99` anlegen.
+   *
+   * Jahrabhaengig ungueltige 53. Wochen bleiben erlaubt: dafuer braeuchte es
+   * eine Kalenderrechnung, und die gibt es hier bewusst nicht.
+   */
+  weekKey: z
+    .string()
+    .regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/, "Wochenschluessel im Format 2026-W32"),
 });
 
 export type PlanningWindowQuery = z.infer<typeof PlanningWindowQuerySchema>;
 
+/**
+ * Herkunft der angezeigten Zuweisungen (EYT-50).
+ *
+ * Ohne diese Angabe konnte das Fenster die Zuweisungen eines ENTWURFS zeigen
+ * und daneben `publishedVersionId` einer bereits veroeffentlichten Version —
+ * die Oberflaeche zeigte dann "Veroeffentlichte Version X" ueber Daten, die
+ * gar nicht zu X gehoeren. Ein Vergleich mit der Mitarbeitersicht (AK9) waere
+ * damit ein Vergleich von Aepfeln mit Birnen.
+ *
+ * `null` heisst: es gibt fuer diese Woche ueberhaupt keine Version.
+ */
+export const SourceVersionSchema = z.strictObject({
+  id: IdSchema,
+  state: z.enum(["draft", "published"]),
+});
+
+export type SourceVersion = z.infer<typeof SourceVersionSchema>;
+
 export const PlanningWindowSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/),
+  weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
   /** IANA-Zeitzone, nach der die Woche abgegrenzt wurde. Mitgeliefert, damit die
    * UI die Wochengrenze nicht selbst raten muss. */
   timeZone: z.string(),
   assignments: z.array(AssignmentDtoSchema),
-  /** Id der zuletzt veröffentlichten Planversion, `null` solange nichts veröffentlicht ist. */
+  /**
+   * Version, ZU DER die `assignments` gehoeren — Entwurf oder veroeffentlicht.
+   * Getrennt von `publishedVersionId`, weil beides gleichzeitig gelten kann.
+   */
+  sourceVersion: SourceVersionSchema.nullable(),
+  /**
+   * Id der zuletzt veröffentlichten Planversion, `null` solange nichts
+   * veröffentlicht ist. Sagt NICHTS darüber, ob die angezeigten Zuweisungen
+   * daher stammen — dafür ist `sourceVersion` da.
+   */
   publishedVersionId: IdSchema.nullable(),
 });
 
@@ -119,7 +163,7 @@ export const CreateAssignmentCommandSchema = z.strictObject({
 export type CreateAssignmentCommand = z.infer<typeof CreateAssignmentCommandSchema>;
 
 export const ValidatePlanCommandSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/),
+  weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
   draft: CreateAssignmentCommandSchema,
 });
 
@@ -142,7 +186,7 @@ export type PlanValidationResult = z.infer<typeof PlanValidationResultSchema>;
  * überschreiben. `null` heisst „ich erwarte, dass noch nichts veröffentlicht ist".
  */
 export const PublishPlanCommandSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/),
+  weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
   expectedVersionId: IdSchema.nullable(),
 });
 
@@ -150,7 +194,7 @@ export type PublishPlanCommand = z.infer<typeof PublishPlanCommandSchema>;
 
 export const PublishedPlanVersionSchema = z.strictObject({
   versionId: IdSchema,
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/),
+  weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
   publishedAtUtc: InstantSchema,
   assignmentIds: z.array(IdSchema),
 });

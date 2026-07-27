@@ -845,7 +845,7 @@
         "properties": {
           "weekKey": {
             "type": "string",
-            "pattern": "^\\d{4}-W\\d{2}$"
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$"
           },
           "timeZone": {
             "type": "string"
@@ -903,6 +903,30 @@
               "additionalProperties": false
             }
           },
+          "sourceVersion": {
+            "nullable": true,
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "description": "UUID"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "published"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ],
+            "additionalProperties": false
+          },
           "publishedVersionId": {
             "nullable": true,
             "type": "string",
@@ -915,6 +939,7 @@
           "weekKey",
           "timeZone",
           "assignments",
+          "sourceVersion",
           "publishedVersionId"
         ],
         "additionalProperties": false
@@ -967,7 +992,7 @@
         "properties": {
           "weekKey": {
             "type": "string",
-            "pattern": "^\\d{4}-W\\d{2}$"
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$"
           },
           "draft": {
             "type": "object",
@@ -1066,7 +1091,7 @@
         "properties": {
           "weekKey": {
             "type": "string",
-            "pattern": "^\\d{4}-W\\d{2}$"
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$"
           },
           "expectedVersionId": {
             "nullable": true,
@@ -1093,7 +1118,7 @@
           },
           "weekKey": {
             "type": "string",
-            "pattern": "^\\d{4}-W\\d{2}$"
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$"
           },
           "publishedAtUtc": {
             "type": "string",
