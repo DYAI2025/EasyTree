@@ -29,6 +29,35 @@
 begin;
 
 -- ---------------------------------------------------------------------------
+-- Eigene Beschaeftigte und Baustellen mit GUELTIGEN v4-UUIDs
+-- ---------------------------------------------------------------------------
+-- Befund aus dem zweiten Harnesslauf: die Antwort wurde vom Server selbst
+-- abgelehnt ("Antwort entspricht nicht dem Vertrag"). Ursache war nicht die
+-- Fachlogik, sondern die Id-Form.
+--
+-- `IdSchema` ist `z.uuid()` und prueft Version und Variante. Die Ids aus
+-- supabase/seed.sql tragen die Form 00000000-0000-0000-0000-0000004010a1 —
+-- Versions-Nibble 0, also KEINE gueltige UUID v4. Sie stehen als employeeId
+-- und worksiteId in der Antwort und fallen dort durch.
+--
+-- Der Harness legt sich deshalb eigene an. Der Befund selbst ist damit NICHT
+-- behoben: der Standardseed bleibt vertragswidrig, sobald seine Ids in einer
+-- Antwort auftauchen. Er gehoert zu dem Vorgang, der den Seed besitzt.
+insert into public.employees (id, org_id, user_id, display_name, active)
+values
+  ('e11a0001-0001-4001-8001-000000000001', '00000000-0000-0000-0000-0000000000a1',
+   '00000000-0000-0000-0000-00000000aaa1', 'Harness Planerin Alpha', true),
+  ('e11b0001-0001-4001-8001-000000000001', '00000000-0000-0000-0000-0000000000b2',
+   '00000000-0000-0000-0000-00000000bbb2', 'Harness Planer Beta', true);
+
+insert into public.worksites (id, org_id, name, activity_count)
+values
+  ('5117a001-0001-4001-8001-000000000001', '00000000-0000-0000-0000-0000000000a1',
+   'Harness Baustelle Alpha', 1),
+  ('5117b001-0001-4001-8001-000000000001', '00000000-0000-0000-0000-0000000000b2',
+   'Harness Baustelle Beta', 1);
+
+-- ---------------------------------------------------------------------------
 -- Alpha, Woche 2026-W40 — erste Version
 -- ---------------------------------------------------------------------------
 -- `created_at` ausdruecklich gesetzt: der Default waere `now()`, und dann
@@ -43,7 +72,7 @@ insert into public.assignments
 values ('a5510001-0001-4001-8001-000000000001',
         '00000000-0000-0000-0000-0000000000a1',
         'aaaa1111-1111-4111-8111-111111111111',
-        '00000000-0000-0000-0000-0000004010a1', '00000000-0000-0000-0000-0000005010a1',
+        'e11a0001-0001-4001-8001-000000000001', '5117a001-0001-4001-8001-000000000001',
         '2026-09-28T06:00:00Z', '2026-09-28T10:00:00Z');
 
 -- Jetzt erst veroeffentlichen. Der Trigger stempelt die Zuweisung mit.
@@ -69,7 +98,7 @@ insert into public.assignments
 values ('a5510002-0002-4002-8002-000000000002',
         '00000000-0000-0000-0000-0000000000a1',
         'aaaa2222-2222-4222-8222-222222222222',
-        '00000000-0000-0000-0000-0000004010a1', '00000000-0000-0000-0000-0000005010a1',
+        'e11a0001-0001-4001-8001-000000000001', '5117a001-0001-4001-8001-000000000001',
         '2026-09-29T06:00:00Z', '2026-09-29T10:00:00Z');
 
 update public.plan_versions
@@ -89,7 +118,7 @@ insert into public.assignments
 values ('a5510003-0003-4003-8003-000000000003',
         '00000000-0000-0000-0000-0000000000a1',
         'aaaa3333-3333-4333-8333-333333333333',
-        '00000000-0000-0000-0000-0000004010a1', '00000000-0000-0000-0000-0000005010a1',
+        'e11a0001-0001-4001-8001-000000000001', '5117a001-0001-4001-8001-000000000001',
         '2026-09-30T06:00:00Z', '2026-09-30T10:00:00Z');
 
 -- ---------------------------------------------------------------------------
@@ -106,7 +135,7 @@ insert into public.assignments
 values ('b5510001-0001-4001-8001-000000000001',
         '00000000-0000-0000-0000-0000000000b2',
         'bbbb1111-1111-4111-8111-111111111111',
-        '00000000-0000-0000-0000-0000004020b2', '00000000-0000-0000-0000-0000005020b2',
+        'e11b0001-0001-4001-8001-000000000001', '5117b001-0001-4001-8001-000000000001',
         '2026-09-28T06:00:00Z', '2026-09-28T10:00:00Z');
 
 update public.plan_versions
