@@ -57,8 +57,10 @@ const nonLocalUrlSchema = z.url().refine(
  * Environment presets, selected via NODE_ENV.
  *
  * development: convenience defaults matching the local Supabase stack
- *   (supabase start exposes API on 54321, Postgres on 54322), so a fresh
- *   checkout only needs the anon key to boot.
+ *   (supabase start exposes API on 54321). DATABASE_URL has NO default since
+ *   EYT-45: the application connects as `easytree_app` and verifies at startup
+ *   that the role cannot bypass RLS, so a convenience default that names no
+ *   user would only produce a confusing boot failure. See `.env.example`.
  *
  * test: NO defaults for connection targets. Tests must state their inputs
  *   explicitly, otherwise a missing variable would be masked by a default
@@ -73,7 +75,14 @@ const nonLocalUrlSchema = z.url().refine(
 export const envSchemas = {
   development: z.strictObject({
     NODE_ENV: z.enum(NODE_ENVS),
-    DATABASE_URL: z.url().default("postgresql://localhost:54322/postgres"),
+    // KEIN Default mehr (EYT-45). Seit Migration 0003 verbindet die Anwendung
+    // als `easytree_app` und prueft beim Start, dass die Rolle RLS nicht
+    // umgehen kann. Der frühere Default `postgresql://localhost:54322/postgres`
+    // nennt weder Benutzer noch Passwort — er würde die Startprüfung
+    // zuverlässig scheitern lassen. Ein Default, der nicht funktionieren kann,
+    // ist schlechter als keiner: er sieht nach Bequemlichkeit aus und kostet
+    // eine Fehlersuche. Der Wert steht in `.env.example`.
+    DATABASE_URL: z.url(),
     SUPABASE_URL: z.url().default("http://localhost:54321"),
     SUPABASE_ANON_KEY: z.string().min(1),
     API_PORT: portSchema.default(3001),

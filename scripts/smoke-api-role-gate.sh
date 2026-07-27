@@ -15,19 +15,51 @@
 # Erwartet dieselbe strikte Test-Preset-Umgebung wie smoke-api.sh.
 set -euo pipefail
 
-if node apps/api/dist/main.js >/tmp/role-gate.log 2>&1; then
-  echo "::error::API ist gestartet, obwohl die Datenbankrolle nicht pruefbar war."
-  cat /tmp/role-gate.log
+# Der Prozess laeuft im HINTERGRUND mit Zeitschranke.
+#
+# Die erste Fassung startete ihn im Vordergrund. Faellt das Rollen-Gate aus —
+# also genau der Fehler, den dieser Smoke fangen soll — dann startet die API
+# erfolgreich und bedient endlos Anfragen. Das Skript haette nie zurueckgegeben,
+# und der Job waere bis zum Job-Timeout gehangen, statt die Regression zu
+# melden. Eine Pruefung, die im Fehlerfall haengt statt rot zu werden, ist keine.
+TIMEOUT_SECONDS="${ROLE_GATE_TIMEOUT_SECONDS:-30}"
+LOG="$(mktemp -t eyt-role-gate)"
+
+node apps/api/dist/main.js >"$LOG" 2>&1 &
+PID=$!
+trap 'kill -9 "$PID" 2>/dev/null || true; rm -f "$LOG"' EXIT
+
+exit_code=""
+for _ in $(seq 1 "$TIMEOUT_SECONDS"); do
+  if ! kill -0 "$PID" 2>/dev/null; then
+    set +e
+    wait "$PID"
+    exit_code=$?
+    set -e
+    break
+  fi
+  sleep 1
+done
+
+if [ -z "$exit_code" ]; then
+  echo "::error::API laeuft nach ${TIMEOUT_SECONDS}s noch — das Rollen-Gate hat NICHT gegriffen."
+  cat "$LOG"
+  exit 1
+fi
+
+if [ "$exit_code" -eq 0 ]; then
+  echo "::error::API ist sauber beendet worden, statt den Start zu verweigern."
+  cat "$LOG"
   exit 1
 fi
 
 # Nicht nur "irgendein Fehler": es muss DIESER Fehler sein. Sonst wuerde ein
 # Tippfehler in der Konfiguration denselben gruenen Haken erzeugen.
-if ! grep -q "InsecureDatabaseRoleError\|Datenbankrolle" /tmp/role-gate.log; then
+if ! grep -q "Die Datenbankrolle" "$LOG"; then
   echo "::error::API ist nicht gestartet, aber nicht wegen der Rollenpruefung:"
-  cat /tmp/role-gate.log
+  cat "$LOG"
   exit 1
 fi
 
-echo "Rollen-Gate OK: Start verweigert, Grund ist die Rollenpruefung."
-grep -o "Die Datenbankrolle.*" /tmp/role-gate.log | head -1 || true
+echo "Rollen-Gate OK: Start verweigert (exit ${exit_code}), Grund ist die Rollenpruefung."
+grep -o "Die Datenbankrolle.*" "$LOG" | head -1 || true
