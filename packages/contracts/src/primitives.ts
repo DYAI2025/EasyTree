@@ -103,3 +103,19 @@ export const IdempotencyKeySchema = z
   .regex(/^[A-Za-z0-9._~-]+$/, "Nur URL-sichere Zeichen erlaubt");
 
 export type IdempotencyKey = z.infer<typeof IdempotencyKeySchema>;
+
+/**
+ * Erzeugt einen Schluessel fuer EINEN fachlichen Vorgang.
+ *
+ * Die Lebensdauer ist der Vorgang, nicht der Aufruf. Wer wiederholt, weil eine
+ * Antwort verloren ging, verwendet denselben Schluessel weiter — sonst ist die
+ * Wiederholung fuer den Server ein zweiter Vorgang, und der Doppeleffekt, den
+ * der Schluessel verhindern soll, tritt genau dann ein, wenn er gebraucht wird.
+ *
+ * Deshalb steht diese Funktion hier und NICHT im HTTP-Client: ein Client, der
+ * sich selbst einen Schluessel erzeugen kann, erzeugt bei jedem Aufruf einen
+ * neuen. Der Aufrufer muss ihn besitzen.
+ */
+export function newIdempotencyKey(): IdempotencyKey {
+  return crypto.randomUUID();
+}

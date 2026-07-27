@@ -37,7 +37,7 @@ import type { z } from "zod";
 
 import { gatewayFailed, gatewayOk, type GatewayResult } from "../gateway.js";
 import { IDEMPOTENCY_HEADER, ProblemDocumentSchema, type ProblemDocument } from "../primitives.js";
-import type { PlanningGateway } from "../planning/gateway.js";
+import type { PlanningGateway, WriteOptions } from "../planning/gateway.js";
 import {
   AssignmentDtoSchema,
   PlanValidationResultSchema,
@@ -60,22 +60,30 @@ export interface HttpPlanningGatewayOptions {
    * einmal eingesammeltes Token waere nach dem ersten Ablauf still falsch.
    */
   readonly authorization?: () => string | null;
-  /**
-   * Erzeugt den Idempotenzschluessel eines schreibenden Aufrufs.
-   *
-   * Einspritzbar, weil ein Test sonst nicht pruefen kann, dass eine
-   * WIEDERHOLUNG denselben Schluessel traegt — und genau das ist die Aussage
-   * von Idempotenz. `crypto.randomUUID` ist der Standardweg.
-   */
-  readonly newIdempotencyKey?: () => string;
 }
+// Bewusst KEINE Option fuer den Idempotenzschluessel.
+//
+// Hier stand eine `newIdempotencyKey`-Fabrik, und sie war der Fehler: der
+// Client erzeugte bei jedem Aufruf einen neuen Schluessel. Eine Wiederholung
+// nach verlorener Antwort bekam damit einen ANDEREN Schluessel, der Server
+// erkannte sie nicht als Wiederholung, und der Doppeleffekt trat genau in dem
+// Fall ein, gegen den der Schluessel schuetzen soll.
+//
+// Der Test dazu war ebenfalls wertlos: er spritzte eine Fabrik ein, die immer
+// dieselbe Konstante lieferte, und "bewies" damit nur das Verhalten der
+// Attrappe. Zwei Aufrufe desselben fachlichen Vorgangs hat er nie gefahren.
+//
+// Jetzt liefert der AUFRUFER den Schluessel (siehe `WriteOptions`). Der Client
+// kann keinen erfinden — nicht als Vorsichtsmassnahme, sondern weil ihm die
+// Faehigkeit fehlt.
 
 /** Ein einzelner Aufruf, bevor `fetch` ihn sieht. */
 interface Call<TOut> {
   readonly path: string;
   readonly method: "GET" | "POST";
   readonly body?: unknown;
-  readonly idempotent: boolean;
+  /** Der Schluessel des fachlichen Vorgangs, oder `null` bei lesenden Aufrufen. */
+  readonly idempotencyKey: string | null;
   readonly schema: z.ZodType<TOut>;
   /** Was ein 409 an dieser Stelle bedeutet. */
   readonly conflictAs: "REJECTED" | "STALE_VERSION";
@@ -95,7 +103,7 @@ export class HttpPlanningGateway implements PlanningGateway {
     return this.send({
       path: `/planung/fenster?${query.toString()}`,
       method: "GET",
-      idempotent: false,
+      idempotencyKey: null,
       schema: PlanningWindowSchema,
       conflictAs: "REJECTED",
     });
@@ -110,7 +118,7 @@ export class HttpPlanningGateway implements PlanningGateway {
       path: "/planung/entwuerfe/validierung",
       method: "POST",
       body: input,
-      idempotent: false,
+      idempotencyKey: null,
       schema: PlanValidationResultSchema,
       conflictAs: "REJECTED",
     });
@@ -118,12 +126,13 @@ export class HttpPlanningGateway implements PlanningGateway {
 
   createAssignment(
     input: CreateAssignmentCommand,
+    options: WriteOptions,
   ): Promise<GatewayResult<z.infer<typeof AssignmentDtoSchema>>> {
     return this.send({
       path: "/planung/einsaetze",
       method: "POST",
       body: input,
-      idempotent: true,
+      idempotencyKey: options.idempotencyKey,
       schema: AssignmentDtoSchema,
       conflictAs: "REJECTED",
     });
@@ -131,6 +140,7 @@ export class HttpPlanningGateway implements PlanningGateway {
 
   publishPlan(
     input: PublishPlanCommand,
+    options: WriteOptions,
   ): Promise<GatewayResult<z.infer<typeof PublishedPlanVersionSchema>>> {
     // 409 heisst hier etwas anderes als bei den uebrigen Aufrufen: der Client
     // arbeitete auf einem veralteten Stand. `expectedVersionId` ist genau
@@ -140,7 +150,7 @@ export class HttpPlanningGateway implements PlanningGateway {
       path: "/planung/versionen",
       method: "POST",
       body: input,
-      idempotent: true,
+      idempotencyKey: options.idempotencyKey,
       schema: PublishedPlanVersionSchema,
       conflictAs: "STALE_VERSION",
     });
@@ -153,9 +163,8 @@ export class HttpPlanningGateway implements PlanningGateway {
     const authorization = this.options.authorization?.() ?? null;
     if (authorization !== null) headers["authorization"] = authorization;
 
-    if (call.idempotent) {
-      const newKey = this.options.newIdempotencyKey ?? ((): string => crypto.randomUUID());
-      headers[IDEMPOTENCY_HEADER] = newKey();
+    if (call.idempotencyKey !== null) {
+      headers[IDEMPOTENCY_HEADER] = call.idempotencyKey;
     }
 
     let response: Response;
