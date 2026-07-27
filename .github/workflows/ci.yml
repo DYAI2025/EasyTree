@@ -149,8 +149,20 @@ jobs:
         run: |
           set -Eeuo pipefail
           PSQL='psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1'
-          $PSQL -c "reassign owned by easytree_app to postgres;" || true
-          $PSQL -c "drop owned by easytree_app;" || true
+          # `postgres` ist in Supabase KEIN Superuser (es traegt BYPASSRLS, das ist
+          # nicht dasselbe). reassign/drop owned by scheitern deshalb mit
+          #   Only roles with privileges of role "easytree_app" may ...
+          # Gebraucht werden sie hier auch nicht: 0003 legt die Rolle an und gibt
+          # ihr Rechte, sie BESITZT kein Objekt. Was DROP ROLE blockiert, ist
+          # ausschliesslich das Datenbankrecht aus 0003:
+          #   role "easytree_app" cannot be dropped because some objects depend on it
+          #   DETAIL: privileges for database postgres
+          # Das darf postgres entziehen, weil postgres es erteilt hat.
+          #
+          # Kein `|| true`: bekaeme easytree_app spaeter Eigentum an einem Objekt,
+          # muss dieser Schritt laut werden statt es zu verschlucken. DROP ROLE
+          # benennt die Abhaengigkeit dann selbst.
+          $PSQL -c "revoke all on database postgres from easytree_app;"
           $PSQL -c "drop role easytree_app;"
           test "$($PSQL -Atc "select count(*) from pg_roles where rolname='easytree_app'")" = "0"
           echo "Rolle geloescht — jetzt muss der Reset sie neu anlegen."
