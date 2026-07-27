@@ -43,12 +43,21 @@ begin;
 -- Der Harness legt sich deshalb eigene an. Der Befund selbst ist damit NICHT
 -- behoben: der Standardseed bleibt vertragswidrig, sobald seine Ids in einer
 -- Antwort auftauchen. Er gehoert zu dem Vorgang, der den Seed besitzt.
+-- `user_id` bleibt NULL. Migration 0005 fuehrt `unique (org_id, user_id)`
+-- ("eine Identitaet ist pro Organisation hoechstens einmal beschaeftigt"), und
+-- der Standardseed belegt aaa1 in Alpha bereits. Gebraucht wird die Verbindung
+-- hier ohnehin nicht: RLS filtert nach Mandant, nicht nach Person, und das
+-- Fenster listet Zuweisungen — die Berechtigung des Subjekts entscheidet die
+-- PlanningAccessPolicy.
+--
+-- Die Spalte ist ausdruecklich nullable ("NULL = geplante Person ohne Login",
+-- 0005), und mehrere NULL verletzen eine Unique-Regel in PostgreSQL nicht.
 insert into public.employees (id, org_id, user_id, display_name, active)
 values
   ('e11a0001-0001-4001-8001-000000000001', '00000000-0000-0000-0000-0000000000a1',
-   '00000000-0000-0000-0000-00000000aaa1', 'Harness Planerin Alpha', true),
+   null, 'Harness Planerin Alpha', true),
   ('e11b0001-0001-4001-8001-000000000001', '00000000-0000-0000-0000-0000000000b2',
-   '00000000-0000-0000-0000-00000000bbb2', 'Harness Planer Beta', true);
+   null, 'Harness Planer Beta', true);
 
 insert into public.worksites (id, org_id, name, activity_count)
 values
