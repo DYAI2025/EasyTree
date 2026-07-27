@@ -76,6 +76,16 @@ export type {
 } from "./employee/schemas.js";
 export type { EmployeeGateway } from "./employee/gateway.js";
 
+/**
+ * Basispfad der Fach-API — die EINE Quelle.
+ *
+ * Er steht in `servers[0].url` des erzeugten Dokuments und muss deshalb
+ * dieselbe Zeichenkette sein, die Server und Client verwenden. Eine zweite,
+ * frei gepflegte Kopie war genau die Falle, aus der `/api/v1` serverseitig
+ * ueberhaupt nicht existierte, ohne dass etwas rot wurde.
+ */
+export { API_BASE_PATH } from "./openapi/document.js";
+
 export { HttpPlanningGateway } from "./http/planning-gateway.js";
 export type { FetchLike, HttpPlanningGatewayOptions } from "./http/planning-gateway.js";
 
