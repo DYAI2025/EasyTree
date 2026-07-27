@@ -61,14 +61,23 @@ describe("loadConfig — shared technical schema", () => {
 });
 
 describe("loadConfig — environment presets", () => {
-  it("development falls back to local-stack defaults", () => {
+  it("development falls back to local-stack defaults, except for DATABASE_URL", () => {
     const config = loadConfig({
       NODE_ENV: "development",
       SUPABASE_ANON_KEY: "anon-placeholder",
+      DATABASE_URL: "postgresql://easytree_app:local@localhost:54322/postgres",
     });
-    expect(config.databaseUrl).toContain("localhost");
     expect(config.supabaseUrl).toContain("localhost");
     expect(config.apiPort).toBe(3001);
+  });
+
+  it("development requires DATABASE_URL explicitly (EYT-45)", () => {
+    // Seit die Anwendung als easytree_app verbindet und die Rolle beim Start
+    // prueft, kann ein Default, der keinen Benutzer nennt, nur scheitern.
+    // Lieber gar keiner als ein bequem aussehender, der eine Fehlersuche kostet.
+    expect(() =>
+      loadConfig({ NODE_ENV: "development", SUPABASE_ANON_KEY: "anon-placeholder" }),
+    ).toThrow(/DATABASE_URL/);
   });
 
   it("test preset has no localhost defaults — every variable must be explicit", () => {

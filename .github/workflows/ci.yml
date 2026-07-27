@@ -205,29 +205,56 @@ jobs:
           grep "\[tenant-pooling\]" /tmp/tenant-pooled.log >> "$GITHUB_STEP_SUMMARY" || true
       - name: Build api for runtime smokes
         run: pnpm --filter @easytree/api... build
+      # Die Rolle legt Migration 0003 an; ein Passwort steht bewusst NICHT in der
+      # Migration (das laege in git). Lokal/CI wird es hier gesetzt, produktiv
+      # kommt es aus dem Secret Manager.
+      - name: Provision local password for easytree_app (EYT-45)
+        run: |
+          PGPASSWORD=postgres psql "host=127.0.0.1 port=54322 dbname=postgres user=postgres sslmode=disable" \
+            -v ON_ERROR_STOP=1 -c "alter role easytree_app password 'ci-local-app-password';"
+          # Gegenprobe: die Anwendungsrolle darf RLS nicht umgehen koennen.
+          PGPASSWORD=ci-local-app-password psql "host=127.0.0.1 port=54322 dbname=postgres user=easytree_app sslmode=disable" \
+            -v ON_ERROR_STOP=1 -Atc \
+            "select current_user || ' super=' || rolsuper || ' bypassrls=' || rolbypassrls || ' inherit=' || rolinherit from pg_roles where rolname = current_user" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
       - name: API smoke — healthy runtime (ready must be 200)
         env:
           NODE_ENV: test
           API_PORT: "3001"
           EXPECT_READY: "200"
-          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          DATABASE_URL: "postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres"
           SUPABASE_URL: "http://127.0.0.1:54321"
           SUPABASE_ANON_KEY: "ci-local-anon-key"
         run: bash scripts/smoke-api.sh
-      - name: API smoke — dependency down (ready must be 503)
+      # Loest den frueheren Smoke "dependency down -> ready 503" ab. Seit EYT-45
+      # verweigert der Bootstrap den Start, wenn die Rollenattribute nicht
+      # ermittelbar sind — eine unerreichbare Datenbank darf die
+      # Sicherheitspruefung nicht ueberspringen. Das 503-Verhalten der Readiness
+      # bleibt in apps/api/test/health.e2e.test.ts abgedeckt (zwei Faelle).
+      - name: API smoke — refuses to start when the role cannot be verified
         env:
           NODE_ENV: test
           API_PORT: "3002"
-          EXPECT_READY: "503"
-          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:59999/postgres"
+          DATABASE_URL: "postgresql://easytree_app:ci-local-app-password@127.0.0.1:59999/postgres"
           SUPABASE_URL: "http://127.0.0.1:54321"
           SUPABASE_ANON_KEY: "ci-local-anon-key"
-        run: bash scripts/smoke-api.sh
+        run: bash scripts/smoke-api-role-gate.sh
+      # Gegenprobe zur Migration: mit der Superuser-Rolle MUSS der Start
+      # scheitern. Ohne diesen Fall koennte die Pruefung auch dann gruen sein,
+      # wenn sie gar nichts prueft.
+      - name: API smoke — refuses to start as superuser
+        env:
+          NODE_ENV: test
+          API_PORT: "3004"
+          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          SUPABASE_URL: "http://127.0.0.1:54321"
+          SUPABASE_ANON_KEY: "ci-local-anon-key"
+        run: bash scripts/smoke-api-role-gate.sh
       - name: Worker smoke — no port, graceful shutdown
         env:
           NODE_ENV: test
           API_PORT: "3003"
-          DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          DATABASE_URL: "postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres"
           SUPABASE_URL: "http://127.0.0.1:54321"
           SUPABASE_ANON_KEY: "ci-local-anon-key"
         run: bash scripts/smoke-worker.sh

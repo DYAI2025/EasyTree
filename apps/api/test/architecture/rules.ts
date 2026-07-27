@@ -88,6 +88,22 @@ function isDomainFile(file: string): boolean {
   return file.startsWith(DOMAIN_PACKAGE) || layerOf(file) === "domain";
 }
 
+/**
+ * Was `apps/api/src` ausserhalb von `platform/` importieren darf (EYT-45).
+ *
+ * Absichtlich kurz und absichtlich vollstaendig: `pg` fehlt hier, weil
+ * Datenbankzugriff nur in `platform/` gehoert. Eine neue Zeile in dieser Liste
+ * ist eine Entscheidung, die im Review sichtbar wird.
+ */
+const API_ALLOWED_PACKAGES: readonly RegExp[] = [
+  /^@easytree\/(config|domain|contracts)$/,
+  /^@nestjs\/(common|core)$/,
+  /^express$/,
+  /^rxjs$/,
+  /^reflect-metadata$/,
+  /^node:(crypto|http)$/,
+];
+
 export const RULES: readonly Rule[] = [
   {
     // ADR-001 Z. 74 — als Allowlist formuliert, siehe Dateikopf.
@@ -198,6 +214,30 @@ export const RULES: readonly Rule[] = [
         }
       }
       return null;
+    },
+  },
+  {
+    // EYT-45 — Datenbankzugriff nur aus der Datenbankplattform.
+    //
+    // Der eigentliche Fund, der diese Regel ausgeloest hat: `pg` ist bereits
+    // Abhaengigkeit von @easytree/api. Ein Repository mit
+    // `import { Pool } from "pg"` und `config.databaseUrl` haette alle neun
+    // Pflichtchecks passiert und ohne jeden Tenantkontext gequert — an
+    // Transaktionsgrenze, Rollenwechsel und RLS vorbei.
+    //
+    // Formuliert als ALLOWLIST, nicht als Sperrliste fuer Treibernamen. Eine
+    // Sperrliste haette `pg-pool`, `postgres`, `typeorm`, `drizzle-orm` und
+    // jedes kuenftige SDK einzeln fuehren muessen — dieselbe Lehre wie bei
+    // `domain-allowlist` (siehe Dateikopf). Ausserhalb von
+    // `apps/api/src/platform/` darf nur importiert werden, was hier steht;
+    // alles Neue ist eine bewusste Entscheidung, kein Nebeneffekt.
+    id: "api-dependency-allowlist",
+    inScope: (file): boolean =>
+      file.startsWith("apps/api/src/") && !file.startsWith("apps/api/src/platform/"),
+    check: (ref): string | null => {
+      if (ref.specifier.startsWith(".")) return null;
+      if (API_ALLOWED_PACKAGES.some((allowed) => allowed.test(ref.specifier))) return null;
+      return `"${ref.specifier}" steht nicht auf der Importliste von apps/api/src. Datenbanktreiber und Query-Builder gehoeren ausschliesslich nach apps/api/src/platform/ (EYT-45); jede andere neue Abhaengigkeit gehoert zuerst in diese Liste.`;
     },
   },
   {

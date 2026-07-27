@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PgDatabasePing } from "../src/health/pg-database-ping";
+import { PgDatabasePing } from "../src/platform/database/pg-database-ping";
 
 /**
  * Integration-level check WITHOUT Docker (EYT-58): the real pg-based ping
