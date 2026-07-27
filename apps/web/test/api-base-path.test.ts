@@ -34,6 +34,16 @@ const DOCUMENT_BASE_PATH = (
 
 const API_ORIGIN = "https://api.example.test";
 
+describe("Same-Origin: relative Aufrufe", () => {
+  it("baut ohne Origin einen RELATIVEN Pfad", () => {
+    // Der Browser bleibt damit auf der Origin der Web-App; die Weiterleitung
+    // macht das Rewrite in next.config.ts. Waere hier eine absolute URL,
+    // braeuchte die API CORS.
+    expect(buildPlanningApiBaseUrl("")).toBe(DOCUMENT_BASE_PATH);
+    expect(buildPlanningApiBaseUrl("").startsWith("http")).toBe(false);
+  });
+});
+
 describe("Vertragspfad im Produktionscode", () => {
   it("liest ueberhaupt einen Pfad aus dem Dokument — sonst prueft dieser Test nichts", () => {
     expect(DOCUMENT_BASE_PATH.length).toBeGreaterThan(1);

@@ -14,7 +14,12 @@ const VIEWPORTS = [
  * Deshalb: nur Fehler mit Ursprung API-Origin sind erlaubt, und der
  * gehandelte Fehlerzustand muss sichtbar gerendert sein.
  */
-const API_ORIGIN = new URL(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001").origin;
+/**
+ * Seit EYT-50 laeuft die API ueber das Same-Origin-Rewrite: der Browser sieht
+ * nur die Origin der Web-App. Ein fehlgeschlagener Health-Check meldet sich
+ * deshalb unter DIESER Origin, nicht mehr unter einer fremden.
+ */
+const API_ORIGIN = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000").origin;
 
 test("laedt ohne ungefangene Console-Fehler", async ({ page }) => {
   const errors: string[] = [];

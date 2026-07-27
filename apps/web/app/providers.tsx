@@ -7,7 +7,15 @@ import { ApiClientProvider } from "../lib/api-client-provider";
 import { createPlanningGateway } from "../lib/planning-gateway-factory";
 import { PlanningGatewayProvider } from "../lib/planning-gateway-provider";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+/**
+ * Leere Origin: der Browser ruft RELATIV. Die Weiterleitung an die API macht
+ * das Rewrite in `next.config.ts`, serverseitig konfiguriert.
+ *
+ * `NEXT_PUBLIC_API_URL` ist hier bewusst weg. Ein `NEXT_PUBLIC_*`-Wert wird
+ * ins Browserbuendel eingebacken und beim Build festgeschrieben — und er
+ * zwaenge die API, fuer eine fremde Origin zu oeffnen.
+ */
+const SAME_ORIGIN = "";
 
 /**
  * Kompositionswurzel der Web-Shell: die EINZIGE Stelle, an der ein
@@ -23,9 +31,9 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
  */
 
 export function Providers({ children }: { children: ReactNode }) {
-  const client = useMemo(() => createApiClient(API_BASE_URL), []);
+  const client = useMemo(() => createApiClient(SAME_ORIGIN), []);
   const planning = useMemo(
-    () => createPlanningGateway(API_BASE_URL, (input, init) => fetch(input, init)),
+    () => createPlanningGateway(SAME_ORIGIN, (input, init) => fetch(input, init)),
     [],
   );
 
