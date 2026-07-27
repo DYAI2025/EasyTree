@@ -139,4 +139,40 @@ export const TABLE_OWNERSHIP: readonly TableOwnership[] = [
     tenantOwned: true,
     note: "Synthetische RLS-Beweistabelle aus 0002_tenancy.sql, kein Fachbestand.",
   },
+  {
+    table: "public.employees",
+    owner: "workforce",
+    tenantOwned: true,
+    note: "Beschaeftigte je Organisation (0005). PERSONENBEZOGEN. user_id ist optional, deshalb eigenstaendiges org_id.",
+  },
+  {
+    table: "public.worksites",
+    owner: "worksites",
+    tenantOwned: true,
+    note: "Baustellen je Organisation (0006). Adresse, Treffpunkt und Taetigkeiten folgen mit EYT-16.",
+  },
+  {
+    table: "public.plan_versions",
+    owner: "planning",
+    tenantOwned: true,
+    note: "Planversion je Organisation und ISO-Woche (0007). published_at ist die autoritative Veroeffentlichungsmarke.",
+  },
+  {
+    table: "public.assignments",
+    owner: "planning",
+    tenantOwned: true,
+    note: "Zuweisungen (0007). PERSONENBEZOGEN. Tenantgebundene FKs auf employees und worksites; published_at ist der lokal pruefbare Marker fuer EYT-49.",
+  },
+  {
+    table: "public.audit_events",
+    owner: "audit",
+    tenantOwned: true,
+    note: "Anfuegbare Auditspur (0008). Kein update/delete-Grant — Anfuegbarkeit ist ein Recht, keine Konvention.",
+  },
+  {
+    table: "public.outbox_messages",
+    owner: "audit",
+    tenantOwned: true,
+    note: "Transactional Outbox (0008). Zustellstrecke fehlt noch und hat kein Ticket (Sprintplan L-12).",
+  },
 ];

@@ -78,3 +78,53 @@ values
    '00000000-0000-0000-0000-00000000bbb2')
 on conflict do nothing;
 
+
+-- ---------------------------------------------------------------------------
+-- Fachschema (EYT-86)
+-- ---------------------------------------------------------------------------
+-- Weiterhin ausschliesslich synthetische Fantasiedaten mit festen UUIDs. Die
+-- Namen sind bewusst erfunden und nicht personenbeziehbar ("Alpha Planerin"),
+-- damit der Seed die Auflage "keine personenbezogenen Produktionsdaten"
+-- erfuellt, ohne dass jemand sie im Einzelfall abwaegen muss.
+
+-- Beschaeftigte: je Org eine, plus eine INAKTIVE in Alpha fuer Negativfaelle.
+insert into public.employees (id, org_id, user_id, display_name, active)
+values
+  ('00000000-0000-0000-0000-0000004010a1', '00000000-0000-0000-0000-0000000000a1',
+   '00000000-0000-0000-0000-00000000aaa1', 'Alpha Planerin', true),
+  ('00000000-0000-0000-0000-0000004011a1', '00000000-0000-0000-0000-0000000000a1',
+   null, 'Alpha Inaktive', false),
+  ('00000000-0000-0000-0000-0000004020b2', '00000000-0000-0000-0000-0000000000b2',
+   '00000000-0000-0000-0000-00000000bbb2', 'Beta Planer', true)
+on conflict (id) do nothing;
+
+-- Baustellen: je Org eine mit mindestens einer Taetigkeit.
+insert into public.worksites (id, org_id, name, activity_count)
+values
+  ('00000000-0000-0000-0000-0000005010a1', '00000000-0000-0000-0000-0000000000a1',
+   'Alpha Allee 1', 2),
+  ('00000000-0000-0000-0000-0000005020b2', '00000000-0000-0000-0000-0000000000b2',
+   'Beta Boulevard 2', 1)
+on conflict (id) do nothing;
+
+-- Planversionen: je Org ein Entwurf fuer 2026-W32 (published_at NULL).
+insert into public.plan_versions (id, org_id, week_key)
+values
+  ('00000000-0000-0000-0000-0000006010a1', '00000000-0000-0000-0000-0000000000a1', '2026-W32'),
+  ('00000000-0000-0000-0000-0000006020b2', '00000000-0000-0000-0000-0000000000b2', '2026-W32')
+on conflict (id) do nothing;
+
+-- Zuweisungen: je Org eine Achtstundenschicht am Montag der Woche 32.
+-- 06:00-14:00 UTC entspricht 08:00-16:00 Europe/Berlin.
+insert into public.assignments
+  (id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+values
+  ('00000000-0000-0000-0000-0000007010a1', '00000000-0000-0000-0000-0000000000a1',
+   '00000000-0000-0000-0000-0000006010a1', '00000000-0000-0000-0000-0000004010a1',
+   '00000000-0000-0000-0000-0000005010a1',
+   '2026-08-03T06:00:00Z', '2026-08-03T14:00:00Z'),
+  ('00000000-0000-0000-0000-0000007020b2', '00000000-0000-0000-0000-0000000000b2',
+   '00000000-0000-0000-0000-0000006020b2', '00000000-0000-0000-0000-0000004020b2',
+   '00000000-0000-0000-0000-0000005020b2',
+   '2026-08-03T06:00:00Z', '2026-08-03T14:00:00Z')
+on conflict (id) do nothing;
