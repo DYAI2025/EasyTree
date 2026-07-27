@@ -17,7 +17,7 @@ export const READINESS_INDICATORS = "EASYTREE_READINESS_INDICATORS";
 
 /**
  * Minimal database ping abstraction. Production wires `PgDatabasePing`
- * (EYT-58, see ./pg-database-ping.ts); tests override the token.
+ * (EYT-58, siehe ../platform/database/pg-database-ping.ts); tests override the token.
  */
 export interface DatabasePing {
   ping(): Promise<boolean>;

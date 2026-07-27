@@ -6,7 +6,7 @@ import { CorrelationIdMiddleware } from "./common/correlation-id.middleware";
 import { HttpExceptionFilter } from "./common/http-exception.filter";
 import { APP_CONFIG, ConfigModule } from "./config/config.module";
 import { HealthController } from "./health/health.controller";
-import { PgDatabasePing } from "./health/pg-database-ping";
+import { PgDatabasePing } from "./platform/database/pg-database-ping";
 import {
   DATABASE_PING,
   READINESS_INDICATORS,

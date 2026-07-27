@@ -1,6 +1,6 @@
 import { Client } from "pg";
 
-import type { DatabasePing } from "./readiness";
+import type { DatabasePing } from "../../health/readiness";
 
 /** Echter DB-Ping (EYT-58): SELECT 1 mit hartem Timeout, niemals throw. */
 export class PgDatabasePing implements DatabasePing {
