@@ -5,6 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
+import { API_BASE_PATH } from "./common/api-base-path";
 import { APP_CONFIG } from "./config/config.module";
 import {
   createRolePrivilegeReader,
@@ -22,6 +23,15 @@ export async function bootstrapApi(
   readRolePrivileges: (databaseUrl: string) => RolePrivilegeReader = createRolePrivilegeReader,
 ): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
+  // Der Vertrag nennt "/api/v1" als Basispfad (packages/contracts/openapi/v1.json,
+  // servers[0].url). Bis EYT-50 gab es diesen Pfad serverseitig ueberhaupt nicht —
+  // jeder daraus abgeleitete Client haette ins Leere gezeigt.
+  //
+  // health und ready bleiben unversioniert: sie sind Betriebsschnittstellen,
+  // keine Fachrouten. scripts/smoke-api.sh und die Playwright-Suite fragen sie
+  // unter genau diesen Pfaden ab, und ein Liveness-Endpunkt, der sich mit der
+  // Fachversion verschiebt, ist kein Liveness-Endpunkt.
+  app.setGlobalPrefix(API_BASE_PATH, { exclude: ["health", "ready"] });
   app.enableShutdownHooks();
   const config = app.get<AppConfig>(APP_CONFIG);
   // Vor dem ersten Request: die verbundene Rolle darf RLS nicht umgehen
