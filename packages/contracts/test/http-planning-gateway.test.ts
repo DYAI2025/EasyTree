@@ -9,7 +9,12 @@
 import { describe, expect, it } from "vitest";
 
 import { HttpPlanningGateway, type FetchLike } from "../src/http/planning-gateway.js";
-import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, newIdempotencyKey } from "../src/primitives.js";
+import {
+  IDEMPOTENCY_HEADER,
+  IdempotencyKeySchema,
+  newIdempotencyKey,
+  type IdempotencyKey,
+} from "../src/primitives.js";
 
 const BASE = "https://api.example.test/api/v1";
 
