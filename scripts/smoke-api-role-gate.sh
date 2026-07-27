@@ -23,7 +23,10 @@ set -euo pipefail
 # und der Job waere bis zum Job-Timeout gehangen, statt die Regression zu
 # melden. Eine Pruefung, die im Fehlerfall haengt statt rot zu werden, ist keine.
 TIMEOUT_SECONDS="${ROLE_GATE_TIMEOUT_SECONDS:-30}"
-LOG="$(mktemp -t eyt-role-gate)"
+# Portabel: GNU-mktemp verlangt die X-e im Template, BSD-mktemp ergaenzt sie bei
+# `-t` selbst. Die explizite Form funktioniert auf beiden — die erste Fassung
+# lief auf macOS und scheiterte auf dem Linux-Runner mit "too few X's in template".
+LOG="$(mktemp "${TMPDIR:-/tmp}/eyt-role-gate.XXXXXX")"
 
 node apps/api/dist/main.js >"$LOG" 2>&1 &
 PID=$!
