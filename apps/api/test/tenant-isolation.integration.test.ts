@@ -34,6 +34,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   BETA_ITEM_ID,
   BETA_NOTE_ID,
+  FailClosedGate,
   inTenantTx,
   ORG_ALPHA,
   ORG_BETA,
@@ -51,8 +52,7 @@ const DB_URL =
  * Warnung.
  */
 const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local"; // "required" | "local"
-let executedCount = 0;
-let skippedCount = 0;
+const gate = new FailClosedGate("tenant-isolation", TENANT_TESTS_MODE, "EYT-71");
 
 let dbAvailable = false;
 let client: Client;
@@ -66,14 +66,13 @@ let client: Client;
 function dbIt(name: string, fn: () => Promise<void>): void {
   it(name, async (ctx) => {
     if (!dbAvailable) {
-      skippedCount++;
+      gate.markSkipped();
       ctx.skip(
         `SKIPPED: Supabase-Postgres unter ${DB_URL} nicht erreichbar — ` +
           "lokal starten mit `pnpm exec supabase start && pnpm exec supabase db reset`.",
       );
     }
-    executedCount++;
-    await fn();
+    await gate.run(fn);
   });
 }
 
@@ -110,14 +109,8 @@ describe("tenant isolation via RLS (transaction-mode context)", () => {
     // process.stdout.write statt console.info: Vitest 4 unterdrueckt
     // console-Ausgaben aus Hooks im Default-Reporter — die Zeile MUSS
     // aber im Log stehen, damit CI sie greppen kann (Task 4, EYT-57).
-    process.stdout.write(
-      `[tenant-isolation] mode=${TENANT_TESTS_MODE} executed=${executedCount} skipped=${skippedCount}\n`,
-    );
-    if (TENANT_TESTS_MODE === "required" && skippedCount > 0) {
-      throw new Error(
-        `[tenant-isolation] fail-closed: ${skippedCount} Pflicht-Tenant-Tests uebersprungen (EYT-66).`,
-      );
-    }
+    process.stdout.write(gate.reportLine());
+    gate.assertOrThrow();
   });
 
   // inTenantTx (Transaction-Mode-Kontextmuster) kommt aus

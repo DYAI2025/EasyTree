@@ -38,6 +38,77 @@ export async function probeDatabase(url: string): Promise<boolean> {
 }
 
 /**
+ * Zaehlwerk der fail-closed-Suiten (EYT-66/EYT-71).
+ *
+ * Bewusst OHNE vitest-Import: reine Logik, damit der Rot-Fall direkt getrieben
+ * werden kann, statt ihn behaupten zu muessen (siehe
+ * test/fail-closed-gate.red-case.test.ts). Die Suiten behalten `it`/`ctx.skip`.
+ *
+ * Warum getrennte Zaehler: `executed` stieg frueher VOR der Assertion, ein
+ * fehlgeschlagener Test zaehlte also mit. `executed=7 skipped=0` las sich damit
+ * wie sieben bestandene Sicherheitstests — die Zahl trug diese Aussage nie.
+ */
+export class FailClosedGate {
+  private executed = 0;
+  private passed = 0;
+  private skipped = 0;
+
+  constructor(
+    private readonly prefix: string,
+    private readonly mode: string,
+    private readonly ticket: string,
+  ) {}
+
+  /** Ein Pflichttest wurde uebersprungen (nur im Local-Modus zulaessig). */
+  markSkipped(): void {
+    this.skipped++;
+  }
+
+  /**
+   * Fuehrt einen Pflichttest aus. `passed` steigt ERST nach fehlerfreiem
+   * Durchlauf — wirft `fn`, bleibt die Differenz im Report sichtbar.
+   */
+  async run(fn: () => Promise<void>): Promise<void> {
+    this.executed++;
+    await fn();
+    this.passed++;
+  }
+
+  counts(): { executed: number; passed: number; skipped: number } {
+    return { executed: this.executed, passed: this.passed, skipped: this.skipped };
+  }
+
+  /** Greppbare Report-Zeile; scripts/assert-tenant-report.sh wertet sie aus. */
+  reportLine(): string {
+    return (
+      `[${this.prefix}] mode=${this.mode} executed=${this.executed} ` +
+      `passed=${this.passed} skipped=${this.skipped}\n`
+    );
+  }
+
+  /**
+   * Im Required-Modus: jeder Skip und jeder nicht bestandene Pflichttest ist
+   * ein Fehler. Vitest laesst den Lauf bei einem fehlgeschlagenen Test ohnehin
+   * rot werden; dieser Wurf sorgt dafuer, dass die Diskrepanz auch dort
+   * auffaellt, wo nur der Report gelesen wird.
+   */
+  assertOrThrow(): void {
+    if (this.mode !== "required") return;
+    if (this.skipped > 0) {
+      throw new Error(
+        `[${this.prefix}] fail-closed: ${this.skipped} Pflichttests uebersprungen (EYT-66).`,
+      );
+    }
+    if (this.passed !== this.executed) {
+      throw new Error(
+        `[${this.prefix}] fail-closed: ${this.executed - this.passed} von ${this.executed} ` +
+          `Pflichttests sind nicht bestanden (${this.ticket}).`,
+      );
+    }
+  }
+}
+
+/**
  * Fuehrt `fn` in einer Transaktion mit transaktionslokalem Tenantkontext
  * aus — exakt das Muster, das Transaction-Mode-Pooling erzwingt.
  * userId === null: authenticated ohne JWT-Claims (kaputter/fehlender Kontext).
