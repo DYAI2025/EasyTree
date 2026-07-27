@@ -26,6 +26,14 @@
 begin;
 select plan(8);
 
+-- Hinweis zu den Casts: pg_class.relname hat den Typ `name`, nicht `text`.
+-- array_agg(relname) liefert daher name[], und pgTAPs polymorphes is() findet
+-- fuer (name[], text[]) keine Signatur — der erste Entwurf scheiterte mit
+--   ERROR: function is(name[], text[], unknown) does not exist
+-- und riss die ganze Datei mit (0 von 8 Zusicherungen gelaufen, "Bad plan").
+-- Deshalb steht ueberall relname::text, auch im ORDER BY: bei array_agg mit
+-- DISTINCT muss der Sortierausdruck dem aggregierten Ausdruck entsprechen.
+
 -- ---------------------------------------------------------------------------
 -- Erwarteter Tabellenbestand
 -- ---------------------------------------------------------------------------
@@ -53,7 +61,7 @@ insert into expected_tables (table_name, tenant_owned, note) values
 -- ---------------------------------------------------------------------------
 select is(
   (
-    select coalesce(array_agg(c.relname order by c.relname), array[]::text[])
+    select coalesce(array_agg(c.relname::text order by c.relname::text), array[]::text[])
     from pg_class c
     join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public'
@@ -109,7 +117,7 @@ select is(
 -- Policy nicht. Beide zusammen sind die Aussage.
 select is(
   (
-    select coalesce(array_agg(c.relname order by c.relname), array[]::text[])
+    select coalesce(array_agg(c.relname::text order by c.relname::text), array[]::text[])
     from pg_class c
     join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind = 'r'
@@ -122,14 +130,21 @@ select is(
 -- ---------------------------------------------------------------------------
 -- 4. Keine DML-Rechte fuer PUBLIC oder anon
 -- ---------------------------------------------------------------------------
+-- PUBLIC wird direkt gegen die ACL geprueft, nicht ueber has_table_privilege:
+-- die Pseudorolle hat keinen Eintrag in pg_roles, und ihre Aufloesung ueber
+-- einen Namensparameter ist eine Zusatzannahme, die diese Datei bei einem
+-- Fehlschlag komplett abbrechen liesse. In der ACL ist PUBLIC schlicht
+-- grantee = 0. Ist relacl NULL, liefert acldefault nur Ownerrechte — kein
+-- falsches Positiv.
 select is(
   (
-    select coalesce(array_agg(distinct c.relname order by c.relname), array[]::text[])
+    select coalesce(array_agg(distinct c.relname::text order by c.relname::text), array[]::text[])
     from pg_class c
     join pg_namespace n on n.oid = c.relnamespace
-    cross join unnest(array['select','insert','update','delete']) as p(priv)
+    cross join aclexplode(coalesce(c.relacl, acldefault('r'::"char", c.relowner))) as acl
     where n.nspname = 'public' and c.relkind = 'r'
-      and has_table_privilege('public', c.oid, p.priv)
+      and acl.grantee = 0
+      and acl.privilege_type in ('SELECT','INSERT','UPDATE','DELETE')
   ),
   array[]::text[],
   'PUBLIC hat auf keiner public-Tabelle DML-Rechte'
@@ -137,7 +152,7 @@ select is(
 
 select is(
   (
-    select coalesce(array_agg(distinct c.relname order by c.relname), array[]::text[])
+    select coalesce(array_agg(distinct c.relname::text order by c.relname::text), array[]::text[])
     from pg_class c
     join pg_namespace n on n.oid = c.relnamespace
     cross join unnest(array['select','insert','update','delete']) as p(priv)
@@ -157,10 +172,10 @@ select is(
 -- ein. Deshalb direkt gegen relacl geprueft.
 select is(
   (
-    select coalesce(array_agg(distinct c.relname order by c.relname), array[]::text[])
+    select coalesce(array_agg(distinct c.relname::text order by c.relname::text), array[]::text[])
     from pg_class c
     join pg_namespace n on n.oid = c.relnamespace
-    cross join aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) as acl
+    cross join aclexplode(coalesce(c.relacl, acldefault('r'::"char", c.relowner))) as acl
     join pg_roles grantee on grantee.oid = acl.grantee
     where n.nspname = 'public' and c.relkind = 'r'
       and grantee.rolname = 'easytree_app'

@@ -165,6 +165,7 @@ select throws_ok(
     join public.worksites w on w.org_id = o.id
     limit 1$$,
   '23514',
+  'new row for relation "assignments" violates check constraint "assignments_interval_ordered"',
   'A: assignment mit start == end verletzt assignments_interval_ordered'
 );
 
