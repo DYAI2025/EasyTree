@@ -248,9 +248,15 @@ asserts its own greppable `[…] mode=required executed=… skipped=0` line.
 - Playwright (`apps/web/e2e/`) runs against the production build (`next start` on 3000) with
   axe; it is not part of `pnpm test`. It starts that server itself
   (`reuseExistingServer: false`), so port 3000 must be free.
-- `scripts/smoke-worker.sh` detects listening sockets via `ss` or `/proc/net/tcp*` — **on macOS
-  neither exists, so the "no open port" assertion passes vacuously**. Only the Linux CI run
-  (`db-gates`) is evidence for that claim.
+- `scripts/smoke-worker.sh` distinguishes three states (EYT-70): a listening socket belongs to
+  the worker (red), the check ran and found none (green), or **the check could not run at all
+  (red, not "no listener")**. Probes in order: `/proc` (authoritative for a process we started),
+  `lsof` (macOS/BSD), `ss` (fallback). It no longer passes vacuously on macOS — `lsof` gives a
+  real answer there, and a probe that errors or returns nothing fails the smoke. Two test hooks
+  make the red case reproducible: `EASYTREE_SMOKE_PROBE_PID` checks one pid without starting a
+  worker, `EASYTREE_SMOKE_FORCE_PROBE=proc|lsof|ss|none` forces a method. Caveat: the
+  end-to-end smoke still needs a reachable database, because the worker refuses to boot without
+  one — so on a machine with no Supabase stack, only `db-gates` exercises the full path.
 - Automated a11y lives in `apps/web/test/a11y.test.tsx` (jsdom + axe) and, since Sprint 2, in
   `apps/web/e2e/shell-smoke.spec.ts` (real Chromium, CI job `web-smoke`). In
   `docs/runbooks/a11y-checklist.md`, items 1–6 are passed and regression-guarded; only item 7
