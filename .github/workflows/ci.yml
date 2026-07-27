@@ -189,6 +189,20 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/tenant-isolation.integration.test.ts 2>&1 | tee /tmp/tenant-direct.log
           grep -E "\[tenant-isolation\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/tenant-direct.log
+      # Nebenlaeufigkeit ist der Teil von EYT-49 AK6, den pgTAP nicht leisten
+      # kann: eine Session zeigt Ablehnung, nicht Serialisierung. Diese Suite
+      # oeffnet zwei echte Verbindungen und committet bewusst nichts —
+      # veroeffentlichte Zeilen sind laut 0010 unveraenderlich UND unloeschbar,
+      # ein commit hier liesse jeden folgenden Schritt auf einer veraenderten
+      # Datenbank laufen.
+      - name: Planning invariants gate (fail-closed, zwei Verbindungen, EYT-49)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/planning-invariants.integration.test.ts 2>&1 | tee /tmp/planning-invariants.log
+          grep -E "\[planning-invariants\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/planning-invariants.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |
