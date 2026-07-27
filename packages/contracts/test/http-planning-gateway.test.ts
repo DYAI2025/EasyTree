@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import { HttpPlanningGateway, type FetchLike } from "../src/http/planning-gateway.js";
-import { IDEMPOTENCY_HEADER, newIdempotencyKey } from "../src/primitives.js";
+import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, newIdempotencyKey } from "../src/primitives.js";
 
 const BASE = "https://api.example.test/api/v1";
 
@@ -39,7 +39,9 @@ function gatewayWith(fetchImpl: FetchLike): HttpPlanningGateway {
   });
 }
 
-const KEY_A = "11111111-1111-4111-8111-111111111111";
+// Durch das Schema, nicht per Cast — sonst umginge der Test genau die
+// Pruefung, die er absichern soll.
+const KEY_A = IdempotencyKeySchema.parse("11111111-1111-4111-8111-111111111111");
 
 const DRAFT = {
   employeeId: "00000000-0000-0000-0000-0000004010a1",
@@ -240,6 +242,42 @@ describe("HttpPlanningGateway — Aufrufform", () => {
     );
     expect(keys[0]).toBeDefined();
     expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("lehnt einen formal ungueltigen Schluessel ab, statt ihn zu senden", async () => {
+    // Der Brand haelt Typebene; ein `as` beim Aufrufer umgeht ihn. Fuer den
+    // Server waere ein leerer Header nicht von gar keinem zu unterscheiden —
+    // die Wiederholungserkennung fiele still aus. Der Fehler gehoert dorthin,
+    // wo er benannt werden kann.
+    const recorded: Recorded[] = [];
+    const gateway = gatewayWith(stubFetch(200, PUBLISHED, recorded));
+
+    for (const bad of ["", "kurz", "hat leerzeichen", "unerlaubt/zeichen"]) {
+      const result = await gateway.publishPlan(
+        { weekKey: "2026-W32", expectedVersionId: null },
+        { idempotencyKey: bad as unknown as IdempotencyKey },
+      );
+      expect(result.ok, bad).toBe(false);
+      if (result.ok) continue;
+      expect(result.failure, bad).toBe("CONTRACT_VIOLATION");
+    }
+
+    // Und es ging wirklich nichts hinaus: ein abgelehnter Schluessel darf den
+    // Server gar nicht erst erreichen.
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("laesst einen gueltigen Schluessel unveraendert durch", async () => {
+    // Gegenprobe: ohne sie waere die Ablehnung oben auch dann gruen, wenn der
+    // Client JEDEN Schluessel verwuerfe.
+    const recorded: Recorded[] = [];
+    const key = newIdempotencyKey();
+    const result = await gatewayWith(stubFetch(200, PUBLISHED, recorded)).publishPlan(
+      { weekKey: "2026-W32", expectedVersionId: null },
+      { idempotencyKey: key },
+    );
+    expect(result.ok).toBe(true);
+    expect((recorded[0]?.init?.headers as Record<string, string>)[IDEMPOTENCY_HEADER]).toBe(key);
   });
 
   it("sendet bei lesenden Aufrufen keinen Schluessel", async () => {

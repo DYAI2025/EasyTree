@@ -96,11 +96,24 @@ export function cursorPage<T extends z.ZodTypeAny>(item: T) {
  */
 export const IDEMPOTENCY_HEADER = "Idempotency-Key";
 
+/**
+ * GEBRANDET, und das ist der Punkt.
+ *
+ * Ohne `.brand()` waere `IdempotencyKey` auf Typebene schlicht `string`. Jeder
+ * beliebige String — auch ein leerer, auch einer mit Leerzeichen — haette als
+ * geprueft gegolten, und die Regeln unten waeren eine Zusage gewesen, die
+ * niemand einloest: das Schema existierte, aber niemand fuehrte es aus.
+ *
+ * Mit dem Brand kommt man nur ueber {@link newIdempotencyKey} oder ein
+ * ausdrueckliches `IdempotencyKeySchema.parse(...)` an einen Wert. Beide Wege
+ * fuehren die Pruefung wirklich aus.
+ */
 export const IdempotencyKeySchema = z
   .string()
   .min(8)
   .max(128)
-  .regex(/^[A-Za-z0-9._~-]+$/, "Nur URL-sichere Zeichen erlaubt");
+  .regex(/^[A-Za-z0-9._~-]+$/, "Nur URL-sichere Zeichen erlaubt")
+  .brand<"IdempotencyKey">();
 
 export type IdempotencyKey = z.infer<typeof IdempotencyKeySchema>;
 
@@ -117,5 +130,8 @@ export type IdempotencyKey = z.infer<typeof IdempotencyKeySchema>;
  * neuen. Der Aufrufer muss ihn besitzen.
  */
 export function newIdempotencyKey(): IdempotencyKey {
-  return crypto.randomUUID();
+  // Durch das Schema, nicht daran vorbei. Ein `as IdempotencyKey` haette
+  // denselben Typ geliefert und nichts geprueft — genau die Abkuerzung, die
+  // den Brand wertlos macht.
+  return IdempotencyKeySchema.parse(crypto.randomUUID());
 }
