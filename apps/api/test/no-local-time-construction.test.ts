@@ -59,11 +59,34 @@ interface Forbidden {
   readonly why: string;
 }
 
+/**
+ * Ein Datums-Zeit-String OHNE Zonenangabe.
+ *
+ * ECMA-262 unterscheidet zwei Faelle, und der Unterschied ist genau die Falle:
+ *   "2026-03-29"            -> nur Datum, wird als UTC gelesen. Harmlos.
+ *   "2026-03-29T02:30"      -> Datum UND Zeit ohne Offset, wird als ORTSZEIT
+ *                              der Maschine gelesen. Genau die Mehrdeutigkeit,
+ *                              die dieser Waechter verhindern soll — und an
+ *                              diesem Beispiel gibt es den Zeitpunkt in
+ *                              Europe/Berlin gar nicht.
+ *   "2026-03-29T02:30:00Z"  -> eindeutig. Erlaubt.
+ *   "...T02:30:00+02:00"    -> eindeutig. Erlaubt.
+ *
+ * Das erste Muster unten fand diesen Fall NICHT: es verlangt ein Komma, und
+ * ein Einzelstring hat keins.
+ */
+const ZONELESS_DATE_TIME =
+  /new\s+Date\s*\(\s*(["'`])(?![^"'`]*(?:Z|[+-]\d{2}:?\d{2})["'`])[^"'`]*\d{1,2}:\d{2}[^"'`]*\1/;
+
 const FORBIDDEN: readonly Forbidden[] = [
   {
     // new Date(2026, 2, 29, 2, 30) — Ortszeit der MASCHINE, nicht der Organisation.
     pattern: /new\s+Date\s*\([^)]*,[^)]*\)/,
     why: "new Date(<jahr>, <monat>, ...) baut eine Zeit in der Zone der Maschine. An der Sommerzeitluecke gibt es den gemeinten Zeitpunkt nicht, und die Laufzeit erfindet einen.",
+  },
+  {
+    pattern: ZONELESS_DATE_TIME,
+    why: 'new Date("<datum>T<zeit>") ohne Z oder Offset wird laut ECMA-262 als ORTSZEIT der Maschine gelesen. Entweder Z anhaengen oder den Offset ausschreiben.',
   },
   {
     pattern: /\.set(?!UTC)(FullYear|Month|Date|Hours|Minutes|Seconds|Milliseconds)\s*\(/,
@@ -91,14 +114,38 @@ function normalize(line: string): string {
   return line.replace(/Date\.UTC\s*\([^)]*\)/g, "0");
 }
 
-/** Zeilen ohne Kommentare — sonst schlaegt der Waechter auf seiner eigenen Doku an. */
-function codeLines(source: string): { readonly line: string; readonly number: number }[] {
-  const withoutBlockComments = source.replace(/\/\*[\s\S]*?\*\//g, (match) =>
-    match.replace(/[^\n]/g, " "),
-  );
-  return withoutBlockComments
+/** Quelltext ohne Kommentare — sonst schlaegt der Waechter auf seiner eigenen Doku an. */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, " "))
     .split("\n")
-    .map((line, index) => ({ line: normalize(line.replace(/\/\/.*$/, "")), number: index + 1 }));
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
+
+function codeLines(source: string): { readonly line: string; readonly number: number }[] {
+  return stripComments(source)
+    .split("\n")
+    .map((line, index) => ({ line: normalize(line), number: index + 1 }));
+}
+
+/**
+ * Derselbe Quelltext, aber ohne Zeilenumbrueche.
+ *
+ * Der zeilenweise Scan uebersieht eine ueber mehrere Zeilen umbrochene
+ * Konstruktion — und Prettier bricht lange Aufrufe automatisch um, der Fall
+ * entsteht also von selbst:
+ *
+ *     const start = new Date(
+ *       2026, 2, 29,
+ *       2, 30,
+ *     );
+ *
+ * Diese Fassung findet ihn. Sie kann keine Zeilennummer nennen; das ist der
+ * Preis und immer noch besser als ein Waechter, den ein Zeilenumbruch aushebelt.
+ */
+function collapsed(source: string): string {
+  return normalize(stripComments(source).replace(/\s+/g, " "));
 }
 
 describe("kein Produktionscode konstruiert Zeit aus Wanduhrteilen (EYT-61 AK6a)", () => {
@@ -113,11 +160,23 @@ describe("kein Produktionscode konstruiert Zeit aus Wanduhrteilen (EYT-61 AK6a)"
 
     for (const file of PRODUCTION_FILES) {
       const source = readFileSync(resolve(repoRoot, file), "utf8");
+      const found = new Set<RegExp>();
+
       for (const { line, number } of codeLines(source)) {
         for (const { pattern, why } of FORBIDDEN) {
           if (pattern.test(line)) {
+            found.add(pattern);
             violations.push(`${file}:${number} — ${line.trim()}\n    ${why}`);
           }
+        }
+      }
+
+      // Zweiter Durchgang ohne Zeilenumbrueche. Nur melden, was der erste
+      // nicht schon hat — sonst stuende jede umbrochene Fundstelle doppelt da.
+      const oneLine = collapsed(source);
+      for (const { pattern, why } of FORBIDDEN) {
+        if (!found.has(pattern) && pattern.test(oneLine)) {
+          violations.push(`${file} (ueber mehrere Zeilen umbrochen)\n    ${why}`);
         }
       }
     }
@@ -138,6 +197,11 @@ describe("kein Produktionscode konstruiert Zeit aus Wanduhrteilen (EYT-61 AK6a)"
       "start.setHours(3);",
       "const day = start.getDate();",
       "const off = start.getTimezoneOffset();",
+      // Der zonenlose Datums-Zeit-String: laut ECMA-262 Ortszeit der Maschine —
+      // und diesen Zeitpunkt gibt es in Europe/Berlin ueberhaupt nicht.
+      'const start = new Date("2026-03-29T02:30");',
+      'const start = new Date("2026-03-29T02:30:00");',
+      'const start = new Date("2026-03-29 02:30:00");',
     ];
     for (const line of synthetic) {
       expect(
@@ -145,6 +209,18 @@ describe("kein Produktionscode konstruiert Zeit aus Wanduhrteilen (EYT-61 AK6a)"
         line,
       ).toBe(true);
     }
+
+    // Ueber mehrere Zeilen umbrochen. Prettier erzeugt diese Form von selbst,
+    // sobald der Aufruf lang genug wird.
+    const wrapped = "const start = new Date(\n  2026, 2, 29,\n  2, 30,\n);";
+    expect(
+      FORBIDDEN.some(({ pattern }) => pattern.test(collapsed(wrapped))),
+      "umbrochene Konstruktion wird im zweiten Durchgang gefunden",
+    ).toBe(true);
+    expect(
+      codeLines(wrapped).some(({ line }) => FORBIDDEN.some(({ pattern }) => pattern.test(line))),
+      "der zeilenweise Scan allein findet sie NICHT — genau dafuer gibt es den zweiten Durchgang",
+    ).toBe(false);
 
     // Und die erlaubten Formen duerfen NICHT anschlagen, sonst waere der
     // Waechter unbrauchbar und wuerde beim ersten echten Einsatz entschaerft.
@@ -155,6 +231,11 @@ describe("kein Produktionscode konstruiert Zeit aus Wanduhrteilen (EYT-61 AK6a)"
       "const utcMidnight = Date.UTC(date.year, date.month - 1, date.day);",
       "const d = new Date(startMs);",
       'const d = new Date("2026-03-29T00:00:00Z");',
+      // Ausgeschriebener Offset ist ebenso eindeutig wie Z.
+      'const d = new Date("2026-03-29T02:30:00+02:00");',
+      'const d = new Date("2026-03-29T02:30:00-05:00");',
+      // Nur Datum, keine Zeit: liest ECMA-262 als UTC. Harmlos.
+      'const d = new Date("2026-03-29");',
       "return d.getUTCFullYear();",
       "return new Date(utcMidnight).getUTCDay();",
       "d.setUTCHours(0, 0, 0, 0);",
