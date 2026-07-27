@@ -41,6 +41,17 @@ jobs:
       # Tenant-Integrationstests laufen hier im Local-Mode (Skip mit Warnung);
       # das PFLICHT-Gate dafür ist der Job db-gates (fail-closed, EYT-66/57).
       - run: pnpm test
+      # Dass die Zeitrechnung unabhängig von der Maschinenzone ist, folgte
+      # bisher nur aus dem Quelltext (überall explizites `timeZone` in `Intl`,
+      # sonst nur `Date.UTC`/`getUTC*`). Gelesen ist nicht gemessen — und der
+      # Runner steht auf UTC, also würde ein Rückfall auf die Maschinenzone dort
+      # gar nicht auffallen. Zwei Extremzonen, je eine pro Vorzeichen:
+      # Kiritimati liegt auf UTC+14, Niue auf UTC-11. Ein Kalendertag, der aus
+      # der Maschinenzone kommt, geht unter mindestens einer von beiden kaputt.
+      - name: Domain-Suite unter fremder Maschinenzeitzone (EYT-61 AK6)
+        run: |
+          TZ=Pacific/Kiritimati pnpm --filter @easytree/domain test
+          TZ=Pacific/Niue pnpm --filter @easytree/domain test
 
   build-web:
     runs-on: ubuntu-latest
