@@ -140,36 +140,42 @@ test.describe("Read-Through: Browser bis PostgreSQL", () => {
     await expect(version).toHaveAttribute("data-published-version-id", A_ZULETZT_VEROEFFENTLICHT);
   });
 
-  test("Nachweis 4: Reload und zweiter Browserkontext liefern dieselben Ids", async ({
+  test("Nachweis 4: Reload und zweiter Browserkontext liefern denselben Serverstand", async ({
     page,
     browser,
   }) => {
     await page.goto(SEITE);
-    const idsVon = async (p: typeof page): Promise<string[]> =>
-      p
-        .locator("[data-assignment-id]")
-        .evaluateAll((els) => els.map((e) => e.getAttribute("data-assignment-id") ?? ""));
+    await expect(page.locator(`[data-assignment-id="${A_ZUWEISUNG_ENTWURF}"]`)).toBeVisible();
 
-    const ersteIds = await idsVon(page);
-    expect(ersteIds.length).toBeGreaterThan(0);
-    const ersteVersion = await page
-      .getByTestId("planungsfenster-version")
-      .getAttribute("data-published-version-id");
+    const ersteIds = await sichtbareZuweisungen(page);
+    expect(ersteIds).toEqual([A_ZUWEISUNG_ENTWURF]);
+    const ersteProvenienz = await provenienz(page);
 
     await page.reload();
-    expect(await idsVon(page)).toEqual(ersteIds);
+    await expect(page.locator(`[data-assignment-id="${A_ZUWEISUNG_ENTWURF}"]`)).toBeVisible();
+    expect(await sichtbareZuweisungen(page)).toEqual(ersteIds);
+    expect(await provenienz(page)).toEqual(ersteProvenienz);
 
-    // Zweiter Kontext: eigener Cookie-Jar, eigener Cache. Was hier gleich
-    // ist, kann kein Clientzustand sein.
-    const zweiter = await browser.newContext();
-    const zweiteSeite = await zweiter.newPage();
-    await zweiteSeite.goto(SEITE);
-    expect(await idsVon(zweiteSeite)).toEqual(ersteIds);
-    expect(
-      await zweiteSeite
-        .getByTestId("planungsfenster-version")
-        .getAttribute("data-published-version-id"),
-    ).toBe(ersteVersion);
-    await zweiter.close();
+    // Zweiter Kontext: eigener Cookie-Jar, eigener Cache, eigener
+    // Speicherzustand. Was hier gleich ist, kann kein Clientzustand sein.
+    //
+    // `baseURL` ausdruecklich mitgeben: ein neuer Kontext erbt sie NICHT aus
+    // der Testkonfiguration, und ein relatives goto() liefe ins Leere.
+    const origin = new URL(page.url()).origin;
+    const zweiter = await browser.newContext({ baseURL: origin });
+    try {
+      const zweiteSeite = await zweiter.newPage();
+      await zweiteSeite.goto(SEITE);
+      await expect(
+        zweiteSeite.locator(`[data-assignment-id="${A_ZUWEISUNG_ENTWURF}"]`),
+      ).toBeVisible();
+      // Verglichen werden alle vier Provenienzmerkmale, nicht nur die Ids:
+      // gleiche Zuweisungen bei abweichender Version waeren derselbe Fehler,
+      // nur unauffaelliger.
+      expect(await sichtbareZuweisungen(zweiteSeite)).toEqual(ersteIds);
+      expect(await provenienz(zweiteSeite)).toEqual(ersteProvenienz);
+    } finally {
+      await zweiter.close();
+    }
   });
 });
