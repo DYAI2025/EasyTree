@@ -36,7 +36,12 @@
 import type { z } from "zod";
 
 import { gatewayFailed, gatewayOk, type GatewayResult } from "../gateway.js";
-import { IDEMPOTENCY_HEADER, ProblemDocumentSchema, type ProblemDocument } from "../primitives.js";
+import {
+  IDEMPOTENCY_HEADER,
+  IdempotencyKeySchema,
+  ProblemDocumentSchema,
+  type ProblemDocument,
+} from "../primitives.js";
 import type { PlanningGateway, WriteOptions } from "../planning/gateway.js";
 import {
   AssignmentDtoSchema,
@@ -164,7 +169,16 @@ export class HttpPlanningGateway implements PlanningGateway {
     if (authorization !== null) headers["authorization"] = authorization;
 
     if (call.idempotencyKey !== null) {
-      headers[IDEMPOTENCY_HEADER] = call.idempotencyKey;
+      // Geprueft, obwohl der Typ gebrandet ist: ein `as IdempotencyKey` beim
+      // Aufrufer umgeht den Brand, und ein leerer oder formal ungueltiger
+      // Schluessel waere fuer den Server nicht unterscheidbar von gar keinem.
+      // Der Fehler gehoert hierhin, wo er benannt werden kann, und nicht in
+      // eine Serverantwort, die niemand einem Header zuordnet.
+      const key = IdempotencyKeySchema.safeParse(call.idempotencyKey);
+      if (!key.success) {
+        return gatewayFailed<TOut>("CONTRACT_VIOLATION", null);
+      }
+      headers[IDEMPOTENCY_HEADER] = key.data;
     }
 
     let response: Response;
