@@ -9,13 +9,23 @@
  * ausschliesslich `request.jwt.claims`, und `PgTenantQueryRunner` setzt genau
  * das transaktionslokal.
  *
- * Diese Datei liefert die NAHT, nicht die Pruefung. Die Verifikation eines
- * Supabase-JWT braucht ein Geheimnis, also eine neue Umgebungsvariable — und
- * der kanonische Variablensatz hat laut CLAUDE.md exakt sechs Eintraege, deren
- * Erweiterung sechs Stellen beruehrt. Wichtiger: das vollstaendige Subjekt- und
- * Rollenmodell ist EYT-14 zugeordnet, ausdruecklich und mit Begruendung. Es
- * hier nebenbei zu erfinden hiesse, eine Sicherheitsentscheidung als
- * Nebeneffekt eines Referenzslices zu treffen.
+ * Diese Datei liefert die NAHT, nicht die Pruefung. EYT-50 implementiert
+ * KEINE Tokenverifikation und nimmt auch keine vorweg: weder ein Shared
+ * Secret, noch JWKS, noch eine Pruefung ueber den Auth-Server. Welche davon
+ * es wird, entscheidet EYT-14/EYT-87 zusammen mit Benutzerzuordnung, Rollen,
+ * Sessions, Revocation und Fehlerfaellen — also im Zusammenhang, in dem die
+ * Frage vollstaendig beantwortbar ist.
+ *
+ * Hier stand frueher, die Verifikation eines Supabase-JWT brauche zwingend ein
+ * Geheimnis und damit eine neue Umgebungsvariable. Das war eine vorweggenommene
+ * Architekturentscheidung und falsch: ein asymmetrisch signiertes Token laesst
+ * sich ueber die oeffentlichen JWKS pruefen, ganz ohne lokales Geheimnis. Die
+ * Aussage steht hier als Korrektur und nicht geloescht, weil sie in
+ * Commitverlauf und Ticketkommentaren weiterlebt.
+ *
+ * Was bleibt, ist die eigentliche Begruendung: das vollstaendige Subjekt- und
+ * Rollenmodell gehoert zu EYT-14. Es hier nebenbei zu erfinden hiesse, eine
+ * Sicherheitsentscheidung als Nebeneffekt eines Referenzslices zu treffen.
  *
  * ## Deshalb fail-closed statt vorlaeufig offen
  *
