@@ -21,12 +21,20 @@ Two layers of documents, deliberately not the same thing:
   read and cite: `docs/prd/CURRENT_PRD_v1.3.md`, `docs/traceability/REQUIREMENT_TO_JIRA_v1.3.csv`,
   `docs/validation/PRD_VALIDATION_v1.3.md`.
 
-Product source of truth is `docs/prd/CURRENT_PRD_v1.3.md`; agent boundaries and stop conditions
-are in [`docs/handoff/AGENT_HANDOFF_v1.3.md`](docs/handoff/AGENT_HANDOFF_v1.3.md). Architecture is
-split across [ADR-001](docs/architecture/ADR-001-boilerplate-architecture.md) (boilerplate) and
+Product source of truth is `docs/prd/CURRENT_PRD_v1.3.md`. The root artifacts above are generator
+and validation evidence, not a competing authority — where they disagree with the curated PRD,
+the PRD wins and the divergence is a defect. Architecture is split across
+[ADR-001](docs/architecture/ADR-001-boilerplate-architecture.md) (boilerplate) and
 `docs/architecture/ARCHITECTURE_DECISIONS_v1.3.md` (provider, hosting, retention, pilot) — neither
 supersedes the other. Work is tracked as Jira `EYT-*` tickets; commits and code comments
 reference those IDs.
+
+[`docs/handoff/AGENT_HANDOFF_v1.3.md`](docs/handoff/AGENT_HANDOFF_v1.3.md) holds the agent
+guardrails: required working method, prohibited actions, evidence rules, stop conditions and the
+human review checkpoints. **Read it before changing code** — the rules below are a summary of the
+parts that bite most often, not a replacement. Its mandatory sections are guarded by
+`apps/api/test/handoff-guardrails.test.ts`, because they were once removed without anyone
+noticing (EYT-89).
 
 ## Commands
 
