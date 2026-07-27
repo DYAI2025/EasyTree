@@ -13,6 +13,7 @@
  *   - ein Entwurf aaaa3333 ist der ANGEZEIGTE Stand
  *   - Organisation Beta haelt b5510001 in derselben Woche
  */
+import { PlanningWindowSchema } from "@easytree/contracts";
 import { expect, test } from "@playwright/test";
 
 const WOCHE = "2026-W40";
@@ -69,14 +70,12 @@ test.describe("Read-Through: Browser bis PostgreSQL", () => {
     // Nachweis 6: der Parameter ueberlebt das Rewrite.
     expect(url.searchParams.get("weekKey")).toBe(WOCHE);
 
-    // Die Antwort entspricht dem Vertrag und traegt Alpha-Daten.
-    const koerper = (await fensterAntwort.json()) as {
-      weekKey: string;
-      timeZone: string;
-      assignments: { id: string }[];
-      sourceVersion: { id: string; state: string } | null;
-      publishedVersionId: string | null;
-    };
+    // Die Antwort wird GEPRUEFT, nicht behauptet. Hier stand ein
+    // TypeScript-`as` — das wird beim Uebersetzen geloescht und prueft nichts,
+    // waehrend der Kommentar daneben "entspricht dem Vertrag" behauptete.
+    // `parse` wirft, wenn der Server etwas anderes liefert.
+    const koerper = PlanningWindowSchema.parse(await fensterAntwort.json());
+
     expect(koerper.weekKey).toBe(WOCHE);
     expect(koerper.timeZone.length).toBeGreaterThan(0);
     expect(koerper.sourceVersion).toEqual({ id: A_ENTWURF, state: "draft" });
@@ -177,5 +176,42 @@ test.describe("Read-Through: Browser bis PostgreSQL", () => {
     } finally {
       await zweiter.close();
     }
+  });
+});
+
+/**
+ * Nachweis 7 — laeuft in einem EIGENEN Playwright-Aufruf (EYT-50).
+ *
+ * Das Harness-Skript beendet die API zwischen den beiden Laeufen. Der Test
+ * steuert den Prozess ausdruecklich NICHT selbst: ein Test, der seine eigene
+ * Voraussetzung herstellt, prueft am Ende sein Herstellen und nicht das
+ * Verhalten. Ausserdem liefe er in einem parallelen Lauf allen anderen davon.
+ *
+ * Aufruf: `--grep "Nachweis 7"` nach dem SIGTERM, waehrend der gesunde Lauf
+ * mit `--grep-invert "Nachweis 7"` davor gelaufen ist.
+ */
+test.describe("Read-Through: API gestoppt", () => {
+  test("Nachweis 7: ohne API zeigt die UI UNAVAILABLE, keine Fixture, keine leere Woche", async ({
+    page,
+  }) => {
+    // Frischer Kontext durch den eigenen Lauf: was hier sichtbar ist, kann
+    // kein Rest der vorherigen, erfolgreichen Anzeige sein.
+    await page.goto(SEITE);
+
+    const fehler = page.getByTestId("planungsfenster-fehler");
+    await expect(fehler).toBeVisible();
+    await expect(fehler).toHaveAttribute("data-failure", "UNAVAILABLE");
+
+    // Kein Leerzustand: "nichts geplant" waere die Verwechslung, gegen die
+    // dieser ganze Slice gebaut ist.
+    await expect(page.getByTestId("planungsfenster-leer")).toHaveCount(0);
+    await expect(page.getByTestId("planungsfenster-liste")).toHaveCount(0);
+    await expect(page.getByTestId("planungsfenster-stand")).toHaveCount(0);
+    await expect(page.getByTestId("planungsfenster-version")).toHaveCount(0);
+
+    // Und keine einzige Zuweisung — insbesondere nicht die aus dem gesunden
+    // Lauf, die ein Cache oder ein Fallback zeigen koennte.
+    await expect(page.locator("[data-assignment-id]")).toHaveCount(0);
+    expect(await page.content()).not.toContain(A_ZUWEISUNG_ENTWURF);
   });
 });

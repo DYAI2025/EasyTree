@@ -20,17 +20,18 @@ werden. Branch Protection macht aus einem Vorschlag eine Zusage.
 Alle Jobs stammen aus `.github/workflows/ci.yml`. Da dort kein job-level `name:`
 gesetzt ist, entspricht der Check-Name exakt der Job-ID.
 
-| Check         | Deckt ab                                                                                                                   | Belegt                         |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `format`      | Prettier-Konformität des gesamten Repositories                                                                             | EYT-56                         |
-| `lint`        | ESLint über alle Workspaces                                                                                                | EYT-56                         |
-| `typecheck`   | TypeScript-Typprüfung über alle Workspaces                                                                                 | EYT-56                         |
-| `unit-tests`  | Unit-Smoke über alle Workspaces                                                                                            | EYT-56                         |
-| `build-web`   | Produktionsbuild der Web-/PWA-Shell                                                                                        | EYT-56, EYT-41                 |
-| `web-smoke`   | Playwright-Smoke in echtem Chromium inkl. axe, Fokus, Viewports                                                            | EYT-58, EYT-41                 |
-| `build-api`   | Produktionsbuild von API und Worker                                                                                        | EYT-56                         |
-| `secret-scan` | Getrackte `.env`-/Schlüsseldateien und gitleaks (gepinnt 8.24.3)                                                           | EYT-56                         |
-| `db-gates`    | Supabase-Migrationen, doppelter Reset, pgTAP, Tenant-Isolation fail-closed (direkt und über Supavisor), API-/Worker-Smokes | EYT-57, EYT-66, EYT-15, EYT-58 |
+| Check          | Deckt ab                                                                                                                                                            | Belegt                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `format`       | Prettier-Konformität des gesamten Repositories                                                                                                                      | EYT-56                         |
+| `lint`         | ESLint über alle Workspaces                                                                                                                                         | EYT-56                         |
+| `typecheck`    | TypeScript-Typprüfung über alle Workspaces                                                                                                                          | EYT-56                         |
+| `unit-tests`   | Unit-Smoke über alle Workspaces                                                                                                                                     | EYT-56                         |
+| `build-web`    | Produktionsbuild der Web-/PWA-Shell                                                                                                                                 | EYT-56, EYT-41                 |
+| `web-smoke`    | Playwright-Smoke in echtem Chromium inkl. axe, Fokus, Viewports                                                                                                     | EYT-58, EYT-41                 |
+| `build-api`    | Produktionsbuild von API und Worker                                                                                                                                 | EYT-56                         |
+| `secret-scan`  | Getrackte `.env`-/Schlüsseldateien und gitleaks (gepinnt 8.24.3)                                                                                                    | EYT-56                         |
+| `db-gates`     | Supabase-Migrationen, doppelter Reset, pgTAP, Tenant-Isolation fail-closed (direkt und über Supavisor), API-/Worker-Smokes                                          | EYT-57, EYT-66, EYT-15, EYT-58 |
+| `read-through` | Integrierter Lesepfad: Browser → Same-Origin-Rewrite → NestJS → RLS → PostgreSQL, mit Fremdtenant-Nichtsichtbarkeit, Reload, zweitem Browserkontext und API-Ausfall | EYT-50                         |
 
 `scripts/setup-branch-protection.sh` bricht ab, wenn `ci.yml` einen Job enthält, der
 nicht in dieser Liste steht. Ein neuer CI-Job wird dadurch nicht stillschweigend zum

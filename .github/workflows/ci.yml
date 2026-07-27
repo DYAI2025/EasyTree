@@ -355,3 +355,26 @@ jobs:
           SUPABASE_URL: "http://127.0.0.1:54321"
           SUPABASE_ANON_KEY: "ci-local-anon-key"
         run: bash scripts/smoke-worker.sh
+
+  # Integrierter Read-Through-Nachweis (EYT-50): Browser -> Same-Origin-Rewrite
+  # -> NestJS -> TenantQueryRunner -> RLS -> PostgreSQL.
+  #
+  # Der Job ist bewusst duenn. Die Orchestrierung liegt in einem Skript, weil
+  # ein `trap` nur im eigenen Prozess gilt: ueber mehrere Steps verteilt raeumte
+  # ein Fehlschlag die zuvor gestarteten Prozesse nicht ab.
+  read-through:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - run: bash scripts/read-through-harness.sh
+      - name: Logs und Traces sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-through-diagnose
+          path: |
+            harness-logs/
+            apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
