@@ -214,7 +214,9 @@ jobs:
         shell: bash
         run: |
           pnpm --filter @easytree/api exec vitest run test/planning-invariants.integration.test.ts 2>&1 | tee /tmp/planning-invariants.log
-          grep -E "\[planning-invariants\] mode=required executed=[1-9][0-9]* skipped=0" /tmp/planning-invariants.log
+          # Gleiche Bedingungen wie bei den Tenant-Gates: executed>=1,
+          # passed==executed, skipped==0 (EYT-90).
+          bash scripts/assert-tenant-report.sh planning-invariants /tmp/planning-invariants.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |
