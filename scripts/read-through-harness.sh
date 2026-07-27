@@ -100,7 +100,7 @@ echo "::group::10-12 Prozesse starten und Bereitschaft abwarten"
   SUPABASE_URL="http://127.0.0.1:54321" \
   SUPABASE_ANON_KEY="harness-anon-key" \
   API_PORT="$API_PORT" \
-  LOG_LEVEL="error" \
+  LOG_LEVEL="debug" \
   node dist-harness/test/harness/main.js "$SUBJEKT_A" "$API_PORT"
 ) >"$LOGS/api.log" 2>&1 &
 API_PID=$!
@@ -116,6 +116,27 @@ warte_auf "Web" "$WEB_ORIGIN" "$WEB_PID"
 # Und der Beweis, dass das Rewrite steht, BEVOR ein Browser startet: /health
 # ueber die WEB-Origin muss NestJS erreichen.
 warte_auf "Rewrite" "${WEB_ORIGIN}/health" "$WEB_PID"
+echo "::endgroup::"
+
+echo "::group::12b Diagnoseabruf vor dem Browser"
+# Der Fachaufruf einmal direkt, BEVOR Playwright startet.
+#
+# Grund: der Exception-Filter gibt bewusst keine Stacktraces aus (EYT-58), und
+# LOG_LEVEL=error haelt den Nest-Logger still. Ein 500 waere damit im
+# Browsertest sichtbar und im Log unsichtbar — genau das ist beim ersten Lauf
+# passiert, und die Diagnose kostete einen ganzen Durchgang.
+#
+# Die Antwort landet im Artefakt, egal ob sie gelingt. `|| true`, weil dieser
+# Schritt DIAGNOSTIZIERT und nicht urteilt: die Zusicherungen stehen in den
+# Tests.
+{
+  echo "--- GET /api/v1/planung/fenster?weekKey=2026-W40 (direkt an die API) ---"
+  curl -sS -i --max-time 10 "${API_ORIGIN}/api/v1/planung/fenster?weekKey=2026-W40" || true
+  echo
+  echo "--- dasselbe ueber die WEB-Origin (Rewrite) ---"
+  curl -sS -i --max-time 10 "${WEB_ORIGIN}/api/v1/planung/fenster?weekKey=2026-W40" || true
+} >"$LOGS/diagnose.txt" 2>&1
+sed -n '1,40p' "$LOGS/diagnose.txt"
 echo "::endgroup::"
 
 echo "::group::13 Gesunde Nachweise"
