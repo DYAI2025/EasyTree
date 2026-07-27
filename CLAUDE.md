@@ -204,12 +204,12 @@ new job silently becomes optional.
 
 `db-gates` is the heavy one: starts the real Supabase stack, resets twice, runs pgTAP twice,
 proves the catalogue meta gate is not vacuous (creates a deliberately open table and requires
-the suite to go red *naming that table*), resets again, drops and re-creates `easytree_app` to
+the suite to go red _naming that table_), resets again, drops and re-creates `easytree_app` to
 prove the `create` branch of migration `0003`, restarts the stack to re-provision the Supavisor
 tenant, then runs the tenant gate against both a direct connection and the transaction-mode
 pooler (tenant id and port are derived from the running container, not hardcoded), then the
 planning-invariants gate (EYT-49 — two real connections, because one session can show a
-constraint *rejecting* but not *serialising*), then the API/worker process smokes. Every gate
+constraint _rejecting_ but not _serialising_), then the API/worker process smokes. Every gate
 asserts its own greppable `[…] mode=required executed=… skipped=0` line.
 
 ## Testing notes
