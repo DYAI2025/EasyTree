@@ -14,8 +14,28 @@ import {
 } from "../lib/api-proxy-target";
 
 describe("normalizeProxyTarget", () => {
-  it("nimmt den dokumentierten Standard, wenn nichts gesetzt ist", () => {
-    expect(normalizeProxyTarget(undefined)).toBe(DEFAULT_API_PROXY_TARGET);
+  it("nimmt den dokumentierten Standard in development und test", () => {
+    expect(normalizeProxyTarget(undefined, "test")).toBe(DEFAULT_API_PROXY_TARGET);
+    expect(normalizeProxyTarget("", "development")).toBe(DEFAULT_API_PROXY_TARGET);
+    expect(normalizeProxyTarget("   ", "development")).toBe(DEFAULT_API_PROXY_TARGET);
+  });
+
+  it("bricht in production ohne Wert ab", () => {
+    // Fail-closed: ein Proxy auf localhost, waehrend die API woanders laeuft,
+    // erzeugt keinen Fehler beim Bauen — sondern eine Weiterleitung ins Leere,
+    // die im Browser wie eine leere Woche aussieht.
+    expect(() => normalizeProxyTarget(undefined, "production")).toThrow(InvalidProxyTargetError);
+    expect(() => normalizeProxyTarget("", "production")).toThrow(InvalidProxyTargetError);
+  });
+
+  it("lehnt Zugangsdaten in der Ziel-URL ab", () => {
+    // Sie landen sonst in Konfiguration, Logs und Fehlermeldungen.
+    expect(() => normalizeProxyTarget("http://nutzer:geheim@127.0.0.1:3001")).toThrow(
+      InvalidProxyTargetError,
+    );
+    expect(() => normalizeProxyTarget("http://nutzer@127.0.0.1:3001")).toThrow(
+      InvalidProxyTargetError,
+    );
   });
 
   it("laesst eine absolute http- oder https-URL durch", () => {
@@ -36,7 +56,6 @@ describe("normalizeProxyTarget", () => {
   });
 
   it.each([
-    ["leer", ""],
     ["relativ", "/api"],
     ["ohne Schema", "127.0.0.1:3001"],
     ["falsches Schema", "ftp://127.0.0.1:3001"],
