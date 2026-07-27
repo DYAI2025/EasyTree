@@ -25,7 +25,14 @@
  */
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { inTenantTx, ORG_ALPHA, probeDatabase, USER_A, USER_C } from "./tenant-context.helper";
+import {
+  FailClosedGate,
+  inTenantTx,
+  ORG_ALPHA,
+  probeDatabase,
+  USER_A,
+  USER_C,
+} from "./tenant-context.helper";
 
 /**
  * Die lokale Supabase CLI provisioniert fuer Supavisor eine eigene
@@ -42,8 +49,7 @@ const POOLER_URL =
 
 /** Fail-closed-Modus (EYT-66-Semantik): "required" (CI) | "local" (Default). */
 const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local";
-let executedCount = 0;
-let skippedCount = 0;
+const gate = new FailClosedGate("tenant-pooling", TENANT_TESTS_MODE, "EYT-71");
 
 let poolerAvailable = false;
 let client: Client;
@@ -56,14 +62,13 @@ let client: Client;
 function poolerIt(name: string, fn: () => Promise<void>): void {
   it(name, async (ctx) => {
     if (!poolerAvailable) {
-      skippedCount++;
+      gate.markSkipped();
       ctx.skip(
         `SKIPPED: Transaction-Pooler unter ${POOLER_URL} nicht erreichbar — ` +
           "lokal starten mit `pnpm exec supabase start && pnpm exec supabase db reset`.",
       );
     }
-    executedCount++;
-    await fn();
+    await gate.run(fn);
   });
 }
 
@@ -98,14 +103,8 @@ describe("tenant isolation through real transaction pooler (Supavisor)", () => {
   afterAll(() => {
     // Report fuer CI-Step-Summary (gleiches Muster wie [tenant-isolation],
     // eigenes Prefix — CI greppt beide Zeilen getrennt, Task 5/EYT-15).
-    process.stdout.write(
-      `[tenant-pooling] mode=${TENANT_TESTS_MODE} executed=${executedCount} skipped=${skippedCount}\n`,
-    );
-    if (TENANT_TESTS_MODE === "required" && skippedCount > 0) {
-      throw new Error(
-        `[tenant-pooling] fail-closed: ${skippedCount} Pflicht-Pooler-Tests uebersprungen (EYT-15).`,
-      );
-    }
+    process.stdout.write(gate.reportLine());
+    gate.assertOrThrow();
   });
 
   poolerIt(

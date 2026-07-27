@@ -21,12 +21,20 @@ Two layers of documents, deliberately not the same thing:
   read and cite: `docs/prd/CURRENT_PRD_v1.3.md`, `docs/traceability/REQUIREMENT_TO_JIRA_v1.3.csv`,
   `docs/validation/PRD_VALIDATION_v1.3.md`.
 
-Product source of truth is `docs/prd/CURRENT_PRD_v1.3.md`; agent boundaries and stop conditions
-are in [`docs/handoff/AGENT_HANDOFF_v1.3.md`](docs/handoff/AGENT_HANDOFF_v1.3.md). Architecture is
-split across [ADR-001](docs/architecture/ADR-001-boilerplate-architecture.md) (boilerplate) and
+Product source of truth is `docs/prd/CURRENT_PRD_v1.3.md`. The root artifacts above are generator
+and validation evidence, not a competing authority — where they disagree with the curated PRD,
+the PRD wins and the divergence is a defect. Architecture is split across
+[ADR-001](docs/architecture/ADR-001-boilerplate-architecture.md) (boilerplate) and
 `docs/architecture/ARCHITECTURE_DECISIONS_v1.3.md` (provider, hosting, retention, pilot) — neither
 supersedes the other. Work is tracked as Jira `EYT-*` tickets; commits and code comments
 reference those IDs.
+
+[`docs/handoff/AGENT_HANDOFF_v1.3.md`](docs/handoff/AGENT_HANDOFF_v1.3.md) holds the agent
+guardrails: required working method, prohibited actions, evidence rules, stop conditions and the
+human review checkpoints. **Read it before changing code** — the rules below are a summary of the
+parts that bite most often, not a replacement. Its mandatory sections are guarded by
+`apps/api/test/handoff-guardrails.test.ts`, because they were once removed without anyone
+noticing (EYT-89).
 
 ## Commands
 
@@ -240,9 +248,15 @@ asserts its own greppable `[…] mode=required executed=… skipped=0` line.
 - Playwright (`apps/web/e2e/`) runs against the production build (`next start` on 3000) with
   axe; it is not part of `pnpm test`. It starts that server itself
   (`reuseExistingServer: false`), so port 3000 must be free.
-- `scripts/smoke-worker.sh` detects listening sockets via `ss` or `/proc/net/tcp*` — **on macOS
-  neither exists, so the "no open port" assertion passes vacuously**. Only the Linux CI run
-  (`db-gates`) is evidence for that claim.
+- `scripts/smoke-worker.sh` distinguishes three states (EYT-70): a listening socket belongs to
+  the worker (red), the check ran and found none (green), or **the check could not run at all
+  (red, not "no listener")**. Probes in order: `/proc` (authoritative for a process we started),
+  `lsof` (macOS/BSD), `ss` (fallback). It no longer passes vacuously on macOS — `lsof` gives a
+  real answer there, and a probe that errors or returns nothing fails the smoke. Two test hooks
+  make the red case reproducible: `EASYTREE_SMOKE_PROBE_PID` checks one pid without starting a
+  worker, `EASYTREE_SMOKE_FORCE_PROBE=proc|lsof|ss|none` forces a method. Caveat: the
+  end-to-end smoke still needs a reachable database, because the worker refuses to boot without
+  one — so on a machine with no Supabase stack, only `db-gates` exercises the full path.
 - Automated a11y lives in `apps/web/test/a11y.test.tsx` (jsdom + axe) and, since Sprint 2, in
   `apps/web/e2e/shell-smoke.spec.ts` (real Chromium, CI job `web-smoke`). In
   `docs/runbooks/a11y-checklist.md`, items 1–6 are passed and regression-guarded; only item 7

@@ -37,14 +37,19 @@
 import { Client, DatabaseError } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { ORG_ALPHA, probeDatabase, USER_A } from "./tenant-context.helper";
+import { FailClosedGate, ORG_ALPHA, probeDatabase, USER_A } from "./tenant-context.helper";
 
 const DB_URL =
   process.env["EASYTREE_TEST_DB_URL"] ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
 const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local"; // "required" | "local"
-let executedCount = 0;
-let skippedCount = 0;
+
+// EYT-90: dritter Nutzer desselben Zaehlwerks. Vorher stieg `executed` VOR der
+// Assertion und es gab kein `passed` — `executed=5 skipped=0` las sich wie fuenf
+// bestandene Invariantentests, obwohl die Zahl das nie getragen hat. Die
+// Fehlerpropagation war nie kaputt (der CI-Step setzt `shell: bash`, also
+// `-eo pipefail`); betroffen war allein die Evidence-Zeile.
+const gate = new FailClosedGate("planning-invariants", TENANT_TESTS_MODE, "EYT-90");
 
 let dbAvailable = false;
 let sessionA: Client;
@@ -76,14 +81,13 @@ const SHIFT_B_OVERLAPPING = { start: "2026-09-28T10:00:00Z", end: "2026-09-28T18
 function dbIt(name: string, fn: () => Promise<void>): void {
   it(name, async (ctx) => {
     if (!dbAvailable) {
-      skippedCount++;
+      gate.markSkipped();
       ctx.skip(
         `SKIPPED: Supabase-Postgres unter ${DB_URL} nicht erreichbar — ` +
           "lokal starten mit `pnpm exec supabase start && pnpm exec supabase db reset`.",
       );
     }
-    executedCount++;
-    await fn();
+    await gate.run(fn);
   });
 }
 
@@ -156,14 +160,8 @@ describe("planning invariants under concurrency (EYT-49)", () => {
   });
 
   afterAll(() => {
-    process.stdout.write(
-      `[planning-invariants] mode=${TENANT_TESTS_MODE} executed=${executedCount} skipped=${skippedCount}\n`,
-    );
-    if (TENANT_TESTS_MODE === "required" && skippedCount > 0) {
-      throw new Error(
-        `[planning-invariants] fail-closed: ${skippedCount} Pflichttests uebersprungen (EYT-49).`,
-      );
-    }
+    process.stdout.write(gate.reportLine());
+    gate.assertOrThrow();
   });
 
   dbIt(
