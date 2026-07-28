@@ -56,7 +56,7 @@ let sessionA: Client;
 let sessionB: Client;
 
 /** Seed-Konstanten aus supabase/seed.sql (Org Alpha). */
-const EMPLOYEE_ALPHA = "00000000-0000-4000-8000-0000004010a1";
+const EMPLOYEE_ALPHA = "00000000-0000-0000-0000-0000004010a1";
 const WORKSITE_ALPHA = "00000000-0000-4000-8000-0000005010a1";
 
 /**
