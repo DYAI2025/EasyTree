@@ -1,0 +1,44 @@
+# gitleaks-Konfiguration (EYT-88-Nebenvorgang).
+#
+# Eng begrenzte Ausnahme, KEINE pauschale Freistellung.
+#
+# ## Befund
+#
+# `secret-scan` meldete vier Treffer der Regel `generic-api-key`, alle im Commit
+# a559df2 und alle in zwei Dateien: `docs/ux/(519) Pinterest.html` und
+# `docs/ux/ety-ds1.html`. Beide sind mit dem Browser gespeicherte fremde
+# Webseiten, die als UX-Referenz abgelegt wurden.
+#
+# Geprueft, was die Treffer sind — Kontext, nicht Wert:
+#
+#   csp_nonce   einmaliger Content-Security-Policy-Nonce der Seitenauslieferung
+#   unauth_id   anonyme Besucherkennung einer abgemeldeten Sitzung
+#   node_id     base64-kodierte GraphQL-Knotenkennung
+#   epik        Werbe-Attributionscookie des fremden Anbieters
+#
+# Keiner davon ist ein Zugangsdatum dieses Projekts. Keiner gewaehrt Zugriff auf
+# etwas, das uns gehoert. Die Regel `generic-api-key` schlaegt auf hohe Entropie
+# an; lange zufaellig aussehende Zeichenketten sind in einer gespeicherten
+# Webseite die Norm.
+#
+# ## Was diese Ausnahme NICHT tut
+#
+# Sie deaktiviert keine Regel, gilt fuer kein anderes Verzeichnis und fuer keine
+# andere Dateiendung. Eine `.env`, ein Schluessel oder ein Token an irgendeiner
+# anderen Stelle im Repository wird weiterhin gefunden — die uebrigen Schritte
+# des Jobs (getrackte `.env`- und Key-Dateien) sind ohnehin unberuehrt.
+#
+# ## Getrennt davon: ein Datenschutzhinweis
+#
+# `unauth_id` und `epik` sind Tracking-Kennungen der Person, die diese Seiten
+# gespeichert hat. Sie sind kein Sicherheitsrisiko fuer das Projekt, gehoeren
+# aber auch nicht dauerhaft in ein Repository. Ob die beiden Dateien ueberhaupt
+# bleiben sollen, ist eine Produktentscheidung und wird hier nicht getroffen.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[rules.allowlist]
+paths = ['''docs/ux/.*\.html$''']

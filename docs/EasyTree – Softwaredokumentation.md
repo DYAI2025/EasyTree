@@ -2,9 +2,9 @@
 
 # EasyTree – Softwaredokumentation
 
-> **Dokumentstatus:** lebende Systemdokumentation    
-> **Letzte fachliche Aktualisierung:** 27.07.2026    
-> **Geltung:** Architektur- und Implementierungsstand des kanonischen Repositories `DYAI2025/EasyTree` (Default-Branch `master`)    
+> **Dokumentstatus:** lebende Systemdokumentation  
+> **Letzte fachliche Aktualisierung:** 27.07.2026  
+> **Geltung:** Architektur- und Implementierungsstand des kanonischen Repositories `DYAI2025/EasyTree` (Default-Branch `master`)  
 > **Produktstatus:** Plattformbasis ist implementiert; fachlicher MVP-Referenzfluss ist noch nicht fertiggestellt. Diese Seite ist keine Produktionsfreigabe.
 
 ## 1. Zweck und Produktkontext
@@ -19,18 +19,18 @@ Der Referenzfluss ist in [EYT-50](https://dyai2026.atlassian.net/browse/EYT-50) 
 
 ## 2. Quellen, Gültigkeit und Lesart
 
-| Quelle | Rolle | Gültigkeit |
-| --- | --- | --- |
-| [ADR-001](https://github.com/DYAI2025/EasyTree/blob/master/docs/architecture/ADR-001-boilerplate-architecture.md) | verbindliche Architekturentscheidung für die Boilerplate | akzeptiert |
-| [Repository-README](https://github.com/DYAI2025/EasyTree/blob/master/README.md) | aktuelle Struktur, lokale Befehle, CI- und Laufzeitbeschreibung | implementierte Basis, soweit durch Repository belegbar |
-| [EYT-45](https://dyai2026.atlassian.net/browse/EYT-45) | Datenzugriff und Tenant-Transaktion | offen |
-| [EYT-49](https://dyai2026.atlassian.net/browse/EYT-49) | Datenbank-Invarianten und Nebenläufigkeit | offen |
-| [EYT-50](https://dyai2026.atlassian.net/browse/EYT-50) | vertikaler Plan→Publish→Mitarbeiter-Leseweg | offen |
-| [EYT-86](https://dyai2026.atlassian.net/browse/EYT-86) und [PR #18](https://github.com/DYAI2025/EasyTree/pull/18) | Fachschema, RLS-Metagates und Migrationen | PR offen; finale CI-/Merge-Evidenz ausstehend |
-| [Datenbank-Runbook](https://github.com/DYAI2025/EasyTree/blob/master/docs/runbooks/database-workflow.md) | verbindlicher lokaler Migrationsworkflow | implementiert/dokumentiert |
-| [Accessibility-Checkliste](https://github.com/DYAI2025/EasyTree/blob/master/docs/runbooks/a11y-checklist.md) | A11y-Nachweis und offene manuelle Prüfung | automatisierte Checks belegt; Screenreader-Smoke offen |
+| Quelle                                                                                                            | Rolle                                                           | Gültigkeit                                             |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------ |
+| [ADR-001](https://github.com/DYAI2025/EasyTree/blob/master/docs/architecture/ADR-001-boilerplate-architecture.md) | verbindliche Architekturentscheidung für die Boilerplate        | akzeptiert                                             |
+| [Repository-README](https://github.com/DYAI2025/EasyTree/blob/master/README.md)                                   | aktuelle Struktur, lokale Befehle, CI- und Laufzeitbeschreibung | implementierte Basis, soweit durch Repository belegbar |
+| [EYT-45](https://dyai2026.atlassian.net/browse/EYT-45)                                                            | Datenzugriff und Tenant-Transaktion                             | offen                                                  |
+| [EYT-49](https://dyai2026.atlassian.net/browse/EYT-49)                                                            | Datenbank-Invarianten und Nebenläufigkeit                       | offen                                                  |
+| [EYT-50](https://dyai2026.atlassian.net/browse/EYT-50)                                                            | vertikaler Plan→Publish→Mitarbeiter-Leseweg                     | offen                                                  |
+| [EYT-86](https://dyai2026.atlassian.net/browse/EYT-86) und [PR #18](https://github.com/DYAI2025/EasyTree/pull/18) | Fachschema, RLS-Metagates und Migrationen                       | PR offen; finale CI-/Merge-Evidenz ausstehend          |
+| [Datenbank-Runbook](https://github.com/DYAI2025/EasyTree/blob/master/docs/runbooks/database-workflow.md)          | verbindlicher lokaler Migrationsworkflow                        | implementiert/dokumentiert                             |
+| [Accessibility-Checkliste](https://github.com/DYAI2025/EasyTree/blob/master/docs/runbooks/a11y-checklist.md)      | A11y-Nachweis und offene manuelle Prüfung                       | automatisierte Checks belegt; Screenreader-Smoke offen |
 
-**Begriffe:** *implementiert* bedeutet im Repository vorhanden. *geplant* bedeutet Jira-/ADR-Entscheidung ohne vollständigen Laufzeitnachweis. *offen* bedeutet nicht als abgenommen oder gemerged behandeln. Alle Architekturentscheidungen sind bei ihren Revisionsbedingungen erneut zu prüfen.
+**Begriffe:** _implementiert_ bedeutet im Repository vorhanden. _geplant_ bedeutet Jira-/ADR-Entscheidung ohne vollständigen Laufzeitnachweis. _offen_ bedeutet nicht als abgenommen oder gemerged behandeln. Alle Architekturentscheidungen sind bei ihren Revisionsbedingungen erneut zu prüfen.
 
 ## 3. Architektur auf einen Blick
 
@@ -49,29 +49,29 @@ HTTP-API (NestJS) ─────┐
 
 ### Architekturentscheidungen
 
-| Entscheidung | Begründung | Konsequenz / Revisionsbedingung |
-| --- | --- | --- |
-| Next.js-Web/PWA plus NestJS-API/Worker | UI, fachliche Kommandos und Hintergrundarbeit bleiben getrennt, ohne verteilte Anfangskomplexität | Überdenken, wenn der API-Kern nachweislich unverhältnismäßig bremst |
-| Ein NestJS-Codepaket, zwei Entrypoints | API und Worker teilen Module/DI, Worker öffnet keinen HTTP-Port | getrennte Skalierung bleibt möglich |
-| PostgreSQL/Supabase als transaktionaler Kern | RLS, Constraints, FK-Integrität und lokale reproduzierbare Tests | separate Datenbank/Datenresidenz erst bei belegter Anforderung |
-| Shared-Schema-Multitenancy | geringer Betriebsaufwand und einheitliche Produktbasis | jeder Tenant-Datensatz braucht Organisationseinbettung; große Sondermandanten können später getrennt werden |
-| SQL-Migrationen als alleinige Schemaquelle | Änderungen sind reviewbar und reproduzierbar | Dashboard-Schemaänderungen sind verboten; Migrationen sind append-only |
-| Operative Writes nur über Backend-Commands | Browser und LLM/Automatisierung dürfen nicht direkt in operative Tabellen schreiben | API-Vertrag und serverseitige Autorisierung werden Pflicht |
-| Transactional Outbox für asynchrone Arbeit | Business-Write und Folgeauftrag können gemeinsam committen/rollbacken | keine Exactly-once-Garantie behaupten; Verbraucher bleiben idempotent |
-| Web zuerst, native Mobile später | Planner-Ansichten gehören ins Web; native/offline braucht belegten Feldnutzen | Offline-Queue, Verschlüsselung und Konfliktmodell erst bei realem Bedarf |
+| Entscheidung                                 | Begründung                                                                                        | Konsequenz / Revisionsbedingung                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Next.js-Web/PWA plus NestJS-API/Worker       | UI, fachliche Kommandos und Hintergrundarbeit bleiben getrennt, ohne verteilte Anfangskomplexität | Überdenken, wenn der API-Kern nachweislich unverhältnismäßig bremst                                         |
+| Ein NestJS-Codepaket, zwei Entrypoints       | API und Worker teilen Module/DI, Worker öffnet keinen HTTP-Port                                   | getrennte Skalierung bleibt möglich                                                                         |
+| PostgreSQL/Supabase als transaktionaler Kern | RLS, Constraints, FK-Integrität und lokale reproduzierbare Tests                                  | separate Datenbank/Datenresidenz erst bei belegter Anforderung                                              |
+| Shared-Schema-Multitenancy                   | geringer Betriebsaufwand und einheitliche Produktbasis                                            | jeder Tenant-Datensatz braucht Organisationseinbettung; große Sondermandanten können später getrennt werden |
+| SQL-Migrationen als alleinige Schemaquelle   | Änderungen sind reviewbar und reproduzierbar                                                      | Dashboard-Schemaänderungen sind verboten; Migrationen sind append-only                                      |
+| Operative Writes nur über Backend-Commands   | Browser und LLM/Automatisierung dürfen nicht direkt in operative Tabellen schreiben               | API-Vertrag und serverseitige Autorisierung werden Pflicht                                                  |
+| Transactional Outbox für asynchrone Arbeit   | Business-Write und Folgeauftrag können gemeinsam committen/rollbacken                             | keine Exactly-once-Garantie behaupten; Verbraucher bleiben idempotent                                       |
+| Web zuerst, native Mobile später             | Planner-Ansichten gehören ins Web; native/offline braucht belegten Feldnutzen                     | Offline-Queue, Verschlüsselung und Konfliktmodell erst bei realem Bedarf                                    |
 
 ## 4. Repository- und Komponentenkarte
 
-| Baustein | Pfad | Aufgabe | aktueller Nachweis / Grenze |
-| --- | --- | --- | --- |
-| Web | `apps/web` | Next.js App Router, mobile-first PWA-Shell, Planer- und Mitarbeiteroberflächen | Shell, Accessibility-Basis und API-Client-Injektion vorhanden; Fachoberflächen noch nicht vollständig integriert |
-| API | `apps/api` | NestJS HTTP-Endpunkt, Domänenkommandos, Auth-/Tenantgrenze | `GET /health`, `GET /ready`, Correlation-ID, strukturierte Fehler und Shutdown vorhanden; EYT-45 Business-Transaktionspfad offen |
-| Worker | `apps/api/src/worker.ts` | Hintergrundarbeit aus demselben NestJS-Codepaket | kein HTTP-Listener; spätere Outbox-Verarbeitung vorgesehen |
-| UI-Paket | `packages/ui` | domänenfreie Primitives, z. B. Button, Card, VisuallyHidden | Fachlogik verbleibt in Apps |
-| Konfiguration | `packages/config` | validierte Umgebungsvariablen und Secret-Redaktion | keine echten Secrets im Repository |
-| Datenbank | `supabase/` | lokaler Supabase-Stack, Migrationen, Seed, pgTAP | SQL ist Schema-Source-of-Truth |
-| Dokumentation | `docs/` | ADRs, Pläne und Runbooks | diese Confluence-Seite ergänzt, ersetzt aber nicht die versionierten technischen Quellen |
-| Qualitätsgates | `.github/workflows/ci.yml` | format, lint, typecheck, unit, build, Secret-Scan, DB- und Web-Gates | Pflichtchecks laut README aktiv; PR-spezifische Ergebnisse separat bewerten |
+| Baustein       | Pfad                       | Aufgabe                                                                        | aktueller Nachweis / Grenze                                                                                                      |
+| -------------- | -------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Web            | `apps/web`                 | Next.js App Router, mobile-first PWA-Shell, Planer- und Mitarbeiteroberflächen | Shell, Accessibility-Basis und API-Client-Injektion vorhanden; Fachoberflächen noch nicht vollständig integriert                 |
+| API            | `apps/api`                 | NestJS HTTP-Endpunkt, Domänenkommandos, Auth-/Tenantgrenze                     | `GET /health`, `GET /ready`, Correlation-ID, strukturierte Fehler und Shutdown vorhanden; EYT-45 Business-Transaktionspfad offen |
+| Worker         | `apps/api/src/worker.ts`   | Hintergrundarbeit aus demselben NestJS-Codepaket                               | kein HTTP-Listener; spätere Outbox-Verarbeitung vorgesehen                                                                       |
+| UI-Paket       | `packages/ui`              | domänenfreie Primitives, z. B. Button, Card, VisuallyHidden                    | Fachlogik verbleibt in Apps                                                                                                      |
+| Konfiguration  | `packages/config`          | validierte Umgebungsvariablen und Secret-Redaktion                             | keine echten Secrets im Repository                                                                                               |
+| Datenbank      | `supabase/`                | lokaler Supabase-Stack, Migrationen, Seed, pgTAP                               | SQL ist Schema-Source-of-Truth                                                                                                   |
+| Dokumentation  | `docs/`                    | ADRs, Pläne und Runbooks                                                       | diese Confluence-Seite ergänzt, ersetzt aber nicht die versionierten technischen Quellen                                         |
+| Qualitätsgates | `.github/workflows/ci.yml` | format, lint, typecheck, unit, build, Secret-Scan, DB- und Web-Gates           | Pflichtchecks laut README aktiv; PR-spezifische Ergebnisse separat bewerten                                                      |
 
 ## 5. Laufzeitverhalten und Schnittstellen
 
@@ -106,15 +106,15 @@ REST/OpenAPI mit generiertem Webclient ist die gewählte Vertragsrichtung. Der k
 
 Bereits vorhanden bzw. als Grundlage behandelt werden `organizations`, `users` und `memberships`. EYT-86 ergänzt für den Sprint-3-Referenzfluss:
 
-| Entität | Verantwortung | Status |
-| --- | --- | --- |
-| `employees` | Mitarbeiterstamm und spätere Benutzerzuordnung | PR #18 offen |
-| `worksites` | Baustellen-/Einsatzorte | PR #18 offen |
-| `plan_versions` | revisionsfähige Planversionen | PR #18 offen |
-| `assignments` | Mitarbeiterzuordnung mit Zeitintervall und Planversion | PR #18 offen |
-| `audit_events` | append-only Auditereignisse | PR #18 offen |
-| `outbox_messages` | transaktional erzeugte Folgeaufträge | PR #18 offen |
-| IANA-Zeitzone | Organisation oder gleichwertiger Fachträger | PR #18 offen |
+| Entität           | Verantwortung                                          | Status       |
+| ----------------- | ------------------------------------------------------ | ------------ |
+| `employees`       | Mitarbeiterstamm und spätere Benutzerzuordnung         | PR #18 offen |
+| `worksites`       | Baustellen-/Einsatzorte                                | PR #18 offen |
+| `plan_versions`   | revisionsfähige Planversionen                          | PR #18 offen |
+| `assignments`     | Mitarbeiterzuordnung mit Zeitintervall und Planversion | PR #18 offen |
+| `audit_events`    | append-only Auditereignisse                            | PR #18 offen |
+| `outbox_messages` | transaktional erzeugte Folgeaufträge                   | PR #18 offen |
+| IANA-Zeitzone     | Organisation oder gleichwertiger Fachträger            | PR #18 offen |
 
 Bewusst **nicht** Bestandteil von EYT-86: `time_entries`, Korrekturen, `absence_requests`, Skills/Zertifikate, Fahrzeuge/Equipment, Ressourcenreservierung, Wetter, Notifications, Realtime-Publication, persistierte Konfliktresultate und die endgültige Rollen-/Self-Service-Autorisierung. `app.current_employee_id()` wird erst mit EYT-14 entschieden.
 
@@ -139,13 +139,13 @@ Die erwartete Laufzeitprobe ist noch offen: Vor dem Rollenwechsel muss ein Busin
 
 ### CI-Gates
 
-| Gate | Zweck |
-| --- | --- |
-| format, lint, typecheck, unit-tests | Codeformatierung, statische Regeln, Typen und Unit-Tests |
-| build-web, build-api | Produktionsbuilds von Web sowie API/Worker |
-| secret-scan | keine Secrets, Keys oder .env-Dateien im Repository |
-| db-gates | Migrationen, Reset, pgTAP und fail-closed Tenant-/RLS-Prüfungen |
-| web-smoke | Chromium-/Playwright-Smoke einschließlich automatisierter Accessibility-Prüfung |
+| Gate                                | Zweck                                                                           |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| format, lint, typecheck, unit-tests | Codeformatierung, statische Regeln, Typen und Unit-Tests                        |
+| build-web, build-api                | Produktionsbuilds von Web sowie API/Worker                                      |
+| secret-scan                         | keine Secrets, Keys oder .env-Dateien im Repository                             |
+| db-gates                            | Migrationen, Reset, pgTAP und fail-closed Tenant-/RLS-Prüfungen                 |
+| web-smoke                           | Chromium-/Playwright-Smoke einschließlich automatisierter Accessibility-Prüfung |
 
 Für jede Schemaänderung gelten: PR-Review, mindestens zwei aufeinanderfolgende lokale Resets, pgTAP, ausschließlich synthetische Seeds und append-only Forward-Fixes. Destruktive Rollbacks sind nach produktiver Dateneinführung ohne belegten Restore verboten.
 
@@ -165,19 +165,19 @@ Planungslogik wird später in harte Constraints und Optimierungsziele getrennt. 
 
 ## 9. Nachverfolgbarkeit: Entscheidung → Umsetzung → offene Arbeit
 
-| Entscheidung / Regel | Umsetzung bzw. Ticket | Abnahmestatus |
-| --- | --- | --- |
-| Split-Monolith | ADR-001; `apps/web`, `apps/api`, `packages/*` | Basis implementiert |
-| API und Worker trennen | EYT-42, `main.ts` / `worker.ts` | Basis implementiert |
-| Web ohne direkten Supabase-Schreibzugriff | EYT-41, injizierter API-Client | Basis implementiert |
-| SQL-only Schema + lokale Reproduzierbarkeit | EYT-44, Datenbank-Runbook | implementiert/dokumentiert |
-| RLS/Tenant-Gate | EYT-15 / EYT-45 / EYT-86 | teilweise; Query-Laufzeitvertrag offen |
-| Kerndomänenschema | EYT-86, PR #18 | offen, nicht gemerged |
-| Publish-/Intervallinvarianten | EYT-49 | offen |
-| Integrierter Referenzfluss | EYT-50 | offen |
-| Rollen und Self-Service | EYT-14 | offen |
-| Login/Einladung/Reset | EYT-87 | offen |
-| UI-Tokens, Assets, Layoutprimitives | EYT-80 | offen |
+| Entscheidung / Regel                        | Umsetzung bzw. Ticket                         | Abnahmestatus                          |
+| ------------------------------------------- | --------------------------------------------- | -------------------------------------- |
+| Split-Monolith                              | ADR-001; `apps/web`, `apps/api`, `packages/*` | Basis implementiert                    |
+| API und Worker trennen                      | EYT-42, `main.ts` / `worker.ts`               | Basis implementiert                    |
+| Web ohne direkten Supabase-Schreibzugriff   | EYT-41, injizierter API-Client                | Basis implementiert                    |
+| SQL-only Schema + lokale Reproduzierbarkeit | EYT-44, Datenbank-Runbook                     | implementiert/dokumentiert             |
+| RLS/Tenant-Gate                             | EYT-15 / EYT-45 / EYT-86                      | teilweise; Query-Laufzeitvertrag offen |
+| Kerndomänenschema                           | EYT-86, PR #18                                | offen, nicht gemerged                  |
+| Publish-/Intervallinvarianten               | EYT-49                                        | offen                                  |
+| Integrierter Referenzfluss                  | EYT-50                                        | offen                                  |
+| Rollen und Self-Service                     | EYT-14                                        | offen                                  |
+| Login/Einladung/Reset                       | EYT-87                                        | offen                                  |
+| UI-Tokens, Assets, Layoutprimitives         | EYT-80                                        | offen                                  |
 
 ## 10. Offene Risiken und Revisionspunkte
 

@@ -28,27 +28,35 @@ Administrator und Geschäftsführung erhalten nach dem MVP eine interne, nachvol
 ## Vorgeschlagene Stories
 
 ### ECON-1 — Berechtigungen und Feature Gate
+
 Nur Administrator/Geschäftsführung; serverseitige atomare Rechte; Feature im MVP deaktiviert.
 
 ### ECON-2 — Zeitlich gültige individuelle Sätze
+
 Netto EUR, Stunde/Tag, gültig ab/bis, Versionierung, Überlappungsschutz, Audit.
 
 ### ECON-3 — Plan-Kosten
+
 Berechnung aus geplanten Einsätzen und Ressourcenreservierungen mit angewendeter Satzversion.
 
 ### ECON-4 — Ist-Kosten
+
 Berechnung nur aus freigegebenen Arbeitszeiten und bestätigter Ressourcennutzung.
 
 ### ECON-5 — Maschinenverleih-Erlöse
+
 Bestätigte Mietzeiträume, maschinenspezifischer Netto-Mieterlössatz, keine Faktura-/Steuerwirkung.
 
 ### ECON-6 — Berichte und Exporte
+
 Plan/Ist/Erlös getrennt, Filter nach Person, Ressource, Baustelle, Tag, Woche und Zeitraum; Quellen- und Satzversionsnachweis.
 
 ### ECON-7 — Historie, Audit und Korrekturen
+
 Rückdatierte Korrektur nur mit Berechtigung, Begründung, Auswirkungsvorschau und Audit.
 
 ### ECON-8 — Security, Tests und Rollback
+
 Autorisierung, Vertraulichkeit, Berechnungs-/Rundungstests, keine Buchhaltungsnebenwirkungen, Feature-Flag-Rollback.
 
 ## Release-Gate
