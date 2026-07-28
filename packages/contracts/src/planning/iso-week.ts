@@ -149,6 +149,16 @@ export function parseIsoWeekKey(kandidat: string): IsoWeekKeyResult {
   if (isoWeek < 1 || isoWeek > 53) {
     return { ok: false, reason: "WEEK_OUT_OF_RANGE" };
   }
+  // Diese Pruefung ist REDUNDANT zur Rueckrechnung weiter unten, und das ist
+  // Absicht — aber es war nicht geplant, sondern gemessen. Die Gegenmutation zu
+  // EYT-88 hat sie entfernt, und die Tests blieben gruen: die Rueckrechnung
+  // faengt denselben Fall, weil der Montag einer nicht existenten 53. Woche in
+  // die erste Woche des Folgejahres faellt.
+  //
+  // Sie bleibt trotzdem stehen, aus einem Grund: sie liefert
+  // `WEEK_53_NOT_IN_YEAR` statt `ROUND_TRIP_MISMATCH`. Der erste Wert sagt einem
+  // Aufrufer, WAS falsch ist; der zweite sagt nur, dass die Rechnung nicht
+  // aufgeht. Wer sie entfernt, verliert keine Sicherheit, aber eine Diagnose.
   if (isoWeek === 53 && isoWochenImJahr(isoYear) === 52) {
     return { ok: false, reason: "WEEK_53_NOT_IN_YEAR" };
   }
