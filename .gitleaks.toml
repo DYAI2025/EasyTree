@@ -38,7 +38,13 @@
 [extend]
 useDefault = true
 
+# Exakt die zwei untersuchten Dateien, kein Verzeichnis- und kein
+# Endungsmuster. Eine dritte Datei unter docs/ux wird wieder geprueft — und
+# muss dann wieder einzeln klassifiziert werden.
 [[rules]]
 id = "generic-api-key"
 [rules.allowlist]
-paths = ['''docs/ux/.*\.html$''']
+paths = [
+  '''^docs/ux/\(519\) Pinterest\.html$''',
+  '''^docs/ux/ety-ds1\.html$''',
+]
