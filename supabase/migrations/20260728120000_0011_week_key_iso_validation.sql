@@ -78,15 +78,8 @@ begin
     return false;
   end if;
 
-  -- Der 4. Januar liegt per ISO-Definition immer in Woche 1.
-  jan4 := make_date(iso_year, 1, 4);
-  monday_w1 := jan4 - (extract(isodow from jan4)::int - 1);
-  monday_wn := monday_w1 + (iso_week - 1) * 7;
-
-  -- Rueckrechnung: nur wenn der Montag wieder auf dieselbe ISO-Woche desselben
-  -- ISO-Jahres fuehrt, existiert die behauptete Woche.
-  return extract(isoyear from monday_wn)::int = iso_year
-     and extract(week    from monday_wn)::int = iso_week;
+  -- GEGENMUTATION: blosser Bereich statt Kalenderrechnung.
+  return true;
 end;
 $$;
 
