@@ -36,6 +36,43 @@ parts that bite most often, not a replacement. Its mandatory sections are guarde
 `apps/api/test/handoff-guardrails.test.ts`, because they were once removed without anyone
 noticing (EYT-89).
 
+## Where the work is tracked
+
+Jira project `EYT`, board 72 — https://dyai2026.atlassian.net/jira/software/c/projects/EYT/boards/72
+Reach it with the `claude_ai_Atlassian` MCP tools (`searchJiraIssuesUsingJql`, `getJiraIssue`,
+`transitionJiraIssue`). The `/jira-automation` skill documents Rube MCP, which is **not**
+connected here — use the native Atlassian tools instead. Do not trust the search `count` mode;
+it has reported "8 not done" for a sprint in which all 8 were done. Query with `issues` mode
+and read the statuses.
+
+### Snapshot — 27.07.2026 (verify before relying on it)
+
+Everything in this subsection is a point-in-time record and rots. Re-measure with
+`gh pr view <n>`, `git log --oneline master..HEAD` and a Jira query before acting on it.
+
+- **Sprint 3 in progress.** Merged this sprint: EYT-86 (`c1dbf50`, org settings + workforce +
+  audit outbox + catalogue meta gate), EYT-49 (`acccf3b`, planning invariants — no overlapping
+  published assignments, published rows immutable), EYT-61 (`2f15770`, temporal edges + property
+  tests + static no-local-time guard), EYT-50 part 1/2 (`5e07115`, `5f88703`, contract-derived
+  client, branded idempotency key, tenant query runner).
+- **PR #23 — `feat/eyt-50-read-through-slice`, Draft, do not merge.** Head `3773ecf3`,
+  18 ahead / 0 behind `master`. Read-through slice: browser → Next rewrite → Nest → PostgreSQL,
+  proven end-to-end in the `read-through` CI job against a real Supabase stack. All ten jobs
+  green on run `30300223577`.
+- **Open admin step (needs repository admin, cannot be done from here):**
+  `DRY_RUN=true ./scripts/setup-branch-protection.sh`, then apply, then
+  `./scripts/verify-branch-protection.sh` must show `enforcement=active`,
+  `strict_required_status_checks_policy=true` and `read-through` among the required checks.
+  Until that read-after-write exists, **do not claim `read-through` blocks a merge.**
+- **EYT-91 (Bug, open) blocks closing EYT-50/EYT-62:** `supabase/seed.sql` uses IDs that
+  `IdSchema` rejects as invalid UUID v4, so contract response validation returns 500 on seeded
+  data. The e2e harness works around it with its own v4 fixtures
+  (`apps/web/e2e/harness/seed.sql`) — that is a workaround, not the fix.
+- Ticket status at the time of writing: EYT-50 _In Arbeit_; EYT-62, EYT-88, EYT-91 _Zu
+  erledigen_. Sprint 3 still open besides those: EYT-75, 87, 72, 81, 11.
+- Eight of the nine contract operations are still `NOT_YET_IMPLEMENTED`; only the planning-window
+  read is wired. Writes and publish are EYT-88.
+
 ## Commands
 
 Node 22 (`.nvmrc`), pnpm 10.28.0 via corepack. **pnpm is the only permitted package manager.**
@@ -190,11 +227,17 @@ skipped=…` line that CI asserts. `apps/api/test/tenant-gate.fail-closed.test.t
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every PR. Jobs: `format`, `lint`, `typecheck`,
-`unit-tests`, `build-web`, `web-smoke`, `build-api`, `secret-scan`, `db-gates`. None uses
+`.github/workflows/ci.yml` runs on every PR. Jobs on `master`: `format`, `lint`, `typecheck`,
+`unit-tests`, `build-web`, `web-smoke`, `build-api`, `secret-scan`, `db-gates`. Branch
+`feat/eyt-50-read-through-slice` adds a tenth, `read-through` (EYT-50). None uses
 `continue-on-error`.
 
-All nine are required status checks in repository ruleset `19718704` (`enforcement: active`,
+**A green job is not a blocking job.** `read-through` passes but is _not_ a required status
+check — the ruleset has not been re-applied since it was added, so it cannot block a merge.
+Never report it as a gate until `scripts/verify-branch-protection.sh` says otherwise; it
+currently prints `FAIL AC3 — fehlende Pflichtchecks: read-through`.
+
+All nine `master` jobs are required status checks in repository ruleset `19718704` (`enforcement: active`,
 `bypass_actors: []`, `~DEFAULT_BRANCH`), alongside `pull_request`, `non_fast_forward` and
 `deletion`. That the gates actually block is measured, not assumed: negative PR #7 carried a
 deliberately unformatted file → `format` failed, `mergeable_state` went to `blocked`, and the
@@ -208,7 +251,12 @@ the inference were wrong.
 
 `scripts/setup-branch-protection.sh` aborts if `ci.yml` contains a job that isn't in the
 required-checks list — **adding a CI job means updating that script and the runbook**, or the
-new job silently becomes optional.
+new job silently becomes optional. `scripts/verify-branch-protection.sh` keeps a **second,
+independent copy** of that list on purpose (a verifier reading the setter's list would confirm
+the very drift it exists to catch), and guards it the same way. So a new job means editing
+**both** lists: update only one and `verify` aborts with an internal drift error instead of
+reporting the real ruleset state — which is exactly what happened when `read-through` was
+added (fixed 27.07.2026).
 
 `db-gates` is the heavy one: starts the real Supabase stack, resets twice, runs pgTAP twice,
 proves the catalogue meta gate is not vacuous (creates a deliberately open table and requires
@@ -222,6 +270,17 @@ asserts its own greppable `[…] mode=required executed=… skipped=0` line.
 
 ## Testing notes
 
+- **Every test that asserts a _property_ needs a named counter-mutation that turns it red.**
+  Without a concrete answer to "which deliberate mutation makes this test fail?", the test is
+  execution evidence, not proof. Prefer a **permanent scenario** in the suite (a deliberately
+  open probe table, a foreign-tenant row, a stopped process) over a throwaway edit to source —
+  a mutation you reverted never runs again. This rule exists because Sprint 3 shipped nine
+  green tests that measured nothing (a conformance test that checked its own re-implementation;
+  an idempotency test that asserted a constant stub; a base-path test that compared a constant
+  to itself; a seed check that printed "KAPUTT" and exited 0). Seven were caught by review, not
+  by the suite. Worked examples of the rule applied: `architecture-red-case.test.ts` and the
+  meta-gate probe inside `db-gates`. Related traps: a Zod schema nobody `parse`s is a comment,
+  and an `as` cast under the word "validated" is erased at compile time.
 - Vitest per package; `test/**/*.test.ts(x)`. Files under `test/` without a `.test.ts` suffix
   (e.g. `tenant-context.helper.ts`, `test/architecture/{scan,rules}.ts`) are shared helpers,
   not suites.
@@ -263,12 +322,37 @@ asserts its own greppable `[…] mode=required executed=… skipped=0` line.
   (screenreader smoke with VoiceOver/NVDA) is open — it needs a human with assistive tech, so
   no "accessibility fully verified" claim is available yet.
 
+## Operator-side agent tooling (not part of this repo)
+
+Two global Claude Code skills were re-triggered on 27.07.2026 after the Sprint 3 review found
+that both already covered the failures but never fired — the gap was discovery, not content.
+They live in `~/.claude/skills/` on Benjamin's machine, so a fresh clone elsewhere will not
+have them; the rules they carry are duplicated above in _Testing notes_ and _Conventions_,
+which is where this repo's copy of record is.
+
+- `testing-anti-patterns` — now triggers when **writing** tests, not only when reviewing them.
+- `verification-before-completion` — now triggers before **any push, commit or PR**, not only
+  before a completion claim. (Its description was also truncated mid-word in the source file
+  and has been repaired.)
+
+Both were left content-unchanged. The one real gap remains open: a test written _after_ the
+code has no red phase, and nothing yet requires a substitute for it — see the counter-mutation
+rule under _Testing notes_, which is the manual stand-in.
+
 ## Conventions
 
 - TypeScript is strict plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
   `verbatimModuleSyntax`, `module: NodeNext` (`tsconfig.base.json`). ESM packages
   (`config`, `ui`) need `.js` extensions on relative imports.
 - Commits: conventional prefix + Jira ID, e.g. `feat(ci): EYT-67 …`, `test(web): … (EYT-41)`.
+- **Three delivery checks, one command each — each of these failed twice in Sprint 3.**
+  (1) After a scripted text replacement, grep the _result_; the script's exit code says nothing
+  about whether the pattern still matched (Prettier had reformatted the target, the replacement
+  silently did nothing, and the commit message claimed it anyway). (2) Stage named files, then
+  read `git diff --cached --name-only` — a directory-wide `git add` twice swept in dozens of
+  untracked `docs/ux/` files. (3) Read the gate output before `git push`; `vitest` alone is not
+  enough, a type error in a test file only surfaces under `tsc`. All three produce false claims
+  in commit messages and PR bodies, which are later read as evidence.
 - Docs and most code comments are German; the PRD/handoff artifacts are the exception.
   Match the surrounding language of the file you're editing.
 - `packages/shared` is forbidden (ADR-001) — share only via stable, named packages.
