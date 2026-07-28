@@ -28,7 +28,7 @@ describe("Mandantensubjekt (EYT-50)", () => {
       resolver.resolve({
         headers: {
           authorization: "Bearer beliebig",
-          "x-easytree-subject": "00000000-0000-0000-0000-00000000aaa1",
+          "x-easytree-subject": "00000000-0000-4000-8000-00000000aaa1",
         },
       }),
     ).toBeNull();

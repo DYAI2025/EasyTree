@@ -26,3 +26,7 @@ playwright-report/
 # passiert, als penpot als Gitlink im Index landete.
 penpot/
 _sprint2-transfer/
+
+# Agent runtime state — not product source
+/.claude-flow/
+/.claude/homunculus/

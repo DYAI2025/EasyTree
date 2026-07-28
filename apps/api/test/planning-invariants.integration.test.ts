@@ -56,8 +56,8 @@ let sessionA: Client;
 let sessionB: Client;
 
 /** Seed-Konstanten aus supabase/seed.sql (Org Alpha). */
-const EMPLOYEE_ALPHA = "00000000-0000-0000-0000-0000004010a1";
-const WORKSITE_ALPHA = "00000000-0000-0000-0000-0000005010a1";
+const EMPLOYEE_ALPHA = "00000000-0000-4000-8000-0000004010a1";
+const WORKSITE_ALPHA = "00000000-0000-4000-8000-0000005010a1";
 
 /**
  * Zwei Planversionen in VERSCHIEDENEN Wochen mit Zuweisungen am selben Tag.
@@ -325,7 +325,7 @@ describe("planning invariants under concurrency (EYT-49)", () => {
       // Ueberlappungspruefung.
       // Eine GESEEDETE Planversion, keine frisch angelegte: B muss sie sehen
       // koennen, und Zeilen aus As offener Transaktion sieht B nicht.
-      const SEEDED_DRAFT = "00000000-0000-0000-0000-0000006010a1";
+      const SEEDED_DRAFT = "00000000-0000-4000-8000-0000006010a1";
       await beginAsPlanner(sessionA);
       await beginAsPlanner(sessionB);
       try {

@@ -21,8 +21,8 @@ declare
   beta_bekannt int;
 begin
   select
-    count(*) filter (where org_id = '00000000-0000-0000-0000-0000000000a1'),
-    count(*) filter (where org_id = '00000000-0000-0000-0000-0000000000b2')
+    count(*) filter (where org_id = '00000000-0000-4000-8000-0000000000a1'),
+    count(*) filter (where org_id = '00000000-0000-4000-8000-0000000000b2')
     into alpha_zuweisungen, beta_zuweisungen
   from public.assignments
   where starts_at_utc >= '2026-09-28T00:00:00Z'
@@ -39,7 +39,7 @@ begin
   -- Id-Tie-Breaker gar nicht: die Sortierung haette schon vorher entschieden.
   select count(*) into gleichstand
   from public.plan_versions
-  where org_id = '00000000-0000-0000-0000-0000000000a1'
+  where org_id = '00000000-0000-4000-8000-0000000000a1'
     and week_key = '2026-W40'
     and published_at = '2026-09-25T09:00:00Z'
     and created_at   = '2026-09-20T08:00:00Z';
@@ -55,7 +55,7 @@ begin
   select count(*) into beta_bekannt
   from public.assignments
   where id = 'b5510001-0001-4001-8001-000000000001'
-    and org_id = '00000000-0000-0000-0000-0000000000b2';
+    and org_id = '00000000-0000-4000-8000-0000000000b2';
 
   if beta_bekannt <> 1 then
     raise exception 'Fixture kaputt: Beta-Zuweisung b5510001 fehlt';

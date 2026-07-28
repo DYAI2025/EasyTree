@@ -23,11 +23,15 @@ Two layers of documents, deliberately not the same thing:
 
 Product source of truth is `docs/prd/CURRENT_PRD_v1.3.md`. The root artifacts above are generator
 and validation evidence, not a competing authority — where they disagree with the curated PRD,
-the PRD wins and the divergence is a defect. Architecture is split across
-[ADR-001](docs/architecture/ADR-001-boilerplate-architecture.md) (boilerplate) and
-`docs/architecture/ARCHITECTURE_DECISIONS_v1.3.md` (provider, hosting, retention, pilot) — neither
-supersedes the other. Work is tracked as Jira `EYT-*` tickets; commits and code comments
-reference those IDs.
+the PRD wins and the divergence is a defect. Architecture is split across three documents,
+none of which supersedes another: [ADR-001](docs/architecture/ADR-001-boilerplate-architecture.md)
+(boilerplate — the binding contract), `docs/architecture/ARCHITECTURE_DECISIONS_v1.3.md`
+(provider, hosting, retention, pilot) and
+[ADR-002](docs/architecture/ADR-002-integration-canonical-repo.md) (EYT-78 — this repo is the
+one canonical product repository; "Arborga" is its **former name**, not a second repo, and
+"Arboscus Teamplaner" is the product name while `easytree`/`@easytree/*` is the technical
+namespace). Work is tracked as Jira `EYT-*` tickets; commits and code comments reference
+those IDs.
 
 [`docs/handoff/AGENT_HANDOFF_v1.3.md`](docs/handoff/AGENT_HANDOFF_v1.3.md) holds the agent
 guardrails: required working method, prohibited actions, evidence rules, stop conditions and the
@@ -45,33 +49,65 @@ connected here — use the native Atlassian tools instead. Do not trust the sear
 it has reported "8 not done" for a sprint in which all 8 were done. Query with `issues` mode
 and read the statuses.
 
-### Snapshot — 27.07.2026 (verify before relying on it)
+### Snapshot — 28.07.2026 (verify before relying on it)
 
 Everything in this subsection is a point-in-time record and rots. Re-measure with
-`gh pr view <n>`, `git log --oneline master..HEAD` and a Jira query before acting on it.
+`gh pr view <n>`, `git rev-list --left-right --count origin/master...HEAD` and a Jira query
+before acting on it. Do **not** use local `master` as the reference — compare against
+`origin/master`.
 
-- **Sprint 3 in progress.** Merged this sprint: EYT-86 (`c1dbf50`, org settings + workforce +
-  audit outbox + catalogue meta gate), EYT-49 (`acccf3b`, planning invariants — no overlapping
-  published assignments, published rows immutable), EYT-61 (`2f15770`, temporal edges + property
-  tests + static no-local-time guard), EYT-50 part 1/2 (`5e07115`, `5f88703`, contract-derived
-  client, branded idempotency key, tenant query runner).
-- **PR #23 — `feat/eyt-50-read-through-slice`, Draft, do not merge.** Head `3773ecf3`,
-  18 ahead / 0 behind `master`. Read-through slice: browser → Next rewrite → Nest → PostgreSQL,
-  proven end-to-end in the `read-through` CI job against a real Supabase stack. All ten jobs
-  green on run `30300223577`.
+- **`origin/master` tip is `205fb41`** (merge of PR #24, Sprint-2 retro hardening: EYT-89,
+  EYT-70, EYT-71, EYT-90). Master has **nine** CI jobs; `read-through` exists only on the
+  branch below.
+- **Sprint 3 merged to master:** EYT-86 (`c1dbf50`, org settings + workforce + audit outbox +
+  catalogue meta gate), EYT-49 (`acccf3b`, planning invariants — no overlapping published
+  assignments, published rows immutable), EYT-61 (`2f15770`, temporal edges + property tests +
+  static no-local-time guard), EYT-50 part 1/2 (`5e07115`, `5f88703`, contract-derived client,
+  branded idempotency key, tenant query runner).
+- **PR #23 — `feat/eyt-50-read-through-slice`, still OPEN and Draft.** Head `a559df2`,
+  **24 ahead / 0 behind `origin/master`**. Read-through slice: browser → Next rewrite → Nest →
+  PostgreSQL, proven end-to-end in the `read-through` CI job against a real Supabase stack (ten
+  jobs green on run `30300223577`, measured at head `3773ecf3` — **four commits have landed
+  since, so that run no longer covers the current head**).
+- **PR #25 was merged into PR #23's branch, not into master** (base `feat/eyt-50-read-through-slice`,
+  merged 2026-07-28T00:45Z). It opens Sprint 4 as a Plumbline feature (planning draft +
+  conflict slice) and adds `docs/vision/`, `docs/canvas/`,
+  `docs/prd/planning-draft-conflict-slice.prd.md` and `docs/traceability.md`. Those last two sit
+  beside the existing authorities `docs/prd/CURRENT_PRD_v1.3.md` and
+  `docs/traceability/REQUIREMENT_TO_JIRA_v1.3.csv` — **which one wins is not yet decided; ask
+  before citing either as source of truth.**
+- **Commit `a559df2` ("WE") committed the working tree wholesale.** It tracked `.claude-flow/`,
+  `.claude/homunculus/observations.jsonl` (~3000 lines of agent state), the whole of `docs/ux/`,
+  the PDF, and the four root duplicate documents that the Conventions section below still
+  describes as untracked. That section is therefore stale on that one point, and the duplicate-file
+  warning matters more now, not less: the root copies are tracked but still not authoritative.
 - **Open admin step (needs repository admin, cannot be done from here):**
   `DRY_RUN=true ./scripts/setup-branch-protection.sh`, then apply, then
   `./scripts/verify-branch-protection.sh` must show `enforcement=active`,
   `strict_required_status_checks_policy=true` and `read-through` among the required checks.
-  Until that read-after-write exists, **do not claim `read-through` blocks a merge.**
+  Until that read-after-write exists, **do not claim `read-through` blocks a merge.** Measured
+  27.07.2026, the verifier printed `FAIL AC3 — fehlende Pflichtchecks: read-through`.
 - **EYT-91 (Bug, open) blocks closing EYT-50/EYT-62:** `supabase/seed.sql` uses IDs that
   `IdSchema` rejects as invalid UUID v4, so contract response validation returns 500 on seeded
   data. The e2e harness works around it with its own v4 fixtures
   (`apps/web/e2e/harness/seed.sql`) — that is a workaround, not the fix.
-- Ticket status at the time of writing: EYT-50 _In Arbeit_; EYT-62, EYT-88, EYT-91 _Zu
-  erledigen_. Sprint 3 still open besides those: EYT-75, 87, 72, 81, 11.
-- Eight of the nine contract operations are still `NOT_YET_IMPLEMENTED`; only the planning-window
-  read is wired. Writes and publish are EYT-88.
+- **Sprint 4 is the open sprint** (measured against Jira 28.07.2026, `sprint in openSprints()`),
+  and it holds exactly six issues: EYT-50 _In Arbeit_ (Story, vertical slice up to draft +
+  conflict check), EYT-62 _In Arbeit_ (E2E proof), EYT-79 _In Arbeit_ (PlanningGateway),
+  EYT-88 _Zu erledigen_ (Bug), EYT-91 _Zu erledigen_ (Bug), EYT-92 _Zu erledigen_ (Story,
+  clickable week view). EYT-75/87/72/81/11 are **not** in the open sprint.
+- Eight of the nine contract operations are still unimplemented; only the planning-window read
+  (`GET /planung/woche`) is wired. The list is not documentation — it is the
+  `NOT_YET_IMPLEMENTED` map inside `apps/api/test/openapi-route-conformance.test.ts`, each entry
+  carrying its reason, and the test fails both ways: a contract operation with neither a route
+  nor an entry, **and** an entry for an operation that has since been implemented. Writes and
+  the draft/conflict path are **EYT-50** (Story); three of the eight additionally wait on the
+  subject model from EYT-14. **Correction (28.07.2026, measured against Jira):** an earlier
+  revision of this file said "writes and publish are EYT-88". That is false. **EYT-88 is the
+  Bug "Planungswochen-Schlüssel erlaubt ungültige ISO-Wochen in Vertrag und Datenbank"** — the
+  `^\d{4}-W\d{2}$` pattern accepts `W00`/`W54`/`W99`, to be fixed by a new forward migration
+  plus one shared deterministic validator. **EYT-91** is the seed-UUID bug. Publish itself is
+  explicitly deferred out of Sprint 4 ("Bewusst später" in EYT-50).
 
 ## Commands
 
@@ -87,7 +123,8 @@ pnpm test          # turbo run test       (depends on ^build)
 pnpm build         # turbo run build
 ```
 
-Per package (`@easytree/api`, `@easytree/web`, `@easytree/ui`, `@easytree/config`):
+Six workspace packages — `@easytree/api`, `@easytree/web`, `@easytree/contracts`,
+`@easytree/domain`, `@easytree/ui`, `@easytree/config`:
 
 ```bash
 pnpm --filter @easytree/api test                       # whole package suite
@@ -96,11 +133,12 @@ pnpm --filter @easytree/api exec vitest run -t "returns 503"          # single c
 pnpm --filter @easytree/web dev                        # Next dev server :3000
 pnpm --filter @easytree/web run test:e2e               # Playwright (needs prior build)
 pnpm --filter @easytree/api... build                   # package + its workspace deps
+pnpm --filter @easytree/contracts run openapi:write    # regenerate openapi/v1.json
 ```
 
-`typecheck`/`test` depend on `^build`, so a package consuming `@easytree/config` or
-`@easytree/ui` needs those built (`pnpm --filter @easytree/config build`) before its tests
-resolve `dist/`.
+`typecheck`/`test` depend on `^build`, so a package consuming `@easytree/config`,
+`@easytree/contracts`, `@easytree/domain` or `@easytree/ui` needs those built
+(`pnpm --filter @easytree/config build`) before its tests resolve `dist/`.
 
 Database (Docker required; Supabase CLI is a devDependency, always `pnpm exec supabase`):
 
@@ -135,19 +173,36 @@ NODE_ENV=test API_PORT=3001 EXPECT_READY=200 DATABASE_URL=... SUPABASE_URL=... \
   SUPABASE_ANON_KEY=... bash scripts/smoke-api.sh    # boots dist, /health, /ready, SIGTERM
 bash scripts/smoke-worker.sh                         # worker opens no port, shuts down clean
                                                      # (same strict test-preset env as above)
+bash scripts/smoke-api-role-gate.sh                  # API must NOT start when the DB role cannot be
+                                                     # verified as RLS-bound (EYT-45, fail-closed)
+bash scripts/read-through-harness.sh                 # whole EYT-50 read path, Docker + browser (CI job)
 bash scripts/verify-branch-protection.sh             # reads effective GitHub ruleset (gh CLI)
 ```
 
 ## Architecture
 
 ```
-apps/api        @easytree/api  — NestJS, ONE code package, TWO entrypoints
-apps/web        @easytree/web  — Next.js 16 App Router / React 19, mobile-first PWA shell
-packages/config @easytree/config — strict Zod env validation + secret redaction
-packages/ui     @easytree/ui   — domain-free primitives (Button, Card, VisuallyHidden)
-supabase/       config.toml, migrations (schema source of truth), seed.sql, pgTAP tests
-docs/           ADRs, plans, runbooks, retros, traceability — mostly German
+apps/api           @easytree/api       — NestJS, ONE code package, TWO entrypoints
+apps/web           @easytree/web       — Next.js 16 App Router / React 19, mobile-first PWA shell
+packages/contracts @easytree/contracts — transport contract: Zod schemas, gateway ports,
+                                         generated openapi/v1.json  (EYT-47, EYT-79)
+packages/domain    @easytree/domain    — framework-free core: types, invariants, state models
+                                         (EYT-46, EYT-61)
+packages/config    @easytree/config    — strict Zod env validation + secret redaction
+packages/ui        @easytree/ui        — domain-free primitives (Button, Card, VisuallyHidden)
+supabase/          config.toml, migrations (schema source of truth), seed.sql, pgTAP tests
+docs/              ADRs, plans, runbooks, retros, traceability — mostly German
 ```
+
+Declared workspace dependencies (`package.json`, verifiable): `api` → `config` + `contracts` +
+`domain`; `web` → `contracts` + `ui`. **`contracts` and `domain` depend on no workspace package
+at all** — `contracts` has only `zod`, `domain` has no runtime dependency whatsoever.
+
+That `contracts` does not import `domain` is deliberate, not an oversight (see the file header
+of `packages/contracts/src/planning/schemas.ts`): `domain` models `TimeInterval` as a **class
+with private fields**, which cannot travel over the wire. `contracts` therefore carries its own
+transport types and `apps/api` maps between the two. Do not "simplify" this by making the
+contract reuse a domain class.
 
 **Two entrypoints, one module graph** (ADR-001 §2): `apps/api/src/main.ts` boots `AppModule`
 via `NestFactory.create` and listens on `API_PORT`; `src/worker.ts` boots the _same_
@@ -175,11 +230,74 @@ presets _and_ the `AppConfig` interface), the mapping at the end of
 `scripts/smoke-api.sh` / `scripts/smoke-worker.sh`. `EASYTREE_*` variables are _not_ part of
 this set — they steer tests, never the app, and must never enter `ENV_VAR_META`.
 
-**Web never talks to Supabase or bare `fetch`.** Components get an `ApiClient` from React
-context (`lib/api-client-provider.tsx`); the single construction site is `app/providers.tsx`
-(`NEXT_PUBLIC_API_URL`). `apps/web/test/no-supabase-import.test.ts` is a static guard that
-fails if the Supabase JS SDK name appears anywhere under `apps/web` — that guard string is
-assembled from parts on purpose, so don't "fix" it by inlining the literal.
+**Web never talks to Supabase or bare `fetch`.** Components get an `ApiClient` and a
+`PlanningGateway` from React context (`lib/api-client-provider.tsx`,
+`lib/planning-gateway-provider.tsx`); the single construction site for both is the composition
+root `app/providers.tsx` (ADR-001 §5). `apps/web/test/no-supabase-import.test.ts` is a static
+guard that fails if the Supabase JS SDK name appears anywhere under `apps/web` — that guard
+string is assembled from parts on purpose, so don't "fix" it by inlining the literal.
+
+**There is no `NEXT_PUBLIC_API_URL` any more** (removed in EYT-50) — do not reintroduce it.
+The browser calls **relative** paths and `providers.tsx` passes the empty origin; `next.config.ts`
+rewrites `/api/:path*`, `/health` and `/ready` server-side to `EASYTREE_API_PROXY_TARGET`. Two
+reasons, both deliberate: one visible origin means the API needs no CORS and no extra public
+surface, and a `NEXT_PUBLIC_*` value would be baked into the browser bundle at build time.
+`lib/api-proxy-target.ts` validates that target strictly (absolute http/https, no credentials,
+no query/fragment, no trailing slash) and has **no default in production** — the build fails
+there instead of silently proxying to localhost, which would look like an empty week in the
+browser rather than an error. The URL itself is assembled in exactly one place,
+`lib/planning-gateway-factory.ts`, because the test that checks it must call the same function
+production does — an earlier version built its own gateway and would have stayed green whatever
+`providers.tsx` did.
+
+**The contract is generated from Zod, and the generated file is checked in.**
+`packages/contracts/src/**/schemas.ts` are the source; `packages/contracts/openapi/v1.json` is
+the build product, regenerated with `pnpm --filter @easytree/contracts run openapi:write` and
+committed so reviewers can read the diff. `test/openapi-drift.test.ts` compares the serialized
+document **byte for byte** against the committed file — change a schema without regenerating and
+it goes red (EYT-47 AC 4). `apps/api/test/openapi-route-conformance.test.ts` checks the Nest
+routes against the same document. Never hand-edit `v1.json`.
+
+**Gateway ports model failure in the return type, not in exceptions.**
+`packages/contracts/src/gateway.ts` returns `GatewayResult<T>` — `{ ok: true, value }` or
+`{ ok: false, failure, problem }` with `failure` one of `UNAVAILABLE`, `CONTRACT_VIOLATION`,
+`UNAUTHENTICATED`, `FORBIDDEN`, `STALE_VERSION`, `REJECTED`. Bare `Promise<T>` was rejected on
+purpose: it would push error, empty and stale-version handling back into every component. There
+is deliberately **no `loading` state** on the port — waiting on the promise _is_ the loading
+state, so a `{ state: "loading" }` variant would never be observable; that belongs to the
+component holding the promise.
+
+**Modules are hexagonal and their names are frozen.** Each module under
+`apps/api/src/modules/<slug>/` splits into `domain/` (pure), `application/` (ports), `infrastructure/`
+(adapters) and `interface/http/` (controllers). `MODULE_SLUGS` in `src/modules/module-catalogue.ts`
+is the one frozen list of ten slugs (`tenancy`, `workforce`, `worksites`, `planning`, `resources`,
+`timekeeping`, `communications`, `weather`, `files`, `audit`), derived from ADR-001 Z. 60 — the
+directory name, the registry entry and every type parameter are the same string. That list is
+what stops `architecture.test.ts` from running vacuously: `SCAFFOLDED_MODULES` demands real files
+per named module instead of counting whatever files a glob happens to find.
+
+**One connection owner, three statements per transaction.**
+`src/platform/database/tenant-query-runner.ts` is the only file allowed to hold `pg` — the rule
+`api-dependency-allowlist` permits the driver exclusively under `apps/api/src/platform/`, so no
+module can route a query past transaction boundary, role switch and RLS. Each run is one
+transaction and sets, in this order: (1) `set_config('request.jwt.claims', …, true)` —
+transaction-local, which is what `app.current_user_id()` / `app.user_org_ids()` read;
+(2) `set local role authenticated` — `easytree_app` is `NOINHERIT` (migration `0003`), so without
+the switch a query fails with "permission denied" rather than silently returning everything;
+(3) the body. Transaction-local because the transaction-mode pooler survives nothing else —
+proven in CI against a real Supavisor (`[tenant-pooling] …`). This layer sets context, it does
+**not** decide: server-side authorization belongs in the module's application layer, RLS is
+defense-in-depth. Repositories see only the `TenantQuery` interface, never a driver type.
+
+**The read path is proven end to end, not assembled from unit tests** (EYT-50). Browser →
+same-origin Next rewrite → NestJS → `TenantQueryRunner` → RLS → PostgreSQL, exercised by
+`scripts/read-through-harness.sh` (CI job `read-through`) with `apps/web/e2e/read-through.spec.ts`.
+Only the subject resolver and the access policy are substituted (`apps/api/test/harness/server.ts`,
+built via `pnpm --filter @easytree/api run build:harness`); repository, runner, pool and controller
+are the real ones. It is **one** script rather than several workflow steps because a `trap` only
+covers its own process — split across steps, a failure in the last one would leave the API, the web
+server and Docker running. It waits for a **response** plus `kill -0`, never a fixed `sleep`, so a
+process that died at startup is reported as crashed instead of being polled until timeout.
 
 **Readiness is indicator-based.** `src/health/readiness.ts` defines `ReadinessIndicator` and
 the `DATABASE_PING` token; production wires `PgDatabasePing` (real `SELECT 1`), tests override
@@ -296,6 +414,31 @@ asserts its own greppable `[…] mode=required executed=… skipped=0` line.
   (`apps/api/src/modules/module-catalogue.ts`), and each rule asserts it saw ≥1 file, so a
   rename or a bad glob turns the suite red instead of silently green. `architecture-red-case.test.ts`
   proves each rule fires, against a synthetic tree in `os.tmpdir()` — never the real one.
+- **Domain invariants are covered by a registry, not by a list of green tests** (EYT-61 AC1).
+  `apps/api/test/domain-invariants/registry.ts` names every invariant and the positive _and_
+  negative test that proves it; `domain-invariant-coverage.test.ts` measures four things: every
+  value export of `@easytree/domain` appears in the registry, no entry names a non-existent
+  export, every rule has both directions (only `konstante` may skip the negative), and each
+  named test title occurs verbatim in the named file — so a rename or a deleted test goes red
+  instead of silently green. A "negative test" here means a case that would **disprove** the
+  invariant if it did not hold, not merely a test expecting an error. It lives under
+  `apps/api/test/` rather than in `packages/domain` because that package sets `"types": []` and
+  has no dependencies by design; giving it Node types to read files would breach the very wall
+  the package is.
+- **Property tests use fast-check with a fixed seed** (`packages/domain/test/*.property.test.ts`,
+  EYT-61 AC7). Deterministic sweeps stay, but they never leave their own grid — the existing
+  `time-interval` sweep never left August and said nothing about DST, year boundaries or
+  millisecond edges. fast-check is a **devDependency only**: `domain-allowlist` scopes to
+  `packages/domain/src/`, not `test/`, so the shipped package stays dependency-free. The fixed
+  seed is the point — a red run in CI reproduces locally with no extra argument; when one fails,
+  fast-check reports the shrunk counterexample plus `seed` and `path`.
+- **The DST-gap test is a static guard, and honestly labelled as one**
+  (`apps/api/test/no-local-time-construction.test.ts`, EYT-61 AC6a). The missing hour can only
+  arise if something builds an instant out of wall-clock parts; nothing in the repo does — time
+  enters as a UTC instant and is converted to a zone only for display (`Intl` with an explicit
+  `timeZone`). So a test that "covers" the gap is not possible today; what is possible is
+  ensuring the property is not lost unnoticed. The moment an input field accepts local time, that
+  test fails, and whoever adapts it must decide what "02:30 on 29 March" means.
 - **Module table ownership is documentation, not enforcement.** `TABLE_OWNERSHIP` records
   intent; at runtime there is exactly one application role (`authenticated`) and RLS filters by
   tenant, not by module, so any module's code can write any table inside its tenant. Do not

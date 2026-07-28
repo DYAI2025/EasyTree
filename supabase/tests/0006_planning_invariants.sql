@@ -77,7 +77,7 @@ select is(
 -- ===========================================================================
 select set_config(
   'request.jwt.claims',
-  json_build_object('sub', '00000000-0000-0000-0000-00000000aaa1', 'role', 'authenticated')::text,
+  json_build_object('sub', '00000000-0000-4000-8000-00000000aaa1', 'role', 'authenticated')::text,
   true
 );
 set local role authenticated;
@@ -89,10 +89,10 @@ set local role authenticated;
 select lives_ok(
   $$insert into public.assignments
       (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
-    values ('00000000-0000-0000-0000-0000000000a1',
-            '00000000-0000-0000-0000-0000006010a1',
-            '00000000-0000-0000-0000-0000004010a1',
-            '00000000-0000-0000-0000-0000005010a1',
+    values ('00000000-0000-4000-8000-0000000000a1',
+            '00000000-0000-4000-8000-0000006010a1',
+            '00000000-0000-4000-8000-0000004010a1',
+            '00000000-0000-4000-8000-0000005010a1',
             '2026-08-03T10:00:00Z', '2026-08-03T18:00:00Z')$$,
   'Zwei ueberlappende ENTWURFS-Zuweisungen derselben Person sind erlaubt'
 );
@@ -104,7 +104,7 @@ select lives_ok(
 -- Veroeffentlichung an genau dem Constraint, der weiter unten geprueft wird.
 select lives_ok(
   $$delete from public.assignments
-    where org_id = '00000000-0000-0000-0000-0000000000a1'
+    where org_id = '00000000-0000-4000-8000-0000000000a1'
       and starts_at_utc = '2026-08-03T10:00:00Z'$$,
   'Eine unveroeffentlichte Zuweisung laesst sich loeschen'
 );
@@ -112,8 +112,8 @@ select lives_ok(
 select lives_ok(
   $$update public.plan_versions
        set published_at = '2026-07-31T12:00:00Z',
-           published_by = '00000000-0000-0000-0000-00000000aaa1'
-     where id = '00000000-0000-0000-0000-0000006010a1'$$,
+           published_by = '00000000-0000-4000-8000-00000000aaa1'
+     where id = '00000000-0000-4000-8000-0000006010a1'$$,
   'Eine Planversion laesst sich veroeffentlichen'
 );
 
@@ -121,7 +121,7 @@ select is(
   (
     select published_at
     from public.assignments
-    where id = '00000000-0000-0000-0000-0000007010a1'
+    where id = '00000000-0000-4000-8000-0000007010a1'
   ),
   timestamptz '2026-07-31T12:00:00Z',
   'Die Zuweisung traegt danach denselben Veroeffentlichungszeitpunkt — ein Vorgang, nicht zwei'
@@ -132,14 +132,14 @@ select is(
 -- ---------------------------------------------------------------------------
 select throws_ok(
   $$update public.plan_versions set week_key = '2026-W33'
-     where id = '00000000-0000-0000-0000-0000006010a1'$$,
+     where id = '00000000-0000-4000-8000-0000006010a1'$$,
   '23514',
   'Veroeffentlichte Zeile in public.plan_versions ist unveraenderlich',
   'Eine veroeffentlichte Planversion laesst sich nicht aendern'
 );
 
 select throws_ok(
-  $$delete from public.plan_versions where id = '00000000-0000-0000-0000-0000006010a1'$$,
+  $$delete from public.plan_versions where id = '00000000-0000-4000-8000-0000006010a1'$$,
   '23514',
   'Veroeffentlichte Zeile in public.plan_versions ist unveraenderlich und kann nicht geloescht werden',
   'Eine veroeffentlichte Planversion laesst sich nicht loeschen'
@@ -147,7 +147,7 @@ select throws_ok(
 
 select throws_ok(
   $$update public.assignments set starts_at_utc = '2026-08-03T05:00:00Z'
-     where id = '00000000-0000-0000-0000-0000007010a1'$$,
+     where id = '00000000-0000-4000-8000-0000007010a1'$$,
   '23514',
   'Veroeffentlichte Zeile in public.assignments ist unveraenderlich',
   'Eine veroeffentlichte Zuweisung laesst sich nicht nachtraeglich verschieben'
@@ -156,13 +156,13 @@ select throws_ok(
 select throws_ok(
   $$insert into public.assignments
       (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
-    values ('00000000-0000-0000-0000-0000000000a1',
-            '00000000-0000-0000-0000-0000006010a1',
-            '00000000-0000-0000-0000-0000004011a1',
-            '00000000-0000-0000-0000-0000005010a1',
+    values ('00000000-0000-4000-8000-0000000000a1',
+            '00000000-0000-4000-8000-0000006010a1',
+            '00000000-0000-4000-8000-0000004011a1',
+            '00000000-0000-4000-8000-0000005010a1',
             '2026-08-04T06:00:00Z', '2026-08-04T14:00:00Z')$$,
   '23514',
-  'Planversion 00000000-0000-0000-0000-0000006010a1 ist veroeffentlicht und nimmt keine Zuweisung mehr auf',
+  'Planversion 00000000-0000-4000-8000-0000006010a1 ist veroeffentlicht und nimmt keine Zuweisung mehr auf',
   'Eine veroeffentlichte Planversion nimmt keine weitere Zuweisung auf'
 );
 
@@ -176,19 +176,19 @@ select throws_ok(
 -- verbindlich werden soll.
 select lives_ok(
   $$insert into public.plan_versions (id, org_id, week_key)
-    values ('00000000-0000-0000-0000-0000006099a1',
-            '00000000-0000-0000-0000-0000000000a1', '2026-W32')$$,
+    values ('00000000-0000-4000-8000-0000006099a1',
+            '00000000-0000-4000-8000-0000000000a1', '2026-W32')$$,
   'Nach der Veroeffentlichung ist ein neuer Entwurf derselben Woche erlaubt'
 );
 
 select lives_ok(
   $$insert into public.assignments
       (id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
-    values ('00000000-0000-0000-0000-0000007099a1',
-            '00000000-0000-0000-0000-0000000000a1',
-            '00000000-0000-0000-0000-0000006099a1',
-            '00000000-0000-0000-0000-0000004010a1',
-            '00000000-0000-0000-0000-0000005010a1',
+    values ('00000000-0000-4000-8000-0000007099a1',
+            '00000000-0000-4000-8000-0000000000a1',
+            '00000000-0000-4000-8000-0000006099a1',
+            '00000000-0000-4000-8000-0000004010a1',
+            '00000000-0000-4000-8000-0000005010a1',
             '2026-08-03T10:00:00Z', '2026-08-03T18:00:00Z')$$,
   'Die kollidierende Zuweisung ist als Entwurf erlaubt'
 );
@@ -196,8 +196,8 @@ select lives_ok(
 select throws_ok(
   $$update public.plan_versions
        set published_at = '2026-07-31T13:00:00Z',
-           published_by = '00000000-0000-0000-0000-00000000aaa1'
-     where id = '00000000-0000-0000-0000-0000006099a1'$$,
+           published_by = '00000000-0000-4000-8000-00000000aaa1'
+     where id = '00000000-0000-4000-8000-0000006099a1'$$,
   '23P01',
   'conflicting key value violates exclusion constraint "assignments_no_published_overlap"',
   'Die zweite Veroeffentlichung scheitert an der Ueberlappung derselben Person'
@@ -209,15 +209,15 @@ select throws_ok(
 select lives_ok(
   $$update public.assignments
        set starts_at_utc = '2026-08-03T14:00:00Z', ends_at_utc = '2026-08-03T18:00:00Z'
-     where id = '00000000-0000-0000-0000-0000007099a1'$$,
+     where id = '00000000-0000-4000-8000-0000007099a1'$$,
   'Die kollidierende Zuweisung laesst sich auf einen anschliessenden Zeitraum verschieben'
 );
 
 select lives_ok(
   $$update public.plan_versions
        set published_at = '2026-07-31T13:00:00Z',
-           published_by = '00000000-0000-0000-0000-00000000aaa1'
-     where id = '00000000-0000-0000-0000-0000006099a1'$$,
+           published_by = '00000000-0000-4000-8000-00000000aaa1'
+     where id = '00000000-0000-4000-8000-0000006099a1'$$,
   'Ein anschliessender Zeitraum (14:00 nach 06:00-14:00) ist kein Konflikt — halboffen wie im Domainmodell'
 );
 
