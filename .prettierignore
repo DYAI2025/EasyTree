@@ -12,3 +12,8 @@ docs/audit
 # Generiert aus den Zod-Schemata (EYT-47). Der Generator ist die einzige Quelle;
 # ein nachtraeglich formatierendes Werkzeug wuerde die Byte-Drift-Pruefung brechen.
 packages/contracts/openapi
+
+# Gespeicherte fremde Webseiten als UX-Referenz (EYT-78-Materialsammlung,
+# eingecheckt mit a559df2). Eine 596-KB-Seite in EINER Zeile laesst sich nicht
+# sinnvoll formatieren, und ihr Inhalt ist Beleg, kein Quelltext.
+docs/ux
