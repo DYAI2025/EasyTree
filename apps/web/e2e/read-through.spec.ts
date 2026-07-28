@@ -355,19 +355,59 @@ test.describe("Standardseed-Abgrenzung (EYT-91)", () => {
   // Vorher waere die Pruefung vakuum: sie sucht Harness-Spuren, und ohne
   // eingespielte Fixtures gibt es keine zu finden — gruen, ohne etwas gemessen
   // zu haben.
-  test("die W32-Antwort stammt aus dem Standardseed, nicht aus Harness-Fixtures", async ({
+  test("der PLANSTAND der W32-Antwort stammt aus dem Standardseed, nicht aus Harness-Fixtures", async ({
     page,
   }) => {
     const antwort = await page.request.get(FENSTER_PFAD);
     expect(antwort.status()).toBe(200);
-    const roh = await antwort.text();
-    await page.goto(SEED_SEITE);
-    const dom = (await page.content()).toLowerCase();
+    const fenster = (await antwort.json()) as {
+      assignments: { id: string; employeeId: string; worksiteId: string }[];
+      sourceVersion: { id: string } | null;
+      publishedVersionId: string | null;
+      resources: { employees: { id: string }[]; worksites: { id: string }[] };
+    };
 
+    // Geprueft wird der PLANSTAND — Zuweisungen und Versionen. Nur er traegt
+    // eine Wochenherkunft.
+    //
+    // NICHT geprueft wird `resources` (EYT-92). Das ist keine Abschwaechung,
+    // sondern eine Korrektur der Frage: Stammdaten sind MANDANTENWEIT, nicht
+    // wochengebunden. `e2e/harness/seed.sql` legt "Harness Planerin Alpha" in
+    // dieselbe Organisation Alpha wie den Standardseed — sie steht damit
+    // voellig zu Recht in der Auswahlliste jeder Woche dieses Mandanten,
+    // W32 eingeschlossen. Ein `not.toContain` ueber die ganze Antwort wuerde
+    // hier ein korrektes Verhalten als Leck melden.
+    //
+    // Die Aussage, um die es geht, bleibt scharf: keine Harness-ZUWEISUNG und
+    // keine Harness-VERSION in Woche 32.
+    const planstand = JSON.stringify({
+      assignments: fenster.assignments,
+      sourceVersion: fenster.sourceVersion,
+      publishedVersionId: fenster.publishedVersionId,
+    });
     for (const spur of HARNESS_SPUREN) {
-      expect(roh, `Harness-Fixture ${spur} in der W32-Antwort`).not.toContain(spur);
-      expect(dom, `Harness-Fixture ${spur} im W32-DOM`).not.toContain(spur.toLowerCase());
+      expect(planstand, `Harness-Fixture ${spur} im W32-Planstand`).not.toContain(spur);
     }
+
+    // Gegenprobe gegen Vakuum: der Standardseed MUSS sichtbar sein. Ohne diese
+    // Zeile wuerde eine leere oder fehlgeschlagene Antwort die Pruefung oben
+    // gruen faerben, weil in nichts auch keine Harness-Spur steckt.
+    expect(planstand).toContain(SEED_ZUWEISUNG);
+
+    // Und die Auswahlliste ist nicht etwa leer: der Standardseed steht darin.
+    expect(fenster.resources.employees.map((e) => e.id)).toContain(SEED_EMPLOYEE);
+    expect(fenster.resources.worksites.map((w) => w.id)).toContain(SEED_WORKSITE);
+
+    // Im DOM gilt die alte, strengere Regel weiter — dort werden nur die
+    // Zuweisungen der Woche gerendert, und eine Harness-Id hat dort nichts zu
+    // suchen. Die Auswahlfelder tragen Ids als `value`, nicht als Text, und
+    // stehen deshalb nicht im gerenderten Text.
+    await page.goto(SEED_SEITE);
+    const zuweisungsIds = await sichtbareZuweisungen(page);
+    for (const spur of HARNESS_SPUREN) {
+      expect(zuweisungsIds, `Harness-Fixture ${spur} als Zuweisung im W32-DOM`).not.toContain(spur);
+    }
+    expect(zuweisungsIds).toContain(SEED_ZUWEISUNG);
   });
 });
 
