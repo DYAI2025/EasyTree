@@ -158,6 +158,10 @@ Kontextartefakte — ausdrücklich **nicht** neue Produktanforderungen, Erweiter
 Feature-Scope, Auth-/Publish- oder andere Non-Goal-Funktionen und auch nicht beliebige
 Dokumentationsänderungen außerhalb dieses Features.
 
+Zu `.gitleaks.toml`, `.prettierignore` und den beiden Markdown-Dateien (ergänzt 2026-07-28): vom
+Product Owner beauftragte Entsperrung der zwei geerbten CI-Baseline-Blocker. Wieder eine Lücke in
+dieser Liste, keine Scope-Erweiterung — sie erlauben keine Produktänderung.
+
 - `apps/api/src/modules/planning/**`
 - `apps/api/src/platform/database/**`
 - `apps/api/test/**`
@@ -186,6 +190,10 @@ Dokumentationsänderungen außerhalb dieses Features.
 - `docs/context/**`
 - `docs/traceability.md`
 - `.gitignore`
+- `.gitleaks.toml`
+- `.prettierignore`
+- `docs/EasyTree – Softwaredokumentation.md`
+- `jira_epic_post_mvp_planungsoekonomie_maschinenverleih.md`
 - `CLAUDE.md`
 
 ## Unresolved Questions

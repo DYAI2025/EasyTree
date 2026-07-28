@@ -78,12 +78,8 @@ PGPASSWORD=postgres psql "host=127.0.0.1 port=54322 dbname=postgres user=postgre
   -v ON_ERROR_STOP=1 -c "alter role easytree_app password '${APP_PASSWORT}';"
 echo "::endgroup::"
 
-echo "::group::4-5 Fixtures einspielen und fail-closed pruefen"
-psql "$DB_URL" -v ON_ERROR_STOP=1 -f apps/web/e2e/harness/seed.sql
-# Diese Datei wirft bei jeder Abweichung; ein gruener Schritt hier heisst,
-# dass Alpha UND Beta wirklich existieren.
-psql "$DB_URL" -v ON_ERROR_STOP=1 -f apps/web/e2e/harness/verify-seed.sql
-echo "::endgroup::"
+# Die Harness-Fixtures werden BEWUSST erst nach dem Prozessstart eingespielt
+# (Phase 12c). Grund steht dort.
 
 echo "::group::6-9 Bauen"
 pnpm --filter @easytree/api^... build
@@ -129,20 +125,55 @@ echo "::group::12b Diagnoseabruf vor dem Browser"
 # Die Antwort landet im Artefakt, egal ob sie gelingt. `|| true`, weil dieser
 # Schritt DIAGNOSTIZIERT und nicht urteilt: die Zusicherungen stehen in den
 # Tests.
+# Abgefragt wird W32 (Standardseed) und NICHT W40: die Harness-Fixtures sind an
+# dieser Stelle noch nicht eingespielt (siehe 12c/12d), eine W40-Abfrage lieferte
+# also eine leere Woche und im Log stuende ein irrefuehrendes Ergebnis.
 {
-  echo "--- GET /api/v1/planung/fenster?weekKey=2026-W40 (direkt an die API) ---"
-  curl -sS -i --max-time 10 "${API_ORIGIN}/api/v1/planung/fenster?weekKey=2026-W40" || true
+  echo "--- GET /api/v1/planung/fenster?weekKey=2026-W32 (direkt an die API) ---"
+  curl -sS -i --max-time 10 "${API_ORIGIN}/api/v1/planung/fenster?weekKey=2026-W32" || true
   echo
   echo "--- dasselbe ueber die WEB-Origin (Rewrite) ---"
-  curl -sS -i --max-time 10 "${WEB_ORIGIN}/api/v1/planung/fenster?weekKey=2026-W40" || true
+  curl -sS -i --max-time 10 "${WEB_ORIGIN}/api/v1/planung/fenster?weekKey=2026-W32" || true
 } >"$LOGS/diagnose.txt" 2>&1
 sed -n '1,40p' "$LOGS/diagnose.txt"
 echo "::endgroup::"
 
-echo "::group::13 Gesunde Nachweise"
-PLAYWRIGHT_BASE_URL="$WEB_ORIGIN" \
+echo "::group::12c Standardseed-Kern (EYT-91) — VOR den Harness-Fixtures"
+# Diese Phase laeuft, waehrend die Datenbank ausschliesslich den Stand von
+# `supabase db reset` traegt: Migrationen plus `supabase/seed.sql`. Die
+# W40-Fixtures aus `apps/web/e2e/harness/seed.sql` existieren hier noch NICHT.
+#
+# Das ist der Unterschied zwischen behaupteter und struktureller
+# Unabhaengigkeit. Liefe der Nachweis erst nach dem Einspielen, muesste er
+# ZUSICHERN, dass keine Harness-Zeile eingesprungen ist. Hier kann keine
+# einspringen, weil keine da ist.
+#
+# Genau umgekehrt verhaelt es sich mit der Abgrenzungspruefung
+# ("Standardseed-Abgrenzung"): die sucht Harness-Spuren in der W32-Antwort und
+# waere ohne vorhandene Fixtures vakuum — sie findet nichts, weil es nichts
+# gibt, und faerbt sich gruen ohne etwas gemessen zu haben. Sie laeuft deshalb
+# bewusst SPAETER, in Phase 13.
+EASYTREE_API_ORIGIN="$API_ORIGIN" PLAYWRIGHT_BASE_URL="$WEB_ORIGIN" \
   pnpm --filter @easytree/web exec playwright test \
-    -c playwright.harness.config.ts --grep-invert "Nachweis 7"
+    -c playwright.harness.config.ts --grep "Standardseed-Kern"
+echo "::endgroup::"
+
+echo "::group::12d Harness-Fixtures einspielen und fail-closed pruefen"
+# Erst jetzt — siehe 12c. Die Prozesse laufen bereits; sie brauchen nur die
+# Datenbank, nicht diese Fixtures.
+psql "$DB_URL" -v ON_ERROR_STOP=1 -f apps/web/e2e/harness/seed.sql
+# Diese Datei wirft bei jeder Abweichung; ein gruener Schritt hier heisst,
+# dass Alpha UND Beta wirklich existieren.
+psql "$DB_URL" -v ON_ERROR_STOP=1 -f apps/web/e2e/harness/verify-seed.sql
+echo "::endgroup::"
+
+echo "::group::13 Gesunde Nachweise"
+# Ohne "Standardseed-Kern": der lief bereits in 12c gegen den reinen Seed. Ein
+# zweiter Lauf hier waere nicht falsch, aber er wuerde die Aussage verwaessern
+# — er liefe gegen eine Datenbank, die inzwischen auch Harness-Daten haelt.
+EASYTREE_API_ORIGIN="$API_ORIGIN" PLAYWRIGHT_BASE_URL="$WEB_ORIGIN" \
+  pnpm --filter @easytree/web exec playwright test \
+    -c playwright.harness.config.ts --grep-invert "Nachweis 7|Standardseed-Kern"
 echo "::endgroup::"
 
 echo "::group::14 API kontrolliert beenden"
