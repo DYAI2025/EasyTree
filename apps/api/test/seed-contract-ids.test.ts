@@ -18,7 +18,7 @@
  * ## Gegenmutation
  *
  * Setze in `supabase/seed.sql` eine einzelne ID zurueck auf ein Versions-Nibble
- * ungleich `4` — etwa `00000000-0000-4000-8000-0000004010a1` zurueck auf
+ * ungleich `4` — etwa `00000000-0000-0000-0000-0000004010a1` zurueck auf
  * `00000000-0000-0000-0000-0000004010a1`. Dann wird dieser Test rot und nennt
  * die betroffene ID. Ohne diese Antwort waere er nur Ausfuehrungsevidenz.
  *

@@ -36,7 +36,7 @@ begin;
 -- Fachlogik, sondern die Id-Form.
 --
 -- `IdSchema` ist `z.uuid()` und prueft Version und Variante. Die Ids aus
--- supabase/seed.sql tragen die Form 00000000-0000-4000-8000-0000004010a1 —
+-- supabase/seed.sql tragen die Form 00000000-0000-0000-0000-0000004010a1 —
 -- Versions-Nibble 0, also KEINE gueltige UUID v4. Sie stehen als employeeId
 -- und worksiteId in der Antwort und fallen dort durch.
 --
