@@ -134,6 +134,14 @@ Basisauflösung (LED-014) committete Arbeit überhaupt sichtbar machte. Auch das
 Governance-Pfade und keine fachliche Scope-Erweiterung: sie erlauben keine Produktänderung und
 keine Auth-, Publish- oder sonstige Non-Goal-Funktion.
 
+Zu `packages/contracts/src/index.ts` und `packages/contracts/src/openapi/**` (ergänzt am
+2026-07-28): ebenfalls keine Scope-Erweiterung, sondern eine Lücke in dieser Liste. REQ-002
+verlangt dieselbe Wochenregel in Vertrag und Datenbank, REQ-009 die Gateway-Oberfläche; beides
+ist ohne die öffentliche Export-Datei und den OpenAPI-Generator nicht erreichbar. Vor allem:
+`packages/contracts/openapi/v1.json` steht bereits in der Liste, darf aber **nur** vom Generator
+geschrieben werden — der byteweise Drift-Test verbietet Handarbeit. Die erzeugte Datei
+freizugeben und ihren Erzeuger zu sperren wäre widersprüchlich.
+
 Zu `scripts/read-through-harness.sh` (ergänzt am 2026-07-28): kein neuer Scope, sondern eine
 Lücke in dieser Liste. Der Plan nennt die Datei unter T-06 ausdrücklich als betroffen
 („erweitern, nicht duplizieren"). Aufgefallen ist sie, weil T-01 das darin fest verdrahtete
@@ -163,6 +171,8 @@ dieser Liste, keine Scope-Erweiterung — sie erlauben keine Produktänderung.
 - `apps/web/test/**`
 - `apps/web/e2e/**`
 - `packages/contracts/src/planning/**`
+- `packages/contracts/src/index.ts`
+- `packages/contracts/src/openapi/**`
 - `packages/contracts/src/http/planning-gateway.ts`
 - `packages/contracts/src/mock/planning.ts`
 - `packages/contracts/openapi/v1.json`
