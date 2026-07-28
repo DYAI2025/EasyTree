@@ -215,3 +215,117 @@ test.describe("Read-Through: API gestoppt", () => {
     expect(await page.content()).not.toContain(A_ZUWEISUNG_ENTWURF);
   });
 });
+
+/**
+ * Laufzeitnachweis fuer den Standardseed (EYT-91).
+ *
+ * ## Warum dieser Block zusaetzlich existiert
+ *
+ * Der Block darueber fragt Woche 2026-W40 ab — die Woche der HARNESS-Fixtures
+ * aus `e2e/harness/seed.sql`. Die geben ihre eigenen, schon immer gueltigen
+ * v4-Ids zurueck. Genau die Ids, deren Rueckgabe frueher HTTP 500 ausloeste,
+ * laufen dort nie durch den Vertrag.
+ *
+ * Der urspruengliche EYT-91-Defekt war: `supabase/seed.sql` fuehrte Ids mit
+ * Versions-Nibble `0`, der Controller validierte seine eigene Ausgabe gegen
+ * `PlanningWindowSchema` und lehnte sie ab — sauberer Serverfehler, HTTP 500,
+ * Ursache zwei Schichten entfernt. Belegt war der Fix bisher nur statisch
+ * (`apps/api/test/seed-contract-ids.test.ts`). Statisch heisst: die Datei ist
+ * in Ordnung. Es hiess nicht, dass eine echte Route mit diesen Daten heute 200
+ * liefert.
+ *
+ * Dieser Fall schliesst genau diese Luecke, ueber dieselbe reale Grenze:
+ * Browser -> Same-Origin-Rewrite -> NestJS -> TenantQueryRunner -> RLS ->
+ * PostgreSQL.
+ *
+ * ## Warum kein neues Testsubjekt noetig ist
+ *
+ * Das serverseitig eingespritzte Subjekt `…aaa1` ist Mitglied der
+ * Standardseed-Organisation Alpha (`…0000a1`), und deren Planversion
+ * `…6010a1` traegt Woche 2026-W32. Dieselbe Identitaet, andere Woche — eine
+ * zweite Identitaet einzufuehren wuerde nur eine weitere Fehlerquelle schaffen.
+ *
+ * ## Gegenmutation
+ *
+ * Eine der unten erwarteten Ids in `supabase/seed.sql` zurueck auf
+ * Versions-Nibble `0` setzen. Dann lehnt der Controller seine eigene Antwort
+ * ab, die Route liefert 500, und dieser Fall wird rot — mit genau dem Fehler,
+ * den EYT-91 beschreibt.
+ */
+const SEED_WOCHE = "2026-W32";
+const SEED_SEITE = `/planung?weekKey=${SEED_WOCHE}`;
+
+const SEED_ZUWEISUNG = "00000000-0000-4000-8000-0000007010a1";
+const SEED_EMPLOYEE = "00000000-0000-4000-8000-0000004010a1";
+const SEED_WORKSITE = "00000000-0000-4000-8000-0000005010a1";
+const SEED_VERSION = "00000000-0000-4000-8000-0000006010a1";
+
+/** Harness-Fixtures duerfen hier NICHT einspringen. */
+const HARNESS_SPUREN = [
+  "aaaa3333-3333-4333-8333-333333333333",
+  "a5510003-0003-4003-8003-000000000003",
+  "e11a0001-0001-4001-8001-000000000001",
+  "5117a001-0001-4001-8001-000000000001",
+];
+
+test.describe("Standardseed-Laufzeitnachweis (EYT-91)", () => {
+  test("eine geseedete employeeId und worksiteId passieren den Vertrag mit HTTP 200", async ({
+    page,
+  }) => {
+    const antwortVersprechen = page.waitForResponse(
+      (r) => r.url().includes("/api/v1/planung/fenster") && r.request().method() === "GET",
+    );
+    await page.goto(SEED_SEITE);
+    const antwort = await antwortVersprechen;
+
+    // Der Kern: frueher stand hier 500, weil der Controller seine eigene
+    // Ausgabe gegen den Vertrag prueft und die geseedeten Ids durchfielen.
+    expect(
+      antwort.status(),
+      "Standardseed-Woche muss 200 liefern; 500 bedeutet, dass eine geseedete Id den Vertrag bricht",
+    ).toBe(200);
+
+    // Geprueft, nicht behauptet: `parse` wirft bei Vertragsabweichung. Damit
+    // ist die Validierung an der Transportgrenze Teil des Nachweises und nicht
+    // nur eine Zusicherung ueber ein Feld.
+    const koerper = PlanningWindowSchema.parse(await antwort.json());
+    expect(koerper.weekKey).toBe(SEED_WOCHE);
+
+    // Leere Antwort waere kein Erfolg, sondern eine falsche Testidentitaet:
+    // ein Subjekt ohne aktive Mitgliedschaft sieht durch RLS schlicht nichts.
+    expect(
+      koerper.assignments.length,
+      "leere Woche deutet auf ein Subjekt ohne aktive Mitgliedschaft hin, nicht auf Erfolg",
+    ).toBeGreaterThan(0);
+
+    const zuweisung = koerper.assignments.find((a) => a.id === SEED_ZUWEISUNG);
+    expect(zuweisung, "geseedete Zuweisung fehlt in der Antwort").toBeDefined();
+    expect(zuweisung?.employeeId).toBe(SEED_EMPLOYEE);
+    expect(zuweisung?.worksiteId).toBe(SEED_WORKSITE);
+    // `sourceVersion` ist im Vertrag nullbar — eine Woche ohne Planversion hat
+    // keine. Hier waere `null` aber ein Befund und keine Variante: der Seed legt
+    // die Version an, also muss sie da sein.
+    expect(koerper.sourceVersion, "Standardseed-Planversion fehlt").not.toBeNull();
+    expect(koerper.sourceVersion?.id).toBe(SEED_VERSION);
+
+    // Und der Stand ist auch sichtbar — der Weg endet im DOM, nicht im JSON.
+    await expect(page.locator(`[data-assignment-id="${SEED_ZUWEISUNG}"]`)).toBeVisible();
+  });
+
+  test("die Antwort stammt aus dem Standardseed, nicht aus Harness-Fixtures", async ({ page }) => {
+    // Ohne diesen Fall koennte der Nachweis oben auch dann gruen sein, wenn
+    // versehentlich Harness-Daten in W32 lieferten — dann waere wieder nichts
+    // ueber die geseedeten Ids belegt.
+    const antwortVersprechen = page.waitForResponse(
+      (r) => r.url().includes("/api/v1/planung/fenster") && r.request().method() === "GET",
+    );
+    await page.goto(SEED_SEITE);
+    const roh = await (await antwortVersprechen).text();
+    const dom = (await page.content()).toLowerCase();
+
+    for (const spur of HARNESS_SPUREN) {
+      expect(roh, `Harness-Fixture ${spur} in der W32-Antwort`).not.toContain(spur);
+      expect(dom, `Harness-Fixture ${spur} im W32-DOM`).not.toContain(spur.toLowerCase());
+    }
+  });
+});
