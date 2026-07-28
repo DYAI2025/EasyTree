@@ -16,6 +16,7 @@ export {
   InstantSchema,
   ProblemDocumentSchema,
   cursorPage,
+  newIdempotencyKey,
 } from "./primitives.js";
 export type { IdempotencyKey, Instant, ProblemDocument } from "./primitives.js";
 
@@ -30,6 +31,8 @@ export {
   PlanValidationResultSchema,
   PlanningConflictDtoSchema,
   IsoWeekKeySchema,
+  PlanningResourceSchema,
+  PlanningResourcesSchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
   SourceVersionSchema,
@@ -43,6 +46,8 @@ export type {
   CreateAssignmentCommand,
   PlanValidationResult,
   PlanningConflictDto,
+  PlanningResource,
+  PlanningResources,
   PlanningWindow,
   PlanningWindowQuery,
   SourceVersion,

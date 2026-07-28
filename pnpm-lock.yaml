@@ -105,6 +105,9 @@ importers:
       '@easytree/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@easytree/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@easytree/ui':
         specifier: workspace:*
         version: link:../../packages/ui

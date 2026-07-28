@@ -61,6 +61,7 @@ export async function startHarnessApi(options: HarnessOptions): Promise<INestApp
     .overrideProvider(PLANNING_ACCESS_POLICY)
     .useValue({
       mayReadPlanning: (): Promise<boolean> => Promise.resolve(true),
+      mayWritePlanning: (): Promise<boolean> => Promise.resolve(true),
     } satisfies PlanningAccessPolicy)
     .compile();
 

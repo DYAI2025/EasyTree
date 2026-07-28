@@ -37,6 +37,7 @@ import {
   CreateAssignmentCommandSchema,
   PlanValidationResultSchema,
   PlanningConflictDtoSchema,
+  PlanningResourceSchema,
   PlanningWindowSchema,
   PublishPlanCommandSchema,
   PublishedPlanVersionSchema,
@@ -56,6 +57,9 @@ const NAMED_SCHEMAS = {
   TimeIntervalDto: TimeIntervalDtoSchema,
   PlanningConflictDto: PlanningConflictDtoSchema,
   AssignmentDto: AssignmentDtoSchema,
+  // Benannt, damit ein generierter Client EINEN Ressourcentyp bekommt statt
+  // zweier strukturgleicher Inline-Objekte fuer `employees` und `worksites`.
+  PlanningResource: PlanningResourceSchema,
   PlanningWindow: PlanningWindowSchema,
   CreateAssignmentCommand: CreateAssignmentCommandSchema,
   ValidatePlanCommand: ValidatePlanCommandSchema,

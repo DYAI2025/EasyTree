@@ -27,11 +27,17 @@
  * vergebenen Ids zeigen. Ohne sie liesse sich das nur ueber Text vergleichen,
  * und Text ist Darstellung.
  */
-import type { GatewayFailure, PlanningWindow } from "@easytree/contracts";
+import {
+  newIdempotencyKey,
+  type GatewayFailure,
+  type PlanningResource,
+  type PlanningWindow,
+} from "@easytree/contracts";
 import { Card } from "@easytree/ui";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { usePlanningGateway } from "../lib/planning-gateway-provider";
+import { AssignmentForm } from "./assignment-form";
 
 type ViewState =
   | { readonly kind: "laedt" }
@@ -72,9 +78,27 @@ function standKennung(fenster: PlanningWindow): Stand {
   return fenster.publishedVersionId === null ? "entwurf" : "entwurf-ueber-veroeffentlicht";
 }
 
+/**
+ * Anzeigename einer Id aus `resources`.
+ *
+ * Faellt bewusst auf die Id zurueck statt auf "Unbekannt": eine Id, zu der es
+ * keinen Namen gibt, ist ein Befund und soll sichtbar bleiben. In der Praxis
+ * tritt der Zweig nicht auf — `PlanningWindowSchema` verwirft eine solche
+ * Antwort bereits — er ist die letzte Verteidigungslinie, nicht die erste.
+ */
+function anzeigename(eintraege: readonly PlanningResource[], id: string): string {
+  const treffer = eintraege.find((eintrag) => eintrag.id === id);
+  if (treffer === undefined) return id;
+  return treffer.active ? treffer.label : `${treffer.label} (inaktiv)`;
+}
+
 export function PlanningWindowView({ weekKey }: { weekKey: string }) {
   const gateway = usePlanningGateway();
   const [state, setState] = useState<ViewState>({ kind: "laedt" });
+  // Zaehler statt Bool: nach zwei Speichervorgaengen hintereinander muss die
+  // Woche zweimal neu geladen werden, und ein Bool waere beim zweiten Mal
+  // unveraendert.
+  const [nachladen, setNachladen] = useState(0);
 
   useEffect(() => {
     let abgebrochen = false;
@@ -90,7 +114,42 @@ export function PlanningWindowView({ weekKey }: { weekKey: string }) {
     return () => {
       abgebrochen = true;
     };
-  }, [gateway, weekKey]);
+  }, [gateway, weekKey, nachladen]);
+
+  /**
+   * Speichern und den SERVERSTAND neu lesen.
+   *
+   * Bewusst kein optimistisches Einfuegen der lokal gebauten Zuweisung: die
+   * angezeigte Liste soll das sein, was der Server hat, nicht das, was der
+   * Browser erwartet. Sonst saehe ein fehlgeschlagenes Speichern, dessen
+   * Antwort verloren ging, aus wie ein gelungenes.
+   */
+  const speichern = useCallback(
+    async (befehl: {
+      employeeId: string;
+      worksiteId: string;
+      interval: { startUtc: string; endUtc: string };
+    }): Promise<{ ok: boolean; failure?: GatewayFailure; detail?: string }> => {
+      // Frischer Schluessel je Absendevorgang. Ein wiederverwendeter waere der
+      // Wiederholungsschutz eines FRUEHEREN Einsatzes — der zweite Entwurf
+      // wuerde stillschweigend als Duplikat des ersten beantwortet.
+      const ergebnis = await gateway.createAssignment(
+        { weekKey, ...befehl },
+        { idempotencyKey: newIdempotencyKey() },
+      );
+      if (!ergebnis.ok) {
+        const detail = ergebnis.problem?.detail;
+        return {
+          ok: false,
+          failure: ergebnis.failure,
+          ...(detail === undefined ? {} : { detail }),
+        };
+      }
+      setNachladen((n) => n + 1);
+      return { ok: true };
+    },
+    [gateway, weekKey],
+  );
 
   if (state.kind === "laedt") {
     return (
@@ -135,12 +194,28 @@ export function PlanningWindowView({ weekKey }: { weekKey: string }) {
       ) : (
         <ul data-testid="planungsfenster-liste">
           {fenster.assignments.map((assignment) => (
-            <li key={assignment.id} data-assignment-id={assignment.id}>
+            <li
+              key={assignment.id}
+              data-assignment-id={assignment.id}
+              data-employee-id={assignment.employeeId}
+              data-worksite-id={assignment.worksiteId}
+            >
+              {/* Namen statt Uuids: eine Planerin erkennt "Anna Berg auf
+                  Baustelle Nord", nicht 22222222-…. Die Ids bleiben als
+                  data-Attribute im Markup, weil AK9 den Id-Vergleich zwischen
+                  Planer- und Mitarbeitersicht verlangt — der braucht die Id
+                  selbst, nicht ihre Darstellung. */}
+              <strong>{anzeigename(fenster.resources.employees, assignment.employeeId)}</strong>
+              {" auf "}
+              {anzeigename(fenster.resources.worksites, assignment.worksiteId)}
+              {": "}
               {assignment.interval.startUtc} – {assignment.interval.endUtc}
             </li>
           ))}
         </ul>
       )}
+
+      <AssignmentForm window={fenster} onSubmit={speichern} />
     </Card>
   );
 }

@@ -19,6 +19,7 @@ const LEER: PlanningWindow = {
   assignments: [],
   sourceVersion: null,
   publishedVersionId: null,
+  resources: { employees: [], worksites: [] },
 };
 
 function gateway(seen: string[]): PlanningGateway {

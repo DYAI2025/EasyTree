@@ -11,10 +11,19 @@ import {
   DenyAllPlanningAccess,
   PLANNING_ACCESS_POLICY,
   PLANNING_QUERIES_FACTORY,
+  PLANNING_WRITES_FACTORY,
   PlanningController,
   PlanningWindowRepository,
+  PlanningWriteRepository,
   type PlanningQueriesFactory,
+  type PlanningWritesFactory,
 } from "./modules/planning";
+import {
+  createTimeZone,
+  isoWeekOfLocalDate,
+  localBusinessDate,
+  planningWeekKey,
+} from "@easytree/domain";
 import {
   TENANT_QUERY_RUNNER,
   TenantQueryRunnerProvider,
@@ -75,6 +84,26 @@ import {
       inject: [TENANT_QUERY_RUNNER],
       useFactory: (runner: TenantQueryRunnerProvider): PlanningQueriesFactory => {
         return (subjectUserId: string) => new PlanningWindowRepository(runner, subjectUserId);
+      },
+    },
+    {
+      // Schreibport, gleiche Begruendung wie oben: Subjekt je Anfrage.
+      // Die Wochenregel kommt aus @easytree/domain und wird HINEINGEREICHT,
+      // damit das Repository sie nicht selbst nachbaut — eine zweite
+      // Wochenrechnung waere genau der Fehler aus EYT-74.
+      provide: PLANNING_WRITES_FACTORY,
+      inject: [TENANT_QUERY_RUNNER],
+      useFactory: (runner: TenantQueryRunnerProvider): PlanningWritesFactory => {
+        return (subjectUserId: string) =>
+          new PlanningWriteRepository(runner, subjectUserId, (instant, zone) => {
+            const geprueft = createTimeZone(zone);
+            if (!geprueft.ok) {
+              throw new Error(`EYT-92: unbekannte Zeitzone "" in organizations.time_zone.`);
+            }
+            return planningWeekKey(
+              isoWeekOfLocalDate(localBusinessDate(instant, geprueft.timeZone)),
+            );
+          });
       },
     },
     {

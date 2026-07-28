@@ -49,6 +49,7 @@ function gatewayWith(fetchImpl: FetchLike): HttpPlanningGateway {
 const KEY_A = IdempotencyKeySchema.parse("11111111-1111-4111-8111-111111111111");
 
 const DRAFT = {
+  weekKey: "2026-W32",
   employeeId: "00000000-0000-0000-0000-0000004010a1",
   worksiteId: "00000000-0000-0000-0000-0000005010a1",
   interval: { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T14:00:00.000Z" },
@@ -67,6 +68,7 @@ const VALID_WINDOW = {
   assignments: [],
   sourceVersion: null,
   publishedVersionId: null,
+  resources: { employees: [], worksites: [] },
 };
 
 describe("HttpPlanningGateway — Antwortpruefung", () => {

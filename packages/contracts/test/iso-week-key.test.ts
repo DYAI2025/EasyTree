@@ -128,6 +128,7 @@ const STELLEN: ReadonlyArray<{
       assignments: [],
       sourceVersion: null,
       publishedVersionId: null,
+      resources: { employees: [], worksites: [] },
     }),
   },
   {

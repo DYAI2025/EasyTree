@@ -145,6 +145,51 @@ export const SourceVersionSchema = z.strictObject({
 
 export type SourceVersion = z.infer<typeof SourceVersionSchema>;
 
+/**
+ * Auswaehlbare Ressource einer Planungswoche — Beschaeftigte oder Baustelle.
+ *
+ * Bewusst drei Felder und keines mehr. Die Planerin braucht zum Auswaehlen
+ * einen Namen, zum Absenden eine Id und zum Unterscheiden den Aktivstatus.
+ * `employees` traegt Personenbezug (Migration `0005`); alles darueber hinaus —
+ * Rolle, Qualifikation, Kontaktdaten, Adresse der Baustelle — bleibt draussen,
+ * weil kein Nutzerschritt es braucht. Ein Feld, das niemand liest, ist hier
+ * kein Komfort, sondern eine unnoetig veroeffentlichte Personeneigenschaft.
+ */
+export const PlanningResourceSchema = z.strictObject({
+  id: IdSchema,
+  /** Anzeigename. In der Datenbank `employees.display_name` bzw. `worksites.name`. */
+  label: z.string().min(1),
+  /**
+   * Steuert die **Auswaehlbarkeit**, nicht die Sichtbarkeit.
+   *
+   * Geliefert werden alle tenant-sichtbaren Eintraege, auch inaktive: ein
+   * bestehender Einsatz auf eine inaktive Person muss weiterhin ihren Namen
+   * zeigen statt einer nackten Uuid. Neue Einsaetze duerfen nur auf `active:
+   * true` zeigen — diese Regel setzt die Oberflaeche durch, und der Server
+   * pruefen wird sie erneut, sobald der Schreibpfad existiert.
+   */
+  active: z.boolean(),
+});
+
+export type PlanningResource = z.infer<typeof PlanningResourceSchema>;
+
+/**
+ * Die auswaehlbaren Stammdaten der Woche.
+ *
+ * Sie reisen mit dem Planungsfenster, statt ueber eigene Listenrouten: die
+ * Planerin oeffnet eine Woche und braucht dieselbe Mandantengrenze, dieselbe
+ * Transaktionsklammer und denselben Zeitpunkt wie fuer Versionen und
+ * Zuweisungen. Zwei getrennte Routen koennten zwei verschiedene Zustaende
+ * liefern — eine Zuweisung auf eine Person, die die zweite Antwort nicht mehr
+ * kennt. Ein Roundtrip, eine Wahrheit.
+ */
+export const PlanningResourcesSchema = z.strictObject({
+  employees: z.array(PlanningResourceSchema),
+  worksites: z.array(PlanningResourceSchema),
+});
+
+export type PlanningResources = z.infer<typeof PlanningResourcesSchema>;
+
 export const PlanningWindowSchema = z
   .strictObject({
     weekKey: IsoWeekKeySchema,
@@ -163,12 +208,44 @@ export const PlanningWindowSchema = z
      * daher stammen — dafür ist `sourceVersion` da.
      */
     publishedVersionId: IdSchema.nullable(),
+    /**
+     * Auswaehlbare Beschaeftigte und Baustellen dieses Mandanten. Siehe
+     * {@link PlanningResourcesSchema} — mitgeliefert, nicht nachgeladen.
+     */
+    resources: PlanningResourcesSchema,
   })
   .superRefine((fenster, ctx) => {
     // Feldweise Gueltigkeit genuegt hier nicht: die AUSSAGE steckt in der
     // Beziehung der Felder. Ohne diese Regeln waeren formal gueltige, fachlich
     // widerspruechliche Antworten moeglich — und die faenden erst in der
     // Oberflaeche auf, als "Veroeffentlichte Version X" ueber fremden Daten.
+
+    // Jede angezeigte Zuweisung muss aufloesbar sein. Zeigt eine Zuweisung auf
+    // eine Person oder Baustelle, die `resources` nicht kennt, kann die
+    // Oberflaeche nur eine nackte Uuid rendern — und ein Mandantenleck saehe
+    // genau so aus: eine fremde Id, zu der es lokal keinen Namen gibt. Die
+    // Antwort wird deshalb hier verworfen, nicht in der Oberflaeche kaschiert.
+    const bekannteBeschaeftigte = new Set(fenster.resources.employees.map((e) => e.id));
+    const bekannteBaustellen = new Set(fenster.resources.worksites.map((w) => w.id));
+    fenster.assignments.forEach((einsatz, index) => {
+      if (!bekannteBeschaeftigte.has(einsatz.employeeId)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["assignments", index, "employeeId"],
+          message:
+            "Zuweisung verweist auf eine Beschaeftigte, die nicht in resources.employees steht — nicht aufloesbar.",
+        });
+      }
+      if (!bekannteBaustellen.has(einsatz.worksiteId)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["assignments", index, "worksiteId"],
+          message:
+            "Zuweisung verweist auf eine Baustelle, die nicht in resources.worksites steht — nicht aufloesbar.",
+        });
+      }
+    });
+
     if (fenster.sourceVersion === null) {
       if (fenster.assignments.length > 0) {
         ctx.addIssue({
@@ -213,7 +290,37 @@ export const PlanningWindowSchema = z
 
 export type PlanningWindow = z.infer<typeof PlanningWindowSchema>;
 
+/**
+ * Der Einsatz selbst — ohne Woche.
+ *
+ * Eigenes Schema, weil `ValidatePlanCommand` denselben Entwurf traegt und die
+ * Woche dort bereits eine Ebene hoeher steht. Sie ein zweites Mal darin zu
+ * fuehren waere ein Feld, das mit sich selbst uneins sein kann.
+ */
+export const AssignmentDraftSchema = z.strictObject({
+  employeeId: IdSchema,
+  worksiteId: IdSchema,
+  interval: TimeIntervalDtoSchema,
+});
+
+export type AssignmentDraftDto = z.infer<typeof AssignmentDraftSchema>;
+
 export const CreateAssignmentCommandSchema = z.strictObject({
+  /**
+   * Die Woche, die die Planerin GEOEFFNET hat.
+   *
+   * Redundant zum Intervall — und genau darum steht sie hier. Die Woche eines
+   * Einsatzes ergibt sich aus seinem Beginn in der Zone der Organisation; der
+   * Server rechnet sie selbst aus und vergleicht. Weichen beide ab, hat die
+   * Planerin ein Datum ausserhalb der offenen Woche erwischt, und der Einsatz
+   * waere in einer Woche gelandet, die sie gar nicht ansieht. Ohne dieses Feld
+   * gaebe es dafuer keine Meldung, sondern nur eine Zuweisung, die nach dem
+   * Speichern spurlos verschwindet.
+   *
+   * Es ist ausdruecklich KEINE Mandanten- oder Berechtigungsangabe: der Server
+   * uebernimmt daraus nichts, er prueft nur auf Uebereinstimmung.
+   */
+  weekKey: IsoWeekKeySchema,
   employeeId: IdSchema,
   worksiteId: IdSchema,
   interval: TimeIntervalDtoSchema,
@@ -223,7 +330,7 @@ export type CreateAssignmentCommand = z.infer<typeof CreateAssignmentCommandSche
 
 export const ValidatePlanCommandSchema = z.strictObject({
   weekKey: IsoWeekKeySchema,
-  draft: CreateAssignmentCommandSchema,
+  draft: AssignmentDraftSchema,
 });
 
 export type ValidatePlanCommand = z.infer<typeof ValidatePlanCommandSchema>;

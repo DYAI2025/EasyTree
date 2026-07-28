@@ -42,6 +42,7 @@ const LEERE_WOCHE: PlanningWindow = {
   assignments: [],
   sourceVersion: null,
   publishedVersionId: null,
+  resources: { employees: [], worksites: [] },
 };
 
 // Ohne dieses Cleanup bleiben die gerenderten Baeume stehen und der
@@ -100,6 +101,18 @@ describe("PlanningWindowView", () => {
       value: {
         weekKey: "2026-W32",
         timeZone: "Europe/Berlin",
+        resources: {
+          employees: [
+            {
+              id: "22222222-2222-4222-8222-222222222222",
+              label: "Beschaeftigte A",
+              active: true,
+            },
+          ],
+          worksites: [
+            { id: "33333333-3333-4333-8333-333333333333", label: "Baustelle A", active: true },
+          ],
+        },
         assignments: [
           {
             id: "11111111-1111-4111-8111-111111111111",

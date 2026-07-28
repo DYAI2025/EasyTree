@@ -67,6 +67,7 @@ const WEEK = "packages/domain/test/planning-week.test.ts";
 const EDGES = "packages/domain/test/temporal-edges.test.ts";
 const CAPACITY = "packages/domain/test/weekly-capacity.test.ts";
 const IDS = "packages/domain/test/identifiers.test.ts";
+const WALL = "packages/domain/test/wall-time.test.ts";
 
 export const INVARIANTS: readonly Invariant[] = [
   // -------------------------------------------------------------------------
@@ -209,6 +210,20 @@ export const INVARIANTS: readonly Invariant[] = [
     negative: {
       file: WEEK,
       title: "laesst eine Schicht ueber Mitternacht in der Woche ihres Beginns",
+    },
+  },
+  {
+    exportName: "utcInstantOfLocalWallTime",
+    statement:
+      "Wanduhrzeit -> Instant ist weder total noch eindeutig: die Sommerzeitluecke wird als NONEXISTENT_LOCAL_TIME gemeldet, die Wiederholungsstunde als AMBIGUOUS_LOCAL_TIME — nie geraten.",
+    kind: "regel",
+    positive: {
+      file: WALL,
+      title: "rechnet 03:30 danach schon mit +02:00",
+    },
+    negative: {
+      file: WALL,
+      title: "meldet 02:30 als nicht existierend statt einen Zeitpunkt zu erfinden",
     },
   },
   {

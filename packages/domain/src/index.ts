@@ -41,8 +41,10 @@ export {
 export type {
   IanaTimeZone,
   LocalBusinessDate,
+  LocalWallTime,
   PlanningWeek,
   TimeZoneResult,
+  WallTimeResult,
 } from "./planning-week.js";
 export {
   createTimeZone,
@@ -52,6 +54,7 @@ export {
   localBusinessDate,
   planningWeekKey,
   planningWeekOf,
+  utcInstantOfLocalWallTime,
 } from "./planning-week.js";
 
 export type {

@@ -24,14 +24,23 @@
  *    weil der Client ihn sonst als CONTRACT_VIOLATION meldet, ohne dass
  *    jemand die Ursache sieht.
  */
-import { PlanningWindowQuerySchema, PlanningWindowSchema } from "@easytree/contracts";
+import {
+  AssignmentDtoSchema,
+  CreateAssignmentCommandSchema,
+  PlanningWindowQuerySchema,
+  PlanningWindowSchema,
+} from "@easytree/contracts";
 import {
   BadRequestException,
+  Body,
+  ConflictException,
   Controller,
   ForbiddenException,
   Get,
+  HttpCode,
   Inject,
   InternalServerErrorException,
+  Post,
   Query,
   Req,
   UnauthorizedException,
@@ -49,6 +58,60 @@ import {
   PLANNING_QUERIES_FACTORY,
   type PlanningQueriesFactory,
 } from "../../application/planning-queries.factory";
+import type { ResourceRow } from "../../application/planning-queries.port";
+import {
+  PLANNING_WRITES_FACTORY,
+  type PlanningWriteProblem,
+  type PlanningWritesFactory,
+} from "../../application/planning-writes.port";
+
+/**
+ * Fachproblem -> HTTP-Antwort.
+ *
+ * Jeder Zweig ist ausgeschrieben, es gibt keinen Standardfall: ein
+ * `default: 500` wuerde ein neu hinzugefuegtes Problem stillschweigend als
+ * Serverfehler ausgeben, obwohl es eine erklaerbare Ablehnung ist. Fehlt hier
+ * ein Zweig, faellt es beim Typcheck auf.
+ *
+ * Die Texte sind fuer eine PLANERIN geschrieben, nicht fuer ein Log. "Konflikt"
+ * sagt ihr nicht, was sie tun soll; "ueberschneidet sich mit einem Einsatz von
+ * 08:00 bis 16:00" schon.
+ */
+function problemFor(problem: PlanningWriteProblem): Error {
+  switch (problem.kind) {
+    case "NO_ORGANISATION":
+      return new ForbiddenException("Keine aktive Mitgliedschaft in einer Organisation.");
+    case "AMBIGUOUS_ORGANISATION":
+      return new ForbiddenException(
+        "Mehrere aktive Organisationen. Die Auswahl ist noch nicht modelliert (EYT-14).",
+      );
+    case "RESOURCE_NOT_SELECTABLE":
+      return new BadRequestException(
+        problem.feld === "employeeId"
+          ? "Diese mitarbeitende Person steht für neue Einsätze nicht zur Auswahl."
+          : "Diese Baustelle steht für neue Einsätze nicht zur Auswahl.",
+      );
+    case "OVERLAPPING_ASSIGNMENT":
+      return new ConflictException(
+        `Diese Person ist in diesem Zeitraum bereits eingeplant: ${problem.overlap.startsAtUtc.toISOString()} bis ${problem.overlap.endsAtUtc.toISOString()}. Der Entwurf wurde NICHT gespeichert.`,
+      );
+    case "OUTSIDE_WEEK":
+      return new BadRequestException(
+        `Der Einsatz liegt in Kalenderwoche ${problem.tatsaechlicheWoche}, nicht in der geöffneten Woche. Bitte das Datum prüfen.`,
+      );
+  }
+}
+
+/**
+ * Zeile -> Vertragsform. Explizit Feld fuer Feld, nicht per Spread: ein Spread
+ * wuerde jede kuenftige Spalte des Repositories automatisch veroeffentlichen,
+ * und bei `employees` waere das ein Personenbezug, den niemand entschieden hat.
+ */
+const zuRessource = (row: ResourceRow): { id: string; label: string; active: boolean } => ({
+  id: row.id,
+  label: row.label,
+  active: row.active,
+});
 
 @Controller("planung")
 export class PlanningController {
@@ -59,6 +122,8 @@ export class PlanningController {
     private readonly queriesFor: PlanningQueriesFactory,
     @Inject(PLANNING_ACCESS_POLICY)
     private readonly access: PlanningAccessPolicy,
+    @Inject(PLANNING_WRITES_FACTORY)
+    private readonly writesFor: PlanningWritesFactory,
   ) {}
 
   @Get("fenster")
@@ -111,6 +176,10 @@ export class PlanningController {
       })),
       sourceVersion: result.window.sourceVersion,
       publishedVersionId: result.window.publishedVersionId,
+      resources: {
+        employees: result.window.resources.employees.map(zuRessource),
+        worksites: result.window.resources.worksites.map(zuRessource),
+      },
     };
 
     const validated = PlanningWindowSchema.safeParse(body);
@@ -118,6 +187,70 @@ export class PlanningController {
       // Der Server hat etwas gebaut, das seinem eigenen Vertrag nicht
       // entspricht. Das ist ein Serverfehler, kein Aufruferfehler — und er
       // gehoert hierhin gemeldet, nicht als kaputte Antwort hinausgereicht.
+      throw new InternalServerErrorException("Antwort entspricht nicht dem Vertrag.");
+    }
+    return validated.data;
+  }
+
+  /**
+   * Einsatz im Entwurf der Woche anlegen (EYT-92).
+   *
+   * ## Woher die Woche kommt
+   *
+   * Der Client SENDET `weekKey`, aber der Server GLAUBT ihn nicht. Die Woche
+   * eines Einsatzes ergibt sich allein aus seinem Beginn in der Zone der
+   * Organisation; das Repository rechnet sie selbst und vergleicht. Stimmen
+   * beide nicht ueberein, hat die Planerin ein Datum ausserhalb der offenen
+   * Woche erwischt, und sie bekommt das gesagt — statt einer Zuweisung, die
+   * nach dem Speichern spurlos verschwindet.
+   *
+   * ## Warum die Reihenfolge so ist
+   *
+   * Subjekt, dann Berechtigung, dann Vertragspruefung, dann Fachpruefung.
+   * Eine Vertragsverletzung vor der Berechtigungspruefung zu melden verraet
+   * einem Unberechtigten die Form des Vertrags.
+   */
+  @Post("einsaetze")
+  @HttpCode(201)
+  async createAssignment(@Req() request: unknown, @Body() body: unknown): Promise<unknown> {
+    const subject = this.subjects.resolve(request);
+    if (subject === null) {
+      throw new UnauthorizedException("Kein verifiziertes Subjekt.");
+    }
+    if (!(await this.access.mayWritePlanning(subject))) {
+      throw new ForbiddenException("Keine Schreibberechtigung fuer die Planung.");
+    }
+
+    const command = CreateAssignmentCommandSchema.safeParse(body);
+    if (!command.success) {
+      // Kein ZodError im Rumpf: er traegt die eingesandten Werte, und die
+      // koennen Personenbezug enthalten.
+      throw new BadRequestException(
+        "Der Einsatz ist unvollstaendig oder das Ende liegt nicht nach dem Beginn.",
+      );
+    }
+
+    const result = await this.writesFor(subject).createAssignment({
+      weekKey: command.data.weekKey,
+      employeeId: command.data.employeeId,
+      worksiteId: command.data.worksiteId,
+      startsAtUtc: new Date(command.data.interval.startUtc),
+      endsAtUtc: new Date(command.data.interval.endUtc),
+    });
+
+    if (!result.ok) throw problemFor(result.problem);
+
+    const angelegt = {
+      id: result.assignment.id,
+      employeeId: result.assignment.employeeId,
+      worksiteId: result.assignment.worksiteId,
+      interval: {
+        startUtc: result.assignment.startsAtUtc.toISOString(),
+        endUtc: result.assignment.endsAtUtc.toISOString(),
+      },
+    };
+    const validated = AssignmentDtoSchema.safeParse(angelegt);
+    if (!validated.success) {
       throw new InternalServerErrorException("Antwort entspricht nicht dem Vertrag.");
     }
     return validated.data;

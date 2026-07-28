@@ -114,6 +114,149 @@ export function localBusinessDate(instant: Date, timeZone: IanaTimeZone): LocalB
   return { year: read("year"), month: read("month"), day: read("day") };
 }
 
+/**
+ * Offset der Zone gegenueber UTC zu einem konkreten Instant, in Millisekunden.
+ *
+ * Nicht konstant und nicht ableitbar: Europe/Berlin ist im Januar +1 h und im
+ * Juli +2 h. Deshalb wird der Offset FUER DEN INSTANT bestimmt, indem die
+ * lokalen Bestandteile zurueckgelesen und wieder als UTC zusammengesetzt
+ * werden. Die Differenz ist der Offset.
+ */
+function zonenOffsetMs(instant: Date, timeZone: IanaTimeZone): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(instant);
+
+  const read = (type: string): number => {
+    const value = parts.find((part) => part.type === type)?.value;
+    if (value === undefined) {
+      throw new RangeError(`Intl lieferte keinen Teil "${type}" fuer Zone ${timeZone}.`);
+    }
+    return Number.parseInt(value, 10);
+  };
+
+  const alsUtc = new Date(0);
+  alsUtc.setUTCFullYear(read("year"), read("month") - 1, read("day"));
+  alsUtc.setUTCHours(read("hour"), read("minute"), read("second"), 0);
+  // Millisekunden gehen verloren; deshalb wird nur der Sekundenanteil des
+  // Instants abgezogen, nicht der volle Wert.
+  return alsUtc.getTime() - (instant.getTime() - (instant.getTime() % 1000));
+}
+
+/** Wanduhrzeit an einem lokalen Kalendertag. Stunden 0–23, Minuten 0–59. */
+export interface LocalWallTime {
+  readonly date: LocalBusinessDate;
+  readonly hour: number;
+  readonly minute: number;
+}
+
+export type WallTimeResult =
+  | { readonly ok: true; readonly instant: Date }
+  /** Der Zeitpunkt existiert nicht — Sommerzeitbeginn hat ihn uebersprungen. */
+  | { readonly ok: false; readonly error: "NONEXISTENT_LOCAL_TIME" }
+  /** Der Zeitpunkt existiert zweimal — Sommerzeitende hat ihn wiederholt. */
+  | { readonly ok: false; readonly error: "AMBIGUOUS_LOCAL_TIME" };
+
+/**
+ * Wanduhrzeit einer Zone -> UTC-Instant. Die Gegenrichtung zu
+ * {@link localBusinessDate}, gebraucht, sobald ein Mensch eine Zeit EINGIBT.
+ *
+ * ## Warum das nicht trivial ist
+ *
+ * Die Abbildung Wanduhr -> Instant ist weder total noch eindeutig. Zweimal im
+ * Jahr bricht sie:
+ *
+ * - **Sommerzeitbeginn**: `2026-03-29 02:30` Europe/Berlin existiert nicht.
+ *   Die Uhr springt von 02:00 auf 03:00. Jede Bibliothek, die hier still
+ *   03:30 oder 01:30 zurueckgibt, hat einen Zeitpunkt erfunden.
+ * - **Sommerzeitende**: `2026-10-25 02:30` existiert zweimal, einmal mit
+ *   +02:00 und einmal mit +01:00. Wer einen davon still waehlt, verschiebt
+ *   einen Einsatz um eine Stunde, ohne dass es jemand sieht.
+ *
+ * Beide Faelle werden deshalb als Fehler gemeldet und nicht geraten. Eine
+ * Planerin bekommt eine Rueckfrage; ein stiller Griff ins Ungefaehre waere
+ * genau die Klasse Fehler, die dieses Modul verhindert.
+ *
+ * ## Verfahren
+ *
+ * Die gewuenschte Wanduhrzeit wird zunaechst gelesen, als waere sie UTC. Von
+ * diesem Naeherungswert wird der Zonenoffset abgezogen; weil der Offset selbst
+ * vom Instant abhaengt, wird der Schritt einmal mit dem verbesserten Wert
+ * wiederholt. Anschliessend wird durch RUECKLESEN geprueft, ob der Kandidat
+ * tatsaechlich die gewuenschte Wanduhrzeit zeigt — nur das schliesst die Luecke
+ * aus. Fuer die Doppeldeutigkeit werden beide Offsets der Umstellung
+ * ausprobiert; bestehen zwei verschiedene Instants die Rueckleseprobe, ist die
+ * Eingabe mehrdeutig.
+ *
+ * @throws {RangeError} bei einem Jahr kleiner als 1 oder unmoeglichen Feldern.
+ */
+export function utcInstantOfLocalWallTime(
+  wall: LocalWallTime,
+  timeZone: IanaTimeZone,
+): WallTimeResult {
+  const { date, hour, minute } = wall;
+  if (!Number.isInteger(date.year) || date.year < 1) {
+    throw new RangeError(`utcInstantOfLocalWallTime: Jahr ${date.year} ist nicht darstellbar.`);
+  }
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    throw new RangeError(`utcInstantOfLocalWallTime: Stunde ${hour} liegt ausserhalb 0–23.`);
+  }
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
+    throw new RangeError(`utcInstantOfLocalWallTime: Minute ${minute} liegt ausserhalb 0–59.`);
+  }
+
+  // Zwischenvariable statt `new Date(utcMidnightOfCalendarDay(…))`: der
+  // Waechter `no-local-time-construction` erkennt in der verschachtelten Form
+  // faelschlich eine Ortszeit-Konstruktion, weil sein Muster am ersten `)`
+  // endet und die Kommas des inneren Aufrufs sieht. Die entschachtelte Form
+  // ist ohnehin lesbarer — der Waechter bleibt dafuer unangetastet scharf.
+  const mitternachtMs = utcMidnightOfCalendarDay(date.year, date.month, date.day);
+  const naiv = new Date(mitternachtMs);
+  naiv.setUTCHours(hour, minute, 0, 0);
+  const naivMs = naiv.getTime();
+
+  /** Zeigt dieser Instant in der Zone genau die gewuenschte Wanduhrzeit? */
+  const zeigtGewuenschteZeit = (kandidatMs: number): boolean => {
+    const kandidat = new Date(kandidatMs);
+    const tag = localBusinessDate(kandidat, timeZone);
+    if (tag.year !== date.year || tag.month !== date.month || tag.day !== date.day) return false;
+    // Ein Instant, dessen zurueckgelesener Offset ihn wieder auf `naivMs`
+    // abbildet, zeigt genau die gesuchte Wanduhrzeit — inklusive Stunde und
+    // Minute, ohne sie zweitweise formatieren zu muessen.
+    return kandidatMs + zonenOffsetMs(kandidat, timeZone) === naivMs;
+  };
+
+  const ersterVersuch = naivMs - zonenOffsetMs(naiv, timeZone);
+  const zweiterVersuch = naivMs - zonenOffsetMs(new Date(ersterVersuch), timeZone);
+
+  // Die Iteration allein findet die Doppeldeutigkeit NICHT: sie konvergiert auf
+  // genau einen Zweig und meldet ihn als eindeutig. Deshalb werden zusaetzlich
+  // die Offsets von 24 Stunden davor und danach ausprobiert. Jede Umstellung
+  // liegt innerhalb dieses Fensters, also sind damit beide Offsets des Tages
+  // vertreten — und am Rueckstellungstag bestehen zwei verschiedene Instants
+  // die Rueckleseprobe.
+  const EIN_TAG_MS = 86_400_000;
+  const randOffsets = [naivMs - EIN_TAG_MS, naivMs + EIN_TAG_MS].map(
+    (ms) => naivMs - zonenOffsetMs(new Date(ms), timeZone),
+  );
+
+  const treffer = [ersterVersuch, zweiterVersuch, ...randOffsets].filter(zeigtGewuenschteZeit);
+  const eindeutig = [...new Set(treffer)];
+
+  if (eindeutig.length === 0) return { ok: false, error: "NONEXISTENT_LOCAL_TIME" };
+  if (eindeutig.length > 1) return { ok: false, error: "AMBIGUOUS_LOCAL_TIME" };
+  const gefunden = eindeutig[0];
+  if (gefunden === undefined) return { ok: false, error: "NONEXISTENT_LOCAL_TIME" };
+  return { ok: true, instant: new Date(gefunden) };
+}
+
 /** Planungswoche nach ISO-8601. `isoYear` weicht am Jahreswechsel bewusst vom Kalenderjahr ab. */
 export interface PlanningWeek {
   readonly isoYear: number;

@@ -30,6 +30,14 @@ const INTERVAL = { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T14:
 function makeMock(): MockPlanningGateway {
   return new MockPlanningGateway({
     timeZone: "Europe/Berlin",
+    // Beide Ids der Woche W32 muessen hier auftauchen, sonst verwirft
+    // `PlanningWindowSchema` die Antwort als nicht aufloesbar. Genau das ist
+    // die Absicht: der Mock kann keine Zuweisung mehr auf jemanden zeigen
+    // lassen, den die Auswahlliste nicht kennt.
+    resources: {
+      employees: [{ id: EMPLOYEE_ID, label: "Beschaeftigte A", active: true }],
+      worksites: [{ id: WORKSITE_ID, label: "Baustelle A", active: true }],
+    },
     weeks: new Map([
       [
         "2026-W32",
@@ -118,7 +126,12 @@ describe.each([["MockPlanningGateway", makeMock]])(
 
     it("legt einen vertragskonformen Einsatz an", async () => {
       const result = await gateway.createAssignment(
-        { employeeId: EMPLOYEE_ID, worksiteId: WORKSITE_ID, interval: INTERVAL },
+        {
+          weekKey: "2026-W32",
+          employeeId: EMPLOYEE_ID,
+          worksiteId: WORKSITE_ID,
+          interval: INTERVAL,
+        },
         { idempotencyKey: newIdempotencyKey() },
       );
       expect(result.ok).toBe(true);

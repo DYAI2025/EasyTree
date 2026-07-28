@@ -16,6 +16,7 @@ import type {
   CreateAssignmentCommand,
   PlanValidationResult,
   PlanningWindow,
+  PlanningResources,
   PlanningWindowQuery,
   PublishPlanCommand,
   PublishedPlanVersion,
@@ -39,6 +40,14 @@ export interface MockWeekState {
 
 export interface MockPlanningState {
   readonly timeZone: string;
+  /**
+   * Auswaehlbare Stammdaten. Ohne Standardwert und ohne eingebaute Demonamen —
+   * dieselbe Begruendung wie fuer den ganzen Mock: was hier erscheint, hat ein
+   * Test ausdruecklich hingeschrieben. Ein eingebauter Vorrat an „Max
+   * Mustermann" liesse eine Auswahlliste befuellt aussehen, ohne dass irgendwo
+   * eine Datenquelle existiert.
+   */
+  readonly resources: PlanningResources;
   /** Wochenschluessel -> Wochenzustand. Fehlt der Schluessel, ist die Woche leer und unveroeffentlicht. */
   readonly weeks: ReadonlyMap<string, MockWeekState>;
   /** Fest verdrahtete Antwort der Validierung — der Mock rechnet NICHT. */
@@ -88,6 +97,7 @@ export class MockPlanningGateway implements PlanningGateway {
             ? null
             : { id: week.publishedVersionId, state: "published" as const },
         publishedVersionId: week?.publishedVersionId ?? null,
+        resources: this.state.resources,
       }),
     );
   }

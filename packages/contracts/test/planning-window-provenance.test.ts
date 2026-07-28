@@ -21,7 +21,17 @@ const ASSIGNMENT = {
   interval: { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T14:00:00.000Z" },
 };
 
-const BASIS = { weekKey: "2026-W32", timeZone: "Europe/Berlin" };
+const BASIS = {
+  weekKey: "2026-W32",
+  timeZone: "Europe/Berlin",
+  // Genau die beiden Ids aus ASSIGNMENT. Jede angezeigte Zuweisung muss ueber
+  // `resources` auf einen Namen aufloesbar sein — sonst kann die Oberflaeche
+  // nur eine nackte Uuid rendern, und ein Mandantenleck saehe identisch aus.
+  resources: {
+    employees: [{ id: ASSIGNMENT.employeeId, label: "Beschaeftigte A", active: true }],
+    worksites: [{ id: ASSIGNMENT.worksiteId, label: "Baustelle A", active: true }],
+  },
+};
 
 describe("PlanningWindow — erlaubte Staende", () => {
   it("akzeptiert die leere Woche ohne jede Version", () => {
@@ -118,5 +128,59 @@ describe("PlanningWindow — widerspruechliche Staende", () => {
       publishedVersionId: PUBLISHED_ID,
     });
     expect(r.success).toBe(false);
+  });
+});
+
+/**
+ * Aufloesbarkeit als Invariante (EYT-92).
+ *
+ * **Gegenmutation:** Entfernt man den `bekannteBeschaeftigte`-Block aus
+ * `PlanningWindowSchema.superRefine`, wird der erste Fall gruen — eine
+ * Zuweisung auf eine Person, die die Auswahlliste nicht kennt, ginge durch.
+ * Analog fuer `bekannteBaustellen` und den zweiten Fall. Beide Faelle sind
+ * dauerhaft in der Suite und nicht an eine zurueckgenommene Quelltextaenderung
+ * gebunden.
+ */
+describe("PlanningWindow — Zuweisungen muessen aufloesbar sein", () => {
+  it("lehnt eine Zuweisung auf eine unbekannte Beschaeftigte ab", () => {
+    const r = PlanningWindowSchema.safeParse({
+      ...BASIS,
+      resources: { ...BASIS.resources, employees: [] },
+      assignments: [ASSIGNMENT],
+      sourceVersion: { id: DRAFT_ID, state: "draft" },
+      publishedVersionId: null,
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("resources.employees");
+  });
+
+  it("lehnt eine Zuweisung auf eine unbekannte Baustelle ab", () => {
+    const r = PlanningWindowSchema.safeParse({
+      ...BASIS,
+      resources: { ...BASIS.resources, worksites: [] },
+      assignments: [ASSIGNMENT],
+      sourceVersion: { id: DRAFT_ID, state: "draft" },
+      publishedVersionId: null,
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain("resources.worksites");
+  });
+
+  it("akzeptiert eine Zuweisung auf eine INAKTIVE Beschaeftigte", () => {
+    // Kernregel: `active` steuert die Auswaehlbarkeit neuer Einsaetze, nicht
+    // die Sichtbarkeit bestehender. Wuerde der Vertrag inaktive Eintraege
+    // verwerfen, verloere ein bestehender Einsatz seinen Namen, sobald jemand
+    // die Person deaktiviert.
+    const r = PlanningWindowSchema.safeParse({
+      ...BASIS,
+      resources: {
+        employees: [{ id: ASSIGNMENT.employeeId, label: "Ausgeschieden", active: false }],
+        worksites: BASIS.resources.worksites,
+      },
+      assignments: [ASSIGNMENT],
+      sourceVersion: { id: DRAFT_ID, state: "draft" },
+      publishedVersionId: null,
+    });
+    expect(r.success).toBe(true);
   });
 });

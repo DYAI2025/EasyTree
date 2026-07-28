@@ -30,3 +30,13 @@ export { PlanningWindowRepository } from "./infrastructure/planning-window.repos
 export { PlanningController } from "./interface/http/planning.controller";
 export type { PlanningAccessPolicy } from "./application/planning-access.port";
 export { DenyAllPlanningAccess, PLANNING_ACCESS_POLICY } from "./application/planning-access.port";
+export type {
+  CreateAssignmentInput,
+  CreateAssignmentResult,
+  CreatedAssignmentRow,
+  PlanningWriteProblem,
+  PlanningWrites,
+  PlanningWritesFactory,
+} from "./application/planning-writes.port";
+export { PLANNING_WRITES_FACTORY } from "./application/planning-writes.port";
+export { PlanningWriteRepository } from "./infrastructure/planning-write.repository";
