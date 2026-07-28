@@ -1,74 +1,187 @@
 # Traceability Matrix
 
-Feature Slug: `planning-draft-conflict-slice`  
-Status: ready-for-user-confirmation
+Feature Slug: `planning-draft-conflict-slice`
+Status: user-confirmed
+Confirmed by user: yes
+Bestätigt am: 2026-07-28 durch den Product Owner (Benjamin Poersch), wörtliche Formel erteilt.
+Hinweis zur Bestätigung: bestätigt ist der **fachliche Feature-Scope**. Technische Kapazität
+und Umsetzbarkeit sind ausdrücklich **nicht** vorab bestätigt — sie gehören in das
+Developers-Gate (GATE-002) und sind dort evidenzbasiert zu führen.
 
-## Requirement Traceability
+Canvas: [`docs/canvas/planning-draft-conflict-slice.canvas.md`](canvas/planning-draft-conflict-slice.canvas.md)
+Vision: [`docs/vision/planning-draft-conflict-slice.vision.md`](vision/planning-draft-conflict-slice.vision.md)
+PRD: [`docs/prd/planning-draft-conflict-slice.prd.md`](prd/planning-draft-conflict-slice.prd.md)
 
-| Trace ID | Vision Item ID | Canvas Item ID | Requirement ID | Acceptance Criteria ID | Evidence Needed | Status | Source Type |
-|---|---|---|---|---|---|---|---|
-| TRC-001 | VIS-002, VIS-003 | CAN-001, CAN-005 | REQ-001 | AC-001 | EV-001: Browser-, API- und DB-Abgleich für reale Woche und Tenant-Isolation | linked | EXPLICIT |
-| TRC-002 | VIS-006 | CAN-005, CAN-007 | REQ-002 | AC-002 | EV-002: Contract-/DB-Testvektoren, Forward-Migration, zwei Resets | linked | EXPLICIT |
-| TRC-003 | VIS-006 | CAN-005, CAN-008 | REQ-003 | AC-003 | EV-003: UUID-v4-Scan, Runtime-Parse und grüne abhängige Suiten | linked | EXPLICIT |
-| TRC-004 | VIS-002 | CAN-003, CAN-005 | REQ-004 | AC-004 | EV-004: Komponenten- und Browsertest für Pflichtangaben | linked | EXPLICIT |
-| TRC-005 | VIS-002, VIS-004 | CAN-003, CAN-005, CAN-007 | REQ-005 | AC-005 | EV-005: Route-/Command-/Repository-Integrationstest im Tenantkontext | linked | EXPLICIT |
-| TRC-006 | VIS-002, VIS-006 | CAN-003, CAN-005 | REQ-006 | AC-006 | EV-006: Negativtests mit stabilen Codes für alle definierten Ablehnungen | linked | EXPLICIT |
-| TRC-007 | VIS-005, VIS-006 | CAN-007, CAN-008 | REQ-007 | AC-007 | EV-007: Fehler-Injektion und direkte Datenbank-Gegenprüfung | linked | EXPLICIT |
-| TRC-008 | VIS-005, VIS-006 | CAN-005, CAN-008 | REQ-008 | AC-008 | EV-008: Retry-/Nebenläufigkeitstest mit Wirkungscount eins | linked | EXPLICIT |
-| TRC-009 | VIS-003, VIS-005 | CAN-005, CAN-007 | REQ-009 | AC-009 | EV-009: Gemeinsame Gateway-Contract-Suite und Boundary-Test | linked | EXPLICIT |
-| TRC-010 | VIS-002, VIS-006 | CAN-003, CAN-005 | REQ-010 | AC-010 | EV-010: Komponenten-, Responsive- und Accessibility-Smoke | linked | EXPLICIT |
-| TRC-011 | VIS-004, VIS-006 | CAN-009, CAN-010 | REQ-011 | AC-011 | EV-011: Playwright-E2E mit Reload, zweitem Kontext und DB-Verifikation | linked | EXPLICIT |
-| TRC-012 | VIS-005, VIS-006 | CAN-007, CAN-008, CAN-010 | REQ-012 | AC-012 | EV-012: Ausgeführte rote Gegenproben und fail-closed Reporting | linked | EXPLICIT |
+## Wie diese Datei zu lesen ist
+
+Die Pflichtfelder verteilen sich auf drei Tabellen mit demselben Schlüssel `REQ-*`. Eine
+einzige Tabelle mit fünfzehn Spalten wäre nicht mehr lesbar, und eine Matrix, die niemand
+liest, ist keine Kontrolle. Tabelle A ist die ursprüngliche Verknüpfung, Tabelle B trägt die
+sechs Canvas-Pflichtfelder, Tabelle C die True-Line-Felder und den Reality Ledger.
+
+### Legende `evidence-class`
+
+Zulässige Werte plus ein ausdrücklicher Offen-Wert:
+
+| Wert                  | Bedeutung                                                                |
+| --------------------- | ------------------------------------------------------------------------ |
+| `production-verified` | gegen ein echtes Deployment mit echten Secrets belegt                    |
+| `real-boundary-smoke` | Test berührt die echte Grenze (echte Datenbank, echter Browser)          |
+| `integration-fake`    | Integrationstest, dessen Grenze durch einen Fake ersetzt ist             |
+| `unit-fake`           | Unittest ohne Grenzberührung                                             |
+| `none`                | **kein Nachweis, weil nicht implementiert** — sichtbar offen, nie „grün" |
+
+`production-verified` ist für dieses Feature durchgängig **unerreichbar**: produktives
+Deployment ist ausdrücklicher Non-Goal (CAN-006, VIS-007). Der höchste hier erreichbare Wert
+ist `real-boundary-smoke`. Das ist keine Schwäche der Matrix, sondern die ehrliche Obergrenze
+des bestätigten Scopes.
+
+### Legende `wired-in-prod?`
+
+Bezieht sich auf die **Produktions-Kompositionswurzel** (`apps/web/app/providers.tsx`,
+`apps/api/src/app.module.ts`), nicht auf ein Testharness. Lese- und Schreibpfad werden
+getrennt klassifiziert, weil sie getrennt existieren.
+
+---
+
+## Tabelle A — Requirement Traceability (unverändert)
+
+| Trace ID | Vision Item ID   | Canvas Item ID            | Requirement ID | Acceptance Criteria ID | Evidence Needed                                                             | Status | Source Type |
+| -------- | ---------------- | ------------------------- | -------------- | ---------------------- | --------------------------------------------------------------------------- | ------ | ----------- |
+| TRC-001  | VIS-002, VIS-003 | CAN-001, CAN-005          | REQ-001        | AC-001                 | EV-001: Browser-, API- und DB-Abgleich für reale Woche und Tenant-Isolation | linked | EXPLICIT    |
+| TRC-002  | VIS-006          | CAN-005, CAN-007          | REQ-002        | AC-002                 | EV-002: Contract-/DB-Testvektoren, Forward-Migration, zwei Resets           | linked | EXPLICIT    |
+| TRC-003  | VIS-006          | CAN-005, CAN-008          | REQ-003        | AC-003                 | EV-003: UUID-v4-Scan, Runtime-Parse und grüne abhängige Suiten              | linked | EXPLICIT    |
+| TRC-004  | VIS-002          | CAN-003, CAN-005          | REQ-004        | AC-004                 | EV-004: Komponenten- und Browsertest für Pflichtangaben                     | linked | EXPLICIT    |
+| TRC-005  | VIS-002, VIS-004 | CAN-003, CAN-005, CAN-007 | REQ-005        | AC-005                 | EV-005: Route-/Command-/Repository-Integrationstest im Tenantkontext        | linked | EXPLICIT    |
+| TRC-006  | VIS-002, VIS-006 | CAN-003, CAN-005          | REQ-006        | AC-006                 | EV-006: Negativtests mit stabilen Codes für alle definierten Ablehnungen    | linked | EXPLICIT    |
+| TRC-007  | VIS-005, VIS-006 | CAN-007, CAN-008          | REQ-007        | AC-007                 | EV-007: Fehler-Injektion und direkte Datenbank-Gegenprüfung                 | linked | EXPLICIT    |
+| TRC-008  | VIS-005, VIS-006 | CAN-005, CAN-008          | REQ-008        | AC-008                 | EV-008: Retry-/Nebenläufigkeitstest mit Wirkungscount eins                  | linked | EXPLICIT    |
+| TRC-009  | VIS-003, VIS-005 | CAN-005, CAN-007          | REQ-009        | AC-009                 | EV-009: Gemeinsame Gateway-Contract-Suite und Boundary-Test                 | linked | EXPLICIT    |
+| TRC-010  | VIS-002, VIS-006 | CAN-003, CAN-005          | REQ-010        | AC-010                 | EV-010: Komponenten-, Responsive- und Accessibility-Smoke                   | linked | EXPLICIT    |
+| TRC-011  | VIS-004, VIS-006 | CAN-009, CAN-010          | REQ-011        | AC-011                 | EV-011: Playwright-E2E mit Reload, zweitem Kontext und DB-Verifikation      | linked | EXPLICIT    |
+| TRC-012  | VIS-005, VIS-006 | CAN-007, CAN-008, CAN-010 | REQ-012        | AC-012                 | EV-012: Ausgeführte rote Gegenproben und fail-closed Reporting              | linked | EXPLICIT    |
+
+---
+
+## Tabelle B — Canvas-Pflichtfelder (sechs, je Top-Level-REQ)
+
+`canvas-link` ist für alle Zeilen
+[`docs/canvas/planning-draft-conflict-slice.canvas.md`](canvas/planning-draft-conflict-slice.canvas.md)
+und wird deshalb nicht je Zeile wiederholt; die Spalte nennt die Canvas-ID, auf die sich die
+Zeile stützt.
+
+| REQ     | canvas-link     | canvas-problem                                                           | canvas-target-user                      | canvas-value-claim                                     | canvas-success-signal                      | canvas-risk-status |
+| ------- | --------------- | ------------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------------------ | ------------------------------------------ | ------------------ |
+| REQ-001 | Canvas §CAN-001 | CAN-001: kein vollständiger Planungsvorgang nutzbar; Lesekette existiert | CAN-002: Planerin                       | CAN-003: reale Woche öffnen                            | CAN-009: identische IDs in UI/API/DB       | `aligned`          |
+| REQ-002 | Canvas §CAN-005 | CAN-001: fachlich gültiger Entwurf nicht beweisbar                       | CAN-002: Planerin, Administrator        | CAN-003: fachlich stabiler Grund bei Ablehnung         | CAN-009: definierte Negativfälle abgelehnt | `value-risk`       |
+| REQ-003 | Canvas §CAN-008 | CAN-001: reale Antwort scheitert trotz gültiger DB-Zeilen                | CAN-002: Planerin                       | CAN-003: Woche real öffnen können                      | CAN-009: relevante CI-Gates grün           | `value-risk`       |
+| REQ-004 | Canvas §CAN-005 | CAN-001: kein Einsatzentwurf über UI erstellbar                          | CAN-002: Planerin                       | CAN-003: Einsatzentwurf anlegen                        | CAN-009: Entwurf erscheint in UI           | `aligned`          |
+| REQ-005 | Canvas §CAN-005 | CAN-001: schreibende Autorisierungsgrenze fehlt                          | CAN-002: Planerin, Administrator        | CAN-003: Entwurf wird gespeichert                      | CAN-009: identische IDs in UI/API/DB       | `aligned`          |
+| REQ-006 | Canvas §CAN-005 | CAN-001: Konfliktbehandlung unbewiesen                                   | CAN-002: Planerin                       | CAN-003: nachvollziehbar abgelehnt                     | CAN-009: Negativfälle ohne Teilwirkung     | `aligned`          |
+| REQ-007 | Canvas §CAN-007 | CAN-001: Transaktionsgrenze unbewiesen                                   | CAN-002: Planerin                       | CAN-003: gespeichert oder abgelehnt, nichts dazwischen | CAN-009: keine Teilwirkung                 | `aligned`          |
+| REQ-008 | Canvas §CAN-005 | CAN-001: Idempotenz unbewiesen                                           | CAN-002: Planerin                       | CAN-003: unmittelbar nachvollziehbares Ergebnis        | CAN-009: keine Doppelwirkung               | `aligned`          |
+| REQ-009 | Canvas §CAN-007 | CAN-001: kein zusammenhängender schreibender Nutzerfluss                 | CAN-002: Planerin                       | CAN-003: ein Vorgang statt Bausteine                   | CAN-009: reale Serverwahrheit              | `value-risk`       |
+| REQ-010 | Canvas §CAN-003 | CAN-001: kein nutzbarer Planungsvorgang                                  | CAN-002: Planerin, Führungskraft        | CAN-003: unmittelbar nachvollziehen                    | CAN-009: Ergebnis sichtbar                 | `aligned`          |
+| REQ-011 | Canvas §CAN-009 | CAN-001: Vorgang nicht beweisbar                                         | CAN-002: Planerin                       | CAN-003: persistenter Vorgang                          | CAN-009: Reload und Zweitbrowser           | `value-risk`       |
+| REQ-012 | Canvas §CAN-010 | CAN-001: grüne Tests ohne Nutzerwahrheit                                 | CAN-002: Planerin (mittelbar); Reviewer | CAN-003: Wert statt Attrappe                           | CAN-009: Gegenproben werden rot            | `aligned`          |
+
+---
+
+## Tabelle C — True-Line-Felder und Reality Ledger
+
+`vision-link` ist für alle Zeilen
+[`docs/vision/planning-draft-conflict-slice.vision.md`](vision/planning-draft-conflict-slice.vision.md);
+die Spalte nennt die tragende Vision-ID.
+
+| REQ     | vision-link     | value-check-id | true-line-status  | wired-in-prod?                                                  | evidence-class                                                                            | Belegte Tatsache (gemessen 28.07.2026)                                                                                                                                                                                                                                                                                                                  |
+| ------- | --------------- | -------------- | ----------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| REQ-001 | Vision §VIS-002 | VC-001         | `review-required` | **ja (nur Lesepfad)**                                           | `real-boundary-smoke`                                                                     | `/planung` rendert `PlanningWindowView`; Kompositionswurzel verdrahtet `HttpPlanningGateway`; API-Route `@Get("fenster")` existiert. CI-Job `read-through` grün — **aber gemessen bei `3773ecf3`, Head steht auf `cb56a9f`. Nachweis ist veraltet und muss neu laufen.**                                                                                |
+| REQ-002 | Vision §VIS-006 | VC-002         | `review-required` | **teilweise (Vertrag ja, Datenbank nein)**                      | Vertrag `unit-fake` · Datenbank `none`                                                    | Vertrag erzwingt bereits `01–53` (`packages/contracts/src/planning/schemas.ts:113`). Datenbank prüft weiterhin schwach: `week_key ~ '^\d{4}-W\d{2}$'` (`supabase/migrations/20260727020300_0007_planning.sql:20`). Gemeinsame deterministische Funktion für die jahresabhängige 53. Woche: **nicht vorhanden**.                                         |
+| REQ-003 | Vision §VIS-006 | VC-003         | `review-required` | **nein**                                                        | `none`                                                                                    | `supabase/seed.sql` führt weiterhin IDs mit Versions-Nibble `0`. Das E2E-Harness legt eigene v4-Fixtures an — **Umgehung, kein Nachweis**; daraus darf keine Evidenz abgeleitet werden.                                                                                                                                                                 |
+| REQ-004 | Vision §VIS-002 | VC-004         | `pass`            | **nein**                                                        | `none`                                                                                    | `apps/web/components/planning-window-view.tsx` enthält **null** Formularelemente (kein `<form>`, `<input>`, `<button>`, `onSubmit`). Reine Leseansicht.                                                                                                                                                                                                 |
+| REQ-005 | Vision §VIS-002 | VC-005         | `pass`            | **nein**                                                        | `none`                                                                                    | `planning.controller.ts` hat genau eine Route (`@Get("fenster")`). `POST /planung/einsaetze` steht in `NOT_YET_IMPLEMENTED`. Port `planning-commands.port.ts` existiert ohne Implementierung.                                                                                                                                                           |
+| REQ-006 | Vision §VIS-006 | VC-006         | `pass`            | **nein (Regel vorhanden, für den Nutzer nicht erreichbar)**     | Domain `unit-fake` · DB-Invariante `real-boundary-smoke` · Nutzerpfad `none`              | `conflictsWithExisting` und `validateDraft` existieren mit Unittests; DB-Invarianten aus Migration `0010` sind in `db-gates` gegen zwei echte Verbindungen belegt. **`validateDraft` hat keinen Produktionsaufrufer** — die Regel ist heute über keinen Nutzerpfad erreichbar.                                                                          |
+| REQ-007 | Vision §VIS-005 | VC-007         | `pass`            | **nein**                                                        | `none`                                                                                    | `TenantQueryRunner` stellt die Transaktionsklammer bereit; Audit-Outbox existiert (Migration `0008`). Es gibt keinen Command, der beides in einer Transaktion nutzt.                                                                                                                                                                                    |
+| REQ-008 | Vision §VIS-005 | VC-008         | `pass`            | **teilweise (Client ja, Server nein)**                          | Client `unit-fake` · Server `none`                                                        | `HttpPlanningGateway.send` prüft den gebrandeten Idempotenzschlüssel vor Versand. Serverseitige Speicherung und Wiederholungsschutz: nicht implementiert.                                                                                                                                                                                               |
+| REQ-009 | Vision §VIS-003 | VC-009         | `review-required` | **teilweise (Client-Port vollständig, Serverendpunkte fehlen)** | Lesen `real-boundary-smoke` · Validieren/Erstellen `unit-fake` **gegen Mock**             | `HttpPlanningGateway` implementiert bereits alle vier Methoden inkl. Pfad, Schema, Idempotenzschlüssel und Konfliktabbildung. **Die Contract-Tests für Validieren und Erstellen laufen gegen den Mock; die aufgerufenen Serverrouten existieren nicht.** Genau die Konstellation, in der ein grüner Lauf wie ein funktionierender Schreibpfad aussieht. |
+| REQ-010 | Vision §VIS-002 | VC-010         | `pass`            | **teilweise (Lesezustände ja, Schreibzustände nein)**           | Lesen `real-boundary-smoke` · Schreiben `none`                                            | Shell-A11y ist geprüft; Conflict-, Stale-Version- und Erfolgszustände des Schreibpfads existieren nicht.                                                                                                                                                                                                                                                |
+| REQ-011 | Vision §VIS-004 | VC-011         | `review-required` | **teilweise (nur Lesepfad)**                                    | Lesen `real-boundary-smoke` · Schreiben `none`                                            | `apps/web/e2e/read-through.spec.ts` belegt Reload und zweiten Kontext für den Lesepfad. Schreibender E2E existiert nicht. Der Lesenachweis ist zusätzlich veraltet (siehe REQ-001).                                                                                                                                                                     |
+| REQ-012 | Vision §VIS-005 | VC-012         | `pass`            | **teilweise**                                                   | Architekturregeln `unit-fake` mit permanenter Gegenprobe · Schreibpfad-Gegenproben `none` | `no-supabase-import.test.ts`, `architecture.test.ts` und `architecture-red-case.test.ts` existieren; letzterer beweist gegen einen synthetischen Baum, dass jede Regel feuert. Gegenproben für umgangenen Serverzustand, Tenantfilter, Retryschutz und Konfliktvalidator im **Schreibpfad**: nicht vorhanden.                                           |
+
+### Reality-Ledger-Zusammenfassung
+
+- `production-verified`: **0 von 12** — und im bestätigten Scope unerreichbar (Deployment ist Non-Goal).
+- Vollständig `wired-in-prod?`: **1 von 12** (REQ-001, nur Lesepfad).
+- Teilweise verdrahtet: 5 (REQ-002, 008, 009, 010, 011, 012 — jeweils Lese- oder Clienthälfte).
+- Gar nicht verdrahtet: REQ-003, 004, 005, 006, 007.
+- **RED trotz grüner Tests:** REQ-009. Der Client-Port ist vollständig und seine Contract-Tests
+  sind grün — gegen den Mock. Die Serverrouten fehlen. Diese Zeile darf nie als „Gateway fertig"
+  gelesen werden.
+- **Veralteter Nachweis:** der einzige `real-boundary-smoke` (CI-Job `read-through`) wurde bei
+  `3773ecf3` gemessen; der Branch steht fünf Commits weiter. Bis zu einem neuen grünen Lauf ist
+  REQ-001/REQ-011 **unbelegt für den aktuellen Stand**.
+
+---
 
 ## Source-to-Requirement Map
 
-| Source ID | Supported Requirements | Status |
-|---|---|---|
-| SRC-001 | REQ-001, REQ-004, REQ-005, REQ-006, REQ-010, REQ-011 | linked |
-| SRC-002 | REQ-001, REQ-005, REQ-006, REQ-007, REQ-008 | linked |
-| SRC-003 | REQ-007, REQ-008, REQ-011, REQ-012 | linked |
-| SRC-004 | REQ-009, REQ-010, REQ-012 | linked |
-| SRC-005 | REQ-002 | linked |
-| SRC-006 | REQ-003 | linked |
-| SRC-007 | REQ-001, REQ-004, REQ-006, REQ-010, REQ-011, REQ-012 | linked |
-| SRC-008 | REQ-001, REQ-008, REQ-009, REQ-012 | linked |
-| SRC-009 | REQ-005, REQ-010 | linked |
-| SRC-010 | REQ-007, REQ-011, REQ-012 | linked |
+| Source ID | Supported Requirements                               | Status |
+| --------- | ---------------------------------------------------- | ------ |
+| SRC-001   | REQ-001, REQ-004, REQ-005, REQ-006, REQ-010, REQ-011 | linked |
+| SRC-002   | REQ-001, REQ-005, REQ-006, REQ-007, REQ-008          | linked |
+| SRC-003   | REQ-007, REQ-008, REQ-011, REQ-012                   | linked |
+| SRC-004   | REQ-009, REQ-010, REQ-012                            | linked |
+| SRC-005   | REQ-002                                              | linked |
+| SRC-006   | REQ-003                                              | linked |
+| SRC-007   | REQ-001, REQ-004, REQ-006, REQ-010, REQ-011, REQ-012 | linked |
+| SRC-008   | REQ-001, REQ-008, REQ-009, REQ-012                   | linked |
+| SRC-009   | REQ-005, REQ-010                                     | linked |
+| SRC-010   | REQ-007, REQ-011, REQ-012                            | linked |
 
 ## Jira-to-Feature Map
 
-| Jira Key | Feature Role | Requirements | Completion Evidence |
-|---|---|---|---|
-| EYT-88 | Datenintegritätsvoraussetzung | REQ-002 | AC-002 / EV-002 |
-| EYT-91 | Vertragstreue Testdaten | REQ-003 | AC-003 / EV-003 |
-| EYT-50 | Fachlicher Command- und Persistenzkern | REQ-005, REQ-006, REQ-007, REQ-008 | AC-005 bis AC-008 / EV-005 bis EV-008 |
-| EYT-79 | Gateway und Fehlersemantik | REQ-009 | AC-009 / EV-009 |
-| EYT-92 | Sichtbare Nutzerreise | REQ-001, REQ-004, REQ-010 | AC-001, AC-004, AC-010 / EV-001, EV-004, EV-010 |
-| EYT-62 | Systemweiter Abschlussnachweis | REQ-011, REQ-012 | AC-011, AC-012 / EV-011, EV-012 |
+Ticketrollen und Status gegen Jira geprüft am 28.07.2026 (`sprint in openSprints()`).
+
+| Jira Key | Typ   | Jira-Status  | Feature Role                            | Requirements                       | Completion Evidence                             |
+| -------- | ----- | ------------ | --------------------------------------- | ---------------------------------- | ----------------------------------------------- |
+| EYT-88   | Bug   | Zu erledigen | Datenintegritätsvoraussetzung ISO-Woche | REQ-002                            | AC-002 / EV-002                                 |
+| EYT-91   | Bug   | Zu erledigen | Vertragstreue Testdaten                 | REQ-003                            | AC-003 / EV-003                                 |
+| EYT-50   | Story | In Arbeit    | Fachlicher Command- und Persistenzkern  | REQ-005, REQ-006, REQ-007, REQ-008 | AC-005 bis AC-008 / EV-005 bis EV-008           |
+| EYT-79   | Task  | In Arbeit    | Gateway und Fehlersemantik              | REQ-009                            | AC-009 / EV-009                                 |
+| EYT-92   | Story | Zu erledigen | Sichtbare Nutzerreise                   | REQ-001, REQ-004, REQ-010          | AC-001, AC-004, AC-010 / EV-001, EV-004, EV-010 |
+| EYT-62   | Task  | In Arbeit    | Systemweiter Abschlussnachweis          | REQ-011, REQ-012                   | AC-011, AC-012 / EV-011, EV-012                 |
 
 ## Gate Matrix
 
-| Gate ID | Gate | Requirements | Pass Condition | Current Status |
-|---|---|---|---|---|
-| GATE-001 | Product Intent | REQ-001 bis REQ-012 | Vision und Canvas vom Nutzer bestätigt | blocked-user-confirmation |
-| GATE-002 | Developer Feasibility | REQ-001 bis REQ-012 | Developers bestätigen Kapazität, Reihenfolge und Umsetzbarkeit | missing |
-| GATE-003 | Data Integrity | REQ-002, REQ-003 | Forward-Migration, UUID-v4-Seeds und zwei Resets grün | open |
-| GATE-004 | Write Correctness | REQ-005 bis REQ-008 | Command-, Transaktions-, Konflikt- und Idempotenztests grün | open |
-| GATE-005 | Boundary Integrity | REQ-009, REQ-012 | Gateway-Verträge und Architekturregeln grün | partial-read-only |
-| GATE-006 | User Journey | REQ-001, REQ-004, REQ-010, REQ-011 | Realer Browserfluss speichert und liest denselben Serverstand | open |
-| GATE-007 | Counterproof | REQ-012 | Schutzannahmen absichtlich gebrochen und Tests nachweislich rot | open |
-| GATE-008 | Feature Done | REQ-001 bis REQ-012 | alle vorherigen Gates grün, keine Must-Lücke, Rollback dokumentiert | blocked |
+| Gate ID  | Gate                  | Requirements                       | Pass Condition                                                           | Current Status                                                                                                                                                                                                                                                                             |
+| -------- | --------------------- | ---------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GATE-001 | Product Intent        | REQ-001 bis REQ-012                | Vision und Canvas vom Nutzer bestätigt                                   | **cleared 28.07.2026**                                                                                                                                                                                                                                                                     |
+| GATE-002 | Developer Feasibility | REQ-001 bis REQ-012                | Kapazität, Reihenfolge und Umsetzbarkeit evidenzbasiert bewertet         | **PASS_WITH_CAPACITY_RISK** (2026-07-28). Sprintfenster endet 29.07.2026 06:19 Europe/Berlin. Start freigegeben, Fertigstellung **nicht** zugesagt. Keine Must-Kürzung zur Termineinhaltung; kein unvollständiger Stand gilt als Done; Restarbeit geht transparent in den nächsten Sprint. |
+| GATE-003 | Data Integrity        | REQ-002, REQ-003                   | Forward-Migration, UUID-v4-Seeds und zwei Resets grün                    | open                                                                                                                                                                                                                                                                                       |
+| GATE-004 | Write Correctness     | REQ-005 bis REQ-008                | Command-, Transaktions-, Konflikt- und Idempotenztests grün              | open                                                                                                                                                                                                                                                                                       |
+| GATE-005 | Boundary Integrity    | REQ-009, REQ-012                   | Gateway-Verträge und Architekturregeln grün **gegen echte Serverrouten** | partial-read-only                                                                                                                                                                                                                                                                          |
+| GATE-006 | User Journey          | REQ-001, REQ-004, REQ-010, REQ-011 | Realer Browserfluss speichert und liest denselben Serverstand            | open                                                                                                                                                                                                                                                                                       |
+| GATE-007 | Counterproof          | REQ-012                            | Schutzannahmen absichtlich gebrochen und Tests nachweislich rot          | open                                                                                                                                                                                                                                                                                       |
+| GATE-008 | Feature Done          | REQ-001 bis REQ-012                | alle vorherigen Gates grün, keine Must-Lücke, Rollback dokumentiert      | blocked                                                                                                                                                                                                                                                                                    |
 
 ## Missing / Assumption / Blocker Ledger
 
-| Ledger ID | Marker | Gegenstand | Auswirkung | Auflösung |
-|---|---|---|---|---|
-| LED-001 | MISSING | Nutzerbestätigung von Vision und Canvas | Kein Status `READY_FOR_AGILETEAM_PLANNING` | Nutzer gibt die festgelegte Bestätigungsformel ab |
-| LED-002 | MISSING | Developers-Gate zur Kapazität | Kein belastbares Sprint-Commitment | Entwickler bestätigen Scope und Reihenfolge |
-| LED-003 | ASSUMPTION | PR #23 bleibt technische Basis | Branch-/Merge-Risiko | PR-Reihenfolge festlegen und vor Merge revalidieren |
-| LED-004 | ASSUMPTION | Server-injiziertes Testsubjekt bleibt zulässig | E2E kann ohne produktives Auth laufen | Security-Grenze im Test erneut nachweisen |
-| LED-005 | BLOCKER | Write-Through ist im aktuellen Code nicht implementiert | Feature ist nicht Done | REQ-005 bis REQ-011 umsetzen und belegen |
-| LED-006 | BLOCKER | EYT-88 und EYT-91 sind offen | Realer Schreibpfad kann fachlich oder vertraglich fehlschlagen | Vor Command-E2E schließen |
+| Ledger ID | Marker                   | Gegenstand                                                              | Auswirkung                                                     | Auflösung                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------- | ------------------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LED-001   | ~~MISSING~~ **RESOLVED** | Nutzerbestätigung von Vision und Canvas                                 | —                                                              | Am 28.07.2026 wörtlich erteilt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| LED-012   | BEFUND                   | **Korrektur zu LED-007: die Vertragsseite von EYT-88 ist NICHT fertig** | EYT-88 ist größer als zuerst gemessen                          | Mit der am 2026-07-28 entschiedenen **jahresabhängigen** W53-Regel erfüllt `schemas.ts:113` das Akzeptanzkriterium nicht: das Muster akzeptiert `W53` bedingungslos, AC-002 verlangt die Ablehnung einer in ihrem Jahr nicht existenten 53. Woche. Der Vertrag erfüllt heute nur den Musterteil. Beide Seiten brauchen die gemeinsame deterministische Funktion, Round-Trip-Prüfung und je eine eigene Gegenmutation.                                                                                                                                                                                                                                                                                                                                                        |
+| LED-013   | BEFUND                   | Enforcement-Hook konnte in keinem regierten Repo Gates beweisen         | Stop-Durchsetzung war faktisch wirkungslos                     | Zwei unabhängige Defekte, beide am 2026-07-28 gemessen und im kanonischen Plumbline-Repo behoben (Branch `fix/pril-cli-resolution`, Commit `18f16ed`): (a) der Hook suchte die CLIs ausschließlich unter `$repo/config/claude/bin`, was nur im Plumbline-Repo selbst existiert; (b) die CLI-Wrapper riefen `exec python3`, das diese Umgebung zugunsten von `uv run python3` verweigert — der Hook meldete das als **fehlgeschlagenes Gate** statt als kaputtes Werkzeug. Positiv- und Negativtest ausgeführt.                                                                                                                                                                                                                                                               |
+| LED-014   | OFFEN                    | C2-Scope-Oberfläche des Hooks ist enger als dokumentiert                | Committete Feature-Arbeit wird nicht scope-geprüft             | Der Hook bildet seine Basis mit `git merge-base HEAD main`. In einem Repo mit Default-Branch `master` scheitert das, die Basis fällt auf `HEAD`, und der Diff `HEAD...HEAD` ist leer. Der Dateikopf nennt genau diesen Zustand vakuum und fail-open. Bewusst **nicht** mitrepariert: die Korrektur braucht Default-Branch-Erkennung **und** eine explizite Basis-Referenz, weil ein gestapelter Feature-Branch gegen seine Stack-Basis gemessen werden muss, nicht gegen den Default-Branch.                                                                                                                                                                                                                                                                                 |
+| LED-002   | MISSING                  | Developers-Gate zur Kapazität                                           | **geschlossen 2026-07-28: PASS_WITH_CAPACITY_RISK**            | Sprintfenster endet 29.07.2026 06:19 Europe/Berlin. Start freigegeben, Fertigstellung nicht zugesagt; **keine Must-Kürzung**, Restarbeit transparent in den nächsten Sprint.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| LED-003   | DECIDED                  | PR #23 bleibt ungemergte technische Basis                               | Gestapelter Review                                             | Eigener Branch `feat/sprint-4-planning-draft-conflict-implementation` vom aktuellen Head; PR gestapelt gegen `feat/eyt-50-read-through-slice`; nach Merge von PR #23 Rebase/Retarget auf `master` mit vollständiger Neuausführung aller Pflichtgates.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| LED-004   | ASSUMPTION               | Server-injiziertes Testsubjekt bleibt zulässig                          | E2E kann ohne produktives Auth laufen                          | Security-Grenze im Test erneut nachweisen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| LED-005   | BLOCKER                  | Write-Through ist im aktuellen Code nicht implementiert                 | Feature ist nicht Done                                         | REQ-004 bis REQ-008, REQ-010, REQ-011 umsetzen und belegen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| LED-006   | BLOCKER                  | EYT-88 und EYT-91 sind offen                                            | Realer Schreibpfad kann fachlich oder vertraglich fehlschlagen | Vor Command-E2E schließen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| LED-007   | BEFUND                   | EYT-88 ist **zur Hälfte bereits erledigt**                              | Ticketumfang kleiner als beschrieben                           | Vertragsseite erfüllt das Akzeptanzkriterium „lehnt W00/W54/W99 ab" bereits. Offen bleiben: Forward-Migration, gemeinsame deterministische Funktion, jahresabhängige 53. Woche, Negativtests über beide Seiten.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| LED-008   | BEFUND                   | `HttpPlanningGateway` implementiert bereits alle vier Methoden          | Scheinbare Fertigstellung von EYT-79                           | Der Clientteil ist vorhanden; die Serverrouten fehlen. Ein grüner Contract-Lauf gegen den Mock darf nicht als Gateway-Abschluss gewertet werden (siehe REQ-009).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| LED-009   | BEFUND                   | Read-Through-CI-Nachweis ist veraltet                                   | REQ-001/REQ-011 aktuell unbelegt                               | Grüner Lauf wurde bei `3773ecf3` gemessen, Head ist `cb56a9f`. Vor jeder Done-Aussage neu ausführen.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| LED-010   | BEFUND                   | **Die Datenbank lehnt überlappende ENTWÜRFE nie ab**                    | REQ-006 hat für Entwürfe keine Rückfalllinie in der Datenbank  | Verifiziert in `supabase/migrations/20260727050000_0010_planning_invariants.sql:35–37,53,56`: `assignments_no_published_overlap` trägt `where (published_at is not null)`; Kommentar: „ENTWUERFE duerfen sich ueberschneiden … Entwuerfe sind bewusst ausgenommen" (EYT-49 AK1). Konsequenzen: (a) die Überlappungsablehnung muss vollständig im Command über `conflictsWithExisting` entstehen — das gibt der Domainfunktion ihren ersten Produktionsaufrufer; (b) die Gegenprobe zu AC-012 muss die **Anwendungsprüfung** brechen, nicht den DB-Constraint, sonst misst sie nichts; (c) der Nebenläufigkeitstest braucht **zwei echte Verbindungen**, weil Lesen-dann-Schreiben in einer Transaktion nicht gegen einen parallel entstehenden zweiten Entwurf serialisiert. |
+| LED-011   | COUNCIL                  | Council-Gate Phase 0.16, Runde 1 von 2                                  | Wertbehauptung korrigiert, Reihenfolge angepasst               | Abbruch nach Runde 1 wegen **Konvergenz**, nicht wegen Budgetgrenze. Übernommen: Wertabgrenzung in Vision und Canvas (beide zurück auf `draft`, Neubestätigung nötig); EYT-91 **vor** EYT-88 (kein Scope-Eingriff — das PRD-Stop-Gate fordert nur beide vor dem schreibenden E2E, nicht ihre relative Reihenfolge); LED-010 als Konstruktionsvorgabe. **Abgelehnt:** Kürzung auf eine Schreibroute — hätte REQ-009/AC-009 teilweise unbeweisbar gemacht und wäre eine Must-Kürzung. `POST /planung/versionen` bleibt draußen, weil Publish ohnehin Non-Goal ist. Offen und unverifiziert: Challenger-These, die häufigste Wochenhandlung sei Umplanen statt Ersterfassen — Falsifier: eine reale Planerin nennt Ersterfassung als häufigste Handlung.                        |
 
 ## Traceability Summary
 
@@ -76,13 +189,18 @@ Status: ready-for-user-confirmation
 - Requirements with Vision link: 12
 - Requirements with Canvas link: 12
 - Requirements with Acceptance Criteria: 12
-- Requirements with Evidence: 12
+- Requirements with Evidence Needed: 12
+- Requirements with all six Canvas fields: 12
+- Requirements with True-Line fields: 12
+- Requirements with Reality-Ledger fields: 12
 - Unlinked requirements: 0
-- Product confirmation: pending
-- Implementation status: partial; Read-Through belegt, Write-Through offen
+- Product confirmation: **erteilt 28.07.2026** (Scope; nicht Kapazität)
+- Implementation status: **partial** — Lesepfad verdrahtet und (veraltet) belegt; Schreibpfad
+  nicht implementiert
+- `production-verified`: 0 (im Scope unerreichbar, Deployment ist Non-Goal)
 
 ## User Confirmation
 
-Die Matrix ist vollständig verknüpft, aber noch nicht nutzerbestätigt.
+Erteilt am 28.07.2026:
 
 > Ich bestätige, dass Product Canvas und Product Vision meine Absicht korrekt wiedergeben und als Grundlage für AgileTeam Planning verwendet werden dürfen.
