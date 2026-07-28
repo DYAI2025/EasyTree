@@ -91,14 +91,23 @@ before acting on it. Do **not** use local `master` as the reference — compare 
   `IdSchema` rejects as invalid UUID v4, so contract response validation returns 500 on seeded
   data. The e2e harness works around it with its own v4 fixtures
   (`apps/web/e2e/harness/seed.sql`) — that is a workaround, not the fix.
-- Ticket status as of 27.07.2026: EYT-50 _In Arbeit_; EYT-62, EYT-88, EYT-91 _Zu erledigen_.
-  Sprint 3 still open besides those: EYT-75, 87, 72, 81, 11. Not re-queried on 28.07.
+- **Sprint 4 is the open sprint** (measured against Jira 28.07.2026, `sprint in openSprints()`),
+  and it holds exactly six issues: EYT-50 _In Arbeit_ (Story, vertical slice up to draft +
+  conflict check), EYT-62 _In Arbeit_ (E2E proof), EYT-79 _In Arbeit_ (PlanningGateway),
+  EYT-88 _Zu erledigen_ (Bug), EYT-91 _Zu erledigen_ (Bug), EYT-92 _Zu erledigen_ (Story,
+  clickable week view). EYT-75/87/72/81/11 are **not** in the open sprint.
 - Eight of the nine contract operations are still unimplemented; only the planning-window read
   (`GET /planung/woche`) is wired. The list is not documentation — it is the
   `NOT_YET_IMPLEMENTED` map inside `apps/api/test/openapi-route-conformance.test.ts`, each entry
   carrying its reason, and the test fails both ways: a contract operation with neither a route
   nor an entry, **and** an entry for an operation that has since been implemented. Writes and
-  publish are EYT-88; three of the eight additionally wait on the subject model from EYT-14.
+  the draft/conflict path are **EYT-50** (Story); three of the eight additionally wait on the
+  subject model from EYT-14. **Correction (28.07.2026, measured against Jira):** an earlier
+  revision of this file said "writes and publish are EYT-88". That is false. **EYT-88 is the
+  Bug "Planungswochen-Schlüssel erlaubt ungültige ISO-Wochen in Vertrag und Datenbank"** — the
+  `^\d{4}-W\d{2}$` pattern accepts `W00`/`W54`/`W99`, to be fixed by a new forward migration
+  plus one shared deterministic validator. **EYT-91** is the seed-UUID bug. Publish itself is
+  explicitly deferred out of Sprint 4 ("Bewusst später" in EYT-50).
 
 ## Commands
 
