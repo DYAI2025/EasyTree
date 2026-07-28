@@ -52,6 +52,19 @@ export type {
 } from "./planning/schemas.js";
 export type { PlanningGateway } from "./planning/gateway.js";
 
+// ISO-Wochenschluessel mit Kalenderrechnung (EYT-88). Exportiert, weil sowohl
+// spaetere Command-Grenzen als auch der Paritaetstest gegen `@easytree/domain`
+// dieselbe Funktion verwenden muessen — eine zweite Wochenregel waere genau der
+// Fehler, den EYT-88 behebt.
+export {
+  ISO_WEEK_KEY_PROBLEMS,
+  formatIsoWeekKey,
+  isValidIsoWeekKey,
+  isoWochenImJahr,
+  parseIsoWeekKey,
+} from "./planning/iso-week.js";
+export type { IsoWeek, IsoWeekKeyProblem, IsoWeekKeyResult } from "./planning/iso-week.js";
+
 export {
   ActiveTimeEntrySchema,
   ConfirmPlanCommandSchema,

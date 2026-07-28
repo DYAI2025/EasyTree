@@ -108,12 +108,33 @@ const idempotencyHeader = {
   schema: z.toJSONSchema(IdempotencyKeySchema, { target: "openapi-3.0" }),
 } as const;
 
+/**
+ * Der veroeffentlichte Wochenschluessel — und was er NICHT leisten kann.
+ *
+ * Zwei Befunde aus EYT-88, beide hier behoben beziehungsweise benannt:
+ *
+ * 1. Das Muster stand auf `^\d{4}-W\d{2}$` und war damit sogar schwaecher als
+ *    die Laufzeitpruefung: `W00`, `W54` und `W99` gingen im veroeffentlichten
+ *    Vertrag durch. Jetzt steht hier dieselbe Bereichsgrenze wie im Schema.
+ *
+ * 2. Die jahresabhaengige Regel — `W53` gilt nur in Jahren mit 53 ISO-Wochen —
+ *    laesst sich in JSON Schema nicht ausdruecken. Ein regulaerer Ausdruck kann
+ *    keinen Kalender rechnen. Die `.refine()`-Pruefung des Zod-Schemas taucht im
+ *    erzeugten Dokument deshalb nicht auf; der Drift-Test bestaetigt das, indem
+ *    er trotz der neuen Regel gruen bleibt.
+ *
+ *    Die Beschreibung sagt das ausdruecklich, statt die Luecke zu verschweigen.
+ *    Ein generierter Client kann `2025-W53` senden — abgelehnt wird es
+ *    trotzdem, aber vom Server zur Laufzeit und nicht vom Schema. Dieselbe
+ *    ehrliche Grenzziehung wie bei `TimeIntervalDtoSchema` ("Ende nach Beginn").
+ */
 const weekKeyParam = {
   name: "weekKey",
   in: "query",
   required: true,
-  description: "ISO-Woche im Format 2026-W32",
-  schema: { type: "string", pattern: "^\\d{4}-W\\d{2}$" },
+  description:
+    "ISO-Woche im Format 2026-W32. Woche 01-53. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben (etwa 2020 und 2026, nicht 2021 oder 2025). Diese Kalenderregel kann JSON Schema nicht ausdruecken und wird hier NICHT erzwungen - der Server lehnt einen ungueltigen Schluessel zur Laufzeit ab.",
+  schema: { type: "string", pattern: "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$" },
 } as const;
 
 function jsonBody(name: NamedSchema): unknown {

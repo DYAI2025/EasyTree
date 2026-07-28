@@ -20,6 +20,8 @@
  */
 import { z } from "zod";
 
+import { isValidIsoWeekKey } from "./iso-week.js";
+
 import { IdSchema, InstantSchema } from "../primitives.js";
 
 /**
@@ -99,18 +101,24 @@ export const PlanningWindowQuerySchema = z.strictObject({
    * `W54` und `W99` durchgingen — ein Wochenschluessel, den es nicht gibt,
    * haette eine leere Woche geliefert statt einer Ablehnung.
    *
-   * OFFENER BEFUND: die Datenbank-Constraint in
-   * supabase/migrations/20260727020300_0007_planning.sql traegt weiterhin das
-   * schwache Muster. Sie wird hier NICHT editiert (append-only, CLAUDE.md);
-   * eine Forward-Migration ist vor dem Schreibpfad faellig, sonst kann ein
-   * direkter DB-Schreibvorgang `2026-W99` anlegen.
+   * Seit EYT-88 prueft zusaetzlich `parseIsoWeekKey` mit Kalenderrechnung: eine
+   * 53. Woche gilt nur in Jahren, die tatsaechlich 53 ISO-Wochen haben, und der
+   * Schluessel muss sich verlustfrei zurueckrechnen lassen. Das Muster allein
+   * konnte das nie entscheiden — `2025-W53` ging durch, obwohl es die Woche
+   * nicht gibt.
    *
-   * Jahrabhaengig ungueltige 53. Wochen bleiben erlaubt: dafuer braeuchte es
-   * eine Kalenderrechnung, und die gibt es hier bewusst nicht.
+   * Die Regel liegt in `./iso-week.ts` und ist dieselbe, die die
+   * Forward-Migration in SQL nachbildet; die Uebereinstimmung mit
+   * `packages/domain/src/planning-week.ts` sichert ein Paritaetstest in
+   * `apps/api/test/`.
    */
   weekKey: z
     .string()
-    .regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/, "Wochenschluessel im Format 2026-W32"),
+    .regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/, "Wochenschluessel im Format 2026-W32")
+    .refine(isValidIsoWeekKey, {
+      message:
+        "Wochenschluessel bezeichnet keine reale ISO-Woche (etwa W53 in einem Jahr mit 52 Wochen)",
+    }),
 });
 
 export type PlanningWindowQuery = z.infer<typeof PlanningWindowQuerySchema>;
