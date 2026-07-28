@@ -268,31 +268,42 @@ const HARNESS_SPUREN = [
   "5117a001-0001-4001-8001-000000000001",
 ];
 
-test.describe("Standardseed-Laufzeitnachweis (EYT-91)", () => {
-  test("eine geseedete employeeId und worksiteId passieren den Vertrag mit HTTP 200", async ({
+/** Die reale API-Origin. Der Harness setzt sie; der Vorgabewert ist nur Bequemlichkeit. */
+const API_ORIGIN = process.env["EASYTREE_API_ORIGIN"] ?? "http://127.0.0.1:3001";
+const FENSTER_PFAD = `/api/v1/planung/fenster?weekKey=${SEED_WOCHE}`;
+
+/** Beta-Spuren aus dem STANDARDSEED — nicht die aus dem W40-Harness. */
+const SEED_BETA_SPUREN = [
+  "00000000-0000-4000-8000-0000000000b2",
+  "00000000-0000-4000-8000-0000007020b2",
+  "00000000-0000-4000-8000-0000004020b2",
+  "00000000-0000-4000-8000-0000005020b2",
+];
+
+test.describe("Standardseed-Kern (EYT-91)", () => {
+  test("Woche 2026-W32 liefert 200 — direkt an der API UND ueber die Web-Origin", async ({
     page,
   }) => {
-    const antwortVersprechen = page.waitForResponse(
-      (r) => r.url().includes("/api/v1/planung/fenster") && r.request().method() === "GET",
-    );
-    await page.goto(SEED_SEITE);
-    const antwort = await antwortVersprechen;
-
-    // Der Kern: frueher stand hier 500, weil der Controller seine eigene
-    // Ausgabe gegen den Vertrag prueft und die geseedeten Ids durchfielen.
+    // Zwei Wege, weil sie verschiedene Dinge belegen. Der direkte Aufruf zeigt,
+    // dass CONTROLLER und Antwortvalidierung die geseedeten Ids durchlassen.
+    // Der Weg ueber die Web-Origin zeigt zusaetzlich, dass das Next-Rewrite sie
+    // unveraendert durchreicht. Faellt nur einer, weiss man sofort, welche
+    // Schicht es war.
+    const direkt = await page.request.get(`${API_ORIGIN}${FENSTER_PFAD}`);
     expect(
-      antwort.status(),
-      "Standardseed-Woche muss 200 liefern; 500 bedeutet, dass eine geseedete Id den Vertrag bricht",
+      direkt.status(),
+      "direkt an der API: 500 bedeutet, dass eine geseedete Id den Vertrag bricht",
     ).toBe(200);
 
-    // Geprueft, nicht behauptet: `parse` wirft bei Vertragsabweichung. Damit
-    // ist die Validierung an der Transportgrenze Teil des Nachweises und nicht
-    // nur eine Zusicherung ueber ein Feld.
-    const koerper = PlanningWindowSchema.parse(await antwort.json());
+    const ueberWeb = await page.request.get(FENSTER_PFAD);
+    expect(ueberWeb.status(), "ueber die Web-Origin: Rewrite oder API bricht").toBe(200);
+
+    // Geprueft, nicht behauptet: `parse` wirft bei Vertragsabweichung.
+    const koerper = PlanningWindowSchema.parse(await ueberWeb.json());
     expect(koerper.weekKey).toBe(SEED_WOCHE);
 
-    // Leere Antwort waere kein Erfolg, sondern eine falsche Testidentitaet:
-    // ein Subjekt ohne aktive Mitgliedschaft sieht durch RLS schlicht nichts.
+    // Leere Antwort waere kein Erfolg, sondern eine falsche Testidentitaet: ein
+    // Subjekt ohne aktive Mitgliedschaft saehe durch RLS schlicht nichts.
     expect(
       koerper.assignments.length,
       "leere Woche deutet auf ein Subjekt ohne aktive Mitgliedschaft hin, nicht auf Erfolg",
@@ -303,24 +314,54 @@ test.describe("Standardseed-Laufzeitnachweis (EYT-91)", () => {
     expect(zuweisung?.employeeId).toBe(SEED_EMPLOYEE);
     expect(zuweisung?.worksiteId).toBe(SEED_WORKSITE);
     // `sourceVersion` ist im Vertrag nullbar — eine Woche ohne Planversion hat
-    // keine. Hier waere `null` aber ein Befund und keine Variante: der Seed legt
-    // die Version an, also muss sie da sein.
+    // keine. Hier waere `null` ein Befund und keine Variante.
     expect(koerper.sourceVersion, "Standardseed-Planversion fehlt").not.toBeNull();
     expect(koerper.sourceVersion?.id).toBe(SEED_VERSION);
 
-    // Und der Stand ist auch sichtbar — der Weg endet im DOM, nicht im JSON.
-    await expect(page.locator(`[data-assignment-id="${SEED_ZUWEISUNG}"]`)).toBeVisible();
+    // Beide Antworten muessen dasselbe sagen; ein Rewrite, das den Parameter
+    // verliert, faellt sonst nicht auf.
+    expect(await direkt.json()).toEqual(await ueberWeb.json());
   });
 
-  test("die Antwort stammt aus dem Standardseed, nicht aus Harness-Fixtures", async ({ page }) => {
-    // Ohne diesen Fall koennte der Nachweis oben auch dann gruen sein, wenn
-    // versehentlich Harness-Daten in W32 lieferten — dann waere wieder nichts
-    // ueber die geseedeten Ids belegt.
-    const antwortVersprechen = page.waitForResponse(
-      (r) => r.url().includes("/api/v1/planung/fenster") && r.request().method() === "GET",
-    );
+  test("keine fremde Organisation und kein Fehlerzustand in der W32-Antwort", async ({ page }) => {
+    const antwort = await page.request.get(FENSTER_PFAD);
+    expect(antwort.status()).toBe(200);
+    const roh = await antwort.text();
+
+    // Organisation Beta existiert im Standardseed mit eigener Planversion in
+    // derselben Woche. Genau deshalb ist ihre Abwesenheit hier eine Aussage und
+    // keine Selbstverstaendlichkeit.
+    for (const spur of SEED_BETA_SPUREN) {
+      expect(roh, `Beta-Spur aus dem Standardseed in der Antwort: ${spur}`).not.toContain(spur);
+    }
+
+    // Die modellierten Fehlerzustaende ausdruecklich ausschliessen. Ein 200 mit
+    // einem Problem-Dokument im Rumpf waere sonst gruen.
+    for (const zustand of ["CONTRACT_VIOLATION", "UNAVAILABLE", "FORBIDDEN"]) {
+      expect(roh, `Fehlerzustand ${zustand} in der W32-Antwort`).not.toContain(zustand);
+    }
+
     await page.goto(SEED_SEITE);
-    const roh = await (await antwortVersprechen).text();
+    await expect(page.locator(`[data-assignment-id="${SEED_ZUWEISUNG}"]`)).toBeVisible();
+    const dom = await page.content();
+    for (const spur of SEED_BETA_SPUREN) {
+      expect(dom, `Beta-Spur aus dem Standardseed im DOM: ${spur}`).not.toContain(spur);
+    }
+  });
+});
+
+test.describe("Standardseed-Abgrenzung (EYT-91)", () => {
+  // Laeuft bewusst NACH dem Einspielen der W40-Fixtures (Harness-Phase 13).
+  // Vorher waere die Pruefung vakuum: sie sucht Harness-Spuren, und ohne
+  // eingespielte Fixtures gibt es keine zu finden — gruen, ohne etwas gemessen
+  // zu haben.
+  test("die W32-Antwort stammt aus dem Standardseed, nicht aus Harness-Fixtures", async ({
+    page,
+  }) => {
+    const antwort = await page.request.get(FENSTER_PFAD);
+    expect(antwort.status()).toBe(200);
+    const roh = await antwort.text();
+    await page.goto(SEED_SEITE);
     const dom = (await page.content()).toLowerCase();
 
     for (const spur of HARNESS_SPUREN) {
