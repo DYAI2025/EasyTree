@@ -35,8 +35,6 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { PlanningWindowQuerySchema } from "../src/planning/schemas.js";
-
 /** Jahre mit 53 ISO-Wochen. Dieselben Vektoren gelten spaeter fuer SQL. */
 const JAHRE_MIT_53 = [2020, 2026] as const;
 /** Jahre mit 52 ISO-Wochen — hier ist `W53` ungueltig. */
@@ -82,4 +80,104 @@ describe("Wochenschluessel: jahresabhaengige 53. Woche", () => {
       );
     }
   });
+});
+
+/**
+ * Alle fuenf oeffentlichen weekKey-Stellen tragen DIESELBE Regel (EYT-88).
+ *
+ * Zuvor stand an fuenf Stellen ein eigener regulaerer Ausdruck, und nur einer
+ * davon kannte die Kalenderregel. `2025-W53` waere ueber die Leseabfrage
+ * abgelehnt und ueber das Publish-Kommando angenommen worden — dieselbe Woche,
+ * zwei Urteile.
+ *
+ * Tabellengetrieben, damit eine sechste Stelle nicht durchrutscht: wer ein
+ * Schema hinzufuegt und hier nicht eintraegt, hat keine Abdeckung — und wer es
+ * eintraegt, aber `IsoWeekKeySchema` nicht verwendet, wird rot.
+ */
+import {
+  PlanningWindowQuerySchema,
+  PlanningWindowSchema,
+  PublishPlanCommandSchema,
+  PublishedPlanVersionSchema,
+  ValidatePlanCommandSchema,
+} from "../src/planning/schemas.js";
+
+const VERSION_ID = "00000000-0000-4000-8000-0000006010a1";
+const INSTANT = "2026-08-03T06:00:00.000Z";
+const INSTANT_SPAETER = "2026-08-03T14:00:00.000Z";
+const EMPLOYEE_ID = "00000000-0000-4000-8000-0000004010a1";
+const WORKSITE_ID = "00000000-0000-4000-8000-0000005010a1";
+
+/** Je Schema ein minimal gueltiger Rumpf, in den der Wochenschluessel eingesetzt wird. */
+const STELLEN: ReadonlyArray<{
+  readonly name: string;
+  readonly baue: (weekKey: string) => unknown;
+  readonly schema: { safeParse: (wert: unknown) => { success: boolean } };
+}> = [
+  {
+    name: "PlanningWindowQuerySchema",
+    schema: PlanningWindowQuerySchema,
+    baue: (weekKey) => ({ weekKey }),
+  },
+  {
+    name: "PlanningWindowSchema",
+    schema: PlanningWindowSchema,
+    baue: (weekKey) => ({
+      weekKey,
+      timeZone: "Europe/Berlin",
+      assignments: [],
+      sourceVersion: null,
+      publishedVersionId: null,
+    }),
+  },
+  {
+    name: "ValidatePlanCommandSchema",
+    schema: ValidatePlanCommandSchema,
+    baue: (weekKey) => ({
+      weekKey,
+      draft: {
+        employeeId: EMPLOYEE_ID,
+        worksiteId: WORKSITE_ID,
+        interval: { startUtc: INSTANT, endUtc: INSTANT_SPAETER },
+      },
+    }),
+  },
+  {
+    name: "PublishPlanCommandSchema",
+    schema: PublishPlanCommandSchema,
+    baue: (weekKey) => ({ weekKey, expectedVersionId: null }),
+  },
+  {
+    name: "PublishedPlanVersionSchema",
+    schema: PublishedPlanVersionSchema,
+    baue: (weekKey) => ({
+      versionId: VERSION_ID,
+      weekKey,
+      publishedAtUtc: INSTANT,
+      assignmentIds: [],
+    }),
+  },
+];
+
+const VEKTOREN = [
+  { key: "2026-W53", gueltig: true, warum: "2026 hat 53 ISO-Wochen" },
+  { key: "2025-W53", gueltig: false, warum: "2025 hat nur 52" },
+  { key: "2026-W00", gueltig: false, warum: "Woche 0 gibt es nicht" },
+  { key: "2026-W54", gueltig: false, warum: "Woche 54 gibt es nicht" },
+  { key: "2026-W32", gueltig: true, warum: "regulaere Woche" },
+] as const;
+
+describe("alle oeffentlichen weekKey-Stellen tragen dieselbe Regel", () => {
+  it("deckt alle fuenf Stellen ab — sonst misst diese Tabelle zu wenig", () => {
+    expect(STELLEN).toHaveLength(5);
+  });
+
+  for (const stelle of STELLEN) {
+    for (const vektor of VEKTOREN) {
+      it(`${stelle.name}: ${vektor.key} ist ${vektor.gueltig ? "gueltig" : "ungueltig"} (${vektor.warum})`, () => {
+        const ergebnis = stelle.schema.safeParse(stelle.baue(vektor.key));
+        expect(ergebnis.success).toBe(vektor.gueltig);
+      });
+    }
+  }
 });

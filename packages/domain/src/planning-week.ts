@@ -122,22 +122,54 @@ export interface PlanningWeek {
 }
 
 /**
+ * UTC-Mitternacht eines Kalendertags — ohne die 1900-Umdeutung.
+ *
+ * Hier stand `Date.UTC(jahr, monat - 1, tag)`. Das ist für moderne Jahre
+ * richtig und für Jahre 0 bis 99 falsch: `Date.UTC(99, 0, 1)` ergibt **1999**,
+ * nicht das Jahr 99. Die Umdeutung ist stumm — kein Fehler, nur ein um 1900
+ * Jahre verschobenes Ergebnis.
+ *
+ * Aufgefallen ist das bei EYT-88: `packages/contracts` prüft Wochenschlüssel
+ * seither über `setUTCFullYear`, und ein Paritätsanspruch zwischen beiden
+ * Seiten wäre für kleine Jahreszahlen schlicht falsch gewesen. Die Domain zieht
+ * hier nach, damit die Behauptung „beide rechnen dieselbe Woche" auch an den
+ * Rändern trägt.
+ */
+function utcMidnightOfCalendarDay(year: number, month1to12: number, day: number): number {
+  const d = new Date(0);
+  d.setUTCFullYear(year, month1to12 - 1, day);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
  * ISO-8601-Woche eines lokalen Kalendertags.
  *
- * Rechnung bewusst in UTC-Millisekunden über `Date.UTC`: das ist an dieser
- * Stelle reine Kalenderarithmetik auf einem bereits lokalisierten Datum, keine
+ * Reine Kalenderarithmetik auf einem bereits lokalisierten Datum, keine
  * Zeitzonenumrechnung. Der Donnerstag derselben Woche bestimmt das ISO-Jahr —
  * so fällt der 1. Januar automatisch in die letzte Woche des Vorjahres, wenn er
  * vor dem ersten Donnerstag liegt.
+ *
+ * Das Jahr 0 wird abgelehnt statt umgedeutet: PostgreSQL kennt kein Jahr null,
+ * und eine Woche, die nur eine der beiden Seiten darstellen kann, ist keine
+ * gemeinsame Regel. Dieselbe Grenze zieht
+ * `packages/contracts/src/planning/iso-week.ts`.
+ *
+ * @throws {RangeError} bei einem Jahr kleiner als 1.
  */
 export function isoWeekOfLocalDate(date: LocalBusinessDate): PlanningWeek {
-  const utcMidnight = Date.UTC(date.year, date.month - 1, date.day);
+  if (!Number.isInteger(date.year) || date.year < 1) {
+    throw new RangeError(
+      `isoWeekOfLocalDate: Jahr ${date.year} ist nicht darstellbar (kein Jahr null, keine negativen Jahre).`,
+    );
+  }
+  const utcMidnight = utcMidnightOfCalendarDay(date.year, date.month, date.day);
   // Montag = 0 … Sonntag = 6.
   const weekdayIndex = (new Date(utcMidnight).getUTCDay() + 6) % 7;
   const thursdayMs = utcMidnight + (3 - weekdayIndex) * DAY_MS;
   const thursday = new Date(thursdayMs);
   const isoYear = thursday.getUTCFullYear();
-  const firstThursdayWeekStart = Date.UTC(isoYear, 0, 1);
+  const firstThursdayWeekStart = utcMidnightOfCalendarDay(isoYear, 1, 1);
   const isoWeek = Math.floor((thursdayMs - firstThursdayWeekStart) / (7 * DAY_MS)) + 1;
   return { isoYear, isoWeek };
 }

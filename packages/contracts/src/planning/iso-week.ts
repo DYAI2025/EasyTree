@@ -84,6 +84,16 @@ function istSchaltjahr(jahr: number): boolean {
  * Donnerstagsregel: Woche 1 ist die Woche mit dem ersten Donnerstag des Jahres.
  */
 export function isoWochenImJahr(jahr: number): 52 | 53 {
+  // Bereich pruefen, obwohl die Funktion intern nur von `parseIsoWeekKey` nach
+  // dessen eigener Pruefung gerufen wird: sie ist oeffentlich exportiert, und
+  // ein Aufrufer mit `jahr = 0` bekaeme sonst eine Antwort ueber einen
+  // Kalender, den PostgreSQL nicht kennt. Eine stille Zahl waere schlimmer als
+  // ein Fehler.
+  if (!Number.isInteger(jahr) || jahr < MIN_ISO_JAHR || jahr > MAX_ISO_JAHR) {
+    throw new RangeError(
+      `isoWochenImJahr: Jahr ${jahr} liegt ausserhalb von ${MIN_ISO_JAHR}-${MAX_ISO_JAHR}.`,
+    );
+  }
   const jan1 = isoWochentag(utcMitternacht(jahr, 1, 1));
   if (jan1 === 4) return 53;
   if (jan1 === 3 && istSchaltjahr(jahr)) return 53;
@@ -176,7 +186,25 @@ export function isValidIsoWeekKey(kandidat: string): boolean {
   return parseIsoWeekKey(kandidat).ok;
 }
 
-/** Formatiert eine ISO-Woche als Schluessel. Gegenstueck zu {@link parseIsoWeekKey}. */
+/**
+ * Formatiert eine ISO-Woche als Schluessel. Gegenstueck zu {@link parseIsoWeekKey}.
+ *
+ * Prueft die Eingabe, statt ihr zu vertrauen. `IsoWeek` ist ein reines
+ * Interface — TypeScript haelt niemanden davon ab, `{ isoYear: 2025, isoWeek:
+ * 53 }` zusammenzubauen, und die Funktion haette daraus klaglos `2025-W53`
+ * erzeugt: einen Schluessel, den jede Pruefung dieses Moduls ablehnt. Eine
+ * Formatierungsfunktion, die ungueltige Werte erzeugt, ist ein Leck in genau
+ * der Grenze, die EYT-88 zieht.
+ *
+ * @throws {RangeError} wenn die Woche in ihrem ISO-Jahr nicht existiert.
+ */
 export function formatIsoWeekKey(week: IsoWeek): string {
-  return `${String(week.isoYear).padStart(4, "0")}-W${String(week.isoWeek).padStart(2, "0")}`;
+  const kandidat = `${String(week.isoYear).padStart(4, "0")}-W${String(week.isoWeek).padStart(2, "0")}`;
+  const geprueft = parseIsoWeekKey(kandidat);
+  if (!geprueft.ok) {
+    throw new RangeError(
+      `formatIsoWeekKey: ${kandidat} bezeichnet keine reale ISO-Woche (${geprueft.reason}).`,
+    );
+  }
+  return kandidat;
 }

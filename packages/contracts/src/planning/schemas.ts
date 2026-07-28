@@ -86,6 +86,33 @@ export const AssignmentDtoSchema = z.strictObject({
 export type AssignmentDto = z.infer<typeof AssignmentDtoSchema>;
 
 /**
+ * Der ISO-Wochenschluessel als EIN Schema fuer alle oeffentlichen Felder (EYT-88).
+ *
+ * Zuvor stand an fuenf Stellen ein eigener regulaerer Ausdruck. Vier davon
+ * kannten nur das Muster; die Kalenderregel hing allein an der Leseabfrage.
+ * Damit haetten Leseroute, Validierungsroute, Publish-Kommando und
+ * Antwortvertrag unterschiedliche Regeln getragen — `2025-W53` waere ueber die
+ * Abfrage abgelehnt und ueber das Publish-Kommando angenommen worden.
+ *
+ * Ein Schema, fuenf Verwendungen. Wer eine sechste Stelle hinzufuegt, nimmt
+ * dieses hier und nicht wieder einen eigenen Ausdruck.
+ *
+ * Das Muster bleibt vorgeschaltet, obwohl `isValidIsoWeekKey` die Form selbst
+ * prueft: es liefert die praezisere Meldung fuer den haeufigen Tippfehler,
+ * bevor die Kalenderrechnung ueberhaupt anlaeuft.
+ */
+export const IsoWeekKeySchema = z
+  .string()
+  .regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/, "Wochenschluessel im Format 2026-W32")
+  .refine(isValidIsoWeekKey, {
+    message:
+      "Wochenschluessel bezeichnet keine reale ISO-Woche (etwa W53 in einem Jahr mit 52 Wochen)",
+  })
+  .describe(
+    "ISO-Woche im Format 2026-W32. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben.",
+  );
+
+/**
  * Abfrage eines Planungsfensters.
  *
  * `weekKey` statt Datumsbereich: die Woche ist bereits eine fachliche Einheit
@@ -94,31 +121,8 @@ export type AssignmentDto = z.infer<typeof AssignmentDtoSchema>;
  * die Doppelimplementierung, die `FIND-003` verursacht hat.
  */
 export const PlanningWindowQuerySchema = z.strictObject({
-  /**
-   * ISO-Woche, Format `2026-W32`.
-   *
-   * Das Muster erzwingt 01–53. Zuvor stand hier `\d{2}`, womit auch `W00`,
-   * `W54` und `W99` durchgingen — ein Wochenschluessel, den es nicht gibt,
-   * haette eine leere Woche geliefert statt einer Ablehnung.
-   *
-   * Seit EYT-88 prueft zusaetzlich `parseIsoWeekKey` mit Kalenderrechnung: eine
-   * 53. Woche gilt nur in Jahren, die tatsaechlich 53 ISO-Wochen haben, und der
-   * Schluessel muss sich verlustfrei zurueckrechnen lassen. Das Muster allein
-   * konnte das nie entscheiden — `2025-W53` ging durch, obwohl es die Woche
-   * nicht gibt.
-   *
-   * Die Regel liegt in `./iso-week.ts` und ist dieselbe, die die
-   * Forward-Migration in SQL nachbildet; die Uebereinstimmung mit
-   * `packages/domain/src/planning-week.ts` sichert ein Paritaetstest in
-   * `apps/api/test/`.
-   */
-  weekKey: z
-    .string()
-    .regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/, "Wochenschluessel im Format 2026-W32")
-    .refine(isValidIsoWeekKey, {
-      message:
-        "Wochenschluessel bezeichnet keine reale ISO-Woche (etwa W53 in einem Jahr mit 52 Wochen)",
-    }),
+  /** Siehe {@link IsoWeekKeySchema} — Muster plus jahresabhaengige Kalenderregel. */
+  weekKey: IsoWeekKeySchema,
 });
 
 export type PlanningWindowQuery = z.infer<typeof PlanningWindowQuerySchema>;
@@ -143,7 +147,7 @@ export type SourceVersion = z.infer<typeof SourceVersionSchema>;
 
 export const PlanningWindowSchema = z
   .strictObject({
-    weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
+    weekKey: IsoWeekKeySchema,
     /** IANA-Zeitzone, nach der die Woche abgegrenzt wurde. Mitgeliefert, damit die
      * UI die Wochengrenze nicht selbst raten muss. */
     timeZone: z.string(),
@@ -218,7 +222,7 @@ export const CreateAssignmentCommandSchema = z.strictObject({
 export type CreateAssignmentCommand = z.infer<typeof CreateAssignmentCommandSchema>;
 
 export const ValidatePlanCommandSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
+  weekKey: IsoWeekKeySchema,
   draft: CreateAssignmentCommandSchema,
 });
 
@@ -241,7 +245,7 @@ export type PlanValidationResult = z.infer<typeof PlanValidationResultSchema>;
  * überschreiben. `null` heisst „ich erwarte, dass noch nichts veröffentlicht ist".
  */
 export const PublishPlanCommandSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
+  weekKey: IsoWeekKeySchema,
   expectedVersionId: IdSchema.nullable(),
 });
 
@@ -249,7 +253,7 @@ export type PublishPlanCommand = z.infer<typeof PublishPlanCommandSchema>;
 
 export const PublishedPlanVersionSchema = z.strictObject({
   versionId: IdSchema,
-  weekKey: z.string().regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/),
+  weekKey: IsoWeekKeySchema,
   publishedAtUtc: InstantSchema,
   assignmentIds: z.array(IdSchema),
 });

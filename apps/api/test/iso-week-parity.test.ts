@@ -63,7 +63,11 @@ function domainSchluessel(iso: string): string {
   const [jahr, monat, tag] = iso.split("-").map(Number) as [number, number, number];
   // Mittags, damit eine Sommerzeitverschiebung den Tag nicht kippt: der Test
   // prueft die Wochenregel, nicht die Zeitzonenumrechnung.
-  const instant = new Date(Date.UTC(jahr, monat - 1, tag, 12, 0, 0));
+  // Auch hier NICHT `Date.UTC`: der Helfer selbst wuerde Jahre 0 bis 99 um
+  // 1900 verschieben, und der Test pruefte dann etwas anderes als er behauptet.
+  const instant = new Date(0);
+  instant.setUTCFullYear(jahr, monat - 1, tag);
+  instant.setUTCHours(12, 0, 0, 0);
   return planningWeekKey(isoWeekOfLocalDate(localBusinessDate(instant, EUROPE_BERLIN)));
 }
 
@@ -99,5 +103,56 @@ describe("Vertrag und Domain rechnen dieselbe ISO-Woche", () => {
       const letzteWoche = Number(domainSchluessel(`${jahr}-12-28`).slice(-2));
       expect(letzteWoche, `${jahr}: Domain und Vertrag uneins ueber die Wochenzahl`).toBe(erwartet);
     }
+  });
+});
+
+/**
+ * Die Jahresraender, an denen die Paritaet vorher NICHT galt (EYT-88).
+ *
+ * Der urspruengliche Paritaetstest pruefte ausschliesslich moderne Jahre. Damit
+ * war die Behauptung "Vertrag und Domain rechnen dieselbe Woche" fuer kleine
+ * Jahreszahlen unbelegt — und tatsaechlich falsch: `packages/contracts` rechnete
+ * ueber `setUTCFullYear`, die Domain ueber `Date.UTC`, und `Date.UTC(99, 0, 1)`
+ * ergibt **1999** statt des Jahres 99. Eine stille Verschiebung um 1900 Jahre.
+ *
+ * Diese Faelle schliessen die Luecke. Sie sind der Grund, warum die Domain
+ * inzwischen denselben sicheren Weg geht.
+ */
+describe("Jahresraender: 0000 und 0099", () => {
+  it("die Domain erzeugt fuer den 4. Januar 0099 den Schluessel 0099-W01", () => {
+    // Der 4. Januar liegt per ISO-Definition immer in Woche 1. Mit `Date.UTC`
+    // waere hier 1999-W01 herausgekommen.
+    expect(domainSchluessel("0099-01-04")).toBe("0099-W01");
+  });
+
+  it("der Vertrag akzeptiert 0099-W01 und kennt die Wochenzahl des Jahres 99", () => {
+    expect(isValidIsoWeekKey("0099-W01")).toBe(true);
+    // Gemessen, nicht geraten: der 1. Januar 99 n. Chr. ist ein Donnerstag,
+    // also hat das Jahr 53 ISO-Wochen. Meine erste Fassung dieses Tests
+    // erwartete 52 — die Implementierung hatte recht, der Test nicht.
+    expect(isoWochenImJahr(99)).toBe(53);
+    expect(isValidIsoWeekKey("0099-W53")).toBe(true);
+    // Ein Jahr mit 52 Wochen zum Vergleich, damit der Fall oben nicht
+    // versehentlich "alles ist gueltig" bedeutet.
+    expect(isoWochenImJahr(98)).toBe(52);
+    expect(isValidIsoWeekKey("0098-W53")).toBe(false);
+  });
+
+  it("der Vertrag lehnt 0000-W01 ab — PostgreSQL kennt kein Jahr null", () => {
+    expect(isValidIsoWeekKey("0000-W01")).toBe(false);
+  });
+
+  it("die Domain lehnt ein Geschaeftsdatum mit Jahr 0 ab, statt es umzudeuten", () => {
+    // Umdeuten waere die schlechtere Antwort: ein Jahr, das die Datenbank nicht
+    // speichern kann, darf nicht als gueltige Woche zurueckkommen.
+    expect(() => isoWeekOfLocalDate({ year: 0, month: 1, day: 4 })).toThrow(RangeError);
+  });
+
+  it("formatIsoWeekKey erzeugt keinen ungueltigen Schluessel", () => {
+    // `IsoWeek` ist ein reines Interface — ohne diese Pruefung haette die
+    // Funktion aus einem handgebauten Objekt klaglos `2025-W53` geliefert.
+    expect(() => formatIsoWeekKey({ isoYear: 2025, isoWeek: 53 })).toThrow(RangeError);
+    expect(() => formatIsoWeekKey({ isoYear: 0, isoWeek: 1 })).toThrow(RangeError);
+    expect(formatIsoWeekKey({ isoYear: 2026, isoWeek: 53 })).toBe("2026-W53");
   });
 });

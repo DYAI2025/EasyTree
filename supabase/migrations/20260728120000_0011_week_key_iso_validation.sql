@@ -20,10 +20,17 @@
 -- ## Warum `make_date` und `extract` statt `to_char`
 --
 -- Naheliegend waere `to_char(datum, 'IYYY-"W"IW')` und ein Vergleich mit der
--- Eingabe. `to_char` ist in PostgreSQL aber nur STABLE, nicht IMMUTABLE — in
--- einem CHECK-Constraint ist das unzulaessig. `make_date`, Datumsarithmetik und
--- `extract(isoyear|week from date)` sind immutable und liefern dieselbe
--- Aussage.
+-- Eingabe. `to_char` ist aber nur STABLE.
+--
+-- KORREKTUR einer frueheren Fassung dieses Kommentars: PostgreSQL verbietet
+-- STABLE-Funktionen in CHECK-Ausdruecken nicht grundsaetzlich — der Aufruf
+-- wuerde angenommen. Das Problem liegt tiefer: eine Constraint ist nur dann
+-- dauerhaft korrekt, wenn ihr Ausdruck sich nie anders verhaelt. Eine
+-- STABLE-Funktion darf von Sitzungszustand abhaengen; eine bereits validierte
+-- Zeile koennte spaeter gegen dieselbe Constraint verstossen, ohne dass jemand
+-- sie angefasst hat. Deshalb verwendet diese Invariante ausschliesslich
+-- immutable Kalenderoperationen: `make_date`, Datumsarithmetik und
+-- `extract(isoyear|week from date)`.
 --
 -- Kein `current_date`, keine Session-Zeitzone, kein Locale, kein `timestamptz`.
 -- Die Funktion haengt ausschliesslich von ihrem Argument ab — Voraussetzung
@@ -140,25 +147,45 @@ comment on constraint plan_versions_week_key_is_iso on public.plan_versions is
 --
 -- Findet die Suche nichts, bricht die Migration ab. Ein stilles Weiterlaufen
 -- hiesse, dass zwei Constraints nebeneinander stehen und niemand es merkt.
+-- Die Suche laeuft ueber `attnum` der Spalte, NICHT ueber ein Textmuster auf
+-- der Definition. Eine unscharfe Suche mit `limit 1` haette eine beliebige
+-- Kandidatin gewaehlt — bei zwei Treffern haette sie stillschweigend die
+-- falsche entfernt und die richtige stehen lassen. Genau die Sorte Zufall, die
+-- man in einer Migration nicht will.
 do $$
 declare
-  alter_name text;
+  spalte    smallint;
+  kandidaten text[];
 begin
-  select conname
-    into alter_name
+  select attnum
+    into strict spalte
+    from pg_attribute
+   where attrelid = 'public.plan_versions'::regclass
+     and attname = 'week_key'
+     and not attisdropped;
+
+  -- Alle Check-Constraints, die GENAU diese eine Spalte betreffen, ohne die
+  -- soeben angelegte.
+  select coalesce(array_agg(conname order by conname), '{}')
+    into kandidaten
     from pg_constraint
    where conrelid = 'public.plan_versions'::regclass
      and contype = 'c'
      and conname <> 'plan_versions_week_key_is_iso'
-     and pg_get_constraintdef(oid) like '%W%d{2}%'
-   limit 1;
+     and conkey = array[spalte];
 
-  if alter_name is null then
+  if array_length(kandidaten, 1) is null then
     raise exception
-      'EYT-88: die alte week_key-Constraint aus Migration 0007 wurde nicht gefunden. Abbruch, statt zwei Pruefungen nebeneinander stehen zu lassen.';
+      'EYT-88: keine alte week_key-Constraint gefunden. Abbruch, statt eine unklare Ausgangslage stillschweigend zu uebergehen.';
   end if;
 
-  execute format('alter table public.plan_versions drop constraint %I', alter_name);
-  raise notice 'EYT-88: alte Constraint % entfernt.', alter_name;
+  if array_length(kandidaten, 1) > 1 then
+    raise exception
+      'EYT-88: % Check-Constraints auf week_key gefunden (%). Abbruch — welche die alte schwache Regel ist, muss ein Mensch entscheiden.',
+      array_length(kandidaten, 1), array_to_string(kandidaten, ', ');
+  end if;
+
+  execute format('alter table public.plan_versions drop constraint %I', kandidaten[1]);
+  raise notice 'EYT-88: alte Constraint % entfernt.', kandidaten[1];
 end;
 $$;

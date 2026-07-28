@@ -15,7 +15,7 @@
 -- Schaltjahr) und 2026 (1. Januar Donnerstag) haben 53; 2021 und 2025 haben 52.
 
 begin;
-select plan(22);
+select plan(29);
 
 -- ---------------------------------------------------------------------------
 -- 1. Form
@@ -52,6 +52,8 @@ select ok(not app.is_valid_iso_week_key('2025-W53'), '2025 hat nur 52 Wochen');
 -- Ohne diesen Fall traegen beide Seiten eine stille Divergenz.
 select ok(not app.is_valid_iso_week_key('0000-W01'), 'Jahr 0000 ungueltig (kein Jahr null)');
 select ok(app.is_valid_iso_week_key('0099-W01'), 'fuehrend nullgefuelltes Jahr gueltig');
+select ok(app.is_valid_iso_week_key('0099-W53'), 'Jahr 0099 hat 53 Wochen (1. Januar ist Donnerstag)');
+select ok(not app.is_valid_iso_week_key('0098-W53'), 'Jahr 0098 hat nur 52 Wochen');
 
 -- ---------------------------------------------------------------------------
 -- 5. Determinismus
@@ -77,6 +79,59 @@ select is(
 -- Eine Funktion ohne Aufrufer schuetzt nichts. Diese beiden Faelle sind der
 -- Unterschied zwischen "die Regel existiert" und "die Regel gilt".
 select has_check('public', 'plan_versions', 'plan_versions hat eine Check-Constraint');
+
+-- Katalogpruefungen: die Constraint existiert nicht nur, sie ist auch die
+-- richtige, sie ist validiert, und sie ist die EINZIGE auf dieser Spalte. Ohne
+-- diese vier Faelle koennte die alte schwache Regel danebenstehen bleiben oder
+-- die neue als NOT VALID angelegt sein — beides waere unsichtbar.
+select is(
+  (select count(*)::int
+     from pg_constraint
+    where conrelid = 'public.plan_versions'::regclass
+      and contype = 'c'
+      and conname = 'plan_versions_week_key_is_iso'),
+  1,
+  'die benannte Constraint plan_versions_week_key_is_iso existiert'
+);
+
+select ok(
+  (select convalidated
+     from pg_constraint
+    where conrelid = 'public.plan_versions'::regclass
+      and conname = 'plan_versions_week_key_is_iso'),
+  'die Constraint ist gegen die Bestandsdaten validiert (convalidated)'
+);
+
+select is(
+  (select count(*)::int
+     from pg_constraint c
+     join pg_attribute a
+       on a.attrelid = c.conrelid and a.attname = 'week_key' and not a.attisdropped
+    where c.conrelid = 'public.plan_versions'::regclass
+      and c.contype = 'c'
+      and c.conkey = array[a.attnum]),
+  1,
+  'genau EINE Check-Constraint schuetzt week_key — die alte schwache ist weg'
+);
+
+select ok(
+  (select pg_get_constraintdef(oid) like '%is_valid_iso_week_key%'
+     from pg_constraint
+    where conrelid = 'public.plan_versions'::regclass
+      and conname = 'plan_versions_week_key_is_iso'),
+  'die aktive Definition ruft app.is_valid_iso_week_key auf'
+);
+
+-- Und der Positivfall am echten Insert: eine gueltige 53. Woche muss durch.
+-- Ohne ihn koennte die Constraint pauschal alles ablehnen und die Negativfaelle
+-- waeren trotzdem gruen.
+select lives_ok(
+  $$insert into public.plan_versions (id, org_id, week_key)
+    values ('00000000-0000-4000-8000-00000088e002',
+            '00000000-0000-4000-8000-0000000000a1',
+            '2026-W53')$$,
+  'eine gueltige 53. Woche wird von der Datenbank angenommen'
+);
 
 select throws_ok(
   $$insert into public.plan_versions (id, org_id, week_key)

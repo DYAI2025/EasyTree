@@ -29,6 +29,7 @@ export {
   CreateAssignmentCommandSchema,
   PlanValidationResultSchema,
   PlanningConflictDtoSchema,
+  IsoWeekKeySchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
   SourceVersionSchema,
