@@ -29,7 +29,7 @@ DB_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 APP_PASSWORT="ci-local-app-password"
 
 # Subjekt A: aktives Mitglied von Organisation Alpha (supabase/seed.sql).
-SUBJEKT_A="00000000-0000-0000-0000-00000000aaa1"
+SUBJEKT_A="00000000-0000-4000-8000-00000000aaa1"
 
 LOGS="$(pwd)/harness-logs"
 mkdir -p "$LOGS"

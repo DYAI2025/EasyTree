@@ -134,6 +134,12 @@ Basisauflösung (LED-014) committete Arbeit überhaupt sichtbar machte. Auch das
 Governance-Pfade und keine fachliche Scope-Erweiterung: sie erlauben keine Produktänderung und
 keine Auth-, Publish- oder sonstige Non-Goal-Funktion.
 
+Zu `scripts/read-through-harness.sh` (ergänzt am 2026-07-28): kein neuer Scope, sondern eine
+Lücke in dieser Liste. Der Plan nennt die Datei unter T-06 ausdrücklich als betroffen
+(„erweitern, nicht duplizieren"). Aufgefallen ist sie, weil T-01 das darin fest verdrahtete
+Testsubjekt brach und der CI-Job `read-through` rot wurde. Eingetragen ist nur diese eine
+Datei, nicht `scripts/**` — die Branch-Protection-Skripte bleiben ausdrücklich draußen.
+
 Zwei Formregeln, beide hier schon einmal verletzt: Muster mit führendem `/` verwirft der Parser
 (`plumbline_scope.py:81`), und jede Zeile, die mit `*` beginnt — etwa umbrochene Fettschrift —
 wird als Listenpunkt gelesen. Prosa in diesem Abschnitt darf deshalb nie mit `*` anfangen.
@@ -159,6 +165,7 @@ Dokumentationsänderungen außerhalb dieses Features.
 - `packages/contracts/test/**`
 - `packages/domain/src/**`
 - `packages/domain/test/**`
+- `scripts/read-through-harness.sh`
 - `supabase/migrations/*.sql`
 - `supabase/seed.sql`
 - `supabase/tests/**`
