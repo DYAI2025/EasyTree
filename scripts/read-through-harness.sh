@@ -188,7 +188,7 @@ echo "::group::13b Schreibpfad — Formular bis PostgreSQL und zurueck (EYT-92)"
 #
 # Umgekehrt gilt: der Schreibpfad braucht die Fixtures aus 12d, also kann er
 # nicht frueher laufen.
-EASYTREE_API_ORIGIN="" PLAYWRIGHT_BASE_URL="" \
+EASYTREE_API_ORIGIN="$API_ORIGIN" PLAYWRIGHT_BASE_URL="$WEB_ORIGIN" \
   pnpm --filter @easytree/web exec playwright test \
     -c playwright.harness.config.ts --grep "Schreibpfad"
 echo "::endgroup::"
