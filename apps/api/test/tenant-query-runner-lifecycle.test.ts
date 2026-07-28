@@ -85,7 +85,7 @@ describe("TenantQueryRunnerProvider — Lebenszyklus", () => {
     const { provider, close } = await bootWith(runner);
 
     // Echte Poolnutzung: Verbindung, Transaktion, Kontext, Query.
-    await provider.run({ userId: "00000000-0000-0000-0000-00000000aaa1" }, async (tx) => {
+    await provider.run({ userId: "00000000-0000-4000-8000-00000000aaa1" }, async (tx) => {
       await tx.query("select 1");
     });
     // Ohne diese Zeile koennte der Test auch mit einem nie benutzten Pool
@@ -107,7 +107,7 @@ describe("TenantQueryRunnerProvider — Lebenszyklus", () => {
       runner,
     );
 
-    await provider.run({ userId: "00000000-0000-0000-0000-00000000aaa1" }, async (tx) => {
+    await provider.run({ userId: "00000000-0000-4000-8000-00000000aaa1" }, async (tx) => {
       await tx.query("select 1");
     });
 

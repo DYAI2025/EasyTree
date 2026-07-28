@@ -25,7 +25,7 @@ import {
   type PlanningWindowResult,
 } from "../src/modules/planning";
 
-const SUBJECT = "00000000-0000-0000-0000-00000000aaa1";
+const SUBJECT = "00000000-0000-4000-8000-00000000aaa1";
 
 const EMPTY_WINDOW: PlanningWindowResult = {
   ok: true,

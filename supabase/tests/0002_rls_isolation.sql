@@ -16,7 +16,7 @@ select plan(27);
 select set_config(
   'request.jwt.claims',
   json_build_object(
-    'sub', '00000000-0000-0000-0000-00000000aaa1',
+    'sub', '00000000-0000-4000-8000-00000000aaa1',
     'role', 'authenticated'
   )::text,
   true
@@ -26,32 +26,32 @@ set local role authenticated;
 -- (1) A sieht ausschliesslich Org-Alpha-Items
 select results_eq(
   $$select org_id from public.items$$,
-  $$values ('00000000-0000-0000-0000-0000000000a1'::uuid)$$,
+  $$values ('00000000-0000-4000-8000-0000000000a1'::uuid)$$,
   'A: select items liefert ausschliesslich Org-Alpha-Zeilen'
 );
 
 -- (2) Cross-Tenant-Read: Org-Beta-Items sind leer
 select is_empty(
-  $$select * from public.items where org_id = '00000000-0000-0000-0000-0000000000b2'$$,
+  $$select * from public.items where org_id = '00000000-0000-4000-8000-0000000000b2'$$,
   'A: Cross-Tenant-Read auf Org-Beta-Items ist leer'
 );
 
 -- (3) IDOR: direkter Zugriff auf bekannte fremde Item-UUID ist leer
 select is_empty(
-  $$select * from public.items where id = '00000000-0000-0000-0000-0000000220b2'$$,
+  $$select * from public.items where id = '00000000-0000-4000-8000-0000000220b2'$$,
   'A: IDOR mit fremder Item-UUID liefert keine Zeile'
 );
 
 -- (4) IDOR auf item_notes des fremden Tenants ist leer
 select is_empty(
-  $$select * from public.item_notes where org_id = '00000000-0000-0000-0000-0000000000b2'$$,
+  $$select * from public.item_notes where org_id = '00000000-0000-4000-8000-0000000000b2'$$,
   'A: Cross-Tenant-Read auf Org-Beta-Notes ist leer'
 );
 
 -- (5) Cross-Tenant-Insert (manipulierte org_id) wird abgelehnt
 select throws_ok(
   $$insert into public.items (org_id, title)
-    values ('00000000-0000-0000-0000-0000000000b2', 'smuggled')$$,
+    values ('00000000-0000-4000-8000-0000000000b2', 'smuggled')$$,
   '42501',
   'new row violates row-level security policy for table "items"',
   'A: insert mit org_id=Beta wird mit 42501 abgelehnt'
@@ -60,8 +60,8 @@ select throws_ok(
 -- (6) Manipulierte org_id auf item_notes wird abgelehnt (RLS vor FK)
 select throws_ok(
   $$insert into public.item_notes (org_id, item_id, body)
-    values ('00000000-0000-0000-0000-0000000000b2',
-            '00000000-0000-0000-0000-0000000220b2', 'smuggled note')$$,
+    values ('00000000-0000-4000-8000-0000000000b2',
+            '00000000-0000-4000-8000-0000000220b2', 'smuggled note')$$,
   '42501',
   'new row violates row-level security policy for table "item_notes"',
   'A: insert item_notes mit org_id=Beta wird mit 42501 abgelehnt'
@@ -71,7 +71,7 @@ select throws_ok(
 select results_eq(
   $$with upd as (
       update public.items set title = 'pwned'
-      where org_id = '00000000-0000-0000-0000-0000000000b2'
+      where org_id = '00000000-0000-4000-8000-0000000000b2'
       returning 1)
     select count(*) from upd$$,
   $$values (0::bigint)$$,
@@ -82,7 +82,7 @@ select results_eq(
 select results_eq(
   $$with del as (
       delete from public.items
-      where org_id = '00000000-0000-0000-0000-0000000000b2'
+      where org_id = '00000000-0000-4000-8000-0000000000b2'
       returning 1)
     select count(*) from del$$,
   $$values (0::bigint)$$,
@@ -92,29 +92,29 @@ select results_eq(
 -- (9) Positivkontrolle: Schreiben im EIGENEN Tenant funktioniert
 select lives_ok(
   $$insert into public.items (org_id, title)
-    values ('00000000-0000-0000-0000-0000000000a1', 'Alpha Item von A')$$,
+    values ('00000000-0000-4000-8000-0000000000a1', 'Alpha Item von A')$$,
   'A: insert im eigenen Tenant Org Alpha funktioniert'
 );
 
 -- (10) users: nur das eigene Profil sichtbar
 select results_eq(
   $$select id from public.users$$,
-  $$values ('00000000-0000-0000-0000-00000000aaa1'::uuid)$$,
+  $$values ('00000000-0000-4000-8000-00000000aaa1'::uuid)$$,
   'A: select users liefert ausschliesslich das eigene Profil'
 );
 
 -- (11) memberships: nur eigene Memberships sichtbar
 select results_eq(
   $$select user_id from public.memberships$$,
-  $$values ('00000000-0000-0000-0000-00000000aaa1'::uuid)$$,
+  $$values ('00000000-0000-4000-8000-00000000aaa1'::uuid)$$,
   'A: select memberships liefert ausschliesslich eigene Zeilen'
 );
 
 -- (12) memberships: Selbst-Eskalation (A traegt sich in Org Beta ein) abgelehnt
 select throws_ok(
   $$insert into public.memberships (org_id, user_id, role, active)
-    values ('00000000-0000-0000-0000-0000000000b2',
-            '00000000-0000-0000-0000-00000000aaa1', 'owner', true)$$,
+    values ('00000000-0000-4000-8000-0000000000b2',
+            '00000000-0000-4000-8000-00000000aaa1', 'owner', true)$$,
   '42501',
   null,
   'A: insert in memberships (Selbst-Eskalation nach Org Beta) wird abgelehnt'
@@ -124,7 +124,7 @@ select throws_ok(
 select is_empty(
   $$select name from storage.objects
     where bucket_id = 'tenant-files'
-      and name like '00000000-0000-0000-0000-0000000000b2/%'$$,
+      and name like '00000000-0000-4000-8000-0000000000b2/%'$$,
   'A: Storage-Pfad org_beta/... ist nicht lesbar'
 );
 
@@ -132,7 +132,7 @@ select is_empty(
 select results_eq(
   $$select count(*) from storage.objects
     where bucket_id = 'tenant-files'
-      and name like '00000000-0000-0000-0000-0000000000a1/%'$$,
+      and name like '00000000-0000-4000-8000-0000000000a1/%'$$,
   $$values (1::bigint)$$,
   'A: Storage-Pfad org_alpha/... ist lesbar (1 Seed-Objekt)'
 );
@@ -141,8 +141,8 @@ select results_eq(
 select throws_ok(
   $$insert into storage.objects (bucket_id, name, owner_id)
     values ('tenant-files',
-            '00000000-0000-0000-0000-0000000000b2/evil.txt',
-            '00000000-0000-0000-0000-00000000aaa1')$$,
+            '00000000-0000-4000-8000-0000000000b2/evil.txt',
+            '00000000-0000-4000-8000-00000000aaa1')$$,
   '42501',
   'new row violates row-level security policy for table "objects"',
   'A: Storage-Insert unter org_beta/... wird mit 42501 abgelehnt'
@@ -152,8 +152,8 @@ select throws_ok(
 select lives_ok(
   $$insert into storage.objects (bucket_id, name, owner_id)
     values ('tenant-files',
-            '00000000-0000-0000-0000-0000000000a1/upload-von-a.txt',
-            '00000000-0000-0000-0000-00000000aaa1')$$,
+            '00000000-0000-4000-8000-0000000000a1/upload-von-a.txt',
+            '00000000-0000-4000-8000-00000000aaa1')$$,
   'A: Storage-Insert unter org_alpha/... funktioniert'
 );
 
@@ -164,7 +164,7 @@ reset role;
 select set_config(
   'request.jwt.claims',
   json_build_object(
-    'sub', '00000000-0000-0000-0000-00000000ccc3',
+    'sub', '00000000-0000-4000-8000-00000000ccc3',
     'role', 'authenticated'
   )::text,
   true
@@ -187,7 +187,7 @@ select is_empty(
 select is_empty(
   $$select name from storage.objects
     where bucket_id = 'tenant-files'
-      and name like '00000000-0000-0000-0000-0000000000a1/%'$$,
+      and name like '00000000-0000-4000-8000-0000000000a1/%'$$,
   'C (inaktive Membership): Storage-Pfad org_alpha/... ist nicht lesbar'
 );
 
@@ -198,7 +198,7 @@ reset role;
 select set_config(
   'request.jwt.claims',
   json_build_object(
-    'sub', '00000000-0000-0000-0000-00000000bbb2',
+    'sub', '00000000-0000-4000-8000-00000000bbb2',
     'role', 'authenticated'
   )::text,
   true
@@ -208,7 +208,7 @@ set local role authenticated;
 -- (20) B sieht ausschliesslich Org-Beta-Items
 select results_eq(
   $$select distinct org_id from public.items$$,
-  $$values ('00000000-0000-0000-0000-0000000000b2'::uuid)$$,
+  $$values ('00000000-0000-4000-8000-0000000000b2'::uuid)$$,
   'B: select items liefert ausschliesslich Org-Beta-Zeilen'
 );
 
@@ -221,8 +221,8 @@ reset role;
 --      (Alpha-Item unter Beta-org_id — selbst OHNE RLS unmoeglich, 23503)
 select throws_ok(
   $$insert into public.item_notes (org_id, item_id, body)
-    values ('00000000-0000-0000-0000-0000000000b2',
-            '00000000-0000-0000-0000-0000000110a1', 'cross-tenant ref')$$,
+    values ('00000000-0000-4000-8000-0000000000b2',
+            '00000000-0000-4000-8000-0000000110a1', 'cross-tenant ref')$$,
   '23503',
   null,
   'FK (item_id, org_id): Cross-Tenant-Referenz wird mit 23503 abgelehnt'

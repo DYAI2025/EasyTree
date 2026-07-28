@@ -98,7 +98,7 @@ select is(
 -- ===========================================================================
 select set_config(
   'request.jwt.claims',
-  json_build_object('sub', '00000000-0000-0000-0000-00000000aaa1', 'role', 'authenticated')::text,
+  json_build_object('sub', '00000000-0000-4000-8000-00000000aaa1', 'role', 'authenticated')::text,
   true
 );
 set local role authenticated;
@@ -110,19 +110,19 @@ set local role authenticated;
 -- Wanduhr 02:00 bis 04:00 am 25. Oktober.
 select lives_ok(
   $$insert into public.plan_versions (id, org_id, week_key)
-    values ('00000000-0000-0000-0000-0000006143a1',
-            '00000000-0000-0000-0000-0000000000a1', '2026-W43')$$,
+    values ('00000000-0000-4000-8000-0000006143a1',
+            '00000000-0000-4000-8000-0000000000a1', '2026-W43')$$,
   'Entwurf fuer die Oktober-Umstellungswoche laesst sich anlegen'
 );
 
 select lives_ok(
   $$insert into public.assignments
       (id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
-    values ('00000000-0000-0000-0000-0000007143a1',
-            '00000000-0000-0000-0000-0000000000a1',
-            '00000000-0000-0000-0000-0000006143a1',
-            '00000000-0000-0000-0000-0000004010a1',
-            '00000000-0000-0000-0000-0000005010a1',
+    values ('00000000-0000-4000-8000-0000007143a1',
+            '00000000-0000-4000-8000-0000000000a1',
+            '00000000-0000-4000-8000-0000006143a1',
+            '00000000-0000-4000-8000-0000004010a1',
+            '00000000-0000-4000-8000-0000005010a1',
             '2026-10-25T00:00:00Z', '2026-10-25T03:00:00Z')$$,
   'Schicht durch die doppelte Winterzeitstunde laesst sich anlegen'
 );
@@ -130,8 +130,8 @@ select lives_ok(
 select lives_ok(
   $$update public.plan_versions
        set published_at = '2026-10-20T09:00:00Z',
-           published_by = '00000000-0000-0000-0000-00000000aaa1'
-     where id = '00000000-0000-0000-0000-0000006143a1'$$,
+           published_by = '00000000-0000-4000-8000-00000000aaa1'
+     where id = '00000000-0000-4000-8000-0000006143a1'$$,
   'Die Umstellungswoche laesst sich veroeffentlichen'
 );
 
@@ -141,19 +141,19 @@ select lives_ok(
 -- liesse sich nicht mehr aus derselben Zeile herstellen.
 select lives_ok(
   $$insert into public.plan_versions (id, org_id, week_key)
-    values ('00000000-0000-0000-0000-0000006144a1',
-            '00000000-0000-0000-0000-0000000000a1', '2026-W43')$$,
+    values ('00000000-0000-4000-8000-0000006144a1',
+            '00000000-0000-4000-8000-0000000000a1', '2026-W43')$$,
   'Zweiter Entwurf derselben Woche nach der Veroeffentlichung der ersten'
 );
 
 select lives_ok(
   $$insert into public.assignments
       (id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
-    values ('00000000-0000-0000-0000-0000007144a1',
-            '00000000-0000-0000-0000-0000000000a1',
-            '00000000-0000-0000-0000-0000006144a1',
-            '00000000-0000-0000-0000-0000004010a1',
-            '00000000-0000-0000-0000-0000005010a1',
+    values ('00000000-0000-4000-8000-0000007144a1',
+            '00000000-0000-4000-8000-0000000000a1',
+            '00000000-0000-4000-8000-0000006144a1',
+            '00000000-0000-4000-8000-0000004010a1',
+            '00000000-0000-4000-8000-0000005010a1',
             '2026-10-25T02:00:00Z', '2026-10-25T06:00:00Z')$$,
   'Die ueberlappende Schicht ist als Entwurf erlaubt — Entwuerfe duerfen kollidieren'
 );
@@ -161,14 +161,14 @@ select lives_ok(
 select throws_ok(
   $$update public.plan_versions
        set published_at = '2026-10-20T10:00:00Z',
-           published_by = '00000000-0000-0000-0000-00000000aaa1'
-     where id = '00000000-0000-0000-0000-0000006144a1'$$,
+           published_by = '00000000-0000-4000-8000-00000000aaa1'
+     where id = '00000000-0000-4000-8000-0000006144a1'$$,
   '23P01'
 );
 
 select is(
   (select published_at from public.plan_versions
-    where id = '00000000-0000-0000-0000-0000006144a1'),
+    where id = '00000000-0000-4000-8000-0000006144a1'),
   null,
   'Ueberlappung IN der doppelten Winterzeitstunde verhindert die Veroeffentlichung'
 );
@@ -179,15 +179,15 @@ select is(
 select lives_ok(
   $$update public.assignments
        set starts_at_utc = '2026-10-25T03:00:00Z'
-     where id = '00000000-0000-0000-0000-0000007144a1'$$,
+     where id = '00000000-0000-4000-8000-0000007144a1'$$,
   'Die noch unveroeffentlichte Schicht laesst sich verschieben'
 );
 
 select lives_ok(
   $$update public.plan_versions
        set published_at = '2026-10-20T11:00:00Z',
-           published_by = '00000000-0000-0000-0000-00000000aaa1'
-     where id = '00000000-0000-0000-0000-0000006144a1'$$,
+           published_by = '00000000-0000-4000-8000-00000000aaa1'
+     where id = '00000000-0000-4000-8000-0000006144a1'$$,
   'Beruehrung am Umstellungstag ist kein Konflikt — halboffen gilt auch dort'
 );
 
@@ -196,19 +196,19 @@ select lives_ok(
 -- ---------------------------------------------------------------------------
 select lives_ok(
   $$insert into public.outbox_messages (org_id, message_type, idempotency_key, payload)
-    values ('00000000-0000-0000-0000-0000000000a1', 'plan.published', 'schluessel-1', '{}'::jsonb)$$,
+    values ('00000000-0000-4000-8000-0000000000a1', 'plan.published', 'schluessel-1', '{}'::jsonb)$$,
   'Erste Nachricht mit einem Idempotenzschluessel'
 );
 
 select throws_ok(
   $$insert into public.outbox_messages (org_id, message_type, idempotency_key, payload)
-    values ('00000000-0000-0000-0000-0000000000a1', 'plan.published', 'schluessel-1', '{"anders": true}'::jsonb)$$,
+    values ('00000000-0000-4000-8000-0000000000a1', 'plan.published', 'schluessel-1', '{"anders": true}'::jsonb)$$,
   '23505'
 );
 
 select is(
   (select count(*)::int from public.outbox_messages
-    where org_id = '00000000-0000-0000-0000-0000000000a1'
+    where org_id = '00000000-0000-4000-8000-0000000000a1'
       and message_type = 'plan.published'
       and idempotency_key = 'schluessel-1'),
   1,
@@ -220,7 +220,7 @@ select is(
 -- Organisation moeglich waere.
 select lives_ok(
   $$insert into public.outbox_messages (org_id, message_type, idempotency_key, payload)
-    values ('00000000-0000-0000-0000-0000000000a1', 'plan.published', 'schluessel-2', '{}'::jsonb)$$,
+    values ('00000000-0000-4000-8000-0000000000a1', 'plan.published', 'schluessel-2', '{}'::jsonb)$$,
   'Ein anderer Schluessel erzeugt sehr wohl eine Nachricht'
 );
 
@@ -229,7 +229,7 @@ select lives_ok(
 -- ueberhaupt mitzaehlt.
 select lives_ok(
   $$insert into public.outbox_messages (org_id, message_type, idempotency_key, payload)
-    values ('00000000-0000-0000-0000-0000000000a1', 'plan.retracted', 'schluessel-1', '{}'::jsonb)$$,
+    values ('00000000-0000-4000-8000-0000000000a1', 'plan.retracted', 'schluessel-1', '{}'::jsonb)$$,
   'Derselbe Schluessel unter anderem Nachrichtentyp ist eine eigene Nachricht'
 );
 
@@ -239,19 +239,19 @@ select lives_ok(
 -- Eigene Woche, damit die Veroeffentlichungen oben nicht hineinspielen.
 select lives_ok(
   $$insert into public.plan_versions (org_id, week_key)
-    values ('00000000-0000-0000-0000-0000000000a1', '2026-W44')$$,
+    values ('00000000-0000-4000-8000-0000000000a1', '2026-W44')$$,
   'Ein Entwurf fuer eine bisher unbeplante Woche'
 );
 
 select throws_ok(
   $$insert into public.plan_versions (org_id, week_key)
-    values ('00000000-0000-0000-0000-0000000000a1', '2026-W44')$$,
+    values ('00000000-0000-4000-8000-0000000000a1', '2026-W44')$$,
   '23505'
 );
 
 select is(
   (select count(*)::int from public.plan_versions
-    where org_id = '00000000-0000-0000-0000-0000000000a1'
+    where org_id = '00000000-0000-4000-8000-0000000000a1'
       and week_key = '2026-W44'),
   1,
   'Zwei gleichzeitige Entwuerfe derselben Woche sind unmoeglich — "der" Entwurf bleibt bestimmbar'
