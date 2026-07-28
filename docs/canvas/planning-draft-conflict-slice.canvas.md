@@ -125,6 +125,15 @@ Ausdrücklich außerhalb des erlaubten Scopes: `.github/workflows/ci.yml` als Ga
 ohne Ticketbezug, Auth-/Session-Module, Publish-Pfad, Ressourcen-, Abwesenheits- und
 Wetter-Module.
 
+Zu `/.gitignore` und `/CLAUDE.md`: beide Änderungen hat der Product Owner am 2026-07-28
+ausdrücklich autorisiert — `.gitignore` eng begrenzt auf das Nicht-mehr-Tracken von
+`/.claude-flow/` und `/.claude/homunculus/`, `CLAUDE.md` für die Korrektur der falschen
+EYT-88-/Publish-Zuordnung. Die Freigabe existierte bisher nur im Gesprächsverlauf und nicht in
+dieser maschinenlesbaren Liste; der Scope-Guard hat die Lücke gemeldet, sobald die
+Basisauflösung (LED-014) committete Arbeit überhaupt sichtbar machte. Auch das sind
+**Governance-Pfade, keine fachliche Scope-Erweiterung**: sie erlauben keine Produktänderung,
+keine Auth-, Publish- oder sonstige Non-Goal-Funktion.
+
 Zu `docs/context/**` (freigegeben am 2026-07-28): eine **Governance-Pfadfreigabe, keine
 fachliche Scope-Erweiterung**. Sie deckt Plumbline-Run-Ledger, Gate-Evidenz, Status- und
 Kontextartefakte — ausdrücklich **nicht** neue Produktanforderungen, Erweiterung des
@@ -155,6 +164,8 @@ Dokumentationsänderungen außerhalb dieses Features.
 - `docs/plans/**`
 - `docs/context/**`
 - `docs/traceability.md`
+- `/.gitignore`
+- `/CLAUDE.md`
 
 ## Unresolved Questions
 
