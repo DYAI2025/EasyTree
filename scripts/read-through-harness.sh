@@ -173,7 +173,24 @@ echo "::group::13 Gesunde Nachweise"
 # — er liefe gegen eine Datenbank, die inzwischen auch Harness-Daten haelt.
 EASYTREE_API_ORIGIN="$API_ORIGIN" PLAYWRIGHT_BASE_URL="$WEB_ORIGIN" \
   pnpm --filter @easytree/web exec playwright test \
-    -c playwright.harness.config.ts --grep-invert "Nachweis 7|Standardseed-Kern"
+    -c playwright.harness.config.ts --grep-invert "Nachweis 7|Standardseed-Kern|Schreibpfad"
+echo "::endgroup::"
+
+echo "::group::13b Schreibpfad — Formular bis PostgreSQL und zurueck (EYT-92)"
+# AUSDRUECKLICH nach Phase 13 und in einem eigenen Aufruf.
+#
+# Der Grund ist eine echte Abhaengigkeit, keine Formalie: "Nachweis 4" prueft,
+# dass Woche W40 GENAU EINE Zuweisung zeigt. Der Schreibpfad legt eine zweite
+# an. Liefen beide im selben Aufruf, entschiede die Reihenfolge der
+# Deklaration im Spec darueber, ob Nachweis 4 gruen wird — und die kann
+# jemand beim Umsortieren aendern, ohne es zu merken. Zwei Aufrufe machen die
+# Reihenfolge zu einer Eigenschaft DIESES Skripts.
+#
+# Umgekehrt gilt: der Schreibpfad braucht die Fixtures aus 12d, also kann er
+# nicht frueher laufen.
+EASYTREE_API_ORIGIN="" PLAYWRIGHT_BASE_URL="" \
+  pnpm --filter @easytree/web exec playwright test \
+    -c playwright.harness.config.ts --grep "Schreibpfad"
 echo "::endgroup::"
 
 echo "::group::14 API kontrolliert beenden"
@@ -195,4 +212,4 @@ PLAYWRIGHT_BASE_URL="$WEB_ORIGIN" \
     -c playwright.harness.config.ts --grep "Nachweis 7"
 echo "::endgroup::"
 
-echo "Read-Through-Harness OK: 4 gesunde Nachweise + Ausfallnachweis."
+echo "Read-Through-Harness OK: gesunde Lesenachweise + Schreibpfad + Ausfallnachweis."

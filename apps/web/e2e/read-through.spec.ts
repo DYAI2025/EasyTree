@@ -370,3 +370,194 @@ test.describe("Standardseed-Abgrenzung (EYT-91)", () => {
     }
   });
 });
+
+/**
+ * Schreibpfad im echten Browser (EYT-92) — Schritte 2 bis 5 der Nutzerreise.
+ *
+ * Derselbe Aufbau wie oben, nur in die andere Richtung: Browser -> Formular ->
+ * Same-Origin-Rewrite -> NestJS -> TenantQueryRunner -> RLS -> PostgreSQL, und
+ * danach ueber einen frischen Lesepfad wieder zurueck.
+ *
+ * ## Warum diese Tests in dieser Reihenfolge stehen
+ *
+ * Sie teilen sich EINE Datenbank und laufen seriell (`test.describe.serial`).
+ * Der Konflikttest braucht die Zuweisung, die der Speichertest anlegt — nur so
+ * ist der Konflikt echt und nicht vorbereitet. Waeren sie unabhaengig, muesste
+ * der Konflikttest seine eigene Kollision einfuegen, und er wuerde am Ende
+ * pruefen, dass sein eigenes Einfuegen funktioniert hat.
+ *
+ * ## Gegenmutationen
+ *
+ * 1. Entfernt man die Kollisionsabfrage in `PlanningWriteRepository`, wird
+ *    „Schritt 4" gruen statt rot gemeldet und die Zaehlung im Reload-Test
+ *    steigt auf zwei — beide Faelle schlagen fehl.
+ * 2. Ersetzt man in `PlanningWindowView` das Neuladen durch ein optimistisches
+ *    Einfuegen, bleibt „Schritt 3" gruen, aber „Schritt 5" faellt: nach dem
+ *    Reload waere nichts da.
+ */
+const A_PERSON = "e11a0001-0001-4001-8001-000000000001";
+const A_BAUSTELLE = "5117a001-0001-4001-8001-000000000001";
+
+/** Ein Slot in W40, der die geseedete Zuweisung (30.09. 06:00–10:00 UTC) NICHT beruehrt. */
+const NEU_DATUM = "2026-10-01";
+const NEU_BEGINN = "07:00";
+const NEU_ENDE = "15:00";
+
+async function formularAusfuellen(
+  seite: import("@playwright/test").Page,
+  beginn: string,
+  ende: string,
+): Promise<void> {
+  await seite.getByTestId("feld-employee").selectOption(A_PERSON);
+  await seite.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
+  await seite.getByTestId("feld-datum").fill(NEU_DATUM);
+  await seite.getByTestId("feld-beginn").fill(beginn);
+  await seite.getByTestId("feld-ende").fill(ende);
+}
+
+test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
+  test("Schritt 2: reale Stammdaten aus PostgreSQL sind im Browser auswaehlbar", async ({
+    page,
+  }) => {
+    await page.goto(SEITE);
+    await expect(page.getByTestId("einsatzformular")).toBeVisible();
+
+    // Die Namen stammen aus e2e/harness/seed.sql und existieren nirgends im
+    // Clientcode — waeren sie eine Fixture, stuende hier ein anderer Text.
+    const personen = page.getByTestId("feld-employee");
+    await expect(personen).toContainText("Harness Planerin Alpha");
+    await expect(page.getByTestId("feld-worksite")).toContainText("Harness Baustelle Alpha");
+
+    // Werte sind die SERVERSEITIGEN Ids, nicht die Namen.
+    const werte = await personen
+      .locator("option")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("value") ?? ""));
+    expect(werte).toContain(A_PERSON);
+
+    // Und kein Byte aus Organisation B — weder Id noch Name.
+    const markup = (await page.content()).toLowerCase();
+    for (const spur of [...B_SPUREN, "harness planer beta", "harness baustelle beta"]) {
+      expect(markup).not.toContain(spur.toLowerCase());
+    }
+  });
+
+  test("Schritt 2: unvollstaendige Eingabe loest keinen Schreibaufruf aus", async ({ page }) => {
+    const schreibaufrufe: string[] = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().includes("/planung/einsaetze")) {
+        schreibaufrufe.push(req.url());
+      }
+    });
+
+    await page.goto(SEITE);
+    await page.getByTestId("feld-employee").selectOption(A_PERSON);
+    await page.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
+    // Datum, Beginn und Ende fehlen absichtlich.
+    await page.getByTestId("einsatz-speichern").click({ force: true });
+    await page.waitForTimeout(500);
+
+    expect(schreibaufrufe).toEqual([]);
+  });
+
+  test("Schritt 3: ein gueltiger Entwurf wird serverseitig gespeichert und sichtbar", async ({
+    page,
+  }) => {
+    await page.goto(SEITE);
+    const vorher = await sichtbareZuweisungen(page);
+
+    await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE);
+    const [antwort] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/planung/einsaetze") && r.request().method() === "POST",
+      ),
+      page.getByTestId("einsatz-speichern").click(),
+    ]);
+    expect(antwort.status()).toBe(201);
+
+    // Die Id kommt vom SERVER, nicht aus dem Browser.
+    const angelegt = (await antwort.json()) as { id: string };
+    expect(angelegt.id).toMatch(/^[0-9a-f-]{36}$/);
+
+    // Und sie steht anschliessend im DOM — ueber einen NEUEN Lesevorgang,
+    // nicht durch optimistisches Einfuegen.
+    await expect(page.locator(`[data-assignment-id="${angelegt.id}"]`)).toBeVisible();
+    const nachher = await sichtbareZuweisungen(page);
+    expect(nachher).toHaveLength(vorher.length + 1);
+    expect(nachher).toContain(angelegt.id);
+  });
+
+  test("Schritt 4: ein ueberlappender Entwurf wird mit verstaendlichem Grund abgelehnt", async ({
+    page,
+  }) => {
+    await page.goto(SEITE);
+    const vorher = await sichtbareZuweisungen(page);
+
+    // Genau derselbe Slot wie im vorigen Test — die Ueberlappung ist echt.
+    await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE);
+    const [antwort] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/planung/einsaetze") && r.request().method() === "POST",
+      ),
+      page.getByTestId("einsatz-speichern").click(),
+    ]);
+    expect(antwort.status()).toBe(409);
+
+    // Verstaendlicher Grund, nicht nur ein Statuscode.
+    const meldung = page.getByTestId("einsatzformular-meldung");
+    await expect(meldung).toBeVisible();
+    await expect(meldung).toContainText(/bereits eingeplant/i);
+
+    // Keine Teilwirkung: nach dem Reload steht die Liste unveraendert.
+    await page.reload();
+    expect(await sichtbareZuweisungen(page)).toEqual(vorher);
+  });
+
+  test("Schritt 4: ein ungueltiges Intervall erreicht den Server gar nicht erst", async ({
+    page,
+  }) => {
+    const schreibaufrufe: string[] = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().includes("/planung/einsaetze")) {
+        schreibaufrufe.push(req.url());
+      }
+    });
+
+    await page.goto(SEITE);
+    // Ende vor Beginn.
+    await formularAusfuellen(page, NEU_ENDE, NEU_BEGINN);
+    await page.getByTestId("einsatz-speichern").click();
+
+    await expect(page.getByTestId("einsatzformular-meldung")).toContainText(
+      /Ende muss nach dem Beginn/i,
+    );
+    expect(schreibaufrufe).toEqual([]);
+  });
+
+  test("Schritt 5: der gespeicherte Zustand ueberlebt Reload und zweiten Browserkontext", async ({
+    page,
+    browser,
+  }) => {
+    await page.goto(SEITE);
+    const nachSpeichern = await sichtbareZuweisungen(page);
+    const provenienzVorher = await provenienz(page);
+    // Der Speichertest hat genau eine Zeile ergaenzt; steht sie nicht mehr da,
+    // war sie nie in PostgreSQL.
+    expect(nachSpeichern.length).toBeGreaterThan(1);
+
+    await page.reload();
+    expect(await sichtbareZuweisungen(page)).toEqual(nachSpeichern);
+    expect(await provenienz(page)).toEqual(provenienzVorher);
+
+    const origin = new URL(page.url()).origin;
+    const zweiter = await browser.newContext({ baseURL: origin });
+    try {
+      const zweiteSeite = await zweiter.newPage();
+      await zweiteSeite.goto(SEITE);
+      await expect(zweiteSeite.getByTestId("planungsfenster-liste")).toBeVisible();
+      expect(await sichtbareZuweisungen(zweiteSeite)).toEqual(nachSpeichern);
+      expect(await provenienz(zweiteSeite)).toEqual(provenienzVorher);
+    } finally {
+      await zweiter.close();
+    }
+  });
+});
