@@ -403,6 +403,11 @@ test.describe("Standardseed-Abgrenzung (EYT-91)", () => {
     // suchen. Die Auswahlfelder tragen Ids als `value`, nicht als Text, und
     // stehen deshalb nicht im gerenderten Text.
     await page.goto(SEED_SEITE);
+    // Erst warten, dann zaehlen. Die vorige Fassung dieses Tests las den
+    // Seitentext unmittelbar nach `goto` und war damit im Ladezustand
+    // vakuumgruen — in leerem Markup steckt auch keine Harness-Spur. Die
+    // Gegenprobe unten hat genau das aufgedeckt (Lauf 30409986990).
+    await expect(page.locator(`[data-assignment-id="${SEED_ZUWEISUNG}"]`)).toBeVisible();
     const zuweisungsIds = await sichtbareZuweisungen(page);
     for (const spur of HARNESS_SPUREN) {
       expect(zuweisungsIds, `Harness-Fixture ${spur} als Zuweisung im W32-DOM`).not.toContain(spur);
