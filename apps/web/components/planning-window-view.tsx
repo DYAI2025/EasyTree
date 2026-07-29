@@ -37,7 +37,7 @@ import { Card } from "@easytree/ui";
 import { useCallback, useEffect, useState } from "react";
 
 import { usePlanningGateway } from "../lib/planning-gateway-provider";
-import { AssignmentForm } from "./assignment-form";
+import { AssignmentForm } from "./planning-assignment-form";
 
 type ViewState =
   | { readonly kind: "laedt" }

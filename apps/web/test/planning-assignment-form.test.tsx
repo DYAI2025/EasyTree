@@ -24,7 +24,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AssignmentForm, zuIntervall } from "../components/assignment-form";
+import { AssignmentForm, zuIntervall } from "../components/planning-assignment-form";
 
 afterEach(cleanup);
 
