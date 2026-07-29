@@ -143,6 +143,46 @@ async function neueVerbindung(): Promise<Client> {
 }
 
 /**
+ * Legt eine VEROEFFENTLICHTE Planversion mit einer Zuweisung an.
+ *
+ * Die Reihenfolge ist nicht beliebig, und die erste Fassung hatte sie falsch:
+ * `app.reject_assignment_in_published_plan()` (Migration 0010) verbietet, eine
+ * Zuweisung in eine bereits veroeffentlichte Version einzufuegen. Die Version
+ * entsteht deshalb als ENTWURF, bekommt ihre Zuweisung, und wird erst danach
+ * veroeffentlicht — genau der Weg, den auch der spaetere Publish-Pfad nimmt.
+ *
+ * `assignments.published_at` wird dabei NICHT von Hand gesetzt: der Trigger
+ * `plan_versions_publish_assignments` leitet es aus der Version ab. Es selbst
+ * zu setzen waere eine zweite Wahrheit neben der abgeleiteten.
+ */
+async function veroeffentlichteBaseline(
+  client: Client,
+  woche: string,
+  von: string,
+  bis: string,
+): Promise<string> {
+  const version = await client.query<{ id: string }>(
+    "insert into public.plan_versions (org_id, week_key) values ($1, $2) returning id",
+    [ORG_ALPHA, woche],
+  );
+  const id = version.rows[0]?.id;
+  if (id === undefined) throw new Error("Baseline-Version konnte nicht angelegt werden.");
+
+  await client.query(
+    `insert into public.assignments
+       (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [ORG_ALPHA, id, EMPLOYEE_ALPHA, WORKSITE_ALPHA, von, bis],
+  );
+
+  await client.query(
+    "update public.plan_versions set published_at = now(), published_by = $2 where id = $1",
+    [id, USER_A],
+  );
+  return id;
+}
+
+/**
  * Raeumt ENTWUERFE der Testwochen ab — nicht Veroeffentlichtes.
  *
  * Veroeffentlichte Planversionen und ihre Zuweisungen sind laut Migration 0010
@@ -396,25 +436,11 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
 
       // Eine veroeffentlichte Version mit einer Zuweisung — der Stand, den die
       // Planerin vor sich hat.
-      const version = await client.query<{ id: string }>(
-        `insert into public.plan_versions (org_id, week_key, published_at, published_by)
-       values ($1, $2, now(), $3) returning id`,
-        [ORG_ALPHA, WOCHE_BASELINE, USER_A],
-      );
-      const veroeffentlicht = version.rows[0]?.id;
-      expect(veroeffentlicht).toBeDefined();
-      await client.query(
-        `insert into public.assignments
-         (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc, published_at)
-       values ($1, $2, $3, $4, $5, $6, now())`,
-        [
-          ORG_ALPHA,
-          veroeffentlicht,
-          EMPLOYEE_ALPHA,
-          WORKSITE_ALPHA,
-          "2026-11-10T07:00:00Z",
-          "2026-11-10T15:00:00Z",
-        ],
+      const veroeffentlicht = await veroeffentlichteBaseline(
+        client,
+        WOCHE_BASELINE,
+        "2026-11-10T07:00:00Z",
+        "2026-11-10T15:00:00Z",
       );
 
       const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
@@ -554,24 +580,11 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       await raeumeWoche(a, WOCHE_BASELINE_PARALLEL);
 
       // Veroeffentlichte Baseline mit EINER Zuweisung.
-      const version = await a.query<{ id: string }>(
-        `insert into public.plan_versions (org_id, week_key, published_at, published_by)
-       values ($1, $2, now(), $3) returning id`,
-        [ORG_ALPHA, WOCHE_BASELINE_PARALLEL, USER_A],
-      );
-      const veroeffentlicht = version.rows[0]?.id;
-      await a.query(
-        `insert into public.assignments
-         (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc, published_at)
-       values ($1, $2, $3, $4, $5, $6, now())`,
-        [
-          ORG_ALPHA,
-          veroeffentlicht,
-          EMPLOYEE_ALPHA,
-          WORKSITE_ALPHA,
-          "2026-11-17T07:00:00Z",
-          "2026-11-17T15:00:00Z",
-        ],
+      await veroeffentlichteBaseline(
+        a,
+        WOCHE_BASELINE_PARALLEL,
+        "2026-11-17T07:00:00Z",
+        "2026-11-17T15:00:00Z",
       );
 
       const repoA = new PlanningWriteRepository(runnerAuf(a), USER_A, wochenschluessel);
