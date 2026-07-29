@@ -261,4 +261,62 @@ describe("PlanningWindowView", () => {
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
   });
+
+  it("behält die Erfolgsmeldung während des serverseitigen Read-through sichtbar", async () => {
+    let leseversuch = 0;
+    const offenerReadThrough = new Promise<GatewayResult<PlanningWindow>>(() => {});
+    const gateway: PlanningGateway = {
+      getPlanningWindow: () => {
+        leseversuch += 1;
+        return leseversuch === 1
+          ? Promise.resolve({ ok: true, value: PLANBARE_WOCHE })
+          : offenerReadThrough;
+      },
+      validateDraft: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+      createAssignment: () =>
+        Promise.resolve({
+          ok: true,
+          value: {
+            id: "11111111-1111-4111-8111-111111111111",
+            employeeId: PLANBARE_WOCHE.resources.employees[0]?.id ?? "",
+            worksiteId: PLANBARE_WOCHE.resources.worksites[0]?.id ?? "",
+            interval: {
+              startUtc: "2026-08-03T06:00:00.000Z",
+              endUtc: "2026-08-03T14:00:00.000Z",
+            },
+          },
+        }),
+      publishPlan: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+    };
+
+    render(
+      <PlanningGatewayProvider gateway={gateway}>
+        <PlanningWindowView weekKey="2026-W32" />
+      </PlanningGatewayProvider>,
+    );
+    await screen.findByTestId("einsatzformular");
+
+    await userEvent.selectOptions(
+      screen.getByTestId("feld-employee"),
+      PLANBARE_WOCHE.resources.employees[0]?.id ?? "",
+    );
+    await userEvent.selectOptions(
+      screen.getByTestId("feld-worksite"),
+      PLANBARE_WOCHE.resources.worksites[0]?.id ?? "",
+    );
+    await userEvent.type(screen.getByTestId("feld-datum"), "2026-08-03");
+    await userEvent.type(screen.getByTestId("feld-beginn"), "08:00");
+    await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
+    await userEvent.click(screen.getByTestId("einsatz-speichern"));
+
+    expect((await screen.findByRole("status")).textContent).toContain(
+      "Der Entwurf wurde gespeichert.",
+    );
+    expect(leseversuch).toBe(2);
+    expect(screen.queryByTestId("planungsfenster-laedt")).toBeNull();
+  });
 });

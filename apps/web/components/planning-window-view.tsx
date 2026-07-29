@@ -111,7 +111,16 @@ export function PlanningWindowView({ weekKey }: { weekKey: string }) {
 
   useEffect(() => {
     let abgebrochen = false;
-    setState({ kind: "laedt" });
+    // Beim ersten Laden und beim Wochenwechsel ersetzt der Ladezustand den
+    // bisherigen Inhalt. Ein Read-through derselben Woche nach erfolgreichem
+    // Speichern laeuft dagegen im Hintergrund: sonst wird das Formular
+    // ausgehaengt und seine gerade gesetzte Erfolgsmeldung verschwindet,
+    // bevor die Planerin sie wahrnehmen kann.
+    setState((aktuell) =>
+      aktuell.kind === "geladen" && aktuell.window.weekKey === weekKey
+        ? aktuell
+        : { kind: "laedt" },
+    );
     void gateway.getPlanningWindow({ weekKey }).then((result) => {
       if (abgebrochen) return;
       setState(
