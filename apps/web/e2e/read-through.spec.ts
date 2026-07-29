@@ -14,6 +14,7 @@
  *   - Organisation Beta haelt b5510001 in derselben Woche
  */
 import { PlanningWindowSchema } from "@easytree/contracts";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 const WOCHE = "2026-W40";
@@ -355,18 +356,432 @@ test.describe("Standardseed-Abgrenzung (EYT-91)", () => {
   // Vorher waere die Pruefung vakuum: sie sucht Harness-Spuren, und ohne
   // eingespielte Fixtures gibt es keine zu finden — gruen, ohne etwas gemessen
   // zu haben.
-  test("die W32-Antwort stammt aus dem Standardseed, nicht aus Harness-Fixtures", async ({
+  test("der PLANSTAND der W32-Antwort stammt aus dem Standardseed, nicht aus Harness-Fixtures", async ({
     page,
   }) => {
     const antwort = await page.request.get(FENSTER_PFAD);
     expect(antwort.status()).toBe(200);
-    const roh = await antwort.text();
-    await page.goto(SEED_SEITE);
-    const dom = (await page.content()).toLowerCase();
+    const fenster = (await antwort.json()) as {
+      assignments: { id: string; employeeId: string; worksiteId: string }[];
+      sourceVersion: { id: string } | null;
+      publishedVersionId: string | null;
+      resources: { employees: { id: string }[]; worksites: { id: string }[] };
+    };
 
+    // Geprueft wird der PLANSTAND — Zuweisungen und Versionen. Nur er traegt
+    // eine Wochenherkunft.
+    //
+    // NICHT geprueft wird `resources` (EYT-92). Das ist keine Abschwaechung,
+    // sondern eine Korrektur der Frage: Stammdaten sind MANDANTENWEIT, nicht
+    // wochengebunden. `e2e/harness/seed.sql` legt "Harness Planerin Alpha" in
+    // dieselbe Organisation Alpha wie den Standardseed — sie steht damit
+    // voellig zu Recht in der Auswahlliste jeder Woche dieses Mandanten,
+    // W32 eingeschlossen. Ein `not.toContain` ueber die ganze Antwort wuerde
+    // hier ein korrektes Verhalten als Leck melden.
+    //
+    // Die Aussage, um die es geht, bleibt scharf: keine Harness-ZUWEISUNG und
+    // keine Harness-VERSION in Woche 32.
+    const planstand = JSON.stringify({
+      assignments: fenster.assignments,
+      sourceVersion: fenster.sourceVersion,
+      publishedVersionId: fenster.publishedVersionId,
+    });
     for (const spur of HARNESS_SPUREN) {
-      expect(roh, `Harness-Fixture ${spur} in der W32-Antwort`).not.toContain(spur);
-      expect(dom, `Harness-Fixture ${spur} im W32-DOM`).not.toContain(spur.toLowerCase());
+      expect(planstand, `Harness-Fixture ${spur} im W32-Planstand`).not.toContain(spur);
+    }
+
+    // Gegenprobe gegen Vakuum: der Standardseed MUSS sichtbar sein. Ohne diese
+    // Zeile wuerde eine leere oder fehlgeschlagene Antwort die Pruefung oben
+    // gruen faerben, weil in nichts auch keine Harness-Spur steckt.
+    expect(planstand).toContain(SEED_ZUWEISUNG);
+
+    // Und die Auswahlliste ist nicht etwa leer: der Standardseed steht darin.
+    expect(fenster.resources.employees.map((e) => e.id)).toContain(SEED_EMPLOYEE);
+    expect(fenster.resources.worksites.map((w) => w.id)).toContain(SEED_WORKSITE);
+
+    // Im DOM gilt die alte, strengere Regel weiter — dort werden nur die
+    // Zuweisungen der Woche gerendert, und eine Harness-Id hat dort nichts zu
+    // suchen. Die Auswahlfelder tragen Ids als `value`, nicht als Text, und
+    // stehen deshalb nicht im gerenderten Text.
+    await page.goto(SEED_SEITE);
+    // Erst warten, dann zaehlen. Die vorige Fassung dieses Tests las den
+    // Seitentext unmittelbar nach `goto` und war damit im Ladezustand
+    // vakuumgruen — in leerem Markup steckt auch keine Harness-Spur. Die
+    // Gegenprobe unten hat genau das aufgedeckt (Lauf 30409986990).
+    await expect(page.locator(`[data-assignment-id="${SEED_ZUWEISUNG}"]`)).toBeVisible();
+    const zuweisungsIds = await sichtbareZuweisungen(page);
+    for (const spur of HARNESS_SPUREN) {
+      expect(zuweisungsIds, `Harness-Fixture ${spur} als Zuweisung im W32-DOM`).not.toContain(spur);
+    }
+    expect(zuweisungsIds).toContain(SEED_ZUWEISUNG);
+  });
+});
+
+/**
+ * Schreibpfad im echten Browser (EYT-92) — Schritte 2 bis 5 der Nutzerreise.
+ *
+ * Derselbe Aufbau wie oben, nur in die andere Richtung: Browser -> Formular ->
+ * Same-Origin-Rewrite -> NestJS -> TenantQueryRunner -> RLS -> PostgreSQL, und
+ * danach ueber einen frischen Lesepfad wieder zurueck.
+ *
+ * ## Warum diese Tests in dieser Reihenfolge stehen
+ *
+ * Sie teilen sich EINE Datenbank und laufen seriell (`test.describe.serial`).
+ * Der Konflikttest braucht die Zuweisung, die der Speichertest anlegt — nur so
+ * ist der Konflikt echt und nicht vorbereitet. Waeren sie unabhaengig, muesste
+ * der Konflikttest seine eigene Kollision einfuegen, und er wuerde am Ende
+ * pruefen, dass sein eigenes Einfuegen funktioniert hat.
+ *
+ * ## Gegenmutationen
+ *
+ * 1. Entfernt man die Kollisionsabfrage in `PlanningWriteRepository`, wird
+ *    „Schritt 4" gruen statt rot gemeldet und die Zaehlung im Reload-Test
+ *    steigt auf zwei — beide Faelle schlagen fehl.
+ * 2. Ersetzt man in `PlanningWindowView` das Neuladen durch ein optimistisches
+ *    Einfuegen, bleibt „Schritt 3" gruen, aber „Schritt 5" faellt: nach dem
+ *    Reload waere nichts da.
+ */
+const A_PERSON = "e11a0001-0001-4001-8001-000000000001";
+const A_BAUSTELLE = "5117a001-0001-4001-8001-000000000001";
+
+/** Ein Slot in W40, der die geseedete Zuweisung (30.09. 06:00–10:00 UTC) NICHT beruehrt. */
+const NEU_DATUM = "2026-10-01";
+const NEU_BEGINN = "07:00";
+const NEU_ENDE = "15:00";
+
+/**
+ * Woche oeffnen und warten, bis der SERVERSTAND wirklich da ist.
+ *
+ * `page.goto` allein genuegt nicht: die Ansicht laedt das Fenster in einem
+ * Effekt nach, und eine Momentaufnahme unmittelbar danach liefert die noch
+ * leere Liste. Ein Vorher-Nachher-Vergleich auf dieser Basis vergleicht den
+ * Ladezustand mit dem Endzustand und schlaegt sporadisch fehl — genau das ist
+ * im Lauf 30409513318 passiert.
+ *
+ * Gewartet wird auf das Formular UND auf die Liste: das Formular erscheint erst
+ * mit `resources`, die Liste erst mit den Zuweisungen. Beide zusammen heissen,
+ * dass die Antwort vollstaendig verarbeitet ist.
+ */
+async function wocheOeffnen(seite: import("@playwright/test").Page): Promise<string[]> {
+  await seite.goto(SEITE);
+  await expect(seite.getByTestId("einsatzformular")).toBeVisible();
+  await expect(seite.getByTestId("planungsfenster-liste")).toBeVisible();
+  return sichtbareZuweisungen(seite);
+}
+
+async function formularAusfuellen(
+  seite: import("@playwright/test").Page,
+  beginn: string,
+  ende: string,
+  datum = NEU_DATUM,
+): Promise<void> {
+  await seite.getByTestId("feld-employee").selectOption(A_PERSON);
+  await seite.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
+  await seite.getByTestId("feld-datum").fill(datum);
+  await seite.getByTestId("feld-beginn").fill(beginn);
+  await seite.getByTestId("feld-ende").fill(ende);
+}
+
+test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
+  test("Schritt 2: reale Stammdaten aus PostgreSQL sind im Browser auswaehlbar", async ({
+    page,
+  }) => {
+    await page.goto(SEITE);
+    await expect(page.getByTestId("einsatzformular")).toBeVisible();
+
+    // Die Namen stammen aus e2e/harness/seed.sql und existieren nirgends im
+    // Clientcode — waeren sie eine Fixture, stuende hier ein anderer Text.
+    const personen = page.getByTestId("feld-employee");
+    await expect(personen).toContainText("Harness Planerin Alpha");
+    await expect(page.getByTestId("feld-worksite")).toContainText("Harness Baustelle Alpha");
+
+    // Werte sind die SERVERSEITIGEN Ids, nicht die Namen.
+    const werte = await personen
+      .locator("option")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("value") ?? ""));
+    expect(werte).toContain(A_PERSON);
+
+    // Und kein Byte aus Organisation B — weder Id noch Name.
+    const markup = (await page.content()).toLowerCase();
+    for (const spur of [...B_SPUREN, "harness planer beta", "harness baustelle beta"]) {
+      expect(markup).not.toContain(spur.toLowerCase());
     }
   });
+
+  test("Schritt 2: unvollstaendige Eingabe loest keinen Schreibaufruf aus", async ({ page }) => {
+    const schreibaufrufe: string[] = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().includes("/planung/einsaetze")) {
+        schreibaufrufe.push(req.url());
+      }
+    });
+
+    await page.goto(SEITE);
+    await page.getByTestId("feld-employee").selectOption(A_PERSON);
+    await page.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
+    // Datum, Beginn und Ende fehlen absichtlich.
+    await page.getByTestId("einsatz-speichern").click({ force: true });
+    await page.waitForTimeout(500);
+
+    expect(schreibaufrufe).toEqual([]);
+  });
+
+  test("Schritt 3: ein gueltiger Entwurf wird serverseitig gespeichert und sichtbar", async ({
+    page,
+  }) => {
+    const vorher = await wocheOeffnen(page);
+
+    await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE);
+    const [antwort] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/planung/einsaetze") && r.request().method() === "POST",
+      ),
+      page.getByTestId("einsatz-speichern").click(),
+    ]);
+    expect(antwort.status()).toBe(201);
+
+    // Die Id kommt vom SERVER, nicht aus dem Browser.
+    const angelegt = (await antwort.json()) as { id: string };
+    expect(angelegt.id).toMatch(/^[0-9a-f-]{36}$/);
+
+    // Und sie steht anschliessend im DOM — ueber einen NEUEN Lesevorgang,
+    // nicht durch optimistisches Einfuegen.
+    await expect(page.locator(`[data-assignment-id="${angelegt.id}"]`)).toBeVisible();
+    const nachher = await sichtbareZuweisungen(page);
+    expect(nachher).toHaveLength(vorher.length + 1);
+    expect(nachher).toContain(angelegt.id);
+  });
+
+  test("Schritt 4: ein ueberlappender Entwurf wird mit verstaendlichem Grund abgelehnt", async ({
+    page,
+  }) => {
+    const vorher = await wocheOeffnen(page);
+
+    // Genau derselbe Slot wie im vorigen Test — die Ueberlappung ist echt.
+    await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE);
+    const [antwort] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/planung/einsaetze") && r.request().method() === "POST",
+      ),
+      page.getByTestId("einsatz-speichern").click(),
+    ]);
+    expect(antwort.status()).toBe(409);
+
+    // Verstaendlicher Grund, nicht nur ein Statuscode.
+    const meldung = page.getByTestId("einsatzformular-meldung");
+    await expect(meldung).toBeVisible();
+    await expect(meldung).toContainText(/bereits eingeplant/i);
+
+    // Keine Teilwirkung: nach dem Reload steht die Liste unveraendert.
+    // `wocheOeffnen` statt `reload`, damit hier dieselbe Wartebedingung gilt
+    // wie oben — sonst vergliche der Test den Ladezustand mit dem Endzustand.
+    expect(await wocheOeffnen(page)).toEqual(vorher);
+  });
+
+  test("Schritt 4: ein ungueltiges Intervall erreicht den Server gar nicht erst", async ({
+    page,
+  }) => {
+    const schreibaufrufe: string[] = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().includes("/planung/einsaetze")) {
+        schreibaufrufe.push(req.url());
+      }
+    });
+
+    await page.goto(SEITE);
+    // Ende vor Beginn.
+    await formularAusfuellen(page, NEU_ENDE, NEU_BEGINN);
+    await page.getByTestId("einsatz-speichern").click();
+
+    await expect(page.getByTestId("einsatzformular-meldung")).toContainText(
+      /Ende muss nach dem Beginn/i,
+    );
+    expect(schreibaufrufe).toEqual([]);
+  });
+
+  test("Schritt 5: der gespeicherte Zustand ueberlebt Reload und zweiten Browserkontext", async ({
+    page,
+    browser,
+  }) => {
+    const nachSpeichern = await wocheOeffnen(page);
+    const provenienzVorher = await provenienz(page);
+    // Der Speichertest hat genau eine Zeile ergaenzt; steht sie nicht mehr da,
+    // war sie nie in PostgreSQL.
+    expect(nachSpeichern.length).toBeGreaterThan(1);
+
+    expect(await wocheOeffnen(page)).toEqual(nachSpeichern);
+    expect(await provenienz(page)).toEqual(provenienzVorher);
+
+    const origin = new URL(page.url()).origin;
+    const zweiter = await browser.newContext({ baseURL: origin });
+    try {
+      const zweiteSeite = await zweiter.newPage();
+      expect(await wocheOeffnen(zweiteSeite)).toEqual(nachSpeichern);
+      expect(await provenienz(zweiteSeite)).toEqual(provenienzVorher);
+    } finally {
+      await zweiter.close();
+    }
+  });
+});
+
+const RESPONSIVE_CASES = [
+  {
+    name: "1440px",
+    viewport: { width: 1440, height: 900 },
+    datum: "2026-10-02",
+    beginn: "07:00",
+    ende: "09:00",
+  },
+  {
+    name: "375px",
+    viewport: { width: 375, height: 812 },
+    datum: "2026-10-02",
+    beginn: "10:00",
+    ende: "12:00",
+  },
+] as const;
+
+/**
+ * Per Tastatur zum naechsten fachlichen Form-Control wechseln.
+ *
+ * Native date/time-Inputs besitzen in Chromium mehrere interne Segmente. Beim
+ * Wechsel zwischen Tag, Monat, Jahr beziehungsweise Stunde und Minute bleibt
+ * `document.activeElement` deshalb derselbe Input-Host. Die fachliche
+ * Reihenfolge ist erst verletzt, wenn ein ANDERES, unerwartetes Control
+ * dazwischenliegt oder das erwartete Ziel nach einer begrenzten Zahl von
+ * Tab-Schritten nicht erreicht wird.
+ */
+async function tabZumNaechstenFormfeld(
+  seite: import("@playwright/test").Page,
+  aktuell: import("@playwright/test").Locator,
+  ziel: import("@playwright/test").Locator,
+): Promise<void> {
+  const aktuellId = await aktuell.getAttribute("data-testid");
+  const zielId = await ziel.getAttribute("data-testid");
+  expect(aktuellId).not.toBeNull();
+  expect(zielId).not.toBeNull();
+
+  for (let schritt = 1; schritt <= 12; schritt += 1) {
+    await seite.keyboard.press("Tab");
+    const aktivId = await seite.evaluate(
+      () => document.activeElement?.getAttribute("data-testid") ?? null,
+    );
+    if (aktivId === zielId) return;
+    if (aktivId !== aktuellId) {
+      throw new Error(
+        `Unerwartetes Fokusziel zwischen ${aktuellId} und ${zielId}: ${aktivId ?? "<ohne data-testid>"}.`,
+      );
+    }
+  }
+
+  throw new Error(`${zielId} wurde von ${aktuellId} aus nicht per Tab erreicht.`);
+}
+
+/**
+ * EYT-104: dieselbe reale Kernreise in Desktop- und mobiler Kernbreite.
+ *
+ * Kein zweites Mock-E2E: beide Fälle schreiben über Web-Origin, NestJS, RLS
+ * und PostgreSQL. Unterschiedliche Slots verhindern, dass der zweite Viewport
+ * nur den Konflikt des ersten sieht.
+ */
+test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () => {
+  for (const fall of RESPONSIVE_CASES) {
+    test(`${fall.name}: Speichern, Konflikt und Reload bleiben barrierearm bedienbar`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(fall.viewport);
+      await wocheOeffnen(page);
+
+      const employee = page.getByTestId("feld-employee");
+      const worksite = page.getByTestId("feld-worksite");
+      const datum = page.getByTestId("feld-datum");
+      const beginn = page.getByTestId("feld-beginn");
+      const ende = page.getByTestId("feld-ende");
+      const speichern = page.getByTestId("einsatz-speichern");
+
+      await expect(employee).toHaveAccessibleName("Mitarbeitende");
+      await expect(worksite).toHaveAccessibleName("Baustelle");
+      await expect(datum).toHaveAccessibleName("Datum");
+      await expect(beginn).toHaveAccessibleName(/Beginn/);
+      await expect(ende).toHaveAccessibleName(/Ende/);
+      await expect(speichern).toHaveAccessibleName("Entwurf speichern");
+
+      await formularAusfuellen(page, fall.beginn, fall.ende, fall.datum);
+
+      // Fokusreihenfolge innerhalb des Formulars, jeweils mit sichtbarem
+      // Indikator. Ein programmatischer Start am ersten Feld vermeidet, dass
+      // Headernavigation mit der fachlichen Reihenfolge verwechselt wird.
+      await employee.focus();
+      const fokusziele = [employee, worksite, datum, beginn, ende, speichern];
+      for (const [index, ziel] of fokusziele.entries()) {
+        await expect(ziel).toBeFocused();
+        const focus = await ziel.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            outlineStyle: style.outlineStyle,
+            outlineWidth: Number.parseFloat(style.outlineWidth),
+          };
+        });
+        expect(focus.outlineStyle).not.toBe("none");
+        expect(focus.outlineWidth).toBeGreaterThan(0);
+        const naechstesZiel = fokusziele[index + 1];
+        if (naechstesZiel !== undefined) {
+          await tabZumNaechstenFormfeld(page, ziel, naechstesZiel);
+        }
+      }
+
+      const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+      expect(axe.violations).toEqual([]);
+
+      const overflowBefore = await page.evaluate(() => {
+        const root = document.scrollingElement ?? document.documentElement;
+        return root.scrollWidth - root.clientWidth;
+      });
+      expect(overflowBefore).toBeLessThanOrEqual(0);
+
+      const [createdResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().includes("/planung/einsaetze") && response.request().method() === "POST",
+        ),
+        speichern.click(),
+      ]);
+      expect(createdResponse.status()).toBe(201);
+      const created = (await createdResponse.json()) as { id: string };
+      await expect(page.locator(`[data-assignment-id="${created.id}"]`)).toBeVisible();
+
+      const success = page.getByTestId("einsatzformular-meldung");
+      await expect(success).toHaveAttribute("role", "status");
+      await expect(success).toHaveAttribute("data-state", "erfolg");
+      await expect(success).toContainText(/gespeichert/i);
+
+      await wocheOeffnen(page);
+      await expect(page.locator(`[data-assignment-id="${created.id}"]`)).toBeVisible();
+
+      await formularAusfuellen(page, fall.beginn, fall.ende, fall.datum);
+      const [conflictResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().includes("/planung/einsaetze") && response.request().method() === "POST",
+        ),
+        page.getByTestId("einsatz-speichern").click(),
+      ]);
+      expect(conflictResponse.status()).toBe(409);
+
+      const alert = page.getByTestId("einsatzformular-meldung");
+      await expect(alert).toHaveAttribute("role", "alert");
+      await expect(alert).toHaveAttribute("data-state", "fehler");
+      await expect(alert).toContainText(/bereits eingeplant/i);
+      const describedBy = await page
+        .getByTestId("einsatzformular")
+        .getAttribute("aria-describedby");
+      expect(describedBy).toBe(await alert.getAttribute("id"));
+
+      const overflowAfter = await page.evaluate(() => {
+        const root = document.scrollingElement ?? document.documentElement;
+        return root.scrollWidth - root.clientWidth;
+      });
+      expect(overflowAfter).toBeLessThanOrEqual(0);
+    });
+  }
 });

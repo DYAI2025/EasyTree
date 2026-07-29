@@ -264,6 +264,18 @@ export const RULES: readonly Rule[] = [
         ? `Produktionscode darf "${ref.specifier}" nicht importieren — Prototype-Fixtures sind ausschliesslich Clickdummy-/Testdaten (ADR-002 §5).`
         : null,
   },
+  {
+    // EYT-103 — die kanonische Gateway-Suite importiert Vitest und ist
+    // ausdrücklich Testinfrastruktur. Ein Import aus Produktionscode würde
+    // Test-Runner und Fixtures in die Laufzeitoberfläche ziehen.
+    id: "no-contract-testing-in-production-code",
+    inScope: (file): boolean => !/(^|\/)(test|testing|e2e|__tests__)\//.test(file),
+    check: (ref): string | null =>
+      ref.specifier.startsWith("@easytree/contracts/testing/") ||
+      ref.resolved?.startsWith("packages/contracts/src/testing/") === true
+        ? `Produktionscode darf "${ref.specifier}" nicht importieren — @easytree/contracts/testing/* ist ausschliesslich Testinfrastruktur (EYT-103).`
+        : null,
+  },
 ];
 
 export function evaluate(refs: readonly ImportRef[]): {

@@ -228,6 +228,19 @@ jobs:
           # Gleiche Bedingungen wie bei den Tenant-Gates: executed>=1,
           # passed==executed, skipped==0 (EYT-90).
           bash scripts/assert-tenant-report.sh planning-invariants /tmp/planning-invariants.log
+      # EYT-92: Idempotenz, Transaktionsklammer und Serialisierung des
+      # Schreibpfads. Eigener Schritt im BESTEHENDEN Job db-gates — kein neuer
+      # Job und kein neuer Status-Check, sonst entstuende ein Pflichtcheck, den
+      # das Ruleset nicht kennt und den scripts/setup-branch-protection.sh als
+      # Drift meldet.
+      - name: Planning write gate (fail-closed, zwei Verbindungen, EYT-92)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/planning-write.integration.test.ts 2>&1 | tee /tmp/planning-write.log
+          bash scripts/assert-tenant-report.sh planning-write /tmp/planning-write.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |

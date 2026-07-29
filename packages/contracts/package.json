@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing/planning-gateway-contract": {
+      "types": "./dist/testing/planning-gateway-contract.d.ts",
+      "default": "./dist/testing/planning-gateway-contract.js"
     }
   },
   "files": [

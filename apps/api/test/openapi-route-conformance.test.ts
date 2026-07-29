@@ -66,14 +66,6 @@ function contractOperations(): string[] {
  */
 const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
   [
-    "POST /planung/entwuerfe/validierung",
-    "Validierung ohne Schreibwirkung. validateDraft existiert als reine Funktion (modules/planning/domain/draft-validation.ts), hat aber keinen Aufrufer (EYT-50 AK4).",
-  ],
-  [
-    "POST /planung/einsaetze",
-    "Anlegen einer Zuweisung. Braucht Schreibpfad, Transaktionsgrenze und die Abbildung PlanningConflict -> HTTP 409 (EYT-50 AK5).",
-  ],
-  [
     "POST /planung/versionen",
     "Veroeffentlichen. Die Datenbankseite ist fertig (Migration 0010), die Anwendungsnaht fehlt: Outbox-Eintrag und Auditzeile in derselben Transaktion (EYT-50 AK6/AK7).",
   ],

@@ -1,14 +1,11 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { MockPlanningGateway } from "../src/mock/planning.js";
-import { newIdempotencyKey } from "../src/primitives.js";
-import type { PlanningGateway } from "../src/planning/gateway.js";
 import {
-  AssignmentDtoSchema,
-  PlanValidationResultSchema,
-  PlanningWindowSchema,
-  PublishedPlanVersionSchema,
-} from "../src/planning/schemas.js";
+  PLANNING_GATEWAY_CONTRACT_FIXTURE,
+  PLANNING_VALIDATION_CODE,
+  planningGatewayContractSuite,
+} from "../src/testing/planning-gateway-contract.js";
 
 /**
  * Vertragssuite fuer PlanningGateway.
@@ -18,8 +15,8 @@ import {
  * Server gibt (EYT-50). Jede Antwort wird gegen das veroeffentlichte Schema
  * geparst — eine Implementierung, die etwas anderes liefert, faellt hier durch.
  *
- * **Evidenzgrenze.** Heute ist der Mock die einzige Implementierung. Diese Suite
- * beweist Vertragstreue und Zustandsmodell, NICHT dass ein Backend existiert.
+ * **Evidenzgrenze.** Diese Datei prueft den Mock. Dieselbe exportierte Suite
+ * laeuft in der API gegen `HttpPlanningGateway` und einen echten NestJS-Testserver.
  */
 const VERSION_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3300";
 const ASSIGNMENT_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -30,6 +27,14 @@ const INTERVAL = { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T14:
 function makeMock(): MockPlanningGateway {
   return new MockPlanningGateway({
     timeZone: "Europe/Berlin",
+    // Beide Ids der Woche W32 muessen hier auftauchen, sonst verwirft
+    // `PlanningWindowSchema` die Antwort als nicht aufloesbar. Genau das ist
+    // die Absicht: der Mock kann keine Zuweisung mehr auf jemanden zeigen
+    // lassen, den die Auswahlliste nicht kennt.
+    resources: {
+      employees: [{ id: EMPLOYEE_ID, label: "Beschaeftigte A", active: true }],
+      worksites: [{ id: WORKSITE_ID, label: "Baustelle A", active: true }],
+    },
     weeks: new Map([
       [
         "2026-W32",
@@ -67,104 +72,73 @@ function makeMock(): MockPlanningGateway {
         },
       ],
     ]),
-    validation: {
-      conflicts: [
-        { code: "EMPLOYEE_WEEKLY_CAPACITY", blocking: false, message: "32 h in dieser Woche" },
-      ],
-      publishable: true,
-    },
+    validation: (input) =>
+      input.draft.interval.startUtc ===
+      PLANNING_GATEWAY_CONTRACT_FIXTURE.overlappingInterval.startUtc
+        ? {
+            conflicts: [
+              {
+                code: PLANNING_VALIDATION_CODE.overlap,
+                blocking: true,
+                message: "Mitarbeitende Person ist in diesem Zeitraum bereits eingeplant.",
+              },
+            ],
+            publishable: false,
+          }
+        : { conflicts: [], publishable: true },
     nextAssignmentId: "3f2504e0-4f89-41d3-9a0c-0305e82c3304",
   });
 }
 
-describe.each([["MockPlanningGateway", makeMock]])(
-  "PlanningGateway-Vertrag: %s",
-  (_name, factory) => {
-    let gateway: PlanningGateway;
-    let mock: MockPlanningGateway;
+planningGatewayContractSuite("MockPlanningGateway", () => ({ gateway: makeMock() }));
 
-    beforeEach(() => {
-      mock = factory();
-      gateway = mock;
-    });
+describe("weitere Mock-Zustände", () => {
+  it("liefert eine leere Woche als leere Liste, nicht als Fehler", async () => {
+    const result = await makeMock().getPlanningWindow({ weekKey: "2026-W40" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.assignments).toEqual([]);
+  });
 
-    it("liefert ein vertragskonformes Planungsfenster", async () => {
-      const result = await gateway.getPlanningWindow({ weekKey: "2026-W32" });
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(() => PlanningWindowSchema.parse(result.value)).not.toThrow();
-      expect(result.value.assignments).toHaveLength(1);
+  it("veroeffentlicht auf dem erwarteten Stand", async () => {
+    const result = await makeMock().publishPlan({
+      weekKey: "2026-W32",
+      expectedVersionId: VERSION_ID,
     });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.versionId).toBe(VERSION_ID);
+  });
 
-    it("liefert eine leere Woche als leere Liste, nicht als Fehler", async () => {
-      const result = await gateway.getPlanningWindow({ weekKey: "2026-W40" });
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value.assignments).toEqual([]);
+  it("lehnt eine Veroeffentlichung auf veraltetem Stand ab", async () => {
+    const result = await makeMock().publishPlan({
+      weekKey: "2026-W32",
+      expectedVersionId: null,
     });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("STALE_VERSION");
+    expect(result.problem?.status).toBe(409);
+  });
 
-    it("liefert ein vertragskonformes Pruefergebnis", async () => {
-      const result = await gateway.validateDraft({
-        weekKey: "2026-W32",
-        draft: { employeeId: EMPLOYEE_ID, worksiteId: WORKSITE_ID, interval: INTERVAL },
-      });
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(() => PlanValidationResultSchema.parse(result.value)).not.toThrow();
-      // Warnung blockiert nicht (EYT-74).
-      expect(result.value.conflicts[0]?.blocking).toBe(false);
-      expect(result.value.publishable).toBe(true);
-    });
+  it("modelliert Fehlerzustaende ueber den Port, nicht ueber Ausnahmen", async () => {
+    const mock = makeMock();
+    mock.induce("FORBIDDEN");
+    const result = await mock.getPlanningWindow({ weekKey: "2026-W32" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("FORBIDDEN");
+    expect(result.problem?.status).toBe(403);
+  });
 
-    it("legt einen vertragskonformen Einsatz an", async () => {
-      const result = await gateway.createAssignment(
-        { employeeId: EMPLOYEE_ID, worksiteId: WORKSITE_ID, interval: INTERVAL },
-        { idempotencyKey: newIdempotencyKey() },
-      );
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(() => AssignmentDtoSchema.parse(result.value)).not.toThrow();
-      expect(result.value.interval).toEqual(INTERVAL);
-    });
-
-    it("veroeffentlicht auf dem erwarteten Stand", async () => {
-      const result = await gateway.publishPlan(
-        { weekKey: "2026-W32", expectedVersionId: VERSION_ID },
-        { idempotencyKey: newIdempotencyKey() },
-      );
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(() => PublishedPlanVersionSchema.parse(result.value)).not.toThrow();
-    });
-
-    it("lehnt eine Veroeffentlichung auf veraltetem Stand ab", async () => {
-      const result = await gateway.publishPlan(
-        { weekKey: "2026-W32", expectedVersionId: null },
-        { idempotencyKey: newIdempotencyKey() },
-      );
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(result.failure).toBe("STALE_VERSION");
-      expect(result.problem?.status).toBe(409);
-    });
-
-    it("modelliert Fehlerzustaende ueber den Port, nicht ueber Ausnahmen", async () => {
-      mock.induce("FORBIDDEN");
-      const result = await gateway.getPlanningWindow({ weekKey: "2026-W32" });
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(result.failure).toBe("FORBIDDEN");
-      expect(result.problem?.status).toBe(403);
-    });
-
-    it("faellt nach einem induzierten Fehler wieder auf den Normalfall zurueck", async () => {
-      mock.induce("UNAVAILABLE");
-      await gateway.getPlanningWindow({ weekKey: "2026-W32" });
-      const second = await gateway.getPlanningWindow({ weekKey: "2026-W32" });
-      expect(second.ok).toBe(true);
-    });
-  },
-);
+  it("faellt nach einem induzierten Fehler wieder auf den Normalfall zurueck", async () => {
+    const mock = makeMock();
+    mock.induce("UNAVAILABLE");
+    await mock.getPlanningWindow({ weekKey: "2026-W32" });
+    const second = await mock.getPlanningWindow({ weekKey: "2026-W32" });
+    expect(second.ok).toBe(true);
+  });
+});
 
 describe("Mock-Ehrlichkeit", () => {
   it("merkt sich den geprueften Entwurf, rechnet ihn aber nicht", () => {

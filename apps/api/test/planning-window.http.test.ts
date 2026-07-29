@@ -35,6 +35,7 @@ const EMPTY_WINDOW: PlanningWindowResult = {
     assignments: [],
     sourceVersion: null,
     publishedVersionId: null,
+    resources: { employees: [], worksites: [] },
   },
 };
 
@@ -47,6 +48,7 @@ async function boot(options: {
   seenSubjects?: string[];
   /** Default: berechtigt. Der Produktionsstand ist deny (EYT-14). */
   darfLesen?: boolean;
+  darfSchreiben?: boolean;
 }): Promise<INestApplication> {
   const factory: PlanningQueriesFactory = (subjectUserId) => {
     options.seenSubjects?.push(subjectUserId);
@@ -66,6 +68,7 @@ async function boot(options: {
     .overrideProvider(PLANNING_ACCESS_POLICY)
     .useValue({
       mayReadPlanning: (): Promise<boolean> => Promise.resolve(options.darfLesen ?? true),
+      mayWritePlanning: (): Promise<boolean> => Promise.resolve(options.darfSchreiben ?? true),
     } satisfies PlanningAccessPolicy)
     .compile();
 
@@ -118,6 +121,11 @@ describe("GET /planung/fenster", () => {
       assignments: [],
       sourceVersion: null,
       publishedVersionId: null,
+      // Auch die leere Woche traegt das Feld. Es fehlen zu lassen waere kein
+      // Sparbetrieb, sondern zwei Antwortformen fuer denselben Vertrag — die
+      // Oberflaeche muesste dann raten, ob eine leere Auswahlliste "keine
+      // Stammdaten" oder "Feld nicht geliefert" bedeutet.
+      resources: { employees: [], worksites: [] },
     });
     expect(() => PlanningWindowSchema.parse(response.body)).not.toThrow();
   });
@@ -152,6 +160,24 @@ describe("GET /planung/fenster", () => {
               state: "draft",
             },
             publishedVersionId: "44444444-4444-4444-8444-444444444444",
+            // Beide Ids der Zuweisung; ohne sie verwirft der Vertrag die
+            // Antwort als nicht aufloesbar.
+            resources: {
+              employees: [
+                {
+                  id: "22222222-2222-4222-8222-222222222222",
+                  label: "Beschaeftigte A",
+                  active: true,
+                },
+              ],
+              worksites: [
+                {
+                  id: "33333333-3333-4333-8333-333333333333",
+                  label: "Baustelle A",
+                  active: true,
+                },
+              ],
+            },
           },
         },
       })

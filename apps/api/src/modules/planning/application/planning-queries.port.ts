@@ -21,6 +21,33 @@ export interface AssignmentRow {
   readonly endsAtUtc: Date;
 }
 
+/**
+ * Auswaehlbare Stammdatenzeile — Beschaeftigte oder Baustelle.
+ *
+ * `label` traegt in der Datenbank zwei verschiedene Spaltennamen
+ * (`employees.display_name`, `worksites.name`). Die Vereinheitlichung passiert
+ * hier, weil beide fachlich dasselbe leisten: der Text, den die Planerin liest.
+ */
+export interface ResourceRow {
+  readonly id: string;
+  readonly label: string;
+  /** `false` = weiterhin sichtbar, aber fuer NEUE Einsaetze nicht auswaehlbar. */
+  readonly active: boolean;
+}
+
+/**
+ * Alles, was in dieser Woche ausgewaehlt werden kann.
+ *
+ * Enthaelt bewusst **alle** tenant-sichtbaren Eintraege, nicht nur die aktiven:
+ * ein bestehender Einsatz auf eine inzwischen deaktivierte Person muss ihren
+ * Namen behalten. Die Einschraenkung auf Aktive ist eine Regel der Auswahl,
+ * keine Regel der Abfrage.
+ */
+export interface ResourcesRow {
+  readonly employees: readonly ResourceRow[];
+  readonly worksites: readonly ResourceRow[];
+}
+
 /** Version, ZU DER die angezeigten Zuweisungen gehoeren. */
 export interface SourceVersionRow {
   readonly id: string;
@@ -45,6 +72,12 @@ export interface PlanningWindowRow {
   readonly sourceVersion: SourceVersionRow | null;
   /** Zuletzt veroeffentlichte Version derselben Woche, oder `null`. */
   readonly publishedVersionId: string | null;
+  /**
+   * Auswaehlbare Beschaeftigte und Baustellen, gelesen in DERSELBEN
+   * Transaktion wie `assignments`. Deshalb Teil dieses Rows und keine eigene
+   * Portmethode: zwei Aufrufe koennten zwei Zeitpunkte sehen.
+   */
+  readonly resources: ResourcesRow;
 }
 
 /** Warum eine Leseanfrage nicht beantwortbar ist. */

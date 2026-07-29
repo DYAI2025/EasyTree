@@ -12,6 +12,13 @@
  */
 export interface PlanningAccessPolicy {
   mayReadPlanning(subjectUserId: string): Promise<boolean>;
+  /**
+   * Getrennt vom Lesen, weil beides verschieden schwer wiegt: eine Planerin
+   * darf eine Woche lesen, ohne sie aendern zu duerfen. Ein gemeinsames Recht
+   * haette die Schreibberechtigung stillschweigend an jede Lesefreigabe
+   * gekoppelt (EYT-92).
+   */
+  mayWritePlanning(subjectUserId: string): Promise<boolean>;
 }
 
 export const PLANNING_ACCESS_POLICY = "PLANNING_ACCESS_POLICY";
@@ -21,6 +28,11 @@ export class DenyAllPlanningAccess implements PlanningAccessPolicy {
   mayReadPlanning(subjectUserId: string): Promise<boolean> {
     // Das Subjekt wird bewusst NICHT ausgewertet. Eine Bedingung hier waere
     // ein vorweggenommenes Rollenmodell.
+    void subjectUserId;
+    return Promise.resolve(false);
+  }
+
+  mayWritePlanning(subjectUserId: string): Promise<boolean> {
     void subjectUserId;
     return Promise.resolve(false);
   }

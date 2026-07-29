@@ -4,6 +4,12 @@ Status: user-confirmed
 Confirmed by user: yes  
 Feature Slug: `planning-draft-conflict-slice`
 
+**Dritte Bestätigung am 2026-07-29** (Product Owner, Benjamin Poersch): ausschließlich die drei
+Pfade `apps/api/src/app.module.ts`, `apps/web/package.json` und `pnpm-lock.yaml` in der
+Allowed-change-Liste — begründet unten. Ausdrücklich als **technische Korrektur der Liste**
+freigegeben, nicht als Erweiterung des bestätigten Feature-Scope; der fachliche Scope ist
+unverändert.
+
 **Zweimal bestätigt.** Erstbestätigung 2026-07-28. Danach ergänzte das Council-Gate (Phase 0.16)
 die Wertabgrenzung; das Artefakt kehrte auf `draft` zurück und wurde am 2026-07-28 vom Product
 Owner (Benjamin Poersch) **neu bestätigt**, ausdrücklich einschließlich der Wertabgrenzung:
@@ -108,7 +114,7 @@ Der erlaubte Scope endet nach dem gespeicherten oder nachvollziehbar abgelehnten
 
 ## Allowed change scope
 
-Abgeleitet aus CAN-011 und den sechs Sprint-4-Tickets — enger als der bestätigte Feature-Scope,
+Abgeleitet aus CAN-011 und den acht Sprint-4-Tickets — enger als der bestätigte Feature-Scope,
 nie weiter. Jede Ausweitung ist eine Nutzerentscheidung, keine Agentenentscheidung.
 
 Zur Form, weil sie hier funktional ist: `plumbline-scope-check` liest ausschließlich
@@ -162,9 +168,45 @@ Zu `.gitleaks.toml`, `.prettierignore` und den beiden Markdown-Dateien (ergänzt
 Product Owner beauftragte Entsperrung der zwei geerbten CI-Baseline-Blocker. Wieder eine Lücke in
 dieser Liste, keine Scope-Erweiterung — sie erlauben keine Produktänderung.
 
+Zu `.github/workflows/ci.yml` (freigegeben am 2026-07-29 vom Product Owner): **Evidence-Wiring-Korrektur, keine Erweiterung des Feature-Scope.** Der Ausschluss weiter oben gilt unveraendert fuer eine _Gate-Definition ohne Ticketbezug_; erlaubt ist ausschliesslich, einen bereits vorhandenen Integrationstest im BESTEHENDEN Job `db-gates` auszufuehren. Kein neuer Job, kein neuer Status-Check — die Jobbezeichnung bleibt `db-gates`, sonst entstuende ein Pflichtcheck, den das Ruleset nicht kennt, und `scripts/setup-branch-protection.sh` bräche.
+
+Der Grund: `apps/api/test/planning-write.integration.test.ts` belegt Idempotenz, Teilwirkungsfreiheit und Serialisierung gegen echtes PostgreSQL — und lief in keinem Job. Ein Nachweis, den niemand ausfuehrt, ist kein Nachweis.
+
+Zu `apps/api/src/app.module.ts`, `apps/web/package.json` und `pnpm-lock.yaml` (freigegeben am
+2026-07-29 vom Product Owner, Option 1): **technische Korrektur dieser Liste, keine Erweiterung
+des bestätigten Feature-Scope.** Exakt diese drei Pfade, keine Globs.
+
+`app.module.ts` ist die vorhandene Kompositionswurzel; es gibt kein `planning.module.ts`, und
+Controller wie Write-Provider werden dort registriert. Die Reality-Ledger-Spalte
+`wired-in-prod?` ist per Definition an genau dieser Datei gemessen — eine Liste, die sie
+verbietet, verbietet damit strukturell, jemals `wired-in-prod: ja` zu erreichen, also das eigene
+Erfolgskriterium des Features.
+
+`apps/web/package.json` deklariert `@easytree/domain`, weil die Web-App die bestehende,
+frameworkfreie Domainfunktion für Wanduhrzeit → UTC verwendet. Sie im Web zu duplizieren wäre
+genau der Doppelimplementierungsfehler aus EYT-74; sie in den Transportvertrag zu verschieben
+verbietet die Architekturregel `contracts-transport-only`. `pnpm-lock.yaml` folgt zwingend aus
+der Änderung an `package.json`.
+
+Der Scope-Guard hat die Lücke gemeldet; die Datei `apps/web/components/assignment-form.tsx` war
+im selben Befund und wurde **nicht** durch eine Listenerweiterung gelöst, sondern zu
+`planning-assignment-form.tsx` umbenannt — sie fiel schlicht durch einen falsch gewählten Namen
+aus der bereits vorhandenen Regel `apps/web/components/planning-*.tsx`.
+
+Zu `packages/contracts/package.json`, `packages/contracts/src/testing/**` und
+`apps/web/app/globals.css` (ergänzt am 2026-07-29): **technische Nachweis-Pfade für EYT-103 und
+EYT-104, keine Erweiterung des bestätigten Feature-Scope.** Der test-only Package-Subpath stellt
+dieselben Gateway-Verträge für Mock und echten HTTP-Testserver bereit; die Architekturregel
+verbietet seinen Import in Produktionscode. Die globale Stylesheet-Datei enthält ausschließlich
+die für den geforderten 375-px-Nachweis nötigen bestehenden Formular- und Kartenregeln.
+
+- `apps/api/src/app.module.ts`
 - `apps/api/src/modules/planning/**`
 - `apps/api/src/platform/database/**`
 - `apps/api/test/**`
+- `apps/web/app/globals.css`
+- `apps/web/package.json`
+- `pnpm-lock.yaml`
 - `apps/web/app/planung/**`
 - `apps/web/components/planning-*.tsx`
 - `apps/web/lib/planning-*.ts*`
@@ -175,10 +217,13 @@ dieser Liste, keine Scope-Erweiterung — sie erlauben keine Produktänderung.
 - `packages/contracts/src/openapi/**`
 - `packages/contracts/src/http/planning-gateway.ts`
 - `packages/contracts/src/mock/planning.ts`
+- `packages/contracts/src/testing/**`
+- `packages/contracts/package.json`
 - `packages/contracts/openapi/v1.json`
 - `packages/contracts/test/**`
 - `packages/domain/src/**`
 - `packages/domain/test/**`
+- `.github/workflows/ci.yml`
 - `scripts/read-through-harness.sh`
 - `supabase/migrations/*.sql`
 - `supabase/seed.sql`
