@@ -22,6 +22,12 @@
  *    Entwurf, wird „der erste Entwurf laesst den Planstand nicht verschwinden"
  *    rot: die Woche zeigte danach nur noch die eine neue Zeile.
  */
+import {
+  createTimeZone,
+  isoWeekOfLocalDate,
+  localBusinessDate,
+  planningWeekKey,
+} from "@easytree/domain";
 import { Client } from "pg";
 import type { QueryResultRow } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -60,6 +66,21 @@ const EMPLOYEE_ALPHA_2 = "00000000-0000-4000-8000-0000004012a1";
 
 /** Woche ohne Seed-Inhalt, damit die Faelle einander nicht stoeren. */
 const WOCHE = "2026-W45";
+
+/**
+ * Eigene Wochen fuer die beiden Faelle mit VEROEFFENTLICHTER Baseline.
+ *
+ * Migration 0010 macht veroeffentlichte Zeilen unveraenderlich UND
+ * unloeschbar — `app.reject_published_row_change()` wirft bei jedem Versuch.
+ * Das ist richtig so und wird hier nicht umgangen: statt aufzuraeumen bekommt
+ * jeder dieser Faelle seine eigene Woche. Die Zeilen bleiben stehen, stoeren
+ * niemanden und belegen nebenbei, dass die Invariante auch fuer Testcode gilt.
+ *
+ * Der erste Lauf dieser Suite gegen eine frisch zurueckgesetzte Datenbank ist
+ * der einzige, der zaehlt (`db reset` laeuft in db-gates ohnehin zweimal).
+ */
+const WOCHE_BASELINE = "2026-W46";
+const WOCHE_BASELINE_PARALLEL = "2026-W47";
 const START = new Date("2026-11-03T07:00:00Z");
 const ENDE = new Date("2026-11-03T15:00:00Z");
 
@@ -99,7 +120,20 @@ function runnerAuf(client: Client): TenantQueryRunner {
   };
 }
 
-const wochenschluessel = (): string => WOCHE;
+/**
+ * Die ECHTE Wochenregel, nicht ein Stub.
+ *
+ * Eine fruehere Fassung gab konstant `WOCHE` zurueck. Das war bequem und
+ * falsch: die `OUTSIDE_WEEK`-Pruefung des Repositories vergleicht dann eine
+ * Konstante mit sich selbst und kann nichts mehr finden — genau die Sorte
+ * Test, die gruen ist, ohne etwas zu messen. Hier laeuft dieselbe Funktion wie
+ * in `AppModule`.
+ */
+const wochenschluessel = (instant: Date, zone: string): string => {
+  const geprueft = createTimeZone(zone);
+  if (!geprueft.ok) throw new Error(`Unbekannte Zeitzone ${zone}`);
+  return planningWeekKey(isoWeekOfLocalDate(localBusinessDate(instant, geprueft.timeZone)));
+};
 
 async function neueVerbindung(): Promise<Client> {
   const client = new Client({ connectionString: DB_URL });
@@ -108,19 +142,27 @@ async function neueVerbindung(): Promise<Client> {
   return client;
 }
 
-/** Raeumt die Testwoche vollstaendig ab — Zuweisungen, Versionen, Nebenwirkungen. */
-async function raeumeWoche(client: Client): Promise<void> {
+/**
+ * Raeumt ENTWUERFE der Testwochen ab — nicht Veroeffentlichtes.
+ *
+ * Veroeffentlichte Planversionen und ihre Zuweisungen sind laut Migration 0010
+ * unloeschbar. Der Versuch endet in `app.reject_published_row_change()`, und
+ * genau daran ist die erste Fassung dieser Funktion gescheitert. Die
+ * Einschraenkung ist deshalb keine Bequemlichkeit, sondern die Regel.
+ */
+async function raeumeWoche(client: Client, woche: string = WOCHE): Promise<void> {
   await client.query(
     `delete from public.assignments
-      where plan_version_id in (select id from public.plan_versions where week_key = $1)`,
-    [WOCHE],
+      where published_at is null
+        and plan_version_id in (
+          select id from public.plan_versions
+           where week_key = $1 and published_at is null
+        )`,
+    [woche],
   );
-  await client.query("delete from public.plan_versions where week_key = $1", [WOCHE]);
   await client.query(
-    `insert into public.employees (id, org_id, user_id, display_name, active)
-     values ($1, $2, null, 'Alpha Zweite (Testfixture EYT-92)', true)
-     on conflict (id) do update set active = true`,
-    [EMPLOYEE_ALPHA_2, ORG_ALPHA],
+    "delete from public.plan_versions where week_key = $1 and published_at is null",
+    [woche],
   );
   await client.query("delete from public.idempotency_records where org_id = $1", [ORG_ALPHA]);
   await client.query("delete from public.outbox_messages where org_id = $1 and message_type = $2", [
@@ -131,6 +173,12 @@ async function raeumeWoche(client: Client): Promise<void> {
     ORG_ALPHA,
     "planning.assignment_created",
   ]);
+  await client.query(
+    `insert into public.employees (id, org_id, user_id, display_name, active)
+     values ($1, $2, null, 'Alpha Zweite (Testfixture EYT-92)', true)
+     on conflict (id) do update set active = true`,
+    [EMPLOYEE_ALPHA_2, ORG_ALPHA],
+  );
 }
 
 function dbIt(name: string, fn: () => Promise<void>): void {
@@ -153,7 +201,9 @@ beforeAll(async () => {
 afterAll(async () => {
   const ersteVerbindung = clients[0];
   if (dbAvailable && ersteVerbindung !== undefined) {
-    await raeumeWoche(ersteVerbindung);
+    for (const woche of [WOCHE, WOCHE_BASELINE, WOCHE_BASELINE_PARALLEL]) {
+      await raeumeWoche(ersteVerbindung, woche);
+    }
     // Die selbst angelegte Person wieder entfernen — sonst waechst der
     // Bestand mit jedem Lauf, und die naechste Suite zaehlt anders.
     await ersteVerbindung.query("delete from public.employees where id = $1", [EMPLOYEE_ALPHA_2]);
@@ -342,14 +392,14 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     "der erste Entwurf ueber einer veroeffentlichten Woche laesst den Planstand nicht verschwinden",
     async () => {
       const client = await neueVerbindung();
-      await raeumeWoche(client);
+      await raeumeWoche(client, WOCHE_BASELINE);
 
       // Eine veroeffentlichte Version mit einer Zuweisung — der Stand, den die
       // Planerin vor sich hat.
       const version = await client.query<{ id: string }>(
         `insert into public.plan_versions (org_id, week_key, published_at, published_by)
        values ($1, $2, now(), $3) returning id`,
-        [ORG_ALPHA, WOCHE, USER_A],
+        [ORG_ALPHA, WOCHE_BASELINE, USER_A],
       );
       const veroeffentlicht = version.rows[0]?.id;
       expect(veroeffentlicht).toBeDefined();
@@ -362,18 +412,18 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
           veroeffentlicht,
           EMPLOYEE_ALPHA,
           WORKSITE_ALPHA,
-          "2026-11-05T07:00:00Z",
-          "2026-11-05T15:00:00Z",
+          "2026-11-10T07:00:00Z",
+          "2026-11-10T15:00:00Z",
         ],
       );
 
       const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
       const ergebnis = await repo.createAssignment({
-        weekKey: WOCHE,
+        weekKey: WOCHE_BASELINE,
         employeeId: EMPLOYEE_ALPHA,
         worksiteId: WORKSITE_ALPHA,
-        startsAtUtc: START,
-        endsAtUtc: ENDE,
+        startsAtUtc: new Date("2026-11-11T07:00:00Z"),
+        endsAtUtc: new Date("2026-11-11T15:00:00Z"),
         idempotencyKey: "55555555-5555-4555-8555-555555555555",
       });
       expect(ergebnis.ok).toBe(true);
@@ -501,13 +551,13 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     async () => {
       const a = await neueVerbindung();
       const b = await neueVerbindung();
-      await raeumeWoche(a);
+      await raeumeWoche(a, WOCHE_BASELINE_PARALLEL);
 
       // Veroeffentlichte Baseline mit EINER Zuweisung.
       const version = await a.query<{ id: string }>(
         `insert into public.plan_versions (org_id, week_key, published_at, published_by)
        values ($1, $2, now(), $3) returning id`,
-        [ORG_ALPHA, WOCHE, USER_A],
+        [ORG_ALPHA, WOCHE_BASELINE_PARALLEL, USER_A],
       );
       const veroeffentlicht = version.rows[0]?.id;
       await a.query(
@@ -519,14 +569,14 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
           veroeffentlicht,
           EMPLOYEE_ALPHA,
           WORKSITE_ALPHA,
-          "2026-11-06T07:00:00Z",
-          "2026-11-06T15:00:00Z",
+          "2026-11-17T07:00:00Z",
+          "2026-11-17T15:00:00Z",
         ],
       );
 
       const repoA = new PlanningWriteRepository(runnerAuf(a), USER_A, wochenschluessel);
       const repoB = new PlanningWriteRepository(runnerAuf(b), USER_A, wochenschluessel);
-      const basis = { weekKey: WOCHE, worksiteId: WORKSITE_ALPHA };
+      const basis = { weekKey: WOCHE_BASELINE_PARALLEL, worksiteId: WORKSITE_ALPHA };
 
       // VERSCHIEDENE Personen, damit der Employee-Lock die beiden nicht ohnehin
       // hintereinander legt — nur so ist das Entwurfs-Wettrennen echt.
@@ -534,15 +584,15 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         repoA.createAssignment({
           ...basis,
           employeeId: EMPLOYEE_ALPHA,
-          startsAtUtc: START,
-          endsAtUtc: ENDE,
+          startsAtUtc: new Date("2026-11-18T07:00:00Z"),
+          endsAtUtc: new Date("2026-11-18T15:00:00Z"),
           idempotencyKey: "99999999-9999-4999-8999-99999999999a",
         }),
         repoB.createAssignment({
           ...basis,
           employeeId: EMPLOYEE_ALPHA_2,
-          startsAtUtc: new Date("2026-11-03T16:00:00Z"),
-          endsAtUtc: new Date("2026-11-03T20:00:00Z"),
+          startsAtUtc: new Date("2026-11-18T16:00:00Z"),
+          endsAtUtc: new Date("2026-11-18T20:00:00Z"),
           idempotencyKey: "99999999-9999-4999-8999-99999999999b",
         }),
       ]);
@@ -557,7 +607,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       );
       expect(zeilen.rows).toHaveLength(3);
       const baseline = zeilen.rows.filter(
-        (r) => r.starts_at_utc.toISOString() === "2026-11-06T07:00:00.000Z",
+        (r) => r.starts_at_utc.toISOString() === "2026-11-17T07:00:00.000Z",
       );
       expect(baseline).toHaveLength(1);
     },
