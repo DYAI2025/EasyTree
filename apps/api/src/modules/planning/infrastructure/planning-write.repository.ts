@@ -25,13 +25,13 @@
  * Veroeffentlichen. Die Pruefung ist deshalb hier, und sie laeuft INNERHALB
  * derselben Transaktion wie das Einfuegen.
  *
- * **Ehrlichkeitshinweis zur Grenze dieser Pruefung.** `read committed` schuetzt
- * nicht gegen zwei gleichzeitige Einfuegungen, die einander noch nicht sehen.
- * Zwei parallele Speichervorgaenge derselben Person koennen deshalb beide
- * durchgehen. Die dauerhafte Absicherung ist eine Exclusion-Constraint auch fuer
- * Entwuerfe; sie ist NICHT Teil dieses Slices und darf nicht als vorhanden
- * gemeldet werden. Was hier steht, faengt den Alltagsfall — eine Planerin, ein
- * Formular — und nicht das Wettrennen.
+ * **Ehrlichkeitshinweis zur Grenze dieser Pruefung.** `read committed` allein
+ * schuetzt nicht gegen zwei gleichzeitige Einfuegungen, die einander noch nicht
+ * sehen. `createAssignment` serialisiert deshalb Pruefen und Einfuegen mit einem
+ * transaktionsgebundenen Advisory-Lock je Organisation und Person. Das ist eine
+ * Eigenschaft dieses Kommandopfads, keine allgemeine Datenbank-Constraint:
+ * andere Entwurfspfade duerfen weiterhin ueberlappende Zwischenstaende erzeugen,
+ * wie Migration 0010 es fachlich vorsieht.
  */
 import {
   createTimeZone,

@@ -24,7 +24,7 @@
 -- vakuoes.
 
 begin;
-select plan(8);
+select plan(10);
 
 -- Hinweis zu den Casts: pg_class.relname hat den Typ `name`, nicht `text`.
 -- array_agg(relname) liefert daher name[], und pgTAPs polymorphes is() findet
@@ -200,6 +200,44 @@ select is(
   ),
   array[]::text[],
   'authenticated hat auf jeder erwarteten Tabelle select — sonst laeuft die Anwendung in permission denied'
+);
+
+-- ---------------------------------------------------------------------------
+-- 7. Lockfunktionen nur fuer die vorgesehene Laufzeitrolle
+-- ---------------------------------------------------------------------------
+-- Funktionen erhalten in PostgreSQL standardmaessig EXECUTE fuer PUBLIC. Ein
+-- blosses `grant ... to authenticated` schraenkt dieses Standardrecht NICHT
+-- ein; der PUBLIC-Grant muss ausdruecklich entzogen werden.
+select is(
+  (
+    select coalesce(
+      array_agg(p.proname::text order by p.proname::text),
+      array[]::text[]
+    )
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    cross join aclexplode(coalesce(p.proacl, acldefault('f'::"char", p.proowner))) as acl
+    where n.nspname = 'app'
+      and p.proname in ('lock_employee_planning', 'lock_idempotency_key')
+      and acl.grantee = 0
+      and acl.privilege_type = 'EXECUTE'
+  ),
+  array[]::text[],
+  'PUBLIC darf die Planning-Lockfunktionen nicht ausfuehren'
+);
+
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'app.lock_employee_planning(uuid)',
+    'execute'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'app.lock_idempotency_key(text,text)',
+    'execute'
+  ),
+  'authenticated darf beide Planning-Lockfunktionen ausfuehren'
 );
 
 select * from finish();

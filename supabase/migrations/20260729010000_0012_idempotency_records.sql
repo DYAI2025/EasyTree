@@ -162,6 +162,7 @@ $$;
 comment on function app.lock_employee_planning(uuid) is
   'EYT-92: serialisiert Pruefen-und-Einfuegen von Einsaetzen je Organisation und Person. Die Organisation wird aus der RLS-sichtbaren employees-Zeile abgeleitet, nicht vom Aufrufer uebernommen. Transaktionsgebunden — Freigabe beim commit oder rollback. Ersetzt KEINE Constraint: die Entwurfsueberlappung bleibt fachlich erlaubt (Migration 0010).';
 
+revoke all on function app.lock_employee_planning(uuid) from public;
 grant execute on function app.lock_employee_planning(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
@@ -210,4 +211,5 @@ $$;
 comment on function app.lock_idempotency_key(text, text) is
   'EYT-92: serialisiert Replay-Pruefung und Anlage je Organisation, Vorgang und Idempotenzschluessel. Ohne sie sehen zwei gleichzeitige Anfragen mit demselben Schluessel beide "nicht vorhanden". Transaktionsgebunden.';
 
+revoke all on function app.lock_idempotency_key(text, text) from public;
 grant execute on function app.lock_idempotency_key(text, text) to authenticated;
