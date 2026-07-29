@@ -80,6 +80,13 @@ export class MockPlanningGateway implements PlanningGateway {
         weekKey: input.weekKey,
         timeZone: this.state.timeZone,
         assignments: [...(week?.assignments ?? [])],
+        // Der Mock kennt nur veroeffentlichte Staende; einen Entwurf ueber
+        // einer Veroeffentlichung bildet er bewusst nicht nach. Wer diesen
+        // Fall pruefen will, braucht den echten Server (EYT-50 AK10).
+        sourceVersion:
+          week?.publishedVersionId === undefined || week.publishedVersionId === null
+            ? null
+            : { id: week.publishedVersionId, state: "published" as const },
         publishedVersionId: week?.publishedVersionId ?? null,
       }),
     );

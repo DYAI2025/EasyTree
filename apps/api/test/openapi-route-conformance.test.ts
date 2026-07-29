@@ -66,10 +66,6 @@ function contractOperations(): string[] {
  */
 const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
   [
-    "GET /planung/fenster",
-    "Leseroute des Planungsfensters. Braucht ein Repository auf assignments/plan_versions und ein verifiziertes Subjekt (EYT-50 AK3/AK8).",
-  ],
-  [
     "POST /planung/entwuerfe/validierung",
     "Validierung ohne Schreibwirkung. validateDraft existiert als reine Funktion (modules/planning/domain/draft-validation.ts), hat aber keinen Aufrufer (EYT-50 AK4).",
   ],

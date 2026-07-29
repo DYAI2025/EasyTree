@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "outDir": "dist-harness",
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "test/harness/**/*.ts"],
+  "exclude": ["dist", "dist-harness", "test/**/*.test.ts"]
+}

@@ -13,12 +13,12 @@
  */
 import { Client } from "pg";
 
-export const ORG_ALPHA = "00000000-0000-0000-0000-0000000000a1";
-export const ORG_BETA = "00000000-0000-0000-0000-0000000000b2";
-export const USER_A = "00000000-0000-0000-0000-00000000aaa1"; // aktiv in Org Alpha
-export const USER_C = "00000000-0000-0000-0000-00000000ccc3"; // INAKTIV in Org Alpha
-export const BETA_ITEM_ID = "00000000-0000-0000-0000-0000000220b2";
-export const BETA_NOTE_ID = "00000000-0000-0000-0000-0000000320b2";
+export const ORG_ALPHA = "00000000-0000-4000-8000-0000000000a1";
+export const ORG_BETA = "00000000-0000-4000-8000-0000000000b2";
+export const USER_A = "00000000-0000-4000-8000-00000000aaa1"; // aktiv in Org Alpha
+export const USER_C = "00000000-0000-4000-8000-00000000ccc3"; // INAKTIV in Org Alpha
+export const BETA_ITEM_ID = "00000000-0000-4000-8000-0000000220b2";
+export const BETA_NOTE_ID = "00000000-0000-4000-8000-0000000320b2";
 
 /** Erreichbarkeits-Probe (select 1) — false statt throw bei jedem Fehler. */
 export async function probeDatabase(url: string): Promise<boolean> {

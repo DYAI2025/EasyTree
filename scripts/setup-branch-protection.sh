@@ -36,7 +36,8 @@ build-web
 web-smoke
 build-api
 secret-scan
-db-gates"
+db-gates
+read-through"
 
 die() {
   printf 'FEHLER: %s\n' "$1" >&2

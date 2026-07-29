@@ -41,6 +41,9 @@ importers:
       '@easytree/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@easytree/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@easytree/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -99,6 +102,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@easytree/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@easytree/ui':
         specifier: workspace:*
         version: link:../../packages/ui

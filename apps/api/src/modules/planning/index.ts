@@ -11,3 +11,22 @@ export type { AssignmentDraft, ConflictCode, PlanningConflict } from "./domain/a
 export { CONFLICT_CODES } from "./domain/assignment-draft";
 export { conflictsWithExisting } from "./domain/assignment-draft";
 export { validateDraft } from "./domain/draft-validation";
+
+// EYT-50: Leseport, seine Fabrik und die HTTP-Naht. Nur ueber diese Datei —
+// `module-public-api-only` (ADR-001 Z. 76) laesst modulfremde Importe
+// ausschliesslich hier durch.
+export type {
+  AssignmentRow,
+  PlanningQueries,
+  PlanningQueryProblem,
+  PlanningWindowResult,
+  PlanningWindowRow,
+  SourceVersionRow,
+} from "./application/planning-queries.port";
+export { PLANNING_QUERIES } from "./application/planning-queries.port";
+export type { PlanningQueriesFactory } from "./application/planning-queries.factory";
+export { PLANNING_QUERIES_FACTORY } from "./application/planning-queries.factory";
+export { PlanningWindowRepository } from "./infrastructure/planning-window.repository";
+export { PlanningController } from "./interface/http/planning.controller";
+export type { PlanningAccessPolicy } from "./application/planning-access.port";
+export { DenyAllPlanningAccess, PLANNING_ACCESS_POLICY } from "./application/planning-access.port";

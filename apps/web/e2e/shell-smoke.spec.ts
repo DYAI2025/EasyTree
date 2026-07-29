@@ -11,16 +11,33 @@ const VIEWPORTS = [
  * Die App BEHANDELT das (Fehlerzustand "API nicht erreichbar", kein
  * eigenes console.error) — Chromium meldet den fehlgeschlagenen
  * Netzwerk-Request aber trotzdem als browsergenerierten Console-Fehler.
- * Deshalb: nur Fehler mit Ursprung API-Origin sind erlaubt, und der
- * gehandelte Fehlerzustand muss sichtbar gerendert sein.
+ *
+ * Seit dem Same-Origin-Rewrite (EYT-50) kommt dieser Fehler unter der Origin
+ * der Web-App an, mit HTTP 500: Next versucht weiterzuleiten und findet keine
+ * API. Gefiltert wird deshalb ueber den PFAD, nicht ueber die Origin.
+ *
+ * Ein Vergleich der Origin-Zeichenkette hatte hier schon einen roten Lauf
+ * gekostet: der Test rechnete mit "http://localhost:3000", Playwright meldete
+ * "http://127.0.0.1:3000". Beide sind dieselbe Adresse und verschiedene
+ * Zeichenketten.
  */
-const API_ORIGIN = new URL(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001").origin;
+const PROXIED_OPERATIONAL_PATHS = new Set(["/health", "/ready"]);
+
+/** Ist die Meldung der gehandelte Ausfall einer Betriebsschnittstelle? */
+function istGehandelterBetriebsfehler(url: string): boolean {
+  try {
+    // Basis nur, damit relative Meldungen parsebar sind; nur der Pfad zaehlt.
+    return PROXIED_OPERATIONAL_PATHS.has(new URL(url, "http://ignoriert.invalid").pathname);
+  } catch {
+    return false;
+  }
+}
 
 test("laedt ohne ungefangene Console-Fehler", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() !== "error") return;
-    if (msg.location().url.startsWith(API_ORIGIN)) return; // gehandelter Health-Check, s. o.
+    if (istGehandelterBetriebsfehler(msg.location().url)) return; // s. o.
     errors.push(`${msg.text()} (${msg.location().url})`);
   });
   page.on("pageerror", (err) => errors.push(String(err)));

@@ -20,6 +20,8 @@
  */
 import { z } from "zod";
 
+import { isValidIsoWeekKey } from "./iso-week.js";
+
 import { IdSchema, InstantSchema } from "../primitives.js";
 
 /**
@@ -84,6 +86,33 @@ export const AssignmentDtoSchema = z.strictObject({
 export type AssignmentDto = z.infer<typeof AssignmentDtoSchema>;
 
 /**
+ * Der ISO-Wochenschluessel als EIN Schema fuer alle oeffentlichen Felder (EYT-88).
+ *
+ * Zuvor stand an fuenf Stellen ein eigener regulaerer Ausdruck. Vier davon
+ * kannten nur das Muster; die Kalenderregel hing allein an der Leseabfrage.
+ * Damit haetten Leseroute, Validierungsroute, Publish-Kommando und
+ * Antwortvertrag unterschiedliche Regeln getragen — `2025-W53` waere ueber die
+ * Abfrage abgelehnt und ueber das Publish-Kommando angenommen worden.
+ *
+ * Ein Schema, fuenf Verwendungen. Wer eine sechste Stelle hinzufuegt, nimmt
+ * dieses hier und nicht wieder einen eigenen Ausdruck.
+ *
+ * Das Muster bleibt vorgeschaltet, obwohl `isValidIsoWeekKey` die Form selbst
+ * prueft: es liefert die praezisere Meldung fuer den haeufigen Tippfehler,
+ * bevor die Kalenderrechnung ueberhaupt anlaeuft.
+ */
+export const IsoWeekKeySchema = z
+  .string()
+  .regex(/^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/, "Wochenschluessel im Format 2026-W32")
+  .refine(isValidIsoWeekKey, {
+    message:
+      "Wochenschluessel bezeichnet keine reale ISO-Woche (etwa W53 in einem Jahr mit 52 Wochen)",
+  })
+  .describe(
+    "ISO-Woche im Format 2026-W32. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben.",
+  );
+
+/**
  * Abfrage eines Planungsfensters.
  *
  * `weekKey` statt Datumsbereich: die Woche ist bereits eine fachliche Einheit
@@ -92,21 +121,95 @@ export type AssignmentDto = z.infer<typeof AssignmentDtoSchema>;
  * die Doppelimplementierung, die `FIND-003` verursacht hat.
  */
 export const PlanningWindowQuerySchema = z.strictObject({
-  /** ISO-Woche, Format `2026-W32`. */
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/, "Wochenschluessel im Format 2026-W32"),
+  /** Siehe {@link IsoWeekKeySchema} — Muster plus jahresabhaengige Kalenderregel. */
+  weekKey: IsoWeekKeySchema,
 });
 
 export type PlanningWindowQuery = z.infer<typeof PlanningWindowQuerySchema>;
 
-export const PlanningWindowSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/),
-  /** IANA-Zeitzone, nach der die Woche abgegrenzt wurde. Mitgeliefert, damit die
-   * UI die Wochengrenze nicht selbst raten muss. */
-  timeZone: z.string(),
-  assignments: z.array(AssignmentDtoSchema),
-  /** Id der zuletzt veröffentlichten Planversion, `null` solange nichts veröffentlicht ist. */
-  publishedVersionId: IdSchema.nullable(),
+/**
+ * Herkunft der angezeigten Zuweisungen (EYT-50).
+ *
+ * Ohne diese Angabe konnte das Fenster die Zuweisungen eines ENTWURFS zeigen
+ * und daneben `publishedVersionId` einer bereits veroeffentlichten Version —
+ * die Oberflaeche zeigte dann "Veroeffentlichte Version X" ueber Daten, die
+ * gar nicht zu X gehoeren. Ein Vergleich mit der Mitarbeitersicht (AK9) waere
+ * damit ein Vergleich von Aepfeln mit Birnen.
+ *
+ * `null` heisst: es gibt fuer diese Woche ueberhaupt keine Version.
+ */
+export const SourceVersionSchema = z.strictObject({
+  id: IdSchema,
+  state: z.enum(["draft", "published"]),
 });
+
+export type SourceVersion = z.infer<typeof SourceVersionSchema>;
+
+export const PlanningWindowSchema = z
+  .strictObject({
+    weekKey: IsoWeekKeySchema,
+    /** IANA-Zeitzone, nach der die Woche abgegrenzt wurde. Mitgeliefert, damit die
+     * UI die Wochengrenze nicht selbst raten muss. */
+    timeZone: z.string(),
+    assignments: z.array(AssignmentDtoSchema),
+    /**
+     * Version, ZU DER die `assignments` gehoeren — Entwurf oder veroeffentlicht.
+     * Getrennt von `publishedVersionId`, weil beides gleichzeitig gelten kann.
+     */
+    sourceVersion: SourceVersionSchema.nullable(),
+    /**
+     * Id der zuletzt veröffentlichten Planversion, `null` solange nichts
+     * veröffentlicht ist. Sagt NICHTS darüber, ob die angezeigten Zuweisungen
+     * daher stammen — dafür ist `sourceVersion` da.
+     */
+    publishedVersionId: IdSchema.nullable(),
+  })
+  .superRefine((fenster, ctx) => {
+    // Feldweise Gueltigkeit genuegt hier nicht: die AUSSAGE steckt in der
+    // Beziehung der Felder. Ohne diese Regeln waeren formal gueltige, fachlich
+    // widerspruechliche Antworten moeglich — und die faenden erst in der
+    // Oberflaeche auf, als "Veroeffentlichte Version X" ueber fremden Daten.
+    if (fenster.sourceVersion === null) {
+      if (fenster.assignments.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["assignments"],
+          message:
+            "Ohne sourceVersion kann es keine Zuweisungen geben — sie haetten keine Herkunft.",
+        });
+      }
+      if (fenster.publishedVersionId !== null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["publishedVersionId"],
+          message:
+            "Eine veroeffentlichte Version existiert, wird aber nicht angezeigt: dann muesste sourceVersion sie nennen.",
+        });
+      }
+      return;
+    }
+
+    if (fenster.sourceVersion.state === "published") {
+      if (fenster.publishedVersionId !== fenster.sourceVersion.id) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["publishedVersionId"],
+          message:
+            "Angezeigt wird eine veroeffentlichte Version — dann ist sie auch die zuletzt veroeffentlichte.",
+        });
+      }
+      return;
+    }
+
+    // state === "draft"
+    if (fenster.publishedVersionId === fenster.sourceVersion.id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceVersion"],
+        message: "Dieselbe Id kann nicht gleichzeitig Entwurf und veroeffentlicht sein.",
+      });
+    }
+  });
 
 export type PlanningWindow = z.infer<typeof PlanningWindowSchema>;
 
@@ -119,7 +222,7 @@ export const CreateAssignmentCommandSchema = z.strictObject({
 export type CreateAssignmentCommand = z.infer<typeof CreateAssignmentCommandSchema>;
 
 export const ValidatePlanCommandSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/),
+  weekKey: IsoWeekKeySchema,
   draft: CreateAssignmentCommandSchema,
 });
 
@@ -142,7 +245,7 @@ export type PlanValidationResult = z.infer<typeof PlanValidationResultSchema>;
  * überschreiben. `null` heisst „ich erwarte, dass noch nichts veröffentlicht ist".
  */
 export const PublishPlanCommandSchema = z.strictObject({
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/),
+  weekKey: IsoWeekKeySchema,
   expectedVersionId: IdSchema.nullable(),
 });
 
@@ -150,7 +253,7 @@ export type PublishPlanCommand = z.infer<typeof PublishPlanCommandSchema>;
 
 export const PublishedPlanVersionSchema = z.strictObject({
   versionId: IdSchema,
-  weekKey: z.string().regex(/^\d{4}-W\d{2}$/),
+  weekKey: IsoWeekKeySchema,
   publishedAtUtc: InstantSchema,
   assignmentIds: z.array(IdSchema),
 });

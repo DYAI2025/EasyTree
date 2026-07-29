@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import { conflictsWithExisting, validateDraft } from "../src/modules/planning";
 import type { AssignmentDraft } from "../src/modules/planning";
 
-const ALPHA = unsafeIdentifier<OrgId>("00000000-0000-0000-0000-0000000000a1");
-const BETA = unsafeIdentifier<OrgId>("00000000-0000-0000-0000-0000000000b2");
-const ANNA = unsafeIdentifier<EmployeeId>("00000000-0000-0000-0000-00000000aaa1");
-const BEN = unsafeIdentifier<EmployeeId>("00000000-0000-0000-0000-00000000bbb2");
-const SITE = unsafeIdentifier<WorksiteId>("00000000-0000-0000-0000-0000000011c1");
+const ALPHA = unsafeIdentifier<OrgId>("00000000-0000-4000-8000-0000000000a1");
+const BETA = unsafeIdentifier<OrgId>("00000000-0000-4000-8000-0000000000b2");
+const ANNA = unsafeIdentifier<EmployeeId>("00000000-0000-4000-8000-00000000aaa1");
+const BEN = unsafeIdentifier<EmployeeId>("00000000-0000-4000-8000-00000000bbb2");
+const SITE = unsafeIdentifier<WorksiteId>("00000000-0000-4000-8000-0000000011c1");
 
 function at(startIso: string, endIso: string): TimeInterval {
   const result = TimeInterval.create(new Date(startIso), new Date(endIso));

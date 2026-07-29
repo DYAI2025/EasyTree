@@ -65,6 +65,7 @@ const VALID_WINDOW = {
   weekKey: "2026-W32",
   timeZone: "Europe/Berlin",
   assignments: [],
+  sourceVersion: null,
   publishedVersionId: null,
 };
 

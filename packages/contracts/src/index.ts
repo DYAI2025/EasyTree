@@ -29,8 +29,10 @@ export {
   CreateAssignmentCommandSchema,
   PlanValidationResultSchema,
   PlanningConflictDtoSchema,
+  IsoWeekKeySchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
+  SourceVersionSchema,
   PublishPlanCommandSchema,
   PublishedPlanVersionSchema,
   TimeIntervalDtoSchema,
@@ -43,12 +45,26 @@ export type {
   PlanningConflictDto,
   PlanningWindow,
   PlanningWindowQuery,
+  SourceVersion,
   PublishPlanCommand,
   PublishedPlanVersion,
   TimeIntervalDto,
   ValidatePlanCommand,
 } from "./planning/schemas.js";
 export type { PlanningGateway } from "./planning/gateway.js";
+
+// ISO-Wochenschluessel mit Kalenderrechnung (EYT-88). Exportiert, weil sowohl
+// spaetere Command-Grenzen als auch der Paritaetstest gegen `@easytree/domain`
+// dieselbe Funktion verwenden muessen — eine zweite Wochenregel waere genau der
+// Fehler, den EYT-88 behebt.
+export {
+  ISO_WEEK_KEY_PROBLEMS,
+  formatIsoWeekKey,
+  isValidIsoWeekKey,
+  isoWochenImJahr,
+  parseIsoWeekKey,
+} from "./planning/iso-week.js";
+export type { IsoWeek, IsoWeekKeyProblem, IsoWeekKeyResult } from "./planning/iso-week.js";
 
 export {
   ActiveTimeEntrySchema,
@@ -75,6 +91,16 @@ export type {
   SubmittedTimeEntry,
 } from "./employee/schemas.js";
 export type { EmployeeGateway } from "./employee/gateway.js";
+
+/**
+ * Basispfad der Fach-API — die EINE Quelle.
+ *
+ * Er steht in `servers[0].url` des erzeugten Dokuments und muss deshalb
+ * dieselbe Zeichenkette sein, die Server und Client verwenden. Eine zweite,
+ * frei gepflegte Kopie war genau die Falle, aus der `/api/v1` serverseitig
+ * ueberhaupt nicht existierte, ohne dass etwas rot wurde.
+ */
+export { API_BASE_PATH, API_PATH_VERSION } from "./api-metadata.js";
 
 export { HttpPlanningGateway } from "./http/planning-gateway.js";
 export type { FetchLike, HttpPlanningGatewayOptions } from "./http/planning-gateway.js";

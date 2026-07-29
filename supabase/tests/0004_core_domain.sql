@@ -18,7 +18,7 @@ select plan(23);
 select has_column('public', 'organizations', 'time_zone', 'organizations traegt eine Zeitzone');
 
 select is(
-  (select time_zone from public.organizations where id = '00000000-0000-0000-0000-0000000000a1'),
+  (select time_zone from public.organizations where id = '00000000-0000-4000-8000-0000000000a1'),
   'Europe/Berlin',
   'Org Alpha hat eine gueltige IANA-Zeitzone'
 );
@@ -67,7 +67,7 @@ select is(
 select set_config(
   'request.jwt.claims',
   json_build_object(
-    'sub', '00000000-0000-0000-0000-00000000aaa1',
+    'sub', '00000000-0000-4000-8000-00000000aaa1',
     'role', 'authenticated'
   )::text,
   true
@@ -78,22 +78,22 @@ set local role authenticated;
 -- Lesen: nur die eigene Organisation
 -- ---------------------------------------------------------------------------
 select is_empty(
-  $$select * from public.employees where org_id = '00000000-0000-0000-0000-0000000000b2'$$,
+  $$select * from public.employees where org_id = '00000000-0000-4000-8000-0000000000b2'$$,
   'A: Cross-Tenant-Read auf Beta-Employees ist leer'
 );
 
 select is_empty(
-  $$select * from public.worksites where org_id = '00000000-0000-0000-0000-0000000000b2'$$,
+  $$select * from public.worksites where org_id = '00000000-0000-4000-8000-0000000000b2'$$,
   'A: Cross-Tenant-Read auf Beta-Worksites ist leer'
 );
 
 select is_empty(
-  $$select * from public.assignments where org_id = '00000000-0000-0000-0000-0000000000b2'$$,
+  $$select * from public.assignments where org_id = '00000000-0000-4000-8000-0000000000b2'$$,
   'A: Cross-Tenant-Read auf Beta-Assignments ist leer'
 );
 
 select is_empty(
-  $$select * from public.plan_versions where org_id = '00000000-0000-0000-0000-0000000000b2'$$,
+  $$select * from public.plan_versions where org_id = '00000000-0000-4000-8000-0000000000b2'$$,
   'A: Cross-Tenant-Read auf Beta-Planversionen ist leer'
 );
 
@@ -109,7 +109,7 @@ select isnt_empty(
 -- ---------------------------------------------------------------------------
 select throws_ok(
   $$insert into public.employees (org_id, display_name)
-    values ('00000000-0000-0000-0000-0000000000b2', 'geschmuggelt')$$,
+    values ('00000000-0000-4000-8000-0000000000b2', 'geschmuggelt')$$,
   '42501',
   'new row violates row-level security policy for table "employees"',
   'A: insert employees mit fremder org_id wird mit 42501 abgelehnt'
@@ -117,7 +117,7 @@ select throws_ok(
 
 select throws_ok(
   $$insert into public.worksites (org_id, name)
-    values ('00000000-0000-0000-0000-0000000000b2', 'geschmuggelt')$$,
+    values ('00000000-0000-4000-8000-0000000000b2', 'geschmuggelt')$$,
   '42501',
   'new row violates row-level security policy for table "worksites"',
   'A: insert worksites mit fremder org_id wird mit 42501 abgelehnt'
@@ -125,7 +125,7 @@ select throws_ok(
 
 select throws_ok(
   $$insert into public.audit_events (org_id, event_type, subject_type, subject_id)
-    values ('00000000-0000-0000-0000-0000000000b2', 'x', 'y', gen_random_uuid())$$,
+    values ('00000000-0000-4000-8000-0000000000b2', 'x', 'y', gen_random_uuid())$$,
   '42501',
   'new row violates row-level security policy for table "audit_events"',
   'A: insert audit_events mit fremder org_id wird mit 42501 abgelehnt'
@@ -167,8 +167,8 @@ select is(
 -- ja. Genau deshalb reicht der Mandantenfilter hier nicht.
 select throws_ok(
   $$insert into public.audit_events (org_id, actor_user_id, event_type, subject_type, subject_id)
-    values ('00000000-0000-0000-0000-0000000000a1',
-            '00000000-0000-0000-0000-00000000ccc3',
+    values ('00000000-0000-4000-8000-0000000000a1',
+            '00000000-0000-4000-8000-00000000ccc3',
             'plan.published', 'plan_version', gen_random_uuid())$$,
   '42501',
   'new row violates row-level security policy for table "audit_events"',
@@ -177,7 +177,7 @@ select throws_ok(
 
 select throws_ok(
   $$insert into public.audit_events (org_id, actor_user_id, event_type, subject_type, subject_id)
-    values ('00000000-0000-0000-0000-0000000000a1',
+    values ('00000000-0000-4000-8000-0000000000a1',
             null,
             'plan.published', 'plan_version', gen_random_uuid())$$,
   '42501',
@@ -189,8 +189,8 @@ select throws_ok(
 -- wenn die Policy schlicht jedes insert verweigert.
 select lives_ok(
   $$insert into public.audit_events (org_id, actor_user_id, event_type, subject_type, subject_id)
-    values ('00000000-0000-0000-0000-0000000000a1',
-            '00000000-0000-0000-0000-00000000aaa1',
+    values ('00000000-0000-4000-8000-0000000000a1',
+            '00000000-0000-4000-8000-00000000aaa1',
             'plan.published', 'plan_version', gen_random_uuid())$$,
   'A: Auditereignis auf die EIGENE Person wird akzeptiert'
 );
