@@ -4,6 +4,12 @@ Status: user-confirmed
 Confirmed by user: yes  
 Feature Slug: `planning-draft-conflict-slice`
 
+**Dritte Bestätigung am 2026-07-29** (Product Owner, Benjamin Poersch): ausschließlich die drei
+Pfade `apps/api/src/app.module.ts`, `apps/web/package.json` und `pnpm-lock.yaml` in der
+Allowed-change-Liste — begründet unten. Ausdrücklich als **technische Korrektur der Liste**
+freigegeben, nicht als Erweiterung des bestätigten Feature-Scope; der fachliche Scope ist
+unverändert.
+
 **Zweimal bestätigt.** Erstbestätigung 2026-07-28. Danach ergänzte das Council-Gate (Phase 0.16)
 die Wertabgrenzung; das Artefakt kehrte auf `draft` zurück und wurde am 2026-07-28 vom Product
 Owner (Benjamin Poersch) **neu bestätigt**, ausdrücklich einschließlich der Wertabgrenzung:
@@ -162,9 +168,33 @@ Zu `.gitleaks.toml`, `.prettierignore` und den beiden Markdown-Dateien (ergänzt
 Product Owner beauftragte Entsperrung der zwei geerbten CI-Baseline-Blocker. Wieder eine Lücke in
 dieser Liste, keine Scope-Erweiterung — sie erlauben keine Produktänderung.
 
+Zu `apps/api/src/app.module.ts`, `apps/web/package.json` und `pnpm-lock.yaml` (freigegeben am
+2026-07-29 vom Product Owner, Option 1): **technische Korrektur dieser Liste, keine Erweiterung
+des bestätigten Feature-Scope.** Exakt diese drei Pfade, keine Globs.
+
+`app.module.ts` ist die vorhandene Kompositionswurzel; es gibt kein `planning.module.ts`, und
+Controller wie Write-Provider werden dort registriert. Die Reality-Ledger-Spalte
+`wired-in-prod?` ist per Definition an genau dieser Datei gemessen — eine Liste, die sie
+verbietet, verbietet damit strukturell, jemals `wired-in-prod: ja` zu erreichen, also das eigene
+Erfolgskriterium des Features.
+
+`apps/web/package.json` deklariert `@easytree/domain`, weil die Web-App die bestehende,
+frameworkfreie Domainfunktion für Wanduhrzeit → UTC verwendet. Sie im Web zu duplizieren wäre
+genau der Doppelimplementierungsfehler aus EYT-74; sie in den Transportvertrag zu verschieben
+verbietet die Architekturregel `contracts-transport-only`. `pnpm-lock.yaml` folgt zwingend aus
+der Änderung an `package.json`.
+
+Der Scope-Guard hat die Lücke gemeldet; die Datei `apps/web/components/assignment-form.tsx` war
+im selben Befund und wurde **nicht** durch eine Listenerweiterung gelöst, sondern zu
+`planning-assignment-form.tsx` umbenannt — sie fiel schlicht durch einen falsch gewählten Namen
+aus der bereits vorhandenen Regel `apps/web/components/planning-*.tsx`.
+
+- `apps/api/src/app.module.ts`
 - `apps/api/src/modules/planning/**`
 - `apps/api/src/platform/database/**`
 - `apps/api/test/**`
+- `apps/web/package.json`
+- `pnpm-lock.yaml`
 - `apps/web/app/planung/**`
 - `apps/web/components/planning-*.tsx`
 - `apps/web/lib/planning-*.ts*`
