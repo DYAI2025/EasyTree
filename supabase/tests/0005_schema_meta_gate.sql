@@ -54,7 +54,8 @@ insert into expected_tables (table_name, tenant_owned, note) values
   ('plan_versions', true,  'Planversionen je Organisation und Woche (0007)'),
   ('assignments',   true,  'Zuweisungen (0007), personenbezogen'),
   ('audit_events',  true,  'Anfuegbare Auditspur (0008)'),
-  ('outbox_messages', true,'Transactional Outbox (0008)');
+  ('outbox_messages', true,'Transactional Outbox (0008)'),
+  ('idempotency_records', true, 'Ergebnis idempotenter Schreibvorgaenge je Mandant (0012)');
 
 -- ---------------------------------------------------------------------------
 -- 1. Vollstaendigkeit in beide Richtungen
