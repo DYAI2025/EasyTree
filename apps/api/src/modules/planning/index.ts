@@ -40,3 +40,13 @@ export type {
 } from "./application/planning-writes.port";
 export { PLANNING_WRITES_FACTORY } from "./application/planning-writes.port";
 export { PlanningWriteRepository } from "./infrastructure/planning-write.repository";
+export type {
+  ValidateDraftInput,
+  ValidateDraftResult,
+  ValidatedConflict,
+} from "./application/planning-writes.port";
+export {
+  PLANNING_ERROR_TYPE,
+  PlanningProblemFilter,
+} from "./interface/http/planning-problem.filter";
+export type { PlanningErrorType } from "./interface/http/planning-problem.filter";

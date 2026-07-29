@@ -28,6 +28,24 @@ import {
   TENANT_QUERY_RUNNER,
   TenantQueryRunnerProvider,
 } from "./platform/database/tenant-query-runner.provider";
+
+/**
+ * Fehlerinjektionspunkt fuer den Teilwirkungsnachweis (EYT-92).
+ *
+ * `EASYTREE_FAULT_AFTER=assignment|audit|outbox` bricht den Schreibvorgang
+ * genau nach diesem Schritt ab. Ein unbekannter Wert wird ausdruecklich
+ * ABGELEHNT statt ignoriert: ein Tippfehler wuerde sonst einen Test still in
+ * den Normalfall laufen lassen, und der Test faerbte sich gruen, ohne den
+ * Abbruch je ausgeloest zu haben.
+ */
+function fehlerpunktAusUmgebung(): "assignment" | "audit" | "outbox" | null {
+  const wert = process.env["EASYTREE_FAULT_AFTER"];
+  if (wert === undefined || wert === "") return null;
+  if (wert === "assignment" || wert === "audit" || wert === "outbox") return wert;
+  throw new Error(
+    `EASYTREE_FAULT_AFTER hat den unbekannten Wert "${wert}". Erlaubt: assignment, audit, outbox.`,
+  );
+}
 import { PgDatabasePing } from "./platform/database/pg-database-ping";
 import {
   DATABASE_PING,
@@ -95,15 +113,27 @@ import {
       inject: [TENANT_QUERY_RUNNER],
       useFactory: (runner: TenantQueryRunnerProvider): PlanningWritesFactory => {
         return (subjectUserId: string) =>
-          new PlanningWriteRepository(runner, subjectUserId, (instant, zone) => {
-            const geprueft = createTimeZone(zone);
-            if (!geprueft.ok) {
-              throw new Error(`EYT-92: unbekannte Zeitzone "" in organizations.time_zone.`);
-            }
-            return planningWeekKey(
-              isoWeekOfLocalDate(localBusinessDate(instant, geprueft.timeZone)),
-            );
-          });
+          new PlanningWriteRepository(
+            runner,
+            subjectUserId,
+            (instant, zone) => {
+              const geprueft = createTimeZone(zone);
+              if (!geprueft.ok) {
+                throw new Error(
+                  `EYT-92: unbekannte Zeitzone "${zone}" in organizations.time_zone.`,
+                );
+              }
+              return planningWeekKey(
+                isoWeekOfLocalDate(localBusinessDate(instant, geprueft.timeZone)),
+              );
+            },
+            // Testhaken fuer den Teilwirkungsnachweis. Kann nur SCHEITERN
+            // lassen, nie etwas gruen faerben — das Gegenteil eines
+            // Skip-Schalters. `EASYTREE_*` steuert Tests und nie die Anwendung
+            // (CLAUDE.md), deshalb steht die Variable NICHT in ENV_VAR_META und
+            // wird hier direkt gelesen.
+            fehlerpunktAusUmgebung(),
+          );
       },
     },
     {

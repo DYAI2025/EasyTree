@@ -27,8 +27,12 @@
 import {
   AssignmentDtoSchema,
   CreateAssignmentCommandSchema,
+  IDEMPOTENCY_HEADER,
+  IdempotencyKeySchema,
+  PlanValidationResultSchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
+  ValidatePlanCommandSchema,
 } from "@easytree/contracts";
 import {
   BadRequestException,
@@ -37,6 +41,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Headers,
   HttpCode,
   Inject,
   InternalServerErrorException,
@@ -44,6 +49,7 @@ import {
   Query,
   Req,
   UnauthorizedException,
+  UseFilters,
 } from "@nestjs/common";
 
 import {
@@ -59,6 +65,7 @@ import {
   type PlanningQueriesFactory,
 } from "../../application/planning-queries.factory";
 import type { ResourceRow } from "../../application/planning-queries.port";
+import { PLANNING_ERROR_TYPE, PlanningProblemFilter } from "./planning-problem.filter";
 import {
   PLANNING_WRITES_FACTORY,
   type PlanningWriteProblem,
@@ -80,25 +87,38 @@ import {
 function problemFor(problem: PlanningWriteProblem): Error {
   switch (problem.kind) {
     case "NO_ORGANISATION":
-      return new ForbiddenException("Keine aktive Mitgliedschaft in einer Organisation.");
+      return new ForbiddenException({
+        type: PLANNING_ERROR_TYPE.NO_ORGANISATION,
+        title: "Keine Organisation",
+        detail: "Keine aktive Mitgliedschaft in einer Organisation.",
+      });
     case "AMBIGUOUS_ORGANISATION":
-      return new ForbiddenException(
-        "Mehrere aktive Organisationen. Die Auswahl ist noch nicht modelliert (EYT-14).",
-      );
+      return new ForbiddenException({
+        type: PLANNING_ERROR_TYPE.AMBIGUOUS_ORGANISATION,
+        title: "Mehrdeutige Organisation",
+        detail: "Mehrere aktive Organisationen. Die Auswahl ist noch nicht modelliert (EYT-14).",
+      });
     case "RESOURCE_NOT_SELECTABLE":
-      return new BadRequestException(
-        problem.feld === "employeeId"
-          ? "Diese mitarbeitende Person steht für neue Einsätze nicht zur Auswahl."
-          : "Diese Baustelle steht für neue Einsätze nicht zur Auswahl.",
-      );
+      return new BadRequestException({
+        type: PLANNING_ERROR_TYPE.RESOURCE_NOT_SELECTABLE,
+        title: "Ressource nicht auswählbar",
+        detail:
+          problem.feld === "employeeId"
+            ? "Diese mitarbeitende Person steht für neue Einsätze nicht zur Auswahl."
+            : "Diese Baustelle steht für neue Einsätze nicht zur Auswahl.",
+      });
     case "OVERLAPPING_ASSIGNMENT":
-      return new ConflictException(
-        `Diese Person ist in diesem Zeitraum bereits eingeplant: ${problem.overlap.startsAtUtc.toISOString()} bis ${problem.overlap.endsAtUtc.toISOString()}. Der Entwurf wurde NICHT gespeichert.`,
-      );
+      return new ConflictException({
+        type: PLANNING_ERROR_TYPE.OVERLAPPING_ASSIGNMENT,
+        title: "Überschneidender Einsatz",
+        detail: `Diese Person ist in diesem Zeitraum bereits eingeplant: ${problem.overlap.startsAtUtc.toISOString()} bis ${problem.overlap.endsAtUtc.toISOString()}. Der Entwurf wurde NICHT gespeichert.`,
+      });
     case "OUTSIDE_WEEK":
-      return new BadRequestException(
-        `Der Einsatz liegt in Kalenderwoche ${problem.tatsaechlicheWoche}, nicht in der geöffneten Woche. Bitte das Datum prüfen.`,
-      );
+      return new BadRequestException({
+        type: PLANNING_ERROR_TYPE.OUTSIDE_WEEK,
+        title: "Einsatz außerhalb der Woche",
+        detail: `Der Einsatz liegt in Kalenderwoche ${problem.tatsaechlicheWoche}, nicht in der geöffneten Woche. Bitte das Datum prüfen.`,
+      });
   }
 }
 
@@ -114,6 +134,7 @@ const zuRessource = (row: ResourceRow): { id: string; label: string; active: boo
 });
 
 @Controller("planung")
+@UseFilters(PlanningProblemFilter)
 export class PlanningController {
   constructor(
     @Inject(TENANT_SUBJECT_RESOLVER)
@@ -210,9 +231,65 @@ export class PlanningController {
    * Eine Vertragsverletzung vor der Berechtigungspruefung zu melden verraet
    * einem Unberechtigten die Form des Vertrags.
    */
+  /**
+   * Entwurf pruefen, ohne ihn anzulegen (EYT-92).
+   *
+   * Ohne Idempotenzschluessel — es entsteht nichts, was sich verdoppeln
+   * koennte. Antwortcode 200 statt 201: es wurde nichts erzeugt.
+   *
+   * Die Route macht `validateDraft` aus `modules/planning/domain` erstmals
+   * ueber einen Nutzerpfad erreichbar. Bis hierher hatte die Funktion
+   * Unittests und keinen Produktionsaufrufer — die Regel existierte, aber
+   * niemand konnte sie ausloesen.
+   */
+  @Post("entwuerfe/validierung")
+  @HttpCode(200)
+  async validateDraft(@Req() request: unknown, @Body() body: unknown): Promise<unknown> {
+    const subject = this.subjects.resolve(request);
+    if (subject === null) {
+      throw new UnauthorizedException("Kein verifiziertes Subjekt.");
+    }
+    // Schreibberechtigung, nicht Leseberechtigung: wer nicht anlegen darf, soll
+    // auch nicht ausprobieren duerfen, was ein Anlegen ergaebe.
+    if (!(await this.access.mayWritePlanning(subject))) {
+      throw new ForbiddenException("Keine Schreibberechtigung fuer die Planung.");
+    }
+
+    const command = ValidatePlanCommandSchema.safeParse(body);
+    if (!command.success) {
+      throw new BadRequestException({
+        type: PLANNING_ERROR_TYPE.INVALID_INTERVAL,
+        title: "Prüfauftrag unvollständig oder Intervall ungültig",
+        detail: "Der Entwurf ist unvollständig oder das Ende liegt nicht nach dem Beginn.",
+      });
+    }
+
+    const result = await this.writesFor(subject).validateDraft({
+      weekKey: command.data.weekKey,
+      employeeId: command.data.draft.employeeId,
+      worksiteId: command.data.draft.worksiteId,
+      startsAtUtc: new Date(command.data.draft.interval.startUtc),
+      endsAtUtc: new Date(command.data.draft.interval.endUtc),
+    });
+    if (!result.ok) throw problemFor(result.problem);
+
+    const validated = PlanValidationResultSchema.safeParse({
+      conflicts: result.conflicts,
+      publishable: result.publishable,
+    });
+    if (!validated.success) {
+      throw new InternalServerErrorException("Antwort entspricht nicht dem Vertrag.");
+    }
+    return validated.data;
+  }
+
   @Post("einsaetze")
   @HttpCode(201)
-  async createAssignment(@Req() request: unknown, @Body() body: unknown): Promise<unknown> {
+  async createAssignment(
+    @Req() request: unknown,
+    @Body() body: unknown,
+    @Headers(IDEMPOTENCY_HEADER) idempotencyKey?: string,
+  ): Promise<unknown> {
     const subject = this.subjects.resolve(request);
     if (subject === null) {
       throw new UnauthorizedException("Kein verifiziertes Subjekt.");
@@ -221,13 +298,28 @@ export class PlanningController {
       throw new ForbiddenException("Keine Schreibberechtigung fuer die Planung.");
     }
 
+    // Der Schluessel wird GEPRUEFT, nicht geglaubt. Das OpenAPI-Dokument
+    // fuehrt ihn seit EYT-47 als Pflichtparameter; bis EYT-92 las ihn
+    // serverseitig niemand, und ein Wiederholungsversuch legte einen zweiten
+    // Einsatz an. Ohne Schluessel gibt es deshalb keinen Schreibvorgang.
+    const schluessel = IdempotencyKeySchema.safeParse(idempotencyKey);
+    if (!schluessel.success) {
+      throw new BadRequestException({
+        type: PLANNING_ERROR_TYPE.MISSING_IDEMPOTENCY_KEY,
+        title: "Idempotenzschlüssel fehlt oder ist unbrauchbar",
+        detail: `Der Header ${IDEMPOTENCY_HEADER} fehlt oder entspricht nicht dem Vertrag. Ohne ihn kann ein Wiederholungsversuch nicht von einem neuen Einsatz unterschieden werden.`,
+      });
+    }
+
     const command = CreateAssignmentCommandSchema.safeParse(body);
     if (!command.success) {
       // Kein ZodError im Rumpf: er traegt die eingesandten Werte, und die
       // koennen Personenbezug enthalten.
-      throw new BadRequestException(
-        "Der Einsatz ist unvollstaendig oder das Ende liegt nicht nach dem Beginn.",
-      );
+      throw new BadRequestException({
+        type: PLANNING_ERROR_TYPE.INVALID_INTERVAL,
+        title: "Einsatz unvollständig oder Intervall ungültig",
+        detail: "Der Einsatz ist unvollständig oder das Ende liegt nicht nach dem Beginn.",
+      });
     }
 
     const result = await this.writesFor(subject).createAssignment({
@@ -236,6 +328,7 @@ export class PlanningController {
       worksiteId: command.data.worksiteId,
       startsAtUtc: new Date(command.data.interval.startUtc),
       endsAtUtc: new Date(command.data.interval.endUtc),
+      idempotencyKey: schluessel.data,
     });
 
     if (!result.ok) throw problemFor(result.problem);

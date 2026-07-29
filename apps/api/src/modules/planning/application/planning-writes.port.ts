@@ -55,7 +55,19 @@ export type PlanningWriteProblem =
   | { readonly kind: "OUTSIDE_WEEK"; readonly tatsaechlicheWoche: string };
 
 export type CreateAssignmentResult =
-  | { readonly ok: true; readonly assignment: CreatedAssignmentRow }
+  | {
+      readonly ok: true;
+      readonly assignment: CreatedAssignmentRow;
+      /**
+       * `true`, wenn dieser Aufruf die Wiederholung eines frueheren war und
+       * dessen Ergebnis zurueckgibt, ohne etwas zu schreiben.
+       *
+       * Steht im Ergebnis und nicht nur im Log, weil ein Test sonst nicht
+       * unterscheiden koennte, ob der zweite Aufruf wirklich NICHTS getan hat
+       * oder nur zufaellig dasselbe Ergebnis erzeugte.
+       */
+      readonly replayed: boolean;
+    }
   | { readonly ok: false; readonly problem: PlanningWriteProblem };
 
 export interface CreateAssignmentInput {
@@ -65,9 +77,29 @@ export interface CreateAssignmentInput {
   readonly worksiteId: string;
   readonly startsAtUtc: Date;
   readonly endsAtUtc: Date;
+  /**
+   * Mandantengebundener Wiederholungsschutz aus dem `Idempotency-Key`-Header.
+   *
+   * Pflicht, nicht optional: ein Schreibvorgang ohne Schluessel liesse sich
+   * nicht wiederholen, ohne zu verdoppeln. Der Vertrag verlangt den Header
+   * bereits (`idempotencyHeader` im OpenAPI-Dokument) — bis EYT-92 las ihn nur
+   * niemand.
+   */
+  readonly idempotencyKey: string;
 }
 
 export interface PlanningWrites {
+  /**
+   * Prueft einen Entwurf gegen den Bestand — OHNE Schreibwirkung.
+   *
+   * Deshalb ohne Idempotenzschluessel: es entsteht nichts, was sich
+   * verdoppeln koennte. Und deshalb im Schreibport statt im Leseport: die
+   * Pruefung braucht dieselbe Mandantenklammer und dieselbe
+   * Schreibberechtigung wie das Anlegen — wer nicht schreiben darf, soll auch
+   * nicht ausprobieren duerfen, was ein Schreibvorgang ergaebe.
+   */
+  validateDraft(input: ValidateDraftInput): Promise<ValidateDraftResult>;
+
   /**
    * Legt eine Zuweisung im Entwurf der Woche an — und den Entwurf selbst, falls
    * es noch keinen gibt. Beides in EINER Transaktion: ein angelegter Entwurf
@@ -81,3 +113,26 @@ export interface PlanningWrites {
 export type PlanningWritesFactory = (subjectUserId: string) => PlanningWrites;
 
 export const PLANNING_WRITES_FACTORY = "PLANNING_WRITES_FACTORY";
+
+/** Ein Entwurf, wie ihn die Validierungsroute prueft. Ohne Schreibwirkung. */
+export interface ValidateDraftInput {
+  readonly weekKey: string;
+  readonly employeeId: string;
+  readonly worksiteId: string;
+  readonly startsAtUtc: Date;
+  readonly endsAtUtc: Date;
+}
+
+export interface ValidatedConflict {
+  readonly code: string;
+  readonly blocking: boolean;
+  readonly message: string;
+}
+
+export type ValidateDraftResult =
+  | {
+      readonly ok: true;
+      readonly conflicts: readonly ValidatedConflict[];
+      readonly publishable: boolean;
+    }
+  | { readonly ok: false; readonly problem: PlanningWriteProblem };

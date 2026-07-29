@@ -30,11 +30,12 @@
 import {
   newIdempotencyKey,
   type GatewayFailure,
+  type IdempotencyKey,
   type PlanningResource,
   type PlanningWindow,
 } from "@easytree/contracts";
 import { Card } from "@easytree/ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { usePlanningGateway } from "../lib/planning-gateway-provider";
 import { AssignmentForm } from "./planning-assignment-form";
@@ -99,6 +100,14 @@ export function PlanningWindowView({ weekKey }: { weekKey: string }) {
   // Woche zweimal neu geladen werden, und ein Bool waere beim zweiten Mal
   // unveraendert.
   const [nachladen, setNachladen] = useState(0);
+  /**
+   * Idempotenzschluessel des laufenden Speichervorgangs.
+   *
+   * `useRef` und nicht `useState`: der Wert steuert keine Darstellung, und ein
+   * Zustandswechsel mitten im Absenden wuerde eine unnoetige Neuberechnung
+   * ausloesen. Er ueberlebt bewusst mehrere Absendeversuche derselben Eingabe.
+   */
+  const vorgangsSchluessel = useRef<{ vorgang: string; key: IdempotencyKey } | null>(null);
 
   useEffect(() => {
     let abgebrochen = false;
@@ -130,12 +139,29 @@ export function PlanningWindowView({ weekKey }: { weekKey: string }) {
       worksiteId: string;
       interval: { startUtc: string; endUtc: string };
     }): Promise<{ ok: boolean; failure?: GatewayFailure; detail?: string }> => {
-      // Frischer Schluessel je Absendevorgang. Ein wiederverwendeter waere der
-      // Wiederholungsschutz eines FRUEHEREN Einsatzes — der zweite Entwurf
-      // wuerde stillschweigend als Duplikat des ersten beantwortet.
+      // Ein Schluessel je VORGANG, nicht je Absendeklick.
+      //
+      // Hier stand `newIdempotencyKey()` direkt im Aufruf, und das war der
+      // Fehler: bei einem Netzwerkabbruch weiss die Planerin nicht, ob der
+      // Einsatz angekommen ist. Sie drueckt erneut — und mit einem frischen
+      // Schluessel legt der Server einen ZWEITEN Einsatz an. Der Schutz, den
+      // der Schluessel geben soll, wirkt genau dann nicht, wenn man ihn
+      // braucht.
+      //
+      // Der Schluessel gehoert deshalb zur Eingabe, nicht zum Klick: solange
+      // dieselben fuenf Felder abgeschickt werden, bleibt er gleich. Erst ein
+      // ERFOLG verwirft ihn (siehe unten), denn danach ist der Vorgang
+      // abgeschlossen und der naechste Einsatz ist ein neuer.
+      const vorgang = JSON.stringify(befehl);
+      let schluessel = vorgangsSchluessel.current;
+      if (schluessel === null || schluessel.vorgang !== vorgang) {
+        schluessel = { vorgang, key: newIdempotencyKey() };
+        vorgangsSchluessel.current = schluessel;
+      }
+
       const ergebnis = await gateway.createAssignment(
         { weekKey, ...befehl },
-        { idempotencyKey: newIdempotencyKey() },
+        { idempotencyKey: schluessel.key },
       );
       if (!ergebnis.ok) {
         const detail = ergebnis.problem?.detail;
@@ -145,6 +171,11 @@ export function PlanningWindowView({ weekKey }: { weekKey: string }) {
           ...(detail === undefined ? {} : { detail }),
         };
       }
+      // Erst nach Erfolg verwerfen: der Vorgang ist abgeschlossen, der
+      // naechste Einsatz braucht einen eigenen Schluessel. Bei einem Fehler
+      // bleibt er ausdruecklich stehen, damit ein Wiederholungsversuch
+      // derselben Eingabe derselbe Vorgang bleibt.
+      vorgangsSchluessel.current = null;
       setNachladen((n) => n + 1);
       return { ok: true };
     },
