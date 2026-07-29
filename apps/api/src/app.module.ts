@@ -28,24 +28,6 @@ import {
   TENANT_QUERY_RUNNER,
   TenantQueryRunnerProvider,
 } from "./platform/database/tenant-query-runner.provider";
-
-/**
- * Fehlerinjektionspunkt fuer den Teilwirkungsnachweis (EYT-92).
- *
- * `EASYTREE_FAULT_AFTER=assignment|audit|outbox` bricht den Schreibvorgang
- * genau nach diesem Schritt ab. Ein unbekannter Wert wird ausdruecklich
- * ABGELEHNT statt ignoriert: ein Tippfehler wuerde sonst einen Test still in
- * den Normalfall laufen lassen, und der Test faerbte sich gruen, ohne den
- * Abbruch je ausgeloest zu haben.
- */
-function fehlerpunktAusUmgebung(): "assignment" | "audit" | "outbox" | null {
-  const wert = process.env["EASYTREE_FAULT_AFTER"];
-  if (wert === undefined || wert === "") return null;
-  if (wert === "assignment" || wert === "audit" || wert === "outbox") return wert;
-  throw new Error(
-    `EASYTREE_FAULT_AFTER hat den unbekannten Wert "${wert}". Erlaubt: assignment, audit, outbox.`,
-  );
-}
 import { PgDatabasePing } from "./platform/database/pg-database-ping";
 import {
   DATABASE_PING,
@@ -54,12 +36,6 @@ import {
   type ReadinessIndicator,
 } from "./health/readiness";
 
-/**
- * Shared module core for BOTH entrypoints (EYT-42, ADR-001 §2):
- * `main.ts` boots it as an HTTP application, `worker.ts` boots it as a
- * plain application context. Modules, DI and configuration are identical;
- * only the bootstrap differs.
- */
 @Module({
   imports: [ConfigModule],
   controllers: [HealthController, PlanningController],
@@ -127,12 +103,12 @@ import {
                 isoWeekOfLocalDate(localBusinessDate(instant, geprueft.timeZone)),
               );
             },
-            // Testhaken fuer den Teilwirkungsnachweis. Kann nur SCHEITERN
-            // lassen, nie etwas gruen faerben — das Gegenteil eines
-            // Skip-Schalters. `EASYTREE_*` steuert Tests und nie die Anwendung
-            // (CLAUDE.md), deshalb steht die Variable NICHT in ENV_VAR_META und
-            // wird hier direkt gelesen.
-            fehlerpunktAusUmgebung(),
+            // KEIN vierter Parameter. Der Fehlerpunkt fuer den
+            // Teilwirkungsnachweis bleibt `null`, weil die Produktionswurzel
+            // keine Umgebungsvariable dafuer liest — ein Testhaken in
+            // `AppModule` waere ein Produktionsschalter, egal wie er heisst.
+            // Der Integrationstest konstruiert das Repository direkt und
+            // injiziert den Punkt dort.
           );
       },
     },

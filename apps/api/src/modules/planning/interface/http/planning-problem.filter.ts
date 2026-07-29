@@ -44,6 +44,7 @@ export const PLANNING_ERROR_TYPE = {
   NO_ORGANISATION: "urn:easytree:planning:no-organisation",
   AMBIGUOUS_ORGANISATION: "urn:easytree:planning:ambiguous-organisation",
   MISSING_IDEMPOTENCY_KEY: "urn:easytree:planning:missing-idempotency-key",
+  IDEMPOTENCY_KEY_REUSED: "urn:easytree:planning:idempotency-key-reused",
 } as const;
 
 export type PlanningErrorType = (typeof PLANNING_ERROR_TYPE)[keyof typeof PLANNING_ERROR_TYPE];

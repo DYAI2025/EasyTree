@@ -168,6 +168,10 @@ Zu `.gitleaks.toml`, `.prettierignore` und den beiden Markdown-Dateien (ergänzt
 Product Owner beauftragte Entsperrung der zwei geerbten CI-Baseline-Blocker. Wieder eine Lücke in
 dieser Liste, keine Scope-Erweiterung — sie erlauben keine Produktänderung.
 
+Zu `.github/workflows/ci.yml` (freigegeben am 2026-07-29 vom Product Owner): **Evidence-Wiring-Korrektur, keine Erweiterung des Feature-Scope.** Der Ausschluss weiter oben gilt unveraendert fuer eine _Gate-Definition ohne Ticketbezug_; erlaubt ist ausschliesslich, einen bereits vorhandenen Integrationstest im BESTEHENDEN Job `db-gates` auszufuehren. Kein neuer Job, kein neuer Status-Check — die Jobbezeichnung bleibt `db-gates`, sonst entstuende ein Pflichtcheck, den das Ruleset nicht kennt, und `scripts/setup-branch-protection.sh` bräche.
+
+Der Grund: `apps/api/test/planning-write.integration.test.ts` belegt Idempotenz, Teilwirkungsfreiheit und Serialisierung gegen echtes PostgreSQL — und lief in keinem Job. Ein Nachweis, den niemand ausfuehrt, ist kein Nachweis.
+
 Zu `apps/api/src/app.module.ts`, `apps/web/package.json` und `pnpm-lock.yaml` (freigegeben am
 2026-07-29 vom Product Owner, Option 1): **technische Korrektur dieser Liste, keine Erweiterung
 des bestätigten Feature-Scope.** Exakt diese drei Pfade, keine Globs.
@@ -209,6 +213,7 @@ aus der bereits vorhandenen Regel `apps/web/components/planning-*.tsx`.
 - `packages/contracts/test/**`
 - `packages/domain/src/**`
 - `packages/domain/test/**`
+- `.github/workflows/ci.yml`
 - `scripts/read-through-harness.sh`
 - `supabase/migrations/*.sql`
 - `supabase/seed.sql`

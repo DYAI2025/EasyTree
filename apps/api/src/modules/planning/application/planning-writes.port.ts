@@ -52,7 +52,15 @@ export type PlanningWriteProblem =
    * koennte ein Entwurf fuer W32 eine Zeile in W40 anlegen, und die Woche, in
    * der sie erscheint, waere nicht die, in der sie angelegt wurde.
    */
-  | { readonly kind: "OUTSIDE_WEEK"; readonly tatsaechlicheWoche: string };
+  | { readonly kind: "OUTSIDE_WEEK"; readonly tatsaechlicheWoche: string }
+  /**
+   * Derselbe Idempotenzschluessel, aber eine ANDERE Anfrage.
+   *
+   * Keine Wiederholung, sondern ein Aufruferfehler. Die alte Antwort
+   * zurueckzugeben waere die schlechteste Reaktion: der Aufrufer bekaeme ein
+   * "angelegt" fuer etwas, das er nie geschickt hat.
+   */
+  | { readonly kind: "IDEMPOTENCY_KEY_REUSED" };
 
 export type CreateAssignmentResult =
   | {

@@ -113,6 +113,15 @@ function problemFor(problem: PlanningWriteProblem): Error {
         title: "Überschneidender Einsatz",
         detail: `Diese Person ist in diesem Zeitraum bereits eingeplant: ${problem.overlap.startsAtUtc.toISOString()} bis ${problem.overlap.endsAtUtc.toISOString()}. Der Entwurf wurde NICHT gespeichert.`,
       });
+    case "IDEMPOTENCY_KEY_REUSED":
+      // 409 und nicht 400: die Anfrage ist fuer sich genommen gueltig, sie
+      // steht nur im Widerspruch zu einem bereits abgeschlossenen Vorgang.
+      return new ConflictException({
+        type: PLANNING_ERROR_TYPE.IDEMPOTENCY_KEY_REUSED,
+        title: "Idempotenzschlüssel bereits für eine andere Anfrage verwendet",
+        detail:
+          "Dieser Idempotenzschlüssel gehört zu einem anderen Einsatz. Für einen neuen Einsatz einen neuen Schlüssel verwenden; für einen Wiederholungsversuch dieselbe Anfrage senden.",
+      });
     case "OUTSIDE_WEEK":
       return new BadRequestException({
         type: PLANNING_ERROR_TYPE.OUTSIDE_WEEK,

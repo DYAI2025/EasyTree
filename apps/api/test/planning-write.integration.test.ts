@@ -43,6 +43,21 @@ const clients: Client[] = [];
 const EMPLOYEE_ALPHA = "00000000-0000-4000-8000-0000004010a1";
 const WORKSITE_ALPHA = "00000000-0000-4000-8000-0000005010a1";
 
+/**
+ * Zweite AKTIVE Person, vom Test selbst angelegt.
+ *
+ * `supabase/seed.sql` hat in Organisation Alpha genau eine aktive Person; die
+ * zweite Seed-Zeile ist ausdruecklich inaktiv. Fuer das Entwurfs-Wettrennen
+ * werden aber zwei VERSCHIEDENE Personen gebraucht — sonst legt der
+ * Employee-Lock die beiden Transaktionen ohnehin hintereinander, und der Test
+ * bewiese die falsche Serialisierung.
+ *
+ * Angelegt und wieder entfernt statt in den Seed geschrieben: der Seed ist
+ * gemeinsame Grundlage vieler Suiten, und eine zusaetzliche aktive Person
+ * wuerde dort Zaehlungen verschieben, die niemand hier ueberblickt.
+ */
+const EMPLOYEE_ALPHA_2 = "00000000-0000-4000-8000-0000004012a1";
+
 /** Woche ohne Seed-Inhalt, damit die Faelle einander nicht stoeren. */
 const WOCHE = "2026-W45";
 const START = new Date("2026-11-03T07:00:00Z");
@@ -101,6 +116,12 @@ async function raeumeWoche(client: Client): Promise<void> {
     [WOCHE],
   );
   await client.query("delete from public.plan_versions where week_key = $1", [WOCHE]);
+  await client.query(
+    `insert into public.employees (id, org_id, user_id, display_name, active)
+     values ($1, $2, null, 'Alpha Zweite (Testfixture EYT-92)', true)
+     on conflict (id) do update set active = true`,
+    [EMPLOYEE_ALPHA_2, ORG_ALPHA],
+  );
   await client.query("delete from public.idempotency_records where org_id = $1", [ORG_ALPHA]);
   await client.query("delete from public.outbox_messages where org_id = $1 and message_type = $2", [
     ORG_ALPHA,
@@ -130,7 +151,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (dbAvailable && clients[0] !== undefined) await raeumeWoche(clients[0]);
+  const ersteVerbindung = clients[0];
+  if (dbAvailable && ersteVerbindung !== undefined) {
+    await raeumeWoche(ersteVerbindung);
+    // Die selbst angelegte Person wieder entfernen — sonst waechst der
+    // Bestand mit jedem Lauf, und die naechste Suite zaehlt anders.
+    await ersteVerbindung.query("delete from public.employees where id = $1", [EMPLOYEE_ALPHA_2]);
+  }
   await Promise.all(clients.map((c) => c.end().catch(() => undefined)));
   process.stdout.write(gate.reportLine());
   gate.assertOrThrow();
@@ -361,6 +388,178 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       );
       expect(imEntwurf.rows[0]?.n).toBe("2");
       expect(ergebnis.assignment.planVersionId).not.toBe(veroeffentlicht);
+    },
+  );
+
+  dbIt("zwei parallele Anfragen mit DEMSELBEN Schluessel erzeugen nur einen Einsatz", async () => {
+    // Der Fall, den die erste Fassung nicht abdeckte: der Replay-Blick lief
+    // VOR jeder Sperre, also sahen beide Anfragen "nicht vorhanden".
+    const a = await neueVerbindung();
+    const b = await neueVerbindung();
+    await raeumeWoche(a);
+
+    const repoA = new PlanningWriteRepository(runnerAuf(a), USER_A, wochenschluessel);
+    const repoB = new PlanningWriteRepository(runnerAuf(b), USER_A, wochenschluessel);
+    const eingabe = {
+      weekKey: WOCHE,
+      employeeId: EMPLOYEE_ALPHA,
+      worksiteId: WORKSITE_ALPHA,
+      startsAtUtc: START,
+      endsAtUtc: ENDE,
+      idempotencyKey: "66666666-6666-4666-8666-666666666666",
+    };
+
+    const [x, y] = await Promise.all([
+      repoA.createAssignment(eingabe),
+      repoB.createAssignment(eingabe),
+    ]);
+
+    // Beide erfolgreich, beide mit DERSELBEN Id — eine davon als Replay.
+    expect(x.ok && y.ok).toBe(true);
+    if (!x.ok || !y.ok) return;
+    expect(y.assignment.id).toBe(x.assignment.id);
+    expect([x.replayed, y.replayed].filter(Boolean)).toHaveLength(1);
+
+    const anzahl = await a.query<{ n: string }>(
+      `select count(*) as n from public.assignments
+        where plan_version_id in (select id from public.plan_versions where week_key = $1)`,
+      [WOCHE],
+    );
+    expect(anzahl.rows[0]?.n).toBe("1");
+  });
+
+  dbIt(
+    "derselbe Schluessel mit ANDERER Anfrage wird abgelehnt, nicht als Replay beantwortet",
+    async () => {
+      const client = await neueVerbindung();
+      await raeumeWoche(client);
+      const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
+      const schluessel = "77777777-7777-4777-8777-777777777777";
+
+      const erst = await repo.createAssignment({
+        weekKey: WOCHE,
+        employeeId: EMPLOYEE_ALPHA,
+        worksiteId: WORKSITE_ALPHA,
+        startsAtUtc: START,
+        endsAtUtc: ENDE,
+        idempotencyKey: schluessel,
+      });
+      expect(erst.ok).toBe(true);
+
+      // Anderer Zeitraum, gleicher Schluessel.
+      const zweit = await repo.createAssignment({
+        weekKey: WOCHE,
+        employeeId: EMPLOYEE_ALPHA,
+        worksiteId: WORKSITE_ALPHA,
+        startsAtUtc: new Date("2026-11-04T07:00:00Z"),
+        endsAtUtc: new Date("2026-11-04T15:00:00Z"),
+        idempotencyKey: schluessel,
+      });
+      expect(zweit.ok).toBe(false);
+      if (zweit.ok) return;
+      expect(zweit.problem.kind).toBe("IDEMPOTENCY_KEY_REUSED");
+    },
+  );
+
+  dbIt("ein Retry ueberlebt eine zwischenzeitliche Deaktivierung der Person", async () => {
+    // Replay steht VOR der `active`-Pruefung. Ohne diese Reihenfolge
+    // scheiterte eine Wiederholung an einer Bedingung, die beim
+    // urspruenglichen Vorgang erfuellt war.
+    const client = await neueVerbindung();
+    await raeumeWoche(client);
+    const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
+    const eingabe = {
+      weekKey: WOCHE,
+      employeeId: EMPLOYEE_ALPHA,
+      worksiteId: WORKSITE_ALPHA,
+      startsAtUtc: START,
+      endsAtUtc: ENDE,
+      idempotencyKey: "88888888-8888-4888-8888-888888888888",
+    };
+    const erst = await repo.createAssignment(eingabe);
+    expect(erst.ok).toBe(true);
+    if (!erst.ok) return;
+
+    await client.query("update public.employees set active = false where id = $1", [
+      EMPLOYEE_ALPHA,
+    ]);
+    try {
+      const zweit = await repo.createAssignment(eingabe);
+      expect(zweit.ok).toBe(true);
+      if (!zweit.ok) return;
+      expect(zweit.assignment.id).toBe(erst.assignment.id);
+      expect(zweit.replayed).toBe(true);
+    } finally {
+      await client.query("update public.employees set active = true where id = $1", [
+        EMPLOYEE_ALPHA,
+      ]);
+    }
+  });
+
+  dbIt(
+    "zwei Personen gleichzeitig kopieren die veroeffentlichte Baseline genau einmal",
+    async () => {
+      const a = await neueVerbindung();
+      const b = await neueVerbindung();
+      await raeumeWoche(a);
+
+      // Veroeffentlichte Baseline mit EINER Zuweisung.
+      const version = await a.query<{ id: string }>(
+        `insert into public.plan_versions (org_id, week_key, published_at, published_by)
+       values ($1, $2, now(), $3) returning id`,
+        [ORG_ALPHA, WOCHE, USER_A],
+      );
+      const veroeffentlicht = version.rows[0]?.id;
+      await a.query(
+        `insert into public.assignments
+         (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc, published_at)
+       values ($1, $2, $3, $4, $5, $6, now())`,
+        [
+          ORG_ALPHA,
+          veroeffentlicht,
+          EMPLOYEE_ALPHA,
+          WORKSITE_ALPHA,
+          "2026-11-06T07:00:00Z",
+          "2026-11-06T15:00:00Z",
+        ],
+      );
+
+      const repoA = new PlanningWriteRepository(runnerAuf(a), USER_A, wochenschluessel);
+      const repoB = new PlanningWriteRepository(runnerAuf(b), USER_A, wochenschluessel);
+      const basis = { weekKey: WOCHE, worksiteId: WORKSITE_ALPHA };
+
+      // VERSCHIEDENE Personen, damit der Employee-Lock die beiden nicht ohnehin
+      // hintereinander legt — nur so ist das Entwurfs-Wettrennen echt.
+      const [x, y] = await Promise.all([
+        repoA.createAssignment({
+          ...basis,
+          employeeId: EMPLOYEE_ALPHA,
+          startsAtUtc: START,
+          endsAtUtc: ENDE,
+          idempotencyKey: "99999999-9999-4999-8999-99999999999a",
+        }),
+        repoB.createAssignment({
+          ...basis,
+          employeeId: EMPLOYEE_ALPHA_2,
+          startsAtUtc: new Date("2026-11-03T16:00:00Z"),
+          endsAtUtc: new Date("2026-11-03T20:00:00Z"),
+          idempotencyKey: "99999999-9999-4999-8999-99999999999b",
+        }),
+      ]);
+      expect(x.ok && y.ok).toBe(true);
+      if (!x.ok || !y.ok) return;
+      expect(x.assignment.planVersionId).toBe(y.assignment.planVersionId);
+
+      // Baseline genau einmal, beide neuen Einsaetze genau einmal: drei Zeilen.
+      const zeilen = await a.query<{ starts_at_utc: Date }>(
+        "select starts_at_utc from public.assignments where plan_version_id = $1 order by starts_at_utc",
+        [x.assignment.planVersionId],
+      );
+      expect(zeilen.rows).toHaveLength(3);
+      const baseline = zeilen.rows.filter(
+        (r) => r.starts_at_utc.toISOString() === "2026-11-06T07:00:00.000Z",
+      );
+      expect(baseline).toHaveLength(1);
     },
   );
 });

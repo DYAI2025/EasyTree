@@ -84,6 +84,11 @@ interface OrgRow {
   readonly time_zone: string;
 }
 
+interface VersionRow {
+  readonly id: string;
+  readonly published_at: Date | null;
+}
+
 interface IdRow {
   readonly id: string;
 }
@@ -107,8 +112,31 @@ interface OverlapQueryRow {
   readonly ends_at_utc: Date;
 }
 
-interface SubjectRow {
+interface IdempotencyRow {
   readonly subject_id: string;
+  readonly request_fingerprint: string;
+}
+
+/**
+ * Stabiler Fingerabdruck der Anfrage.
+ *
+ * Kanonisch in fester Feldreihenfolge, Zeitstempel als ISO-8601 — nicht
+ * `JSON.stringify(input)`: dessen Reihenfolge haengt an der Konstruktion des
+ * Objekts, und ein umsortiertes Literal wuerde dieselbe Anfrage plötzlich als
+ * andere lesen. Der Idempotenzschluessel selbst geht NICHT ein, sonst waere der
+ * Vergleich tautologisch.
+ *
+ * Kein Hash: der Wert ist kurz, und ein Klartextvergleich laesst sich im
+ * Fehlerfall lesen. Personenbezug entsteht nicht — es sind Uuids und Instants.
+ */
+function fingerprintOf(input: CreateAssignmentInput): string {
+  return [
+    input.weekKey,
+    input.employeeId,
+    input.worksiteId,
+    input.startsAtUtc.toISOString(),
+    input.endsAtUtc.toISOString(),
+  ].join("|");
 }
 
 /** Vorgangsname im Idempotenzspeicher. Siehe Migration 0012. */
@@ -174,17 +202,36 @@ export class PlanningWriteRepository implements PlanningWrites {
         throw new Error(`EYT-92: ungueltiges Intervall erreichte die Domain (${intervall.error}).`);
       }
 
-      // Bestand derselben Woche — Entwurf, sonst zuletzt Veroeffentlichtes.
-      // Dieselbe Auswahl wie im Lesepfad, damit die Pruefung gegen das prueft,
-      // was die Planerin auch sieht.
-      const bestand = await tx.query<RawExistingRow>(
-        `select a.id, a.employee_id, a.worksite_id, a.starts_at_utc, a.ends_at_utc
-           from public.assignments a
-           join public.plan_versions pv on pv.id = a.plan_version_id
-          where pv.week_key = $1
-          order by a.starts_at_utc asc, a.id asc`,
+      // Bestand des SICHTBAREN Standes — Entwurf, sonst zuletzt
+      // Veroeffentlichtes, sonst leer.
+      //
+      // Die erste Fassung lud alle Zuweisungen ALLER Versionen derselben
+      // Woche. Das widersprach dem eigenen Kommentar und der Leseroute: eine
+      // vor Wochen ueberholte Version haette Konflikte gegen einen Stand
+      // erzeugt, den niemand mehr sieht. Die Auswahl ist deshalb identisch zu
+      // `PlanningWindowRepository` — Entwurf hat Vorrang, sonst gewinnt die
+      // zuletzt veroeffentlichte Version, und der Id-Tie-Breaker entscheidet
+      // bei Zeitstempelgleichstand.
+      const versionen = await tx.query<VersionRow>(
+        `select id, published_at from public.plan_versions
+          where week_key = $1
+          order by published_at asc nulls last, created_at asc, id asc`,
         [input.weekKey],
       );
+      const entwurfVersion = versionen.rows.find((r) => r.published_at === null) ?? null;
+      const veroeffentlichte = versionen.rows.filter((r) => r.published_at !== null);
+      const quelle = entwurfVersion ?? veroeffentlichte[veroeffentlichte.length - 1] ?? null;
+
+      const bestand =
+        quelle === null
+          ? { rows: [] as RawExistingRow[] }
+          : await tx.query<RawExistingRow>(
+              `select id, employee_id, worksite_id, starts_at_utc, ends_at_utc
+                 from public.assignments
+                where plan_version_id = $1
+                order by starts_at_utc asc, id asc`,
+              [quelle.id],
+            );
 
       const alsDraft = (
         id: string,
@@ -274,6 +321,59 @@ export class PlanningWriteRepository implements PlanningWrites {
         };
       }
 
+      // ---------------------------------------------------------------
+      // Wiederholungsschutz — serialisiert, und VOR jeder veraenderlichen Pruefung
+      // ---------------------------------------------------------------
+      // Zwei Aenderungen gegenueber der ersten Fassung, beide notwendig:
+      //
+      // 1. Die Sperre steht VOR der Abfrage. Ohne sie lesen zwei gleichzeitige
+      //    Anfragen mit demselben Schluessel beide "nicht vorhanden", legen
+      //    beide einen Einsatz an, und erst der zweite Insert in
+      //    `idempotency_records` scheitert — der Aufrufer bekaeme einen
+      //    Serverfehler statt seiner Wiederholung.
+      //
+      // 2. Der ganze Block steht VOR der Auswaehlbarkeitspruefung. `active` ist
+      //    veraenderlich: wird eine Person nach dem ersten Aufruf deaktiviert,
+      //    scheiterte ein spaeterer Retry an einer Bedingung, die beim
+      //    urspruenglichen Vorgang erfuellt war. Eine Wiederholung darf nicht
+      //    davon abhaengen, was sich seither geaendert hat.
+      await tx.query("select app.lock_idempotency_key($1, $2)", [OPERATION, input.idempotencyKey]);
+
+      const fingerabdruck = fingerprintOf(input);
+      const frueher = await tx.query<IdempotencyRow>(
+        `select subject_id, request_fingerprint from public.idempotency_records
+          where operation = $1 and idempotency_key = $2`,
+        [OPERATION, input.idempotencyKey],
+      );
+      const bekannt = frueher.rows[0];
+      if (bekannt !== undefined) {
+        if (bekannt.request_fingerprint !== fingerabdruck) {
+          // Derselbe Schluessel, andere Anfrage. Das ist keine Wiederholung,
+          // sondern ein Aufruferfehler — und die alte Antwort zurueckzugeben
+          // waere die schlechteste Reaktion: der Aufrufer bekaeme ein
+          // "angelegt" fuer etwas, das er nie geschickt hat.
+          return {
+            ok: false as const,
+            problem: { kind: "IDEMPOTENCY_KEY_REUSED" as const },
+          };
+        }
+        const wieder = await tx.query<AssignmentInsertRow>(
+          `select id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc
+             from public.assignments where id = $1`,
+          [bekannt.subject_id],
+        );
+        const zeile = wieder.rows[0];
+        if (zeile === undefined) {
+          // Der Schluessel ist bekannt, das Objekt nicht mehr da. Still einen
+          // NEUEN Einsatz anzulegen waere die schlechteste Antwort: der
+          // Aufrufer bekaeme fuer denselben Vorgang zwei verschiedene Ids.
+          throw new Error(
+            `EYT-92: Idempotenzschluessel verweist auf Einsatz ${bekannt.subject_id}, den es nicht mehr gibt.`,
+          );
+        }
+        return { ok: true as const, assignment: zuAssignment(zeile), replayed: true };
+      }
+
       // Auswaehlbarkeit serverseitig, nicht nur im Formular. RLS macht fremde
       // Zeilen unsichtbar, also bedeutet "keine Zeile" hier zugleich "gehoert
       // einem anderen Mandanten" und "existiert nicht" — und genau diese
@@ -295,68 +395,45 @@ export class PlanningWriteRepository implements PlanningWrites {
       }
 
       // ---------------------------------------------------------------
-      // Wiederholungsschutz: hat dieser Schluessel schon ein Ergebnis?
-      // ---------------------------------------------------------------
-      // VOR jeder Schreibwirkung. Steht die Abfrage weiter unten, hat der
-      // zweite Aufruf bereits einen Entwurf angelegt, bevor er merkt, dass er
-      // eine Wiederholung ist.
-      const frueher = await tx.query<SubjectRow>(
-        `select subject_id from public.idempotency_records
-          where operation = $1 and idempotency_key = $2`,
-        [OPERATION, input.idempotencyKey],
-      );
-      const bekannt = frueher.rows[0];
-      if (bekannt !== undefined) {
-        const wieder = await tx.query<AssignmentInsertRow>(
-          `select id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc
-             from public.assignments where id = $1`,
-          [bekannt.subject_id],
-        );
-        const zeile = wieder.rows[0];
-        if (zeile === undefined) {
-          // Der Schluessel ist bekannt, das Objekt nicht mehr da. Still einen
-          // NEUEN Einsatz anzulegen waere die schlechteste Antwort: der
-          // Aufrufer bekaeme fuer denselben Vorgang zwei verschiedene Ids.
-          throw new Error(
-            `EYT-92: Idempotenzschluessel verweist auf Einsatz ${bekannt.subject_id}, den es nicht mehr gibt.`,
-          );
-        }
-        return { ok: true as const, assignment: zuAssignment(zeile), replayed: true };
-      }
-
-      // ---------------------------------------------------------------
       // Pruefen und Einfuegen serialisieren
       // ---------------------------------------------------------------
       // Ab hier darf keine zweite Transaktion desselben Mandanten dieselbe
       // Person gleichzeitig einplanen. Siehe Migration 0012: `read committed`
       // laesst sonst beide Ueberlappungspruefungen durchgehen, weil keine die
       // noch nicht committete Zeile der anderen sieht.
-      await tx.query("select app.lock_employee_planning($1, $2)", [org.id, input.employeeId]);
+      await tx.query("select app.lock_employee_planning($1)", [input.employeeId]);
 
-      // Entwurf der Woche holen oder anlegen. `on conflict do nothing` plus
-      // nachgelagertes `select` statt `returning` allein: bei gleichzeitigem
-      // Anlegen liefert `returning` keine Zeile, und ein blindes Weiterlaufen
-      // haette hier `undefined` als plan_version_id eingesetzt. Der partielle
-      // Unique-Index `plan_versions_one_draft_per_week` ist die Autoritaet.
-      const entwurfVorher = await tx.query<IdRow>(
-        `select id from public.plan_versions
-          where week_key = $1 and published_at is null`,
-        [input.weekKey],
-      );
-      const entwurfExistierte = entwurfVorher.rows.length > 0;
-
-      await tx.query(
+      // Entwurf der Woche holen oder anlegen — und WISSEN, wer ihn angelegt hat.
+      //
+      // Die erste Fassung fragte vorher ab, ob schon ein Entwurf existiert.
+      // Das war ein Wettrennen: zwei Transaktionen fuer verschiedene Personen
+      // derselben Woche haetten beide "existiert nicht" gesehen und beide die
+      // veroeffentlichte Baseline kopiert — der Entwurf traege danach jede
+      // Zeile doppelt.
+      //
+      // `returning id` beantwortet die Frage ohne Vorabblick: nur die
+      // Transaktion, die tatsaechlich eine Zeile eingefuegt hat, bekommt eine
+      // Id zurueck. `on conflict do nothing` liefert der anderen nichts, und
+      // der partielle Unique-Index `plan_versions_one_draft_per_week` ist die
+      // Autoritaet dafuer, dass es genau eine gibt.
+      const angelegt = await tx.query<IdRow>(
         `insert into public.plan_versions (org_id, week_key)
          select id, $1 from public.organizations
-         on conflict do nothing`,
+         on conflict do nothing
+         returning id`,
         [input.weekKey],
       );
-      const entwuerfe = await tx.query<IdRow>(
-        `select id from public.plan_versions
-          where week_key = $1 and published_at is null`,
-        [input.weekKey],
-      );
-      const entwurf = entwuerfe.rows[0];
+      const selbstAngelegt = angelegt.rows[0];
+
+      const entwurf =
+        selbstAngelegt ??
+        (
+          await tx.query<IdRow>(
+            `select id from public.plan_versions
+              where week_key = $1 and published_at is null`,
+            [input.weekKey],
+          )
+        ).rows[0];
       if (entwurf === undefined) {
         // Kein stiller Erfolg. Wenn nach dem Einfuegen kein Entwurf sichtbar
         // ist, stimmt eine Annahme nicht — das gehoert als Fehler gemeldet,
@@ -378,7 +455,7 @@ export class PlanningWriteRepository implements PlanningWrites {
       // Version. `published_at` bleibt dabei NULL: die Kopien sind Entwurf,
       // nicht veroeffentlicht, und die Exclusion-Constraint aus 0010 greift
       // fuer sie bewusst nicht.
-      if (!entwurfExistierte) {
+      if (selbstAngelegt !== undefined) {
         await tx.query(
           `insert into public.assignments
              (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
@@ -493,9 +570,10 @@ export class PlanningWriteRepository implements PlanningWrites {
       // damit beim Lesen klar ist, dass sie den ABGESCHLOSSENEN Vorgang
       // festhaelt.
       await tx.query(
-        `insert into public.idempotency_records (org_id, operation, idempotency_key, subject_id)
-         values ($1, $2, $3, $4)`,
-        [org.id, OPERATION, input.idempotencyKey, zeile.id],
+        `insert into public.idempotency_records
+           (org_id, operation, idempotency_key, subject_id, request_fingerprint)
+         values ($1, $2, $3, $4, $5)`,
+        [org.id, OPERATION, input.idempotencyKey, zeile.id, fingerprintOf(input)],
       );
 
       this.vielleichtScheitern("outbox");
@@ -509,18 +587,21 @@ export class PlanningWriteRepository implements PlanningWrites {
    *
    * Ohne einen erzwungenen Fehler MITTEN im Schreibvorgang laesst sich nicht
    * belegen, dass die Transaktionsklammer haelt — ein gruener Normalfall zeigt
-   * nur, dass nichts schiefging. Der Punkt wird von aussen benannt
-   * (`EASYTREE_FAULT_AFTER`), damit der Test nicht den Quelltext aendern muss;
-   * eine zurueckgenommene Quelltextaenderung liefe nie wieder.
+   * nur, dass nichts schiefging.
+   *
+   * Der Punkt kommt als KONSTRUKTORARGUMENT, nicht aus der Umgebung. Eine
+   * fruehere Fassung las `EASYTREE_FAULT_AFTER` in `AppModule`; das war
+   * falsch, denn ein Testhaken in der Produktionswurzel ist ein
+   * Produktionsschalter, egal wie er heisst. Der Integrationstest konstruiert
+   * dieses Repository ohnehin direkt und setzt den Punkt dort — die
+   * Produktionsverdrahtung uebergibt ihn nie und laeuft damit immer auf `null`.
    *
    * Der Schalter kann nur SCHEITERN lassen, nie etwas gruen faerben. Er ist
-   * damit das Gegenteil eines Skip-Schalters — und `loadConfig` kennt ihn
-   * nicht, weil `EASYTREE_*` nach CLAUDE.md Tests steuert und niemals die
-   * Anwendung.
+   * damit das Gegenteil eines Skip-Schalters.
    */
   private vielleichtScheitern(punkt: "assignment" | "audit" | "outbox"): void {
     if (this.fehlerNach === punkt) {
-      throw new Error(`EYT-92: erzwungener Fehler nach "${punkt}" (EASYTREE_FAULT_AFTER).`);
+      throw new Error(`EYT-92: erzwungener Fehler nach "${punkt}" (Testhaken).`);
     }
   }
 }
