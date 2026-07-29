@@ -443,6 +443,26 @@ const NEU_DATUM = "2026-10-01";
 const NEU_BEGINN = "07:00";
 const NEU_ENDE = "15:00";
 
+/**
+ * Woche oeffnen und warten, bis der SERVERSTAND wirklich da ist.
+ *
+ * `page.goto` allein genuegt nicht: die Ansicht laedt das Fenster in einem
+ * Effekt nach, und eine Momentaufnahme unmittelbar danach liefert die noch
+ * leere Liste. Ein Vorher-Nachher-Vergleich auf dieser Basis vergleicht den
+ * Ladezustand mit dem Endzustand und schlaegt sporadisch fehl — genau das ist
+ * im Lauf 30409513318 passiert.
+ *
+ * Gewartet wird auf das Formular UND auf die Liste: das Formular erscheint erst
+ * mit `resources`, die Liste erst mit den Zuweisungen. Beide zusammen heissen,
+ * dass die Antwort vollstaendig verarbeitet ist.
+ */
+async function wocheOeffnen(seite: import("@playwright/test").Page): Promise<string[]> {
+  await seite.goto(SEITE);
+  await expect(seite.getByTestId("einsatzformular")).toBeVisible();
+  await expect(seite.getByTestId("planungsfenster-liste")).toBeVisible();
+  return sichtbareZuweisungen(seite);
+}
+
 async function formularAusfuellen(
   seite: import("@playwright/test").Page,
   beginn: string,
@@ -502,8 +522,7 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
   test("Schritt 3: ein gueltiger Entwurf wird serverseitig gespeichert und sichtbar", async ({
     page,
   }) => {
-    await page.goto(SEITE);
-    const vorher = await sichtbareZuweisungen(page);
+    const vorher = await wocheOeffnen(page);
 
     await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE);
     const [antwort] = await Promise.all([
@@ -529,8 +548,7 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
   test("Schritt 4: ein ueberlappender Entwurf wird mit verstaendlichem Grund abgelehnt", async ({
     page,
   }) => {
-    await page.goto(SEITE);
-    const vorher = await sichtbareZuweisungen(page);
+    const vorher = await wocheOeffnen(page);
 
     // Genau derselbe Slot wie im vorigen Test — die Ueberlappung ist echt.
     await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE);
@@ -548,8 +566,9 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
     await expect(meldung).toContainText(/bereits eingeplant/i);
 
     // Keine Teilwirkung: nach dem Reload steht die Liste unveraendert.
-    await page.reload();
-    expect(await sichtbareZuweisungen(page)).toEqual(vorher);
+    // `wocheOeffnen` statt `reload`, damit hier dieselbe Wartebedingung gilt
+    // wie oben — sonst vergliche der Test den Ladezustand mit dem Endzustand.
+    expect(await wocheOeffnen(page)).toEqual(vorher);
   });
 
   test("Schritt 4: ein ungueltiges Intervall erreicht den Server gar nicht erst", async ({
@@ -577,24 +596,20 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
     page,
     browser,
   }) => {
-    await page.goto(SEITE);
-    const nachSpeichern = await sichtbareZuweisungen(page);
+    const nachSpeichern = await wocheOeffnen(page);
     const provenienzVorher = await provenienz(page);
     // Der Speichertest hat genau eine Zeile ergaenzt; steht sie nicht mehr da,
     // war sie nie in PostgreSQL.
     expect(nachSpeichern.length).toBeGreaterThan(1);
 
-    await page.reload();
-    expect(await sichtbareZuweisungen(page)).toEqual(nachSpeichern);
+    expect(await wocheOeffnen(page)).toEqual(nachSpeichern);
     expect(await provenienz(page)).toEqual(provenienzVorher);
 
     const origin = new URL(page.url()).origin;
     const zweiter = await browser.newContext({ baseURL: origin });
     try {
       const zweiteSeite = await zweiter.newPage();
-      await zweiteSeite.goto(SEITE);
-      await expect(zweiteSeite.getByTestId("planungsfenster-liste")).toBeVisible();
-      expect(await sichtbareZuweisungen(zweiteSeite)).toEqual(nachSpeichern);
+      expect(await wocheOeffnen(zweiteSeite)).toEqual(nachSpeichern);
       expect(await provenienz(zweiteSeite)).toEqual(provenienzVorher);
     } finally {
       await zweiter.close();
