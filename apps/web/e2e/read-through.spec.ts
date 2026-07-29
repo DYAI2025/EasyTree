@@ -642,6 +642,42 @@ const RESPONSIVE_CASES = [
 ] as const;
 
 /**
+ * Per Tastatur zum naechsten fachlichen Form-Control wechseln.
+ *
+ * Native date/time-Inputs besitzen in Chromium mehrere interne Segmente. Beim
+ * Wechsel zwischen Tag, Monat, Jahr beziehungsweise Stunde und Minute bleibt
+ * `document.activeElement` deshalb derselbe Input-Host. Die fachliche
+ * Reihenfolge ist erst verletzt, wenn ein ANDERES, unerwartetes Control
+ * dazwischenliegt oder das erwartete Ziel nach einer begrenzten Zahl von
+ * Tab-Schritten nicht erreicht wird.
+ */
+async function tabZumNaechstenFormfeld(
+  seite: import("@playwright/test").Page,
+  aktuell: import("@playwright/test").Locator,
+  ziel: import("@playwright/test").Locator,
+): Promise<void> {
+  const aktuellId = await aktuell.getAttribute("data-testid");
+  const zielId = await ziel.getAttribute("data-testid");
+  expect(aktuellId).not.toBeNull();
+  expect(zielId).not.toBeNull();
+
+  for (let schritt = 1; schritt <= 12; schritt += 1) {
+    await seite.keyboard.press("Tab");
+    const aktivId = await seite.evaluate(
+      () => document.activeElement?.getAttribute("data-testid") ?? null,
+    );
+    if (aktivId === zielId) return;
+    if (aktivId !== aktuellId) {
+      throw new Error(
+        `Unerwartetes Fokusziel zwischen ${aktuellId} und ${zielId}: ${aktivId ?? "<ohne data-testid>"}.`,
+      );
+    }
+  }
+
+  throw new Error(`${zielId} wurde von ${aktuellId} aus nicht per Tab erreicht.`);
+}
+
+/**
  * EYT-104: dieselbe reale Kernreise in Desktop- und mobiler Kernbreite.
  *
  * Kein zweites Mock-E2E: beide Fälle schreiben über Web-Origin, NestJS, RLS
@@ -676,7 +712,8 @@ test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () 
       // Indikator. Ein programmatischer Start am ersten Feld vermeidet, dass
       // Headernavigation mit der fachlichen Reihenfolge verwechselt wird.
       await employee.focus();
-      for (const ziel of [employee, worksite, datum, beginn, ende]) {
+      const fokusziele = [employee, worksite, datum, beginn, ende, speichern];
+      for (const [index, ziel] of fokusziele.entries()) {
         await expect(ziel).toBeFocused();
         const focus = await ziel.evaluate((element) => {
           const style = getComputedStyle(element);
@@ -687,9 +724,11 @@ test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () 
         });
         expect(focus.outlineStyle).not.toBe("none");
         expect(focus.outlineWidth).toBeGreaterThan(0);
-        await page.keyboard.press("Tab");
+        const naechstesZiel = fokusziele[index + 1];
+        if (naechstesZiel !== undefined) {
+          await tabZumNaechstenFormfeld(page, ziel, naechstesZiel);
+        }
       }
-      await expect(speichern).toBeFocused();
 
       const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
       expect(axe.violations).toEqual([]);
