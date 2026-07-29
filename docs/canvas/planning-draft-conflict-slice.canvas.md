@@ -114,7 +114,7 @@ Der erlaubte Scope endet nach dem gespeicherten oder nachvollziehbar abgelehnten
 
 ## Allowed change scope
 
-Abgeleitet aus CAN-011 und den sechs Sprint-4-Tickets — enger als der bestätigte Feature-Scope,
+Abgeleitet aus CAN-011 und den acht Sprint-4-Tickets — enger als der bestätigte Feature-Scope,
 nie weiter. Jede Ausweitung ist eine Nutzerentscheidung, keine Agentenentscheidung.
 
 Zur Form, weil sie hier funktional ist: `plumbline-scope-check` liest ausschließlich
@@ -193,10 +193,18 @@ im selben Befund und wurde **nicht** durch eine Listenerweiterung gelöst, sonde
 `planning-assignment-form.tsx` umbenannt — sie fiel schlicht durch einen falsch gewählten Namen
 aus der bereits vorhandenen Regel `apps/web/components/planning-*.tsx`.
 
+Zu `packages/contracts/package.json`, `packages/contracts/src/testing/**` und
+`apps/web/app/globals.css` (ergänzt am 2026-07-29): **technische Nachweis-Pfade für EYT-103 und
+EYT-104, keine Erweiterung des bestätigten Feature-Scope.** Der test-only Package-Subpath stellt
+dieselben Gateway-Verträge für Mock und echten HTTP-Testserver bereit; die Architekturregel
+verbietet seinen Import in Produktionscode. Die globale Stylesheet-Datei enthält ausschließlich
+die für den geforderten 375-px-Nachweis nötigen bestehenden Formular- und Kartenregeln.
+
 - `apps/api/src/app.module.ts`
 - `apps/api/src/modules/planning/**`
 - `apps/api/src/platform/database/**`
 - `apps/api/test/**`
+- `apps/web/app/globals.css`
 - `apps/web/package.json`
 - `pnpm-lock.yaml`
 - `apps/web/app/planung/**`
@@ -209,6 +217,8 @@ aus der bereits vorhandenen Regel `apps/web/components/planning-*.tsx`.
 - `packages/contracts/src/openapi/**`
 - `packages/contracts/src/http/planning-gateway.ts`
 - `packages/contracts/src/mock/planning.ts`
+- `packages/contracts/src/testing/**`
+- `packages/contracts/package.json`
 - `packages/contracts/openapi/v1.json`
 - `packages/contracts/test/**`
 - `packages/domain/src/**`

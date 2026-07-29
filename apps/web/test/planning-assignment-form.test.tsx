@@ -18,6 +18,8 @@
  *    wird „rechnet Wanduhrzeit in der Zone der ORGANISATION" rot, sobald die
  *    Testmaschine nicht in Europe/Berlin steht — deshalb prueft dieser Fall den
  *    UTC-Wert direkt und nicht ueber die Anzeige.
+ * 5. Entfernt man `htmlFor` oder die sichtbare Beschriftung eines Feldes, wird
+ *    „gibt allen Bedienelementen zugängliche Namen" rot.
  */
 import type { PlanningWindow } from "@easytree/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -82,6 +84,16 @@ describe("AssignmentForm — Auswahl aus echten Serverdaten", () => {
     expect(screen.getByTestId("feld-datum").getAttribute("type")).toBe("date");
     expect(screen.getByTestId("feld-beginn").getAttribute("type")).toBe("time");
     expect(screen.getByTestId("feld-ende").getAttribute("type")).toBe("time");
+  });
+
+  it("gibt allen Bedienelementen zugängliche Namen", () => {
+    render(<AssignmentForm window={fenster()} onSubmit={vi.fn()} />);
+    expect(screen.getByRole("combobox", { name: "Mitarbeitende" })).not.toBeNull();
+    expect(screen.getByRole("combobox", { name: "Baustelle" })).not.toBeNull();
+    expect(screen.getByLabelText("Datum")).not.toBeNull();
+    expect(screen.getByLabelText(/Beginn/)).not.toBeNull();
+    expect(screen.getByLabelText(/Ende/)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Entwurf speichern" })).not.toBeNull();
   });
 });
 
@@ -171,6 +183,17 @@ describe("AssignmentForm — vollstaendige Eingabe", () => {
     expect((screen.getByTestId("feld-datum") as HTMLInputElement).value).toBe("");
   });
 
+  it("meldet Erfolg mit Text und Statusrolle statt nur über Farbe", async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ ok: true });
+    render(<AssignmentForm window={fenster()} onSubmit={onSubmit} />);
+    await fuelleVollstaendig();
+    await userEvent.click(screen.getByTestId("einsatz-speichern"));
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toMatch(/gespeichert/i);
+    expect(status.getAttribute("data-state")).toBe("erfolg");
+  });
+
   it("zeigt den Serverbefund, wenn das Speichern scheitert", async () => {
     const onSubmit = vi.fn().mockResolvedValue({
       ok: false,
@@ -183,6 +206,11 @@ describe("AssignmentForm — vollstaendige Eingabe", () => {
     expect((await screen.findByTestId("einsatzformular-meldung")).textContent).toMatch(
       /bereits eingeplant/i,
     );
+    const form = screen.getByTestId("einsatzformular");
+    const message = screen.getByTestId("einsatzformular-meldung");
+    expect(form.getAttribute("aria-describedby")).toBe(message.id);
+    expect(message.getAttribute("role")).toBe("alert");
+    expect(message.getAttribute("data-state")).toBe("fehler");
   });
 
   it("leert das Formular NICHT, wenn das Speichern scheitert", async () => {

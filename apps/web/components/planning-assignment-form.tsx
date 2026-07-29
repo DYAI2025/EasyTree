@@ -173,9 +173,13 @@ export interface AssignmentFormProps {
   }) => Promise<{ ok: boolean; failure?: GatewayFailure; detail?: string }>;
 }
 
+type FormularMeldung =
+  | { readonly art: "erfolg"; readonly text: string }
+  | { readonly art: "fehler"; readonly text: string };
+
 export function AssignmentForm({ window: fenster, onSubmit }: AssignmentFormProps) {
   const [eingabe, setEingabe] = useState<EntwurfEingabe>(LEER);
-  const [meldung, setMeldung] = useState<string | null>(null);
+  const [meldung, setMeldung] = useState<FormularMeldung | null>(null);
   const [laeuft, setLaeuft] = useState(false);
   const idPrefix = useId();
 
@@ -214,7 +218,7 @@ export function AssignmentForm({ window: fenster, onSubmit }: AssignmentFormProp
 
     const intervall = zuIntervall(eingabe, fenster.timeZone);
     if (!intervall.ok) {
-      setMeldung(UMRECHNUNG_TEXT[intervall.fehler]);
+      setMeldung({ art: "fehler", text: UMRECHNUNG_TEXT[intervall.fehler] });
       return;
     }
 
@@ -227,15 +231,17 @@ export function AssignmentForm({ window: fenster, onSubmit }: AssignmentFormProp
       });
       if (ergebnis.ok) {
         setEingabe(LEER);
-        setMeldung(null);
+        setMeldung({ art: "erfolg", text: "Der Entwurf wurde gespeichert." });
         return;
       }
-      setMeldung(
-        ergebnis.detail ??
+      setMeldung({
+        art: "fehler",
+        text:
+          ergebnis.detail ??
           (ergebnis.failure === undefined
             ? "Der Entwurf wurde nicht gespeichert."
             : FEHLER_TEXT[ergebnis.failure]),
-      );
+      });
     } finally {
       setLaeuft(false);
     }
@@ -246,7 +252,11 @@ export function AssignmentForm({ window: fenster, onSubmit }: AssignmentFormProp
   return (
     <section aria-labelledby={feld("titel")}>
       <h3 id={feld("titel")}>Einsatz planen</h3>
-      <form data-testid="einsatzformular" onSubmit={absenden}>
+      <form
+        data-testid="einsatzformular"
+        onSubmit={absenden}
+        aria-describedby={meldung === null ? undefined : feld("meldung")}
+      >
         <label htmlFor={feld("employee")}>Mitarbeitende</label>
         <select
           id={feld("employee")}
@@ -310,8 +320,13 @@ export function AssignmentForm({ window: fenster, onSubmit }: AssignmentFormProp
       </form>
 
       {meldung === null ? null : (
-        <p data-testid="einsatzformular-meldung" role="alert">
-          {meldung}
+        <p
+          id={feld("meldung")}
+          data-testid="einsatzformular-meldung"
+          data-state={meldung.art}
+          role={meldung.art === "erfolg" ? "status" : "alert"}
+        >
+          {meldung.text}
         </p>
       )}
     </section>

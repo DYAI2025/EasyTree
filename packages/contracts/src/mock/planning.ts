@@ -10,6 +10,7 @@
  * Stale-Version-Darstellung zeigen kann, ohne dass jemand den Server abschaltet.
  */
 import { gatewayFailed, gatewayOk, type GatewayFailure, type GatewayResult } from "../gateway.js";
+import type { WriteOptions } from "../planning/gateway.js";
 import type { PlanningGateway } from "../planning/gateway.js";
 import type {
   AssignmentDto,
@@ -22,6 +23,8 @@ import type {
   PublishedPlanVersion,
   ValidatePlanCommand,
 } from "../planning/schemas.js";
+import { CreateAssignmentCommandSchema, ValidatePlanCommandSchema } from "../planning/schemas.js";
+import { IdempotencyKeySchema } from "../primitives.js";
 
 /**
  * Zustand einer einzelnen Woche.
@@ -50,8 +53,12 @@ export interface MockPlanningState {
   readonly resources: PlanningResources;
   /** Wochenschluessel -> Wochenzustand. Fehlt der Schluessel, ist die Woche leer und unveroeffentlicht. */
   readonly weeks: ReadonlyMap<string, MockWeekState>;
-  /** Fest verdrahtete Antwort der Validierung — der Mock rechnet NICHT. */
-  readonly validation: PlanValidationResult;
+  /**
+   * Fest verdrahtete oder explizit vom Test konfigurierte Validierungsantwort.
+   * Der Mock besitzt weiterhin keine eigene Fachlogik.
+   */
+  readonly validation:
+    PlanValidationResult | ((input: ValidatePlanCommand) => PlanValidationResult);
   /** Erzeugte Id fuer `createAssignment`. Kein Zufall, damit Tests reproduzierbar bleiben. */
   readonly nextAssignmentId: string;
 }
@@ -59,8 +66,17 @@ export interface MockPlanningState {
 export class MockPlanningGateway implements PlanningGateway {
   #induced: GatewayFailure | null = null;
   #lastValidated: ValidatePlanCommand | null = null;
+  readonly #assignments = new Map<string, AssignmentDto[]>();
+  readonly #idempotency = new Map<
+    string,
+    { readonly fingerprint: string; readonly assignment: AssignmentDto }
+  >();
 
-  constructor(private readonly state: MockPlanningState) {}
+  constructor(private readonly state: MockPlanningState) {
+    for (const [weekKey, week] of state.weeks) {
+      this.#assignments.set(weekKey, [...week.assignments]);
+    }
+  }
 
   /** Naechster Aufruf schlaegt mit diesem Grund fehl. `null` hebt es auf. */
   induce(failure: GatewayFailure | null): void {
@@ -88,7 +104,7 @@ export class MockPlanningGateway implements PlanningGateway {
       gatewayOk({
         weekKey: input.weekKey,
         timeZone: this.state.timeZone,
-        assignments: [...(week?.assignments ?? [])],
+        assignments: [...(this.#assignments.get(input.weekKey) ?? [])],
         // Der Mock kennt nur veroeffentlichte Staende; einen Entwurf ueber
         // einer Veroeffentlichung bildet er bewusst nicht nach. Wer diesen
         // Fall pruefen will, braucht den echten Server (EYT-50 AK10).
@@ -108,7 +124,22 @@ export class MockPlanningGateway implements PlanningGateway {
     // aber nicht ableiten, dass die Konfliktpruefung stimmt.
     this.#lastValidated = input;
     const failed = this.#maybeFail<PlanValidationResult>();
-    return Promise.resolve(failed ?? gatewayOk(this.state.validation));
+    if (failed !== null) return Promise.resolve(failed);
+    const parsed = ValidatePlanCommandSchema.safeParse(input);
+    if (!parsed.success) {
+      return Promise.resolve(
+        planningRejected(
+          "urn:easytree:planning:invalid-interval",
+          "Prüfauftrag unvollständig oder Intervall ungültig",
+          400,
+        ),
+      );
+    }
+    const validation =
+      typeof this.state.validation === "function"
+        ? this.state.validation(parsed.data)
+        : this.state.validation;
+    return Promise.resolve(gatewayOk(validation));
   }
 
   /** Zuletzt geprueter Entwurf, oder `null`, solange keiner geprueft wurde. */
@@ -116,17 +147,67 @@ export class MockPlanningGateway implements PlanningGateway {
     return this.#lastValidated;
   }
 
-  createAssignment(input: CreateAssignmentCommand): Promise<GatewayResult<AssignmentDto>> {
+  createAssignment(
+    input: CreateAssignmentCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<AssignmentDto>> {
     const failed = this.#maybeFail<AssignmentDto>();
     if (failed !== null) return Promise.resolve(failed);
-    return Promise.resolve(
-      gatewayOk({
-        id: this.state.nextAssignmentId,
-        employeeId: input.employeeId,
-        worksiteId: input.worksiteId,
-        interval: input.interval,
-      }),
+
+    const parsed = CreateAssignmentCommandSchema.safeParse(input);
+    const key = IdempotencyKeySchema.safeParse(options.idempotencyKey);
+    if (!parsed.success || !key.success) {
+      return Promise.resolve(
+        planningRejected(
+          "urn:easytree:planning:invalid-interval",
+          "Einsatz unvollständig oder Intervall ungültig",
+          400,
+        ),
+      );
+    }
+
+    const fingerprint = JSON.stringify(parsed.data);
+    const previous = this.#idempotency.get(key.data);
+    if (previous !== undefined) {
+      return Promise.resolve(
+        previous.fingerprint === fingerprint
+          ? gatewayOk(previous.assignment)
+          : planningRejected(
+              "urn:easytree:planning:idempotency-key-reused",
+              "Idempotenzschlüssel wurde für einen anderen Einsatz wiederverwendet",
+              409,
+            ),
+      );
+    }
+
+    const start = Date.parse(parsed.data.interval.startUtc);
+    const end = Date.parse(parsed.data.interval.endUtc);
+    const overlap = (this.#assignments.get(parsed.data.weekKey) ?? []).find(
+      (assignment) =>
+        assignment.employeeId === parsed.data.employeeId &&
+        Date.parse(assignment.interval.startUtc) < end &&
+        start < Date.parse(assignment.interval.endUtc),
     );
+    if (overlap !== undefined) {
+      return Promise.resolve(
+        planningRejected(
+          "urn:easytree:planning:overlapping-assignment",
+          "Mitarbeitende Person ist in diesem Zeitraum bereits eingeplant",
+          409,
+        ),
+      );
+    }
+
+    const assignment: AssignmentDto = {
+      id: this.state.nextAssignmentId,
+      employeeId: parsed.data.employeeId,
+      worksiteId: parsed.data.worksiteId,
+      interval: parsed.data.interval,
+    };
+    const assignments = this.#assignments.get(parsed.data.weekKey) ?? [];
+    this.#assignments.set(parsed.data.weekKey, [...assignments, assignment]);
+    this.#idempotency.set(key.data, { fingerprint, assignment });
+    return Promise.resolve(gatewayOk(assignment));
   }
 
   publishPlan(input: PublishPlanCommand): Promise<GatewayResult<PublishedPlanVersion>> {
@@ -161,4 +242,14 @@ export class MockPlanningGateway implements PlanningGateway {
     }
     return Promise.resolve(gatewayOk(week.publishResult));
   }
+}
+
+function planningRejected<T>(type: string, detail: string, status: number): GatewayResult<T> {
+  return gatewayFailed<T>("REJECTED", {
+    type,
+    title: status === 409 ? "Planungskonflikt" : "Ungültige Planung",
+    status,
+    detail,
+    correlationId: "mock-correlation-id",
+  });
 }

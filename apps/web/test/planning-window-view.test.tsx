@@ -8,6 +8,7 @@
  */
 import type { GatewayResult, PlanningGateway, PlanningWindow } from "@easytree/contracts";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PlanningWindowView } from "../components/planning-window-view";
@@ -43,6 +44,26 @@ const LEERE_WOCHE: PlanningWindow = {
   sourceVersion: null,
   publishedVersionId: null,
   resources: { employees: [], worksites: [] },
+};
+
+const PLANBARE_WOCHE: PlanningWindow = {
+  ...LEERE_WOCHE,
+  resources: {
+    employees: [
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        label: "Beschaeftigte A",
+        active: true,
+      },
+    ],
+    worksites: [
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        label: "Baustelle A",
+        active: true,
+      },
+    ],
+  },
 };
 
 // Ohne dieses Cleanup bleiben die gerenderten Baeume stehen und der
@@ -178,5 +199,66 @@ describe("PlanningWindowView", () => {
         erwartet,
       );
     }
+  });
+
+  it("behält den Idempotenzschlüssel bei einem unklaren Fehler für den Retry", async () => {
+    const keys: string[] = [];
+    let attempt = 0;
+    const gateway: PlanningGateway = {
+      getPlanningWindow: () => Promise.resolve({ ok: true, value: PLANBARE_WOCHE }),
+      validateDraft: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+      createAssignment: (_input, options) => {
+        keys.push(options.idempotencyKey);
+        attempt += 1;
+        return Promise.resolve(
+          attempt === 1
+            ? { ok: false, failure: "UNAVAILABLE" as const, problem: null }
+            : {
+                ok: true,
+                value: {
+                  id: "11111111-1111-4111-8111-111111111111",
+                  employeeId: PLANBARE_WOCHE.resources.employees[0]?.id ?? "",
+                  worksiteId: PLANBARE_WOCHE.resources.worksites[0]?.id ?? "",
+                  interval: {
+                    startUtc: "2026-08-03T06:00:00.000Z",
+                    endUtc: "2026-08-03T14:00:00.000Z",
+                  },
+                },
+              },
+        );
+      },
+      publishPlan: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+    };
+
+    render(
+      <PlanningGatewayProvider gateway={gateway}>
+        <PlanningWindowView weekKey="2026-W32" />
+      </PlanningGatewayProvider>,
+    );
+    await screen.findByTestId("einsatzformular");
+
+    await userEvent.selectOptions(
+      screen.getByTestId("feld-employee"),
+      PLANBARE_WOCHE.resources.employees[0]?.id ?? "",
+    );
+    await userEvent.selectOptions(
+      screen.getByTestId("feld-worksite"),
+      PLANBARE_WOCHE.resources.worksites[0]?.id ?? "",
+    );
+    await userEvent.type(screen.getByTestId("feld-datum"), "2026-08-03");
+    await userEvent.type(screen.getByTestId("feld-beginn"), "08:00");
+    await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
+
+    await userEvent.click(screen.getByTestId("einsatz-speichern"));
+    await screen.findByRole("alert");
+    await userEvent.click(screen.getByTestId("einsatz-speichern"));
+    await screen.findByRole("status");
+
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
   });
 });

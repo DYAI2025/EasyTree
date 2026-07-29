@@ -14,6 +14,7 @@
  *   - Organisation Beta haelt b5510001 in derselben Woche
  */
 import { PlanningWindowSchema } from "@easytree/contracts";
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 const WOCHE = "2026-W40";
@@ -472,10 +473,11 @@ async function formularAusfuellen(
   seite: import("@playwright/test").Page,
   beginn: string,
   ende: string,
+  datum = NEU_DATUM,
 ): Promise<void> {
   await seite.getByTestId("feld-employee").selectOption(A_PERSON);
   await seite.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
-  await seite.getByTestId("feld-datum").fill(NEU_DATUM);
+  await seite.getByTestId("feld-datum").fill(datum);
   await seite.getByTestId("feld-beginn").fill(beginn);
   await seite.getByTestId("feld-ende").fill(ende);
 }
@@ -620,4 +622,127 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
       await zweiter.close();
     }
   });
+});
+
+const RESPONSIVE_CASES = [
+  {
+    name: "1440px",
+    viewport: { width: 1440, height: 900 },
+    datum: "2026-10-02",
+    beginn: "07:00",
+    ende: "09:00",
+  },
+  {
+    name: "375px",
+    viewport: { width: 375, height: 812 },
+    datum: "2026-10-02",
+    beginn: "10:00",
+    ende: "12:00",
+  },
+] as const;
+
+/**
+ * EYT-104: dieselbe reale Kernreise in Desktop- und mobiler Kernbreite.
+ *
+ * Kein zweites Mock-E2E: beide Fälle schreiben über Web-Origin, NestJS, RLS
+ * und PostgreSQL. Unterschiedliche Slots verhindern, dass der zweite Viewport
+ * nur den Konflikt des ersten sieht.
+ */
+test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () => {
+  for (const fall of RESPONSIVE_CASES) {
+    test(`${fall.name}: Speichern, Konflikt und Reload bleiben barrierearm bedienbar`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(fall.viewport);
+      await wocheOeffnen(page);
+
+      const employee = page.getByTestId("feld-employee");
+      const worksite = page.getByTestId("feld-worksite");
+      const datum = page.getByTestId("feld-datum");
+      const beginn = page.getByTestId("feld-beginn");
+      const ende = page.getByTestId("feld-ende");
+      const speichern = page.getByTestId("einsatz-speichern");
+
+      await expect(employee).toHaveAccessibleName("Mitarbeitende");
+      await expect(worksite).toHaveAccessibleName("Baustelle");
+      await expect(datum).toHaveAccessibleName("Datum");
+      await expect(beginn).toHaveAccessibleName(/Beginn/);
+      await expect(ende).toHaveAccessibleName(/Ende/);
+      await expect(speichern).toHaveAccessibleName("Entwurf speichern");
+
+      await formularAusfuellen(page, fall.beginn, fall.ende, fall.datum);
+
+      // Fokusreihenfolge innerhalb des Formulars, jeweils mit sichtbarem
+      // Indikator. Ein programmatischer Start am ersten Feld vermeidet, dass
+      // Headernavigation mit der fachlichen Reihenfolge verwechselt wird.
+      await employee.focus();
+      for (const ziel of [employee, worksite, datum, beginn, ende]) {
+        await expect(ziel).toBeFocused();
+        const focus = await ziel.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            outlineStyle: style.outlineStyle,
+            outlineWidth: Number.parseFloat(style.outlineWidth),
+          };
+        });
+        expect(focus.outlineStyle).not.toBe("none");
+        expect(focus.outlineWidth).toBeGreaterThan(0);
+        await page.keyboard.press("Tab");
+      }
+      await expect(speichern).toBeFocused();
+
+      const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+      expect(axe.violations).toEqual([]);
+
+      const overflowBefore = await page.evaluate(() => {
+        const root = document.scrollingElement ?? document.documentElement;
+        return root.scrollWidth - root.clientWidth;
+      });
+      expect(overflowBefore).toBeLessThanOrEqual(0);
+
+      const [createdResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().includes("/planung/einsaetze") && response.request().method() === "POST",
+        ),
+        speichern.click(),
+      ]);
+      expect(createdResponse.status()).toBe(201);
+      const created = (await createdResponse.json()) as { id: string };
+      await expect(page.locator(`[data-assignment-id="${created.id}"]`)).toBeVisible();
+
+      const success = page.getByTestId("einsatzformular-meldung");
+      await expect(success).toHaveAttribute("role", "status");
+      await expect(success).toHaveAttribute("data-state", "erfolg");
+      await expect(success).toContainText(/gespeichert/i);
+
+      await wocheOeffnen(page);
+      await expect(page.locator(`[data-assignment-id="${created.id}"]`)).toBeVisible();
+
+      await formularAusfuellen(page, fall.beginn, fall.ende, fall.datum);
+      const [conflictResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().includes("/planung/einsaetze") && response.request().method() === "POST",
+        ),
+        page.getByTestId("einsatz-speichern").click(),
+      ]);
+      expect(conflictResponse.status()).toBe(409);
+
+      const alert = page.getByTestId("einsatzformular-meldung");
+      await expect(alert).toHaveAttribute("role", "alert");
+      await expect(alert).toHaveAttribute("data-state", "fehler");
+      await expect(alert).toContainText(/bereits eingeplant/i);
+      const describedBy = await page
+        .getByTestId("einsatzformular")
+        .getAttribute("aria-describedby");
+      expect(describedBy).toBe(await alert.getAttribute("id"));
+
+      const overflowAfter = await page.evaluate(() => {
+        const root = document.scrollingElement ?? document.documentElement;
+        return root.scrollWidth - root.clientWidth;
+      });
+      expect(overflowAfter).toBeLessThanOrEqual(0);
+    });
+  }
 });

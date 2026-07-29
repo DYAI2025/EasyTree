@@ -157,6 +157,18 @@ describe("Rot-Fall", () => {
     rmSync(join(root, "apps/api/src/uses-fixtures.ts"), { force: true });
   });
 
+  it("faengt den Contract-Testing-Subpfad im Produktionscode", () => {
+    write(
+      "apps/api/src/uses-contract-testkit.ts",
+      [
+        'import { planningGatewayContractSuite } from "@easytree/contracts/testing/planning-gateway-contract";',
+        "export const leakedTestRunner = planningGatewayContractSuite;",
+      ].join("\n") + "\n",
+    );
+    expect(rulesTriggered().has("no-contract-testing-in-production-code")).toBe(true);
+    rmSync(join(root, "apps/api/src/uses-contract-testkit.ts"), { force: true });
+  });
+
   it("faengt ein `export *` in einer Modul-index.ts", () => {
     write("apps/api/src/modules/workforce/index.ts", 'export * from "./domain/employee";\n');
     const files = [...collectSourceFiles(root, "apps"), ...collectSourceFiles(root, "packages")];
