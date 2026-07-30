@@ -77,7 +77,11 @@ function stringConstants(): Map<string, string> {
   for (const file of readdirSync(resolve(domainRoot, "src"))) {
     if (!file.endsWith(".ts")) continue;
     const source = readFileSync(resolve(domainRoot, "src", file), "utf8");
-    const pattern = /export\s+const\s+([A-Z][A-Z0-9_]*)\s*=\s*"([^"]+)"/g;
+    // Die optionale Typannotation ist nicht kosmetisch: ohne sie uebersah der
+    // Leser `export const EUROPE_BERLIN: IanaTimeZone = "Europe/Berlin"` — und
+    // genau dort driftete die Aussage bereits. Ein Leser, der weniger faengt als
+    // sein Docstring zusagt, ist die Luecke, die dieser Test schliessen soll.
+    const pattern = /export\s+const\s+([A-Z][A-Z0-9_]*)\s*(?::[^=]+?)?=\s*"([^"]+)"/g;
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(source)) !== null) {
       const name = match[1];
@@ -191,9 +195,9 @@ describe("Invariantenregister (EYT-61 AK1)", () => {
         "anderen Wert beschreibt als der Code traegt, ist schlimmer als keine.",
     ).toEqual([]);
     // Nicht-Leerlauf: mindestens ROUNDING_MODE, ROUNDING_STAGE und
-    // COST_RULE_VERSION muessen erfasst sein. Ein kaputtes Muster im Leser
+    // COST_RULE_VERSION und EUROPE_BERLIN muessen erfasst sein. Ein kaputtes Muster im Leser
     // machte diese Zeile sonst still gruen.
-    expect(geprueft).toBeGreaterThanOrEqual(3);
+    expect(geprueft).toBeGreaterThanOrEqual(4);
   });
 
   it("erkennt eine abweichende Konstanten-Aussage tatsaechlich", () => {

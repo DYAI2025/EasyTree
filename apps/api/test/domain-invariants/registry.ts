@@ -177,7 +177,7 @@ export const INVARIANTS: readonly Invariant[] = [
   },
   {
     exportName: "EUROPE_BERLIN",
-    statement: "Pilotzone, bis organizations.time_zone gelesen wird.",
+    statement: "Europe/Berlin: Pilotzone, bis organizations.time_zone gelesen wird.",
     kind: "konstante",
     positive: { file: WEEK, title: "nimmt eine bekannte Zone an" },
     negative: null,

@@ -68,6 +68,14 @@ function daysInMonth(year: number, month: number): number {
  * Kalendertage in UTC-Zeitpunkte zu wandeln. Der Umweg über `Date.UTC` wäre
  * genau das — auch wenn der Zeitpunkt nur vorübergehend entstünde — und würde
  * eine Zeitachse einführen, wo eine Kalenderachse gemeint ist.
+ *
+ * **Ein ueberzaehliger Tag wird normalisiert, nicht abgewiesen.** `dayAfter({2026, 2, 30})`
+ * liefert den 1. Maerz. Das ist bewusst anders als bei einem Monat ausserhalb 1..12, der
+ * laut abbricht: der Monat ist strukturell falsch, ein zu hoher Tag dagegen entsteht aus
+ * einer Kalenderrechnung und faellt hier auf den naechsten wirklichen Tag. `LocalBusinessDate`
+ * ist ein offenes Interface mit der Zusage „1–31"; der 30. Februar haelt sie ein und ist
+ * trotzdem kein Kalendertag. Wer diese Eingabe ausschliessen will, tut das an der Grenze, an
+ * der das Datum entsteht, nicht hier.
  */
 export function dayAfter(date: LocalBusinessDate): LocalBusinessDate {
   if (date.day < daysInMonth(date.year, date.month)) {
