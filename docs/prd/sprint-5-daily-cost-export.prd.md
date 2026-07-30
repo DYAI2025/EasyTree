@@ -664,6 +664,97 @@ Für die allgemeine `Money`-Arithmetik:
 
 Damit ist `sumPlanCostAmounts([]) = 0 EUR` eindeutig und nicht mehr eine Auslegung.
 
+#### V5.4-korrigiert — Währung: EUR-only, ein Code an der echten Grenze, einer entfällt
+
+**V5.4 in seiner ersten Fassung widersprach V5.2** und wird hiermit ersetzt. Unter
+`CURRENCIES = ["EUR"] as const` ist `Currency` das Einzelliteral `"EUR"` — eine zweite Währung
+ist **typseitig nicht konstruierbar**. Beide dort eingeführten Codes waren damit genau das, was
+V5.2 „Scheingenauigkeit" nennt.
+
+**Gemessen, nicht argumentiert.** Eine Gegenmutation, die _beide_ Währungswächter deaktiviert
+(`assertSameCurrency` und die Summenprüfung auf `if (false)`), ergab:
+
+```text
+vorher   2 failed | 203 passed
+nachher  2 failed | 203 passed      -> kein Unterschied
+```
+
+Die Währungsregeln waren von **keinem** Test gemessen. Sie hätten ersatzlos entfallen können,
+ohne dass die Suite es bemerkt. Tester und Coder fanden das unabhängig voneinander.
+
+##### `UNSUPPORTED_COST_CURRENCY` wandert an die untrusted Eingangsgrenze
+
+Sprint 5 bleibt strikt EUR-only. Ungeprüfte Werte entstehen ausschließlich an Systemgrenzen:
+HTTP/JSON, PostgreSQL, importierte Daten, später ggf. Queue- oder Connector-Payloads. **Dort**
+wird die Währung validiert, bevor ein Domainwert konstruiert wird:
+
+```ts
+type CostCurrencyResult =
+  | { readonly ok: true; readonly value: "EUR" }
+  | { readonly ok: false; readonly error: "UNSUPPORTED_COST_CURRENCY" };
+
+function costCurrencyFromUnknown(value: unknown): CostCurrencyResult;
+```
+
+Akzeptiert wird **ausschließlich** der exakte String `"EUR"`. Abgelehnt mindestens: `"USD"`,
+`"eur"`, `""`, `null`, `undefined`, `42`, `{}`. **Keine** automatische Großschreibung, **keine**
+stillschweigende Normalisierung.
+
+Das ist dasselbe Muster, das `moneyFromNumber` und `toDurationMilliseconds` bereits tragen: der
+getypte Kern ist unerreichbar-by-construction, die untrusted Grenze ist prüfbar und testbar.
+
+##### `CURRENCY_MISMATCH` entfällt in Sprint 5 vollständig
+
+Zwei gültig konstruierte `Money`-Werte können keine unterschiedlichen Währungen besitzen. Der
+Code wird entfernt aus: `MONEY_ERRORS` · Result-Unions · allen Fehlercodelisten ·
+Testregistern · HTTP-Verträgen · Sprint-5-Dokumentation.
+
+**Keine Ausnahme für „strukturell unerreichbare Fehlercodes".** Das würde den Waisenvalidator
+gezielt schwächen — genau die Prüfung, die diesen Befund überhaupt sichtbar gemacht hat.
+
+##### Auch der tote Zweig in `addMoney` fällt weg
+
+Die Aussage „`addMoney` wirft bei Währungskonflikt und hat das Problem daher gelöst" ist
+**nicht vollständig richtig**: ein `throw` statt eines Result-Zweigs ändert die Erreichbarkeit
+nicht. Bei zwei Werten des Typs `"EUR"` bleibt der Konflikt unmöglich.
+
+```ts
+function addMoney(left, right): Money; // kein Waehrungsvergleich
+function subtractMoney(left, right): Money; // kein CURRENCY_MISMATCH-Zweig
+```
+
+Die Laufzeitsicherheit entsteht stattdessen aus der Kette: (1) Validierung der untrusted
+Eingabe, (2) Konstruktion eines gebrandeten EUR-Werts, (3) keine öffentlichen unvalidierten
+Objektkonstruktionen, (4) Zod-/Gateway-Vertrag, (5) PostgreSQL-Constraint. Ein intern
+gefälschtes Objekt trotz dieser Grenzen ist eine **Invariantenverletzung**, kein fachlicher
+Währungsfehler.
+
+##### Technische Grenzen, deckungsgleich abgebildet
+
+| Schicht     | Form                                                                            |
+| ----------- | ------------------------------------------------------------------------------- |
+| Zod/Gateway | `z.literal("EUR")` — **nicht** `z.string()`, keine künstliche Mehrwährungs-Enum |
+| PostgreSQL  | `CHECK (currency = 'EUR')`                                                      |
+| OpenAPI     | `currency: { type: string, enum: [EUR] }`                                       |
+| Domain      | `HourlyRateAmount` und `PlanCostAmount` in EUR                                  |
+
+##### Evidenz-Eigentum
+
+| Gegenstand                                                                   | Ticket          |
+| ---------------------------------------------------------------------------- | --------------- |
+| `CostCurrency = EUR`, `costCurrencyFromUnknown`, `UNSUPPORTED_COST_CURRENCY` | **EYT-95**      |
+| EUR-Money-Arithmetik, **kein** `CURRENCY_MISMATCH`                           | **EYT-95**      |
+| Gateway validiert untrusted Currency vor dem Domainaufruf                    | **EYT-105**     |
+| Zod- und OpenAPI-Vertrag bleiben deckungsgleich                              | **EYT-105**     |
+| persistierte Raten, Positionen, Snapshots tragen EUR; DB-Constraint          | **EYT-108/109** |
+
+##### Zukunftsregel
+
+Eine zweite Währung ist **kein kleiner Typzusatz**. Sie verlangt mindestens: neue fachliche
+Anforderung, Summierungs- und Snapshotregeln, Exportdarstellung, ggf. Wechselkursentscheidung,
+neue Regelversion, Migration, neue Fehlerverträge. Erst dann wird `CURRENCY_MISMATCH` als
+ehrlich erreichbarer Domainfehler eingeführt.
+
 #### V5.5 — `RateVersionOverlap`: kanonische, deduplizierte Paarstruktur
 
 ```text
