@@ -297,6 +297,16 @@ describe("Rot-Fall Kostenmodul", () => {
         // einen Selbstbezug hat. Gemessen war sie STILL, weil das Muster `set`
         // unmittelbar hinter dem Ziel verlangte.
         'export const g = "update public.assignments a set a.note = $1 where a.id = $2";',
+        // `update only` war dieselbe Bauart wie merge/truncate vor diesem
+        // Commit: funktioniert, aber ersatzlos loeschbar ohne roten Test.
+        //
+        // EIGENES Ziel, nicht `public.plan_versions`: die erste Fassung dieser
+        // Zeile nahm dieselbe Tabelle wie Literal `b`, und damit war die
+        // zugehoerige Zusicherung schon durch `b` erfuellt — die Gegenmutation
+        // lief gruen. Ein Test, der sich selbst bestaetigt, ist genau die
+        // Attrappenform, gegen die dieses Projekt seine Gegenmutationsregel
+        // fuehrt.
+        'export const h = "update only public.only_ledger set published_at = now()";',
       ].join("\n") + "\n",
     );
     const messages = messagesOf("costs-touches-only-own-tables");
@@ -326,6 +336,13 @@ describe("Rot-Fall Kostenmodul", () => {
     expect(
       messages.some((m) => m.includes('"update … set public.assignments"')),
       "update mit Alias wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
+    // Gegenmutation: `(?:\s+only\b)?` aus dem `update`-Muster entfernen -> rot.
+    // Ohne die Gruppe wird `only` selbst zum Ziel und die echte Tabelle
+    // verschwindet.
+    expect(
+      messages.some((m) => m.includes('"update … set public.only_ledger"')),
+      "update only wurde nicht als Schreibziel erkannt.",
     ).toBe(true);
     drop("apps/api/src/modules/costs/infrastructure/foreign-write.repository.ts");
   });
@@ -652,15 +669,32 @@ describe("Rot-Fall Kostenmodul", () => {
     //
     // Gegenmutation: `.xlsx` oder qualifizierte Ziele mit Dateiendung vom
     // Melden ausnehmen -> rot.
+    // Die zweite Zeile ist der ZWEITE, groessere Preis: seit der Fortsetzung am
+    // Stueckanfang feuert Prosa auch ganz OHNE SQL-Schluesselwort, sobald ein
+    // Komma und ein punktierter Bezeichner darin vorkommen. Lexikalisch ist
+    // `alias.spalte` von `schema.tabelle` nicht zu unterscheiden; eine Verengung
+    // wuerde den Fall verlieren, um den es geht (`from ${X} s, public.y a`).
+    // Auch das gehoert gemessen, nicht bloss in den Kommentar.
     write(
       "apps/api/src/modules/costs/infrastructure/preis.repository.ts",
-      'export const hinweis = "Vorlage stammt from vorlage.xlsx";\n',
+      [
+        'export const hinweis = "Vorlage stammt from vorlage.xlsx";',
+        'export const zweiter = "Achtung, config.json fehlt";',
+      ].join("\n") + "\n",
     );
     const meldungen = messagesOf("costs-touches-only-own-tables");
     drop("apps/api/src/modules/costs/infrastructure/preis.repository.ts");
     expect(
       meldungen.some((m) => m.includes('"from vorlage.xlsx"')),
       "Der benannte Preis ist nicht mehr eingetreten — das Ueberfeuer wurde wegoptimiert.",
+    ).toBe(true);
+    // Gegenmutation: `fortsetzung("from", 0)` entfernen -> rot. Derselbe Aufruf
+    // haelt "faengt die Kommafortsetzung auch am Anfang eines
+    // Templateliteral-Stuecks" gruen — die beiden Tests sind die zwei Seiten
+    // derselben Entscheidung.
+    expect(
+      meldungen.some((m) => m.includes('"from config.json"')),
+      "Die Fortsetzung am Stueckanfang feuert nicht mehr auf Prosa — Verhalten geaendert, ohne den Kommentar mitzuaendern.",
     ).toBe(true);
   });
 

@@ -139,6 +139,12 @@ const MONEY_FUNCTION_PATTERN =
  * - **Zweites und folgendes Ziel eines `truncate a, b`.** Nur das erste wird
  *   erfasst; die Kommafortsetzung laeuft ausschliesslich auf dem Lesepfad.
  * - **`select … into <tabelle>`** (DDL-nah, erzeugt die Zieltabelle).
+ * - **Die ganze Kommakette hinter einer mengenliefernden Funktion.** Gemessen:
+ *   `select 1 from unnest($1) t, public.assignments a` meldet NICHTS. Der
+ *   Klammer-Waechter ueberspringt den Schluesselworttreffer komplett, und der
+ *   Cursor steht hinter `from unnest`, nicht hinter der schliessenden Klammer —
+ *   fuer das Weiterzaehlen braeuchte es einen Klammerzaehler. Vorbestehend,
+ *   nicht durch die Fortsetzung am Stueckanfang eingefuehrt.
  *
  * Diese Liste ist das Ergebnis eines systematischen Durchlaufs ueber 173
  * Eingaben (30.07.2026), nicht einer Stichprobe. Sechs vorangegangene
@@ -154,7 +160,14 @@ const SQL_WRITE_TARGETS: ReadonlyArray<readonly [string, RegExp]> = [
   // UPDATE eine FROM-Klausel oder einen Selbstbezug hat — gemessen STILL, und
   // `update … as a set` ebenso. ADR-003 fuehrt "kein fremder Tabellenzugriff,
   // lesend UND schreibend" als von dieser Regel gedeckt; das hielt sie nicht.
-  // Das nachfolgende `set` bleibt Pflicht, sonst traefe das Wort Prosa.
+  // Das nachfolgende `set` bleibt Pflicht — deckt seit der Aliasgruppe aber die
+  // Form `update <a> <b> set` mit ab, und damit auch englische Prosa dieser
+  // Gestalt. Gemessen: "we update the value set by the user" meldet
+  // `public.the`; vorher war der Satz still. Laut statt still, also die
+  // gewaehlte Richtung — aber die Prosabremse ist schwaecher als der Satz oben
+  // frueher behauptete. Weiterhin still (gegengeprueft): "…beim update der
+  // Werte im set…", "on conflict … do update set a = 1" und
+  // "when matched then update set a = 1".
   ["update … set", /\bupdate\b(?:\s+only\b)?\s+([\w$".]+)(?:\s+(?:as\s+)?[\w$"]+)?\s+set\b/gi],
   ["delete from", /\bdelete\s+from\b\s+([\w$".]+)/gi],
   ["truncate", /\btruncate\b(?:\s+table\b)?\s+([\w$".]+)/gi],
@@ -353,8 +366,21 @@ export function sqlAccesses(literal: string): SqlAccess[] {
   }
 
   // Fortsetzung am STUECKANFANG: `from a s` stand im vorigen Stueck, dieses
-  // beginnt mit `, b`. Verb ist `from`, weil eine Kommaliste in SQL nur in einer
-  // FROM-/USING-Quelle vorkommt.
+  // beginnt mit `, b`. Das Verb wird als `from` angenommen, weil es im Stueck
+  // nicht mehr steht — eine Annahme, keine Invariante: Kommalisten stehen in SQL
+  // auch in der SELECT-Liste, in GROUP BY und in Argumentlisten.
+  //
+  // Diese Stelle zahlt den an `SQL_QUALIFIED_TARGET` benannten Preis ZUSAETZLICH
+  // ohne jedes SQL-Schluesselwort — gemessen, nicht vermutet:
+  //   ", a.employee_id from public.cost_snapshots"  -> auch `from a.employee_id`
+  //                                                    (eine SPALTE, keine Tabelle)
+  //   "Achtung, config.json fehlt"                  -> `from config.json`
+  //   "Fehler, docs.easytree.de nicht erreichbar"   -> `from docs.easytree.de`
+  // Lexikalisch ist `alias.spalte` von `schema.tabelle` nicht zu unterscheiden;
+  // eine Verengung auf `^\s*,` wuerde genau den Fall verlieren, um den es geht
+  // (`from ${X} s, public.assignments a` beginnt mit ` s,`, nicht mit `,`).
+  // Die Exposition ist begrenzt, gegengeprueft bleiben still: "Stunden, 2.5 pro
+  // Einsatz", "id, org_id, created_at", "Konflikt, mehrere Zeilen betroffen".
   fortsetzung("from", 0);
 
   for (const match of literal.matchAll(SQL_READ_TARGETS)) {
