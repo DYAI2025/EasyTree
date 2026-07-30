@@ -110,12 +110,6 @@ export interface CostPositionInput {
 }
 
 /**
- * Blockierende Ausgänge der Positionsberechnung.
- *
- * Bewusst die Vereinigung der bereits vergebenen Codes statt einer eigenen
- * Liste: eine zweite Benennung derselben Fehlerlage wäre ein zweiter Vertrag.
- */
-/**
  * Fehler der Positionserzeugung, die NICHT aus der Satzauswahl stammen.
  *
  * `COMPUTED_AT_INVALID` faengt `new Date("kaputt")` — ein gueltig getyptes
@@ -130,19 +124,19 @@ export const COST_POSITION_INPUT_ERRORS = ["COMPUTED_AT_INVALID"] as const;
 /** Ein Fehlercode der Positionseingabe. */
 export type CostPositionInputError = (typeof COST_POSITION_INPUT_ERRORS)[number];
 
+/**
+ * Blockierende Ausgänge der Positionsberechnung.
+ *
+ * Die Vereinigung der Satzauswahl-Codes UND der Positionseingabe-Codes; kein
+ * Code wird zweimal benannt. Eine zweite Benennung derselben Fehlerlage wäre
+ * ein zweiter Vertrag.
+ */
 export type CostPositionError = RateSelectionError | CostPositionInputError;
 
 export type CostPositionResult =
   | { readonly ok: true; readonly position: CostPosition }
   | { readonly ok: false; readonly error: CostPositionError };
 
-/**
- * Betrag einer Menge zu einem Satz — die eine Rundung des Vertrags.
- *
- * Nimmt die geprüfte Satzversion und nicht bloß einen Geldwert entgegen, damit
- * der berechnete Betrag ohne Umweg auf eine belegbare Satzversion zurückführbar
- * bleibt.
- */
 /**
  * `HALF_UP` auf einem exakten Bruch, ganz in `bigint` (V1 Punkt 6).
  *
@@ -174,6 +168,13 @@ function roundHalfUp(numerator: bigint, denominator: bigint): bigint {
   return (2n * numerator + denominator) / (2n * denominator);
 }
 
+/**
+ * Betrag einer Menge zu einem Satz — die eine Rundung des Vertrags.
+ *
+ * Nimmt die geprüfte Satzversion und nicht bloß einen Geldwert entgegen, damit
+ * der berechnete Betrag ohne Umweg auf eine belegbare Satzversion zurückführbar
+ * bleibt.
+ */
 export function costOfDuration(
   rate: HourlyRateVersion,
   quantity: DurationMilliseconds,
@@ -188,8 +189,9 @@ export function costOfDuration(
   const validated = planCostAmount(moneyOfMinorUnits(minorUnits, rate.amountPerHour.currency));
 
   // V5.2: KEIN öffentlicher Fehlerzweig hier. Satz und Menge sind durch ihre
-  // Konstruktoren nichtnegativ, `roundHalfUp bildet nichtnegative Zaehler auf nichtnegative Ergebnisse ab — mit
-  // zulässigen Eingaben kann diese Validierung nicht fehlschlagen. Ein
+  // Konstruktoren nichtnegativ, und `roundHalfUp` bildet nichtnegative Zähler
+  // auf nichtnegative Ergebnisse ab — mit zulässigen Eingaben kann diese
+  // Validierung nicht fehlschlagen. Ein
   // `{ ok: false }` nach aussen wäre Scheingenauigkeit: der Aufrufer müsste
   // einen Fall behandeln, den er nie sieht, und der Vertrag verspräche eine
   // Prüfung, die nichts prüft.

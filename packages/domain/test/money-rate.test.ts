@@ -40,6 +40,12 @@
  */
 import { describe, expect, it } from "vitest";
 
+// Namensraumimport zusaetzlich zu den Einzelimports: die Sperre gegen ein
+// stilles Wiedereinfuehren von `CURRENCY_MISMATCH` leitet ihre Liste aus dem
+// Modul ab, statt sie aufzuzaehlen. Siehe "fuehrt CURRENCY_MISMATCH in keiner
+// oeffentlichen Fehlerliste".
+import * as domain from "../src/index.js";
+
 import {
   addMoney,
   compareLocalBusinessDate,
@@ -1252,7 +1258,7 @@ describe("Kostenposition — Herkunft und historische Stabilitaet (AK4, AK5)", (
   });
 
   it("fuehrt jeden Positionseingabe-Fehlercode genau einmal und erreicht jeden", () => {
-    // Wie bei den fuenf anderen Listen: Doppelfreiheit UND Erreichbarkeit. Ein
+    // Wie bei den anderen Fehlerlisten: Doppelfreiheit UND Erreichbarkeit. Ein
     // Code, der im Vertrag steht, in der Typunion erscheint, von Aufrufern
     // behandelt wird und nie eintritt, ist die teurere Haelfte des Defekts.
     // Gegenmutation: zweiten Code ohne ausloesende Eingabe aufnehmen -> rot.
@@ -1364,21 +1370,49 @@ describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
     // Waisenvalidator schwaechen, der den Befund sichtbar gemacht hat.
     //
     // Diese Zusicherung ist die Sperre gegen ein stilles Wiedereinfuehren:
-    // sie prueft alle sechs oeffentlichen Listen auf einmal, nicht nur die,
-    // in der der Code frueher stand.
-    // Gegenmutation: `CURRENCY_MISMATCH` in irgendeine dieser Listen
-    // zurueckschreiben -> rot.
-    const alleCodes = [
-      ...MONEY_ERRORS,
-      ...QUANTITY_ERRORS,
-      ...PLAN_COST_AMOUNT_ERRORS,
-      ...HOURLY_RATE_AMOUNT_ERRORS,
-      ...RATE_VERSION_ERRORS,
-      ...RATE_SELECTION_ERRORS,
-    ] as readonly string[];
+    // sie prueft ALLE oeffentlichen Fehlerlisten auf einmal, nicht nur die, in
+    // der der Code frueher stand.
+    //
+    // Die Liste wird ABGELEITET, nicht aufgezaehlt. Eine Aufzaehlung stand hier
+    // vorher und war selbst die Luecke: sie nannte sechs Listen, waehrend das
+    // Paket acht exportiert. `COST_POSITION_INPUT_ERRORS` und
+    // `TIME_INTERVAL_ERRORS` fehlten — gemessen blieb dieser Test gruen,
+    // waehrend `CURRENCY_MISMATCH` als erreichbarer oeffentlicher Fehlercode
+    // vollstaendig zurueckkam. Eine Sperre, die bei jeder neuen Liste von Hand
+    // nachgezogen werden muss, sperrt nicht; sie erinnert nur.
+    //
+    // Gegenmutation: `CURRENCY_MISMATCH` in irgendeine `*_ERRORS`-Liste
+    // zurueckschreiben -> rot. Zweite Gegenmutation: eine neunte Liste anlegen
+    // und den Code dort eintragen -> ebenfalls rot, ohne Aenderung an diesem
+    // Test.
+    // Ohne `as`: `Array.isArray` und `typeof` pruefen zur LAUFZEIT, was ein Cast
+    // nur behaupten wuerde. Ein `as` unter dem Wort "geprueft" ist beim
+    // Kompilieren geloescht und traegt hier nichts.
+    const fehlerlisten: string[] = [];
+    const alleCodes: string[] = [];
+    for (const [name, wert] of Object.entries(domain)) {
+      if (!name.endsWith("_ERRORS")) continue;
+      if (!Array.isArray(wert)) continue;
+      fehlerlisten.push(name);
+      for (const code of wert) {
+        if (typeof code === "string") alleCodes.push(code);
+      }
+    }
     expect(alleCodes).not.toContain("CURRENCY_MISMATCH");
-    // Nicht-Leerlauf-Bremse: waeren die Listen leer oder falsch importiert,
-    // waere die Zeile darueber trivial gruen.
+    // Zwei Nicht-Leerlauf-Bremsen, beide gegen ein STILLES Schrumpfen der
+    // Ableitung: waere der Namensraumimport kaputt, eine Liste umbenannt oder
+    // aus `index.ts` gefallen, waere die Zeile darueber trivial gruen.
+    // Gegenmutation: eine `*_ERRORS`-Zeile aus `src/index.ts` entfernen -> rot.
+    expect([...fehlerlisten].sort()).toEqual([
+      "COST_POSITION_INPUT_ERRORS",
+      "HOURLY_RATE_AMOUNT_ERRORS",
+      "MONEY_ERRORS",
+      "PLAN_COST_AMOUNT_ERRORS",
+      "QUANTITY_ERRORS",
+      "RATE_SELECTION_ERRORS",
+      "RATE_VERSION_ERRORS",
+      "TIME_INTERVAL_ERRORS",
+    ]);
     expect(alleCodes.length).toBeGreaterThan(8);
   });
 
@@ -1475,5 +1509,37 @@ describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
         selectRateVersion([a, b], day(2026, 7, 15)),
       ]),
     ).toEqual([...RATE_SELECTION_ERRORS].sort());
+  });
+});
+
+describe("Eingefrorene Konstruktorausgaben (V5.6)", () => {
+  // Vier Konstruktoren dieses Vertrags rufen `Object.freeze`, und bis hierher
+  // mass das NICHTS: gemessen blieb die Suite 212/212 gruen, nachdem der Freeze
+  // aus `checkedQuantity` entfernt wurde. Ein Kommentar, der eine Sperre
+  // behauptet, ohne dass ein Test sie prueft, ist genau die Attrappe, gegen die
+  // dieses Projekt seine Gegenmutationsregel fuehrt.
+  //
+  // Die Sperre zielt auf UNGETYPTE Aufrufer: TypeScript haelt `readonly` nur
+  // beim Kompilieren, JavaScript-Aufrufer und `JSON.parse`-Wege gar nicht.
+  //
+  // Gegenmutation, je Zeile eine: das `Object.freeze` im benannten Konstruktor
+  // entfernen -> genau diese Zusicherung rot.
+  it("friert Money, Menge, Satzversion und Kostenposition ein", () => {
+    const menge = ms(3_600_000n);
+    const satz = validRate("r-frozen", 4500n, day(2026, 1, 1), null);
+    const position = computeCostPosition({
+      source: SOURCE,
+      versions: [satz],
+      on: day(2026, 6, 1),
+      quantity: menge,
+      computedAt: new Date("2026-06-01T08:00:00.000Z"),
+    });
+    if (!position.ok) throw new Error(`Fixture: Position abgelehnt: ${position.error}`);
+
+    expect(Object.isFrozen(moneyOfMinorUnits(4500n, "EUR"))).toBe(true);
+    expect(Object.isFrozen(menge)).toBe(true);
+    expect(Object.isFrozen(satz)).toBe(true);
+    expect(Object.isFrozen(position.position)).toBe(true);
+    expect(Object.isFrozen(position.position.source)).toBe(true);
   });
 });

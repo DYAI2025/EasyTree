@@ -17,7 +17,7 @@
  * Rot-Fall fuer „schreibt fremde Tabellen" auf die echte `TABLE_OWNERSHIP`
  * warten muessen und waere bis dahin nicht ausfuehrbar gewesen.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -393,12 +393,27 @@ describe("Rot-Fall Kostenmodul", () => {
     //     `public.mehrerer`, "stammt from planung" ergab `public.planung`.
     //     Ein Waechter, der bei einer harmlosen Meldung feuert, wird
     //     abgeschaltet — und faengt dann auch das Echte nicht mehr.
+    // (3) Vier weitere Prosaformen, die eine SPAETERE Fassung der Vorpruefung
+    //     wieder durchliess, weil sie nur `raw.includes(".")` testete: der
+    //     Satzpunkt hinter dem Ziel gehoert bei `SQL_READ_TARGETS` mit ins Ziel,
+    //     also sahen `planung.`, `mehrerer.`, `.` (aus `./infrastructure`) und
+    //     `2.5` alle "qualifiziert" aus. Diese vier standen in der Fixture
+    //     bewusst OHNE Satzpunkt und konnten den Rueckfall deshalb nicht sehen.
+    // (4) Ein englischer Satz mit `with`: solange `with` als Statement-Verb
+    //     galt, machte "Compare with … taken from planung" daraus
+    //     `public.planung`.
     write(
       "apps/api/src/modules/costs/infrastructure/ueberfeuer.repository.ts",
       [
         'import type { PublishedPlanFacts } from "../../planning";',
         'export const hinweis = "Konflikt entsteht beim join mehrerer Zeilen";',
         'export const grund = "Wert stammt from planung und ist unveraendert";',
+        'export const satzende = "Der Wert stammt from planung.";',
+        'export const satzendeJoin = "Konflikt entsteht beim join mehrerer.";',
+        'export const pfad = "Adapter kommt from ./infrastructure";',
+        'export const zahl = "Berechnet using 2.5 Stunden je Einsatz";',
+        'export const datei = "Vorlage stammt from vorlage.xlsx";',
+        'export const englisch = "Compare with the published plan, values taken from planung";',
         "export type X = PublishedPlanFacts;",
       ].join("\n") + "\n",
     );
@@ -462,15 +477,17 @@ describe("Rot-Fall Kostenmodul", () => {
         "export const XlsxCostRenderer: CostExportPort | null = null;",
       ].join("\n") + "\n",
     );
-    expect(
-      messagesOf("costs-xlsx-behind-application-port"),
-      "Ein relativer Importpfad wurde als XLSX-Bibliothek gemeldet.",
-    ).toEqual([]);
+    // Erst messen, DANN aufraeumen, DANN zusichern. Waere die Zusicherung wie
+    // frueher die erste Anweisung, liefe der Aufraeumteil bei einem Fehlschlag
+    // gar nicht — und die Folgetests liefen gegen einen zerstoerten Baum. Das
+    // ist dieselbe Bauart, die diesen Befund ueberhaupt erst erzeugt hat.
+    const meldungen = messagesOf("costs-xlsx-behind-application-port");
     drop("apps/api/src/modules/costs/infrastructure/xlsx-cost-renderer.ts");
     // `index.ts` wird hier UEBERSCHRIEBEN, nicht angelegt — ohne diese Zeile
     // liefen die beiden Abschlusszusicherungen "am sauberen Baum" gegen einen
     // anderen Baum als den, den `beforeAll` beschreibt.
     write("apps/api/src/modules/costs/index.ts", SAUBERE_INDEX_TS);
+    expect(meldungen, "Ein relativer Importpfad wurde als XLSX-Bibliothek gemeldet.").toEqual([]);
   });
 
   it("faengt einen generischen Sammelcontainer, auch verschachtelt und unter anderem Namen", () => {
@@ -574,6 +591,18 @@ describe("Rot-Fall Kostenmodul", () => {
   });
 
   it("ist am sauberen Baum gruen — der Rot-Fall kommt von den Verstoessen, nicht vom Aufbau", () => {
+    // Zuerst pruefen, GEGEN WELCHEN Baum hier gemessen wird. Ohne diese Zeile
+    // war der Baumzustand ungeprueft: gemessen blieb die Datei 21/21 gruen,
+    // nachdem die Wiederherstellung von `index.ts` im XLSX-Fall entfernt wurde
+    // — eine `index.ts`, die auf eine geloeschte Datei re-exportiert, erzeugt
+    // schlicht null Befunde. Die beiden Abschlusszusicherungen bestaetigten
+    // damit die Sauberkeit eines Baums, den sie nicht kannten.
+    // Gegenmutation: die Wiederherstellung in "faengt eine relativ importierte
+    // Datei NICHT als XLSX-Bibliothek" entfernen -> rot.
+    expect(
+      readFileSync(join(root, "apps/api/src/modules/costs/index.ts"), "utf8"),
+      "Ein vorheriger Test hat den Referenzbaum veraendert und nicht wiederhergestellt.",
+    ).toBe(SAUBERE_INDEX_TS);
     const result = run();
     expect(
       result.findings.map((f) => `${f.location} [${f.rule}] ${f.message}`),

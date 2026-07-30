@@ -146,10 +146,16 @@ const SQL_WRITE_TARGETS: ReadonlyArray<readonly [string, RegExp]> = [
 /**
  * Sieht das Literal ueberhaupt nach SQL aus?
  *
- * Verlangt ein einleitendes Statement-Verb. Das ist absichtlich eng: `from` und
- * `join` allein kommen in deutscher Prosa vor, `select … from` nicht.
+ * Verlangt ein Statement-Verb. Das ist absichtlich eng: `from` und `join`
+ * allein kommen in deutscher Prosa vor, `select … from` nicht.
+ *
+ * `with` steht bewusst NICHT in dieser Liste, obwohl es ein Statement einleitet:
+ * es ist ein gewoehnliches englisches Wort, und gemessen genuegte es, um
+ * "Compare with the published plan, values taken from planung" zu einem
+ * Tabellenzugriff `public.planung` zu machen. CTEs werden stattdessen an
+ * `SQL_CTE_NAMES` erkannt — die Form `with x as (` kommt in Prosa nicht vor.
  */
-const SQL_STATEMENT_HINT = /\b(select|insert|update|delete|merge|truncate|with)\b/i;
+const SQL_STATEMENT_HINT = /\b(select|insert|update|delete|merge|truncate)\b/i;
 
 /** `from`, `join` und `using` als Lesequellen. */
 const SQL_READ_TARGETS = /\b(from|join|using)\b\s+([\w$".]+)/gi;
@@ -166,6 +172,23 @@ const SQL_FROM_OPERATOR = /\b(extract|substring|trim|overlay|position)\s*\([^()]
 
 /** Namen von Common Table Expressions — sie sind keine Tabellen. */
 const SQL_CTE_NAMES = /(?:\bwith\s+(?:recursive\s+)?|,\s*)("?[\w$]+"?)\s+as\s*\(/gi;
+
+/**
+ * Ein schemaqualifizierter Tabellenname, gemessen am Schemabestand dieses
+ * Projekts (`supabase/migrations/`: `public`, `app`, `auth`, `storage`).
+ *
+ * Das Schemapraefix ist das EINZIGE Merkmal, an dem sich ein Tabellenname von
+ * einem Dateinamen unterscheiden laesst — `vorlage.xlsx` und `public.assignments`
+ * haben dieselbe Form. Ein blosser Punkttest genuegt deshalb nicht; gemessen las
+ * er `from planung.` (deutscher Satzpunkt), `from ./infrastructure` und
+ * `using 2.5` als Tabellenzugriffe.
+ *
+ * Der Anker `^…$` ist Teil der Aussage: `SQL_READ_TARGETS` faengt den Satzpunkt
+ * mit ein, also muss das GANZE Ziel qualifiziert sein, nicht bloss irgendwo
+ * einen Punkt enthalten. Wer ein Schema hinzufuegt, muss diese Liste mitpflegen —
+ * sonst wird der Waechter fuer dessen Tabellen still.
+ */
+const SQL_QUALIFIED_TARGET = /^"?(?:public|app|auth|storage)"?\."?[a-z_][\w$]*"?$/i;
 
 interface SqlAccess {
   readonly verb: string;
@@ -206,21 +229,39 @@ export function sqlAccesses(literal: string): SqlAccess[] {
   // schlechtere Richtung, weil ein stummer Waechter nicht auffaellt.
   //
   // Deshalb ZWEI Zulassungen statt eines Tors: entweder das Literal sieht nach
-  // einem Statement aus, oder das Ziel ist schema-qualifiziert (`public.x`).
-  // Prosa nennt keine qualifizierten Tabellennamen; SQL-Fragmente tun es.
-  const looksLikeSql = SQL_STATEMENT_HINT.test(literal);
+  // einem Statement aus, oder das Ziel traegt ein Schemapraefix dieses Projekts.
+  //
+  // Die zweite Zulassung war zuerst ein blosser Punkttest (`raw.includes(".")`),
+  // begruendet mit "Prosa nennt keine qualifizierten Tabellennamen". Gemessen ist
+  // das falsch: `SQL_READ_TARGETS` zieht den Satzpunkt mit ins Ziel, also wurden
+  // "Der Wert stammt from planung." zu `from planung.`, "…beim join mehrerer." zu
+  // `join mehrerer.`, "from ./infrastructure" zu `from .` und "using 2.5 Stunden"
+  // zu `using 2.5`. `SQL_QUALIFIED_TARGET` verlangt stattdessen ein bekanntes
+  // Schema ueber dem GANZEN Ziel.
   const cteNames = new Set<string>();
   for (const match of literal.matchAll(SQL_CTE_NAMES)) {
     const name = match[1];
     if (name !== undefined) cteNames.add(qualify(name));
   }
+  // CTEs sind der Grund, warum `with` aus SQL_STATEMENT_HINT entfernt wurde: die
+  // Form `with x as (` erkennt sie praeziser als das blosse englische Wort.
+  const looksLikeSql = SQL_STATEMENT_HINT.test(literal) || cteNames.size > 0;
 
   const push = (verb: string, access: SqlAccess["access"], raw: string, index: number): void => {
-    // Die Restluecke ist benannt statt verschwiegen: ein UNqualifiziertes Ziel in
-    // einem verblosen Fragment (`join assignments a on …` ohne `public.`) faellt
-    // durch beide Zulassungen. Der Hausstil schreibt schema-qualifiziert; wer das
-    // aendert, muss diese Zeile mitaendern.
-    if (!looksLikeSql && !raw.includes(".")) return;
+    // Zwei Restluecken, beide benannt statt verschwiegen:
+    //
+    // UNTERFEUER: ein unqualifiziertes Ziel in einem verblosen Fragment
+    // (`join assignments a on …` ohne `public.`) faellt durch beide Zulassungen.
+    // Der Hausstil schreibt schema-qualifiziert — gemessen ist JEDES Ziel im
+    // echten `apps/api/src/modules/` `public.`-qualifiziert; wer das aendert,
+    // muss diese Zeile mitaendern.
+    //
+    // UEBERFEUER: Prosa, die ein Statement-Verb UND ein `from`/`join`/`using`
+    // enthaelt ("Diese Methode wird beim update aufgerufen, Werte kommen from
+    // planung"), meldet weiterhin einen Zugriff. Das ist die bewusst gewaehlte
+    // Richtung: ein Ueberfeuer macht `unit-tests` rot und wird bemerkt, ein
+    // Unterfeuer ist still.
+    if (!looksLikeSql && !SQL_QUALIFIED_TARGET.test(raw)) return;
     const table = qualify(raw);
     if (cteNames.has(table)) return;
     out.push({ verb, access, table, line: lineOf(literal, index) });
