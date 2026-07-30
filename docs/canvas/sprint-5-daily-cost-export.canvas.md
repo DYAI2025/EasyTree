@@ -175,6 +175,7 @@ aus einer Sektion mit genau dieser Überschrift). Der Governance-Block ist gegen
 - apps/web/e2e/**
 - scripts/setup-branch-protection.sh
 - scripts/verify-branch-protection.sh
+- scripts/plumbline-scope-guard.sh
 - packages/contracts/openapi/v1.json
 - docs/canvas/**
 - docs/vision/**
@@ -185,6 +186,14 @@ aus einer Sektion mit genau dieser Überschrift). Der Governance-Block ist gegen
 - docs/runbooks/**
 - docs/retros/**
 - docs/traceability.md
+
+### Nachtraegliche Scopeaufnahme (PO-Weisung 30.07.2026 §4)
+
+Ein einziger Pfad wurde nach der Bestaetigung aufgenommen: `scripts/plumbline-scope-guard.sh`.
+Grundlage ist die woertliche PO-Weisung zum Tooling-Stop-Gate — „Bevorzuge eine projektlokale,
+reversible Konfiguration oder einen Wrapper. Veraendere nicht still die gemeinsam genutzte
+Plumbline-Installation." Der Wrapper ist damit ausdruecklich angeordneter Liefergegenstand, und
+die Aufnahme ist keine Agenten-Ermessensentscheidung. Kein weiterer Pfad kam hinzu.
 
 ### Bewusst nicht enthalten
 
