@@ -318,3 +318,53 @@ Error: NOT_IMPLEMENTED
 
 Der Test erreicht `costOfDuration` und scheitert dort am fehlenden Verhalten — nicht daran, dass
 ein Modul fehlt.
+
+## 11. EYT-95 gruen — und die Gegenmutationen ausgefuehrt, nicht behauptet
+
+**Stand 30.07.2026:** Domain-Suite **195 von 195 gruen**, `domain-invariant-coverage.test.ts`
+7 von 7 gruen, typecheck, lint und prettier gruen. Commits `fd94a88` (Implementierung) und
+`f340605` (Register und Fehlercodelisten).
+
+195 gruene Tests sind **Ausfuehrungsnachweis, kein Beweis**. Was sie zum Nachweis macht, ist die
+ausgefuehrte Gegenmutation. Beide Seiten haben je vier gefahren — der Coder und der
+Orchestrator unabhaengig voneinander, **zwei davon an unterschiedlichen Stellen**:
+
+| Klasse      | Mutation (Orchestrator, unabhaengig)                     | rot    | Mutation (Coder)                                           | rot |
+| ----------- | -------------------------------------------------------- | ------ | ---------------------------------------------------------- | --- |
+| V1 ROUNDING | `roundHalfUp` durch reines Abschneiden ersetzt           | **6**  | dieselbe Stelle                                            | 6   |
+| V2 QUANTITY | **Nenner `3_600_000n` → `60_000n`** (andere Stelle)      | **14** | Menge vorab auf volle Minuten abgeschnitten                | 6   |
+| V3 VALIDITY | **`coversDay`-Endgrenze `< 0` → `<= 0`** (andere Stelle) | **3**  | `exclusiveEnd` liefert `validTo` statt `dayAfter(validTo)` | 7   |
+| V4 SIGN     | Vorzeichentor in `planCostAmount` entfernt               | **2**  | dieselbe Stelle                                            | 2   |
+
+Jede Mutation wurde bytegleich zurueckgebaut (`diff -q` belegt), danach jeweils wieder
+195 von 195. Kennzeichnende Ausgaben:
+
+```text
+V1  AssertionError: expected 5000n to be 5001n     (rundet den Halbwert von null weg)
+V2  AssertionError: expected 1167n to be 1250n     (rechnet siebeneinhalb Minuten exakt)
+V3  AssertionError: expected false to be true      (Kette bis 30.06. / ab 01.07.)
+V4  AssertionError: expected true to be false      (negatives Delta als Plan-Kostenbetrag)
+```
+
+Dass die V2- und V3-Mutationen an **anderen** Stellen ansetzten als die des Coders und trotzdem
+rot wurden, ist die eigentliche Aussage: die Suite haengt nicht an einer einzelnen Zeile, die
+zufaellig getroffen wurde.
+
+### Drei Testluecken, die erst beim Bauen sichtbar wurden
+
+Alle drei sind dieselbe Fehlerart — **eine Grenze, die nur Ablehnungen prueft**, bleibt gruen,
+wenn die Implementierung pauschal alles ablehnt:
+
+1. `toDurationMilliseconds` — vom Tester selbst bemerkt und mit N1 geschlossen.
+2. `moneyFromNumber` — vom Coder beim Skelettbau gefunden.
+3. `hourlyRateVersion` — vom Tester beim Registerschreiben gefunden.
+
+Dieselbe Luecke an drei Stellen, jedes Mal von der jeweils **anderen** Rolle entdeckt. Das ist
+der Ertrag der Unabhaengigkeitsinvariante, nicht Zufall.
+
+### Weiterhin offen, sichtbar im Code markiert statt still entschieden
+
+`sumPlanCostAmounts([])` (gewaehlt `0n` in EUR, Alternative im Kommentar benannt) ·
+`COST_AMOUNT_NEGATIVE` in `costOfDuration` unerreichbar, aber von V4 als Defense in Depth
+verlangt · Waehrungsmischung ohne `CURRENCY_MISMATCH` · Elementform von `RateVersionOverlap` ·
+Pruefreihenfolge in `hourlyRateVersion` bei doppelt verletzter Eingabe.
