@@ -592,6 +592,118 @@ persistiert.
 | Snapshot blockiert negative Positionen, keine Teilpersistenz                   | **EYT-109** |
 | Snapshot-Summe aus gespeicherten Positionen, nichtnegativ                      | **EYT-109** |
 
+### V5 — Vertragsentscheidungen des Product Owners vom 30.07.2026 (nachgezogen)
+
+Sechs offene Punkte entschieden. Vier davon ändern den EYT-95-Vertrag **materiell**; sie sind
+nach der ersten grünen Implementierung nachzuziehen.
+
+#### V5.1 — `sumPlanCostAmounts([])` ergibt `0 EUR`
+
+Sprint 5 erlaubt ausschließlich EUR-Plan-Personalkosten, eine leere Menge hat damit eine
+eindeutige additive Identität.
+
+```text
+sumPlanCostAmounts([]) = PlanCostAmount(0n, "EUR")
+```
+
+- Nichtleere Summen akzeptieren nur Beträge **derselben** Währung; gemischte werden abgelehnt.
+- Keine automatische Währungsumrechnung.
+- Der Nullbetrag läuft durch **denselben** `PlanCostAmount`-Validator wie jeder andere Betrag.
+- Der Kommentar „OFFENE PO-ENTSCHEIDUNG" wird durch den Vertragsverweis ersetzt.
+
+#### V5.2 — kein künstlich erreichbarer Fehlerzweig in `costOfDuration`
+
+Bei validierten nichtnegativen Mengen und Sätzen kann die korrekte Multiplikation keinen
+negativen Betrag ergeben. **Ein öffentlicher Result-Zweig, der mit zulässigen Eingaben nie
+eintreten kann, ist Scheingenauigkeit** — das ist die Korrektur zu V4s Defense-in-Depth-Satz.
+
+`costOfDuration` (1) berechnet den exakten Betrag, (2) validiert ihn über `planCostAmount`,
+(3) behandelt einen unerwarteten negativen internen Wert als **Invariantenverletzung
+fail-closed** — nicht als regulären, vom Nutzer korrigierbaren Domainfehler.
+
+Die Defense in Depth bleibt an zwei **echten** Grenzen:
+
+```text
+EYT-95   planCostAmount(negativ) -> COST_AMOUNT_NEGATIVE
+EYT-109  persistierende Snapshotgrenze lehnt negative Positionen und Summen ab
+```
+
+Der interne Fall darf **nicht** durch einen absichtlich gelockerten Konstruktor testbar
+gemacht werden.
+
+#### V5.3 — `HALF_UP_NON_NEGATIVE`: nachgewiesener Umfang statt Überklaim
+
+Im Kostenpfad sind nur nichtnegative Werte zulässig. **Nachgewiesen ist deshalb nur:**
+
+```text
+Bei exakt 0,5 Cent wird auf den naechsthoeheren Cent gerundet.
+```
+
+**Nicht als bewiesen zu behaupten:** „Negative Halbwerte werden von null weg gerundet."
+
+```text
+ROUNDING_MODE = "HALF_UP_NON_NEGATIVE"
+```
+
+Die Regel ist für nichtnegative Plan-Kostenbeträge definiert. Eine vorzeichenbehaftete
+Rundungsprimitive gehört **nicht** zu Sprint 5 und wird auch nicht allein zum Testen
+eingeführt.
+
+#### V5.4 — Währung: ausschließlich EUR, mit zwei neuen Fehlercodes
+
+```text
+Rate.currency  =  PlanCostAmount.currency  =  Snapshot.currency  =  Export.currency  =  EUR
+```
+
+Für die allgemeine `Money`-Arithmetik:
+
+- Addition und Subtraktion verlangen **identische** Währungen.
+- Unterschiedliche Währungen → **`CURRENCY_MISMATCH`**.
+- Nicht-EUR-Planraten → **`UNSUPPORTED_COST_CURRENCY`**.
+- Keine Umrechnung, keine Wechselkurse.
+
+Damit ist `sumPlanCostAmounts([]) = 0 EUR` eindeutig und nicht mehr eine Auslegung.
+
+#### V5.5 — `RateVersionOverlap`: kanonische, deduplizierte Paarstruktur
+
+```text
+RateVersionOverlap {
+  firstVersionId
+  secondVersionId
+  overlapFrom            einschliessend
+  overlapEndExclusive    interne halboffene Grenze, oder null bei offenem Ende
+}
+```
+
+- `firstVersionId` und `secondVersionId` deterministisch sortiert nach `validFrom`, dann ID.
+- Jedes **ungeordnete** Versionspaar erscheint höchstens **einmal**.
+- Keine berechneten Kosten, keine UI-Texte in der Struktur.
+- EYT-108 ergänzt später Mitarbeiterbezug und handlungsorientierte Darstellung.
+
+Mindesttests: `A überlappt B` → genau ein Element · `B überlappt A` → kein zweites Element ·
+Eingabereihenfolge ändert das Ergebnis nicht · benachbarte, nicht überlappende Intervalle →
+kein Element · offene Intervalle → kanonische `null`-Endgrenze.
+
+#### V5.6 — `hourlyRateVersion` prüft nur noch relationale Invarianten
+
+Keine willkürliche Priorisierung mehrerer roher Eingabefehler. Stattdessen eine Schichtung:
+
+1. **Primitive Eingaben werden vor dem Factory-Aufruf separat validiert:** IDs, Money/Rate,
+   Währung, `validFrom`, `validTo`.
+2. `hourlyRateVersion` akzeptiert **nur bereits validierte, gebrandete Werte**.
+3. Die Factory prüft danach **nur relationale** Invarianten: `validTo` nicht vor `validFrom`,
+   konsistenter Vorgängerbezug, sonstige Versionsinvarianten.
+4. **Überlappungen** zwischen mehreren Versionen prüft **nicht** diese Factory, sondern der
+   separate Overlap-Validator.
+
+Folge: bei doppelt ungültigen Rohwerten gibt es keinen künstlich priorisierten Domainfehler.
+Gateway bzw. Zod-Grenze dürfen mehrere Feldfehler **gleichzeitig** melden; die Domain-Factory
+bekommt solche Werte gar nicht erst.
+
+**Materielle Folge für den Bestand:** `RATE_NEGATIVE` verlässt `hourlyRateVersion` und wandert
+an den gebrandeten Rate-Konstruktor. Der Fehlercode verschwindet nicht, er wechselt die Grenze
+— die zugehörigen Tests wandern mit.
+
 ### Schnittgrenze EYT-95 / EYT-109 (PO-Korrektur 30.07.2026)
 
 REQ-005 wird von **zwei** Tickets getragen. Die Grenze ist verbindlich; sie verschiebt keinen
