@@ -310,13 +310,26 @@ describe("Rot-Fall Kostenmodul", () => {
       ].join("\n") + "\n",
     );
     const messages = messagesOf("costs-touches-only-own-tables");
+    // Beide Zusicherungen nennen seit dieser Runde das VERB. Vorher pruefte die
+    // erste nur `public.assignments && planning && schreibend` und die zweite
+    // nur `public.plan_versions` — beides wurde, nachdem `g` und `f`
+    // dazukamen, von einem anderen Literal derselben Fixture miterfuellt:
+    // Literal `a` bzw. `b` einzeln loeschen liess die Suite gruen. Kein Loch
+    // (jedes der fuenf Schreibverben ist einzeln gedeckt), aber zwei
+    // Zusicherungen, die nichts mehr messen konnten.
     expect(
       messages.some(
         (m) =>
-          m.includes("public.assignments") && m.includes("planning") && m.includes("schreibend"),
+          m.includes('"insert into public.assignments"') &&
+          m.includes("planning") &&
+          m.includes("schreibend"),
       ),
+      "insert into wurde nicht als Schreibziel erkannt.",
     ).toBe(true);
-    expect(messages.some((m) => m.includes("public.plan_versions"))).toBe(true);
+    expect(
+      messages.some((m) => m.includes('"update … set public.plan_versions"')),
+      "update ohne Alias wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
     expect(messages.some((m) => m.includes("public.items") && m.includes("global"))).toBe(true);
     expect(messages.some((m) => m.includes("public.cost_secrets") && m.includes("fehlt"))).toBe(
       true,
