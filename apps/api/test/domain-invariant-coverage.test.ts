@@ -61,6 +61,39 @@ function exportedValues(): string[] {
 
 const EXPORTS = exportedValues();
 
+/**
+ * String-Literal-Konstanten aus `packages/domain/src/*.ts`.
+ *
+ * Gelesen wird der Wert, nicht nur der Name. Grund ist ein gemessener Defekt:
+ * `ROUNDING_MODE` hiess im Quelltext laengst `HALF_UP_NON_NEGATIVE`, waehrend
+ * das Register weiter "HALF_UP, Halbwert von null weg" behauptete — eine
+ * Aussage, die V5.3 ausdruecklich zurueckgenommen hat und die ausserdem FALSCH
+ * ist: `bigint`-Division schneidet zur Null hin ab, ein negativer Halbwert
+ * faellt also nach oben. Keine Zusicherung hat das bemerkt, weil das
+ * `statement`-Feld reine Prosa war.
+ */
+function stringConstants(): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const file of readdirSync(resolve(domainRoot, "src"))) {
+    if (!file.endsWith(".ts")) continue;
+    const source = readFileSync(resolve(domainRoot, "src", file), "utf8");
+    // Die optionale Typannotation ist nicht kosmetisch: ohne sie uebersah der
+    // Leser `export const EUROPE_BERLIN: IanaTimeZone = "Europe/Berlin"` — und
+    // genau dort driftete die Aussage bereits. Ein Leser, der weniger faengt als
+    // sein Docstring zusagt, ist die Luecke, die dieser Test schliessen soll.
+    const pattern = /export\s+const\s+([A-Z][A-Z0-9_]*)\s*(?::[^=]+?)?=\s*"([^"]+)"/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(source)) !== null) {
+      const name = match[1];
+      const value = match[2];
+      if (name !== undefined && value !== undefined) found.set(name, value);
+    }
+  }
+  return found;
+}
+
+const STRING_CONSTANTS = stringConstants();
+
 /** Alle Testdateien des Pakets, einmal gelesen. */
 const TEST_SOURCES = new Map<string, string>(
   readdirSync(resolve(domainRoot, "test"))
@@ -135,6 +168,44 @@ describe("Invariantenregister (EYT-61 AK1)", () => {
       "Verrotteter Registereintrag. Ein umbenannter oder geloeschter Test darf " +
         "die Abdeckungszusage nicht stillschweigend entwerten.",
     ).toEqual([]);
+  });
+
+  it("nennt in jeder Konstanten-Aussage ihren tatsaechlichen Wert", () => {
+    // Das `statement`-Feld war bisher ungeprueft und driftete deshalb still vom
+    // Code weg. Fuer eine String-Literal-Konstante ist der Wert selbst die
+    // knappste pruefbare Zusage: steht er nicht im Text, beschreibt der Text
+    // etwas anderes als den Export.
+    // Gegenmutation: die alte Aussage "HALF_UP, Halbwert von null weg …" wieder
+    // eintragen, oder ROUNDING_MODE in `src` aendern ohne das Register
+    // nachzuziehen -> rot, mit Nennung des abweichenden Exports.
+    const drifted: string[] = [];
+    let geprueft = 0;
+    for (const entry of INVARIANTS) {
+      if (entry.kind !== "konstante") continue;
+      const value = STRING_CONSTANTS.get(entry.exportName);
+      if (value === undefined) continue; // Liste oder Objekt, kein String-Literal
+      geprueft += 1;
+      if (!entry.statement.includes(value)) {
+        drifted.push(`${entry.exportName}: Wert "${value}" fehlt in der Aussage`);
+      }
+    }
+    expect(
+      drifted,
+      "Registeraussage und Export driften auseinander. Eine Aussage, die einen " +
+        "anderen Wert beschreibt als der Code traegt, ist schlimmer als keine.",
+    ).toEqual([]);
+    // Nicht-Leerlauf: mindestens ROUNDING_MODE, ROUNDING_STAGE und
+    // COST_RULE_VERSION und EUROPE_BERLIN muessen erfasst sein. Ein kaputtes Muster im Leser
+    // machte diese Zeile sonst still gruen.
+    expect(geprueft).toBeGreaterThanOrEqual(4);
+  });
+
+  it("erkennt eine abweichende Konstanten-Aussage tatsaechlich", () => {
+    // Gegenprobe zur Zeile oben: ohne sie waere sie auch dann gruen, wenn
+    // `includes` nie fehlschlagen koennte.
+    const wert = STRING_CONSTANTS.get("ROUNDING_MODE");
+    expect(wert).toBe("HALF_UP_NON_NEGATIVE");
+    expect("HALF_UP, Halbwert von null weg".includes(wert ?? "")).toBe(false);
   });
 
   it("erkennt einen verrotteten Eintrag tatsaechlich", () => {

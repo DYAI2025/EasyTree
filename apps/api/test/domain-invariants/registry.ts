@@ -68,6 +68,9 @@ const EDGES = "packages/domain/test/temporal-edges.test.ts";
 const CAPACITY = "packages/domain/test/weekly-capacity.test.ts";
 const IDS = "packages/domain/test/identifiers.test.ts";
 const WALL = "packages/domain/test/wall-time.test.ts";
+// EYT-95 — Money-, Rate- und Rundungsvertrag.
+const MONEY = "packages/domain/test/money-rate.test.ts";
+const RATE_PROP = "packages/domain/test/rate-version.property.test.ts";
 
 export const INVARIANTS: readonly Invariant[] = [
   // -------------------------------------------------------------------------
@@ -174,7 +177,7 @@ export const INVARIANTS: readonly Invariant[] = [
   },
   {
     exportName: "EUROPE_BERLIN",
-    statement: "Pilotzone, bis organizations.time_zone gelesen wird.",
+    statement: "Europe/Berlin: Pilotzone, bis organizations.time_zone gelesen wird.",
     kind: "konstante",
     positive: { file: WEEK, title: "nimmt eine bekannte Zone an" },
     negative: null,
@@ -296,6 +299,366 @@ export const INVARIANTS: readonly Invariant[] = [
     statement: "Kein erfundener Standardwert: weder PRD noch ADR nennen eine Wochenstundengrenze.",
     kind: "konstante",
     positive: { file: CAPACITY, title: "meldet OK, solange keine Grenze aktiviert ist" },
+    negative: null,
+  },
+
+  // ---------------------------------------------------------------------------
+  // EYT-95 — Geld (V1, V4)
+  // ---------------------------------------------------------------------------
+  {
+    exportName: "moneyOfMinorUnits",
+    statement:
+      "Ein Betrag wird als ganzzahlige EUR-Minor-Unit in bigint gefuehrt und verlaesst den Vertrag unveraendert — vorzeichenoffen.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "fuehrt Minor Units als bigint und gibt sie unveraendert zurueck",
+    },
+    // Erzeugt beide Vorzeichen: eine Implementierung, die auf nichtnegativ
+    // klemmt oder ueber Euro-Gleitkomma fuehrt, faellt hier auf.
+    negative: {
+      file: RATE_PROP,
+      title: "gibt jeden Minor-Unit-Betrag unveraendert zurueck, mit beiden Vorzeichen",
+    },
+  },
+  {
+    exportName: "moneyFromNumber",
+    statement:
+      "An der Zahlengrenze passiert nur, was endlich, ganzzahlig und als number eindeutig ist — geprueft in dieser Reihenfolge.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "nimmt an der Zahlengrenze einen sicheren ganzzahligen Betrag an",
+    },
+    // Der schaerfste Gegenfall: endlich UND ganzzahlig, trotzdem abgelehnt,
+    // weil jenseits von 2^53 nicht mehr eindeutig.
+    negative: {
+      file: MONEY,
+      title: "lehnt an der Zahlengrenze einen Betrag jenseits der sicheren Ganzzahl ab",
+    },
+  },
+  {
+    exportName: "addMoney",
+    statement: "Die Summe zweier Betraege ist exakt; es entsteht kein Gleitkommarest.",
+    kind: "regel",
+    positive: { file: MONEY, title: "addiert zwei Betraege exakt in Minor Units" },
+    // Assoziativitaet ist der unterscheidende Gegenfall: eine Addition ueber
+    // Euro-Gleitkommawerte ist nicht assoziativ und driftet hier auseinander.
+    negative: { file: RATE_PROP, title: "addiert assoziativ und exakt" },
+  },
+  {
+    exportName: "subtractMoney",
+    statement:
+      "Die Differenz ist exakt und darf negativ werden — Money traegt ein Vorzeichen, damit Abweichungen modellierbar bleiben (V4).",
+    kind: "regel",
+    positive: { file: MONEY, title: "zieht einen kleineren Betrag exakt ab" },
+    // Der Gegenfall zur naheliegenden Klemmung auf null: hier MUSS das
+    // Ergebnis negativ werden.
+    negative: { file: MONEY, title: "laesst bei der Subtraktion ein negatives Delta zu" },
+  },
+  {
+    exportName: "planCostAmount",
+    statement:
+      "Nur ein nichtnegativer Betrag wird persistierfaehiger Plan-Kostenbetrag; das ist die Domaenengrenze aus V4.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "nimmt einen nichtnegativen Betrag als Plan-Kostenbetrag an, einschliesslich null",
+    },
+    negative: { file: MONEY, title: "nimmt ein negatives Delta nicht als Plan-Kostenbetrag an" },
+  },
+  {
+    exportName: "sumPlanCostAmounts",
+    statement:
+      "Eine Summe entsteht ausschliesslich durch Addition bereits gerundeter Positionsbetraege, nie durch Neuberechnung (V1 Punkt 7 und 8).",
+    kind: "regel",
+    positive: { file: RATE_PROP, title: "summiert Positionen ohne erneutes Runden" },
+    // Der Gegenfall enthaelt die ausdrueckliche Abgrenzung gegen den verbotenen
+    // Weg: drei Positionen ergeben 3501, die Neuberechnung aus der
+    // ungerundeten Gesamtmenge 3500.
+    negative: {
+      file: MONEY,
+      title: "bildet Summen ausschliesslich aus den bereits gerundeten Positionsbetraegen",
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // EYT-95 — Menge und Sicherheitsgrenze vor BigInt (V2, V2b, V4)
+  // ---------------------------------------------------------------------------
+  {
+    exportName: "durationMilliseconds",
+    statement:
+      "Eine Menge ist eine nichtnegative ganzzahlige Millisekundenzahl; null ist zulaessig.",
+    kind: "regel",
+    positive: { file: MONEY, title: "nimmt null Millisekunden als zulaessige Menge an" },
+    negative: { file: MONEY, title: "lehnt eine negative Dauer ab" },
+  },
+  {
+    exportName: "toDurationMilliseconds",
+    statement:
+      "Vor der Konvertierung nach bigint wird endlich, ganzzahlig, nichtnegativ und sicher geprueft — fail-closed (V2b).",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "nimmt einen sicheren ganzzahligen Wert an und konvertiert ihn exakt",
+    },
+    // Der einzige der vier verbotenen Faelle, bei dem BigInt() NICHT wirft,
+    // sondern still einen nicht mehr herleitbaren Wert liefert.
+    negative: {
+      file: MONEY,
+      title: "weist einen unsicheren Number-Wert ab, obwohl BigInt ihn klaglos annaehme",
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // EYT-95 — Kalendertage (V3)
+  // ---------------------------------------------------------------------------
+  {
+    exportName: "compareLocalBusinessDate",
+    statement:
+      "Kalendertage werden nach Jahr, dann Monat, dann Tag geordnet; Gleichheit ist unterscheidbar.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "ordnet zwei Kalendertage desselben Monats und erkennt Gleichheit",
+    },
+    // Unterscheidender Gegenfall: in beiden Paaren ist die Tageszahl des
+    // FRUEHEREN Datums groesser — ein Vergleich ueber day allein bekommt das
+    // Vorzeichen falsch.
+    negative: { file: MONEY, title: "widerlegt die Tagesnummer als Ordnungskriterium" },
+  },
+  {
+    exportName: "dayAfter",
+    statement:
+      "Der Nachfolger eines Kalendertages ist die einzige zulaessige Normalisierung nach halboffen (V3) — echte Kalenderarithmetik, kein Zeitpunkt.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "bildet den Folgetag innerhalb des Monats und ueber die Monatsgrenze",
+    },
+    // Unterscheidender Gegenfall: `day + 1` ergaebe den 32.12., ein fest mit
+    // 28 Tagen kodierter Februar verfehlte den 29.02.2028.
+    negative: {
+      file: MONEY,
+      title: "widerlegt die blosse Tagesinkrementierung an Jahres- und Schaltjahresgrenze",
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // EYT-95 — Satzversionen (AK3, V3, V4)
+  // ---------------------------------------------------------------------------
+  {
+    exportName: "costCurrencyFromUnknown",
+    statement:
+      'Die untrusted Eingangsgrenze akzeptiert ausschliesslich den exakten String "EUR" — keine Grossschreibung, keine stillschweigende Normalisierung (V5.4-korrigiert).',
+    kind: "regel",
+    positive: { file: MONEY, title: "nimmt genau den String EUR an" },
+    // Der unterscheidende Gegenfall ist bewusst `"eur"` und nicht `"USD"`:
+    // eine Implementierung mit `toUpperCase()` faellt nur hier auf und wuerde
+    // an einer Systemgrenze stillschweigend Daten korrigieren.
+    negative: { file: MONEY, title: "lehnt Kleinschreibung ab, statt still zu normalisieren" },
+  },
+  {
+    exportName: "hourlyRateAmount",
+    statement:
+      "Ein Stundensatz ist nichtnegativ; seit V5.6 sitzt diese Pruefung am gebrandeten Satzkonstruktor, nicht mehr in der Versionsfactory.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "nimmt einen nichtnegativen Stundensatz an, einschliesslich null",
+    },
+    negative: { file: MONEY, title: "lehnt einen negativen Stundensatz ab" },
+  },
+  {
+    exportName: "HOURLY_RATE_AMOUNT_ERRORS",
+    statement:
+      "Der Satzkonstruktor kennt genau einen Ablehnungsgrund, RATE_NEGATIVE, und der ist erreichbar. UNSUPPORTED_COST_CURRENCY sitzt seit V5.4-korrigiert an der untrusted Eingangsgrenze, wo er echt ausloesbar ist.",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Stundensatz-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
+  },
+  {
+    exportName: "hourlyRateVersion",
+    statement:
+      "Eine Satzversion entsteht nur aus bereits validierten Werten und prueft danach nur noch relationale Invarianten (V5.6) — validTo nicht vor validFrom.",
+    kind: "regel",
+    positive: { file: MONEY, title: "nimmt eine Satzversion mit gueltigem Intervall an" },
+    negative: {
+      file: MONEY,
+      title: "lehnt eine Version ab, deren gueltig-bis vor gueltig-ab liegt",
+    },
+  },
+  {
+    exportName: "selectRateVersion",
+    statement:
+      "Zu einem Stichtag gilt genau eine Version, sonst ein blockierendes Ergebnis — niemals stillschweigend null Euro.",
+    kind: "regel",
+    positive: { file: MONEY, title: "waehlt am ersten Gueltigkeitstag bereits die Version" },
+    // Der Gegenfall gegen `versions.find(...)`: bei doppelter Deckung darf
+    // nicht die erste gewinnen, sondern es muss blockieren.
+    negative: {
+      file: MONEY,
+      title: "meldet zwei ueberlappende Versionen als blockierend statt die erste zu nehmen",
+    },
+  },
+  {
+    exportName: "findRateVersionOverlaps",
+    statement:
+      "Ueberlappende Gueltigkeitsintervalle werden vollstaendig gefunden, unabhaengig von der Eingabereihenfolge.",
+    kind: "regel",
+    positive: {
+      file: RATE_PROP,
+      title: "stimmt in findRateVersionOverlaps mit dem paarweisen Orakel ueberein",
+    },
+    negative: {
+      file: MONEY,
+      title: "findet die Ueberlappung auch dann, wenn die Versionen unsortiert kommen",
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // EYT-95 — Berechnung und Rundung (V1, V2)
+  // ---------------------------------------------------------------------------
+  {
+    exportName: "costOfDuration",
+    statement:
+      "Betrag = roundHalfUp(satz * millisekunden / 3_600_000), genau einmal gerundet und erst am Ende.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "rundet einen exakten halben Cent auf den naechsthoeheren Cent",
+    },
+    // Unterscheidender Gegenfall gegen jede Zwischenrundung: wer den
+    // Minutensatz vorab rundet, rechnet 14 statt 12.
+    negative: { file: MONEY, title: "rundet nicht auf einem Minuten- oder Sekundensatz" },
+  },
+  {
+    exportName: "computeCostPosition",
+    statement:
+      "Eine Position traegt Quelle, Satzversion, Regelversion und Erzeugungszeitpunkt — oder sie entsteht gar nicht.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "traegt Quelle, Regelversion, Satzversion und Erzeugungszeitpunkt im Ergebnis",
+    },
+    negative: { file: MONEY, title: "blockiert die Position, wenn am Stichtag kein Satz gilt" },
+  },
+
+  // ---------------------------------------------------------------------------
+  // EYT-95 — eingefrorene Konstanten und Fehlercodelisten
+  // ---------------------------------------------------------------------------
+  {
+    exportName: "CURRENCIES",
+    statement:
+      "Sprint 5 kennt genau eine Waehrung: netto EUR. Damit ist ein Waehrungskonflikt im Kern nicht konstruierbar — CURRENCY_MISMATCH entfaellt vollstaendig (V5.4-korrigiert).",
+    kind: "konstante",
+    positive: { file: MONEY, title: "fuehrt genau eine Waehrung und traegt sie am Betrag mit" },
+    negative: null,
+  },
+  {
+    exportName: "COST_RULE_VERSION",
+    statement:
+      "personnel-plan-cost-v1: die Regelversion ist fest verdrahtet und nicht konfigurierbar; ein Wechsel laeuft nur ueber Forward-Fix (V1).",
+    kind: "konstante",
+    positive: { file: MONEY, title: "benennt Regelversion, Rundungsmodus und Rundungsstufe fest" },
+    negative: null,
+  },
+  {
+    exportName: "ROUNDING_MODE",
+    statement:
+      "HALF_UP_NON_NEGATIVE: bei exakt 0,5 Cent wird auf den naechsthoeheren Cent gerundet; fuer negative Werte ist nichts nachgewiesen — die bigint-Division schneidet zur Null hin ab, ein negativer Halbwert faellt also nach OBEN und nicht von null weg (V5.3). Nicht mandanten- oder nutzerkonfigurierbar (V1, V5.3).",
+    kind: "konstante",
+    positive: { file: MONEY, title: "benennt Regelversion, Rundungsmodus und Rundungsstufe fest" },
+    negative: null,
+  },
+  {
+    exportName: "ROUNDING_STAGE",
+    statement:
+      "COST_POSITION_FINAL_AMOUNT: gerundet wird genau einmal, beim Erzeugen der persistenten Kostenposition (V1).",
+    kind: "konstante",
+    positive: { file: MONEY, title: "benennt Regelversion, Rundungsmodus und Rundungsstufe fest" },
+    negative: null,
+  },
+  {
+    exportName: "COST_RATE_DENOMINATOR",
+    statement: "Der Nenner der Stundenrate ist 3_600_000 Millisekunden (V2).",
+    kind: "konstante",
+    // Driftwaechter: das Eigenschaftstestfile fuehrt ein unabhaengiges Literal,
+    // weil es damit die Halbwertfamilie konstruiert. Diese Zeile haelt beide
+    // in Deckung.
+    positive: {
+      file: RATE_PROP,
+      title: "haelt den lokalen Massstab mit dem Nenner des Vertrags in Deckung",
+    },
+    negative: null,
+  },
+  {
+    exportName: "MONEY_ERRORS",
+    statement:
+      "Die Ablehnungsgruende der Zahlengrenze sind doppelfrei und jeder von ihnen ist durch eine konkrete Eingabe erreichbar.",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Money-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
+  },
+  {
+    exportName: "QUANTITY_ERRORS",
+    statement:
+      "Die vier Ablehnungsgruende der Sicherheitsgrenze aus V2b sind doppelfrei und je einzeln erreichbar.",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Mengen-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
+  },
+  {
+    exportName: "PLAN_COST_AMOUNT_ERRORS",
+    statement:
+      "Die Domaenengrenze aus V4 kennt genau einen Ablehnungsgrund, und der ist erreichbar.",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Plan-Kostenbetrag-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
+  },
+  {
+    exportName: "RATE_VERSION_ERRORS",
+    statement:
+      "Die Ablehnungsgruende der Satzversionsfabrik sind doppelfrei und je einzeln erreichbar.",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Satzversions-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
+  },
+  {
+    exportName: "COST_POSITION_INPUT_ERRORS",
+    statement:
+      "COMPUTED_AT_INVALID: ein gueltig getyptes Date mit getTime() === NaN blockiert die Position, weil AK4 den Erzeugungszeitpunkt verlangt (V5.2, gleiche Grenze wie TimeInterval.START_INVALID).",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Positionseingabe-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
+  },
+  {
+    exportName: "RATE_SELECTION_ERRORS",
+    statement:
+      "Die Satzauswahl kennt genau zwei blockierende Ausgaenge und keinen dritten, stillen Null-Euro-Ausgang.",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Satzauswahl-Fehlercode genau einmal und erreicht jeden",
+    },
     negative: null,
   },
 ];

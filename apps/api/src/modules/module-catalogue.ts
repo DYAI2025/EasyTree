@@ -1,5 +1,5 @@
 /**
- * Modulkatalog und Tabellenbesitz (EYT-46).
+ * Modulkatalog und Tabellenbesitz (EYT-46, erweitert um `costs` in EYT-105).
  *
  * ## Was diese Datei ist
  *
@@ -30,22 +30,34 @@
 /**
  * Eingefrorene Modul-Slugs.
  *
- * Quelle ist ADR-001 Z. 60 (der bindende Architekturvertrag). Dessen Einträge
- * sind Prosa mit Schrägstrichen und deshalb keine gültigen Verzeichnisnamen;
- * hier stehen die daraus abgeleiteten, eindeutigen Slugs:
+ * **Zwei Quellen, nicht eine.** Die ersten zehn Slugs sind aus ADR-001 Z. 60
+ * abgeleitet; der elfte (`costs`) kommt aus ADR-003, das die Modulliste aus
+ * ADR-001 ausdrücklich **erweitert** (EYT-105 AC 1). Diese Unterscheidung steht
+ * hier, weil die pauschale Angabe „abgeleitet aus ADR-001 Z. 60" mit `costs`
+ * schlicht falsch wäre: ADR-001 Z. 60 kennt kein Kostenmodul.
  *
- * | ADR-001 Z. 60        | Slug             |
- * | -------------------- | ---------------- |
- * | Tenancy/Identity     | `tenancy`        |
- * | Workforce            | `workforce`      |
- * | Sites/Work           | `worksites`      |
- * | Planning             | `planning`       |
- * | Resources            | `resources`      |
- * | Timekeeping          | `timekeeping`    |
- * | Communications       | `communications` |
- * | Weather/Routing      | `weather`        |
- * | Files                | `files`          |
- * | Audit/Integration    | `audit`          |
+ * Die Einträge von ADR-001 Z. 60 sind Prosa mit Schrägstrichen und deshalb
+ * keine gültigen Verzeichnisnamen; hier stehen die daraus abgeleiteten,
+ * eindeutigen Slugs:
+ *
+ * | Quelle            | Eintrag           | Slug             |
+ * | ----------------- | ----------------- | ---------------- |
+ * | ADR-001 Z. 60     | Tenancy/Identity  | `tenancy`        |
+ * | ADR-001 Z. 60     | Workforce         | `workforce`      |
+ * | ADR-001 Z. 60     | Sites/Work        | `worksites`      |
+ * | ADR-001 Z. 60     | Planning          | `planning`       |
+ * | ADR-001 Z. 60     | Resources         | `resources`      |
+ * | ADR-001 Z. 60     | Timekeeping       | `timekeeping`    |
+ * | ADR-001 Z. 60     | Communications    | `communications` |
+ * | ADR-001 Z. 60     | Weather/Routing   | `weather`        |
+ * | ADR-001 Z. 60     | Files             | `files`          |
+ * | ADR-001 Z. 60     | Audit/Integration | `audit`          |
+ * | ADR-003 §1        | Costs             | `costs`          |
+ *
+ * Eingefroren heißt weiterhin: eine weitere Zeile ist eine Architekturänderung
+ * mit ADR-Pflicht, kein Detail. `architecture.test.ts` prüft für `costs`
+ * namentlich, dass eine ADR unter `docs/architecture/` den Slug zusammen mit
+ * EYT-105 nennt.
  *
  * Abweichung zur Analyse: `docs/audit/INTEGRATION_ARCHITECTURE.md` nennt in der
  * Zielstruktur zusätzlich ein Verzeichnis `absence` und verwendet `time` statt
@@ -65,6 +77,8 @@ export const MODULE_SLUGS = [
   "weather",
   "files",
   "audit",
+  // ADR-003 (EYT-105) — Erweiterung der Liste aus ADR-001 Z. 60.
+  "costs",
 ] as const;
 
 export type ModuleSlug = (typeof MODULE_SLUGS)[number];
@@ -83,6 +97,10 @@ export const SCAFFOLDED_MODULES = [
   "workforce",
   "worksites",
   "planning",
+  // EYT-105: vier gefüllte Schichten plus schmale index.ts. Der Eintrag ist die
+  // Zusage, dass `costs-module-boundaries.test.ts` echte Dateien vorfindet —
+  // ohne ihn liefe `it.each([...SCAFFOLDED_MODULES])` am Modul vorbei.
+  "costs",
 ] as const satisfies readonly ModuleSlug[];
 
 /** Schichten je Modul. Reihenfolge = erlaubte Importrichtung (aussen darf nach innen). */
@@ -101,12 +119,21 @@ export interface TableOwnership {
 }
 
 /**
- * Tabellen, die HEUTE in `supabase/migrations/` existieren.
+ * Besitzregister der Tabellen.
  *
- * Vollständig gegen `20260723214800_0001_foundation.sql` und
- * `20260723222457_0002_tenancy.sql` geprüft. Das Fachschema kommt mit EYT-86;
- * bis dahin besitzt kein Fachmodul eine Tabelle — das ist der ehrliche Stand,
- * nicht eine Lücke im Register.
+ * Alle Einträge bis einschließlich `public.outbox_messages` existieren HEUTE in
+ * `supabase/migrations/`, vollständig gegen die dortigen Dateien geprüft.
+ *
+ * **Ausnahme, benannt statt versteckt:** die drei `cost_*`-Einträge am Ende
+ * haben noch KEINE Migration. Sie stehen hier, weil EYT-105 AC 1 die
+ * Registrierung des Tabellenbesitzes zusammen mit ADR, `MODULE_SLUGS` und
+ * `SCAFFOLDED_MODULES` verlangt und ADR-003 §2 den Besitz entscheidet — das
+ * Schema selbst gehört zu EYT-108 (Sätze) und EYT-109 (Snapshot). Wer dort
+ * einen anderen Tabellennamen wählt, ändert damit ADR-003 und muss diesen
+ * Eintrag mitziehen; ein stiller Namensdrift wäre ein Register, das nichts mehr
+ * beschreibt. Bis dahin ist `false` hier keine Option: Kostendaten sind
+ * mandantengebunden (ADR-001 Z. 82), und das ist die Vorgabe an die Migration,
+ * nicht ein Bericht über sie.
  */
 export const TABLE_OWNERSHIP: readonly TableOwnership[] = [
   {
@@ -174,5 +201,23 @@ export const TABLE_OWNERSHIP: readonly TableOwnership[] = [
     owner: "audit",
     tenantOwned: true,
     note: "Transactional Outbox (0008). Zustellstrecke fehlt noch und hat kein Ticket (Sprintplan L-12).",
+  },
+  {
+    table: "public.cost_rate_versions",
+    owner: "costs",
+    tenantOwned: true,
+    note: "MIGRATION FEHLT NOCH — Besitz von ADR-003 §2 entschieden, Schema gehoert zu EYT-108. Append-only versionierte Mitarbeiter-Stundensaetze in EUR-Minor-Units mit Effective-Date-Intervall. PERSONENBEZOGEN (Entgeltdaten).",
+  },
+  {
+    table: "public.cost_snapshots",
+    owner: "costs",
+    tenantOwned: true,
+    note: "MIGRATION FEHLT NOCH — Besitz von ADR-003 §2 entschieden, Schema gehoert zu EYT-109. Unveraenderlicher Tageskosten-Snapshot je veroeffentlichter Planversion.",
+  },
+  {
+    table: "public.cost_snapshot_items",
+    owner: "costs",
+    tenantOwned: true,
+    note: "MIGRATION FEHLT NOCH — Besitz von ADR-003 §2 entschieden, Schema gehoert zu EYT-109. Einzelpositionen des Snapshots mit Satzversion, Regelversion und gerundetem Betrag.",
   },
 ];

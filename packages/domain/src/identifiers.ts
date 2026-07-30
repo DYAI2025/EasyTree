@@ -38,6 +38,13 @@ export type PlanVersionId = Brand<string, "PlanVersionId">;
 export type ResourceId = Brand<string, "ResourceId">;
 
 /**
+ * Eine Fassung eines Mitarbeiter-Stundensatzes mit eigenem Gültigkeitszeitraum
+ * (EYT-95). Nicht die Person und nicht der Satz — die Version, auf die ein
+ * berechneter Betrag historisch zurückführbar bleiben muss.
+ */
+export type RateVersionId = Brand<string, "RateVersionId">;
+
+/**
  * Unveränderliche Liste aller Bezeichnerarten. Dient als Testanker: neue
  * Bezeichner müssen hier eingetragen werden, damit die Vollständigkeitsprüfung
  * in `test/identifiers.test.ts` grün bleibt.
@@ -50,6 +57,7 @@ export const IDENTIFIER_BRANDS = [
   "AssignmentId",
   "PlanVersionId",
   "ResourceId",
+  "RateVersionId",
 ] as const;
 
 export type IdentifierBrand = (typeof IDENTIFIER_BRANDS)[number];
