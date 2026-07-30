@@ -785,35 +785,3 @@ test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () 
     });
   }
 });
-
-// ---------------------------------------------------------------------------
-// AC8-Gegenfall — TEMPORAER, wird unmittelbar per git revert entfernt
-// ---------------------------------------------------------------------------
-
-/**
- * Absichtlich fehlschlagender Test fuer den Negativnachweis von EYT-67 AC8.
- *
- * Er beantwortet eine Frage, die eine gelesene Konfiguration nicht beantworten
- * kann: Blockiert der seit dem 30.07.2026 erforderliche Pflichtcheck
- * `read-through` einen Merge WIRKLICH, oder steht er nur im Ruleset? Dass alle
- * zehn Checks gruen sind, beweist das nicht — es beweist nur, dass nichts rot
- * war.
- *
- * Warum genau hier: `apps/web/e2e/read-through.spec.ts` laeuft ausschliesslich
- * im Job `read-through` (`playwright.harness.config.ts` matcht nur diese Datei,
- * `playwright.config.ts` schliesst sie per `testIgnore` aus). Ein Fehlschlag
- * trifft damit exakt einen Pflichtcheck und keinen anderen. Die
- * Pflichtcheck-Liste, der Checkname, die Branch Protection, der Workflowjob und
- * die Produktlogik bleiben unangetastet.
- *
- * Dieser Block existiert fuer die Dauer eines einzigen CI-Laufs und wird
- * anschliessend mit `git revert` vollstaendig zurueckgenommen — kein Reset, kein
- * Force Push. Steht er nach dem Revert noch da, ist das ein Fehler.
- */
-test("AC8_NEGATIVE_CONTROL: intentional read-through failure", () => {
-  expect(
-    "AC8_NEGATIVE_CONTROL",
-    "AC8_NEGATIVE_CONTROL: intentional read-through failure — belegt, dass ein roter " +
-      "Pflichtcheck den Merge serverseitig blockiert. Wird per git revert entfernt.",
-  ).toBe("dieser Vergleich schlaegt absichtlich fehl");
-});
