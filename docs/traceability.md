@@ -1,5 +1,20 @@
 # Traceability Matrix
 
+## Featureregister
+
+Diese Datei trägt inzwischen **zwei** Features. Die Kopfzeile darunter gehört zum ersten.
+
+| Feature Slug                    | Abschnitt                                             | Bestätigungsstand               |
+| ------------------------------- | ----------------------------------------------------- | ------------------------------- |
+| `planning-draft-conflict-slice` | alles bis „Sprint 5 — Daily Cost Export"              | **user-confirmed** (28.07.2026) |
+| `sprint-5-daily-cost-export`    | Abschnitt „Sprint 5 — Daily Cost Export" am Dateiende | **user-confirmed** (30.07.2026) |
+
+> **Warnung an Leser und an `plumbline-context-check`.** Das Werkzeug prüft _eine_ Datei
+> `docs/traceability.md` auf _einen_ Bestätigungsmarker. Der Marker unten gehört zu
+> `planning-draft-conflict-slice`. Für `sprint-5-daily-cost-export` würde er die Prüfung
+> **fälschlich** bestehen lassen. Der maßgebliche Sprint-5-Stand steht im eigenen Abschnitt
+> und ist `draft`.
+
 Feature Slug: `planning-draft-conflict-slice`
 Status: user-confirmed
 Confirmed by user: yes
@@ -214,3 +229,128 @@ Ticketrollen und Status gegen Jira geprüft am 28.07.2026 (`sprint in openSprint
 Erteilt am 28.07.2026:
 
 > Ich bestätige, dass Product Canvas und Product Vision meine Absicht korrekt wiedergeben und als Grundlage für AgileTeam Planning verwendet werden dürfen.
+
+**Nicht mitbestätigt:** technische Kapazität für die Fertigstellung (nur der Start), die lokalen
+Zusätze REQ-G01/REQ-G02, und das **Vision-GO** für den Entwicklungsstart — ein eigenes Signal,
+das weiterhin beim Product Owner liegt.
+
+---
+
+---
+
+# Sprint 5 — Daily Cost Export
+
+Feature Slug: `sprint-5-daily-cost-export`
+Sprint-5-Status: **user-confirmed** (30.07.2026, Product Owner) — Vision-GO für den Entwicklungsstart noch offen
+Baseline: Confluence **PRD v1.4** (7766017) + Sprint-5-Seite (8552449), abgeglichen am 30.07.2026 — **keine materielle Abweichung offen**; verblieben `DOC-DRIFT-S5-001` (kein Blocker)
+
+- Canvas: [`docs/canvas/sprint-5-daily-cost-export.canvas.md`](canvas/sprint-5-daily-cost-export.canvas.md)
+- Vision: [`docs/vision/sprint-5-daily-cost-export.vision.md`](vision/sprint-5-daily-cost-export.vision.md)
+- PRD: [`docs/prd/sprint-5-daily-cost-export.prd.md`](prd/sprint-5-daily-cost-export.prd.md)
+
+**Schlüsselraum.** Sprint 5 nummeriert ab `REQ-001`. Um die Kollision mit dem
+Sprint-4-Schlüsselraum derselben Datei zu vermeiden, sind Sprint-5-Zeilen als `S5·REQ-00n`
+geschrieben. `canvas-link` und `vision-link` sind für alle Zeilen die oben verlinkten Dateien.
+
+## S5 Tabelle A — Requirement Traceability
+
+| Trace ID   | Vision  | Canvas           | Requirement | Baseline          | AC     | Jira             | Evidence Needed                                                                                               | Falsifier (Gegenmutation)                                                                    | Status                         |
+| ---------- | ------- | ---------------- | ----------- | ----------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------ |
+| TRC-S5-001 | VIS-003 | CAN-001, CAN-004 | S5·REQ-001  | S5-REQ-01         | AC-001 | EYT-105          | positiver Architekturtest; ADR; Modul-/Tabellenkatalog                                                        | tiefer Querimport, fremder Tabellenwrite, `shared/services`, zweite Money-Impl. bleiben grün | offen                          |
+| TRC-S5-002 | VIS-003 | INV-007, INV-008 | S5·REQ-002  | S5-REQ-02         | AC-002 | EYT-106          | echter Browserlogin; API-Negativprobe; RLS-Negativprobe; abgelaufener/widerrufener/falsch signierter Token    | API erlaubt Zugriff → RLS muss weiter blockieren (FMC-002)                                   | **blockiert** (`OQ-005`)       |
+| TRC-S5-003 | VIS-003 | INV-001, INV-009 | S5·REQ-003  | S5-REQ-03         | AC-003 | EYT-107          | zwei parallele Publish-Verbindungen; Retry gleicher Schlüssel; Fault Injection; Reload/zweiter Browserkontext | paralleler Publish erzeugt zweite Veröffentlichung                                           | offen                          |
+| TRC-S5-004 | VIS-003 | INV-003, INV-010 | S5·REQ-004  | S5-REQ-04         | AC-004 | EYT-108          | Grenzdatum; expliziter Nullsatz; fehlender Satz; parallele Überlappung; Cross-Tenant; Retry                   | überlappender Satz wird angenommen                                                           | offen                          |
+| TRC-S5-005 | VIS-003 | INV-002, INV-005 | S5·REQ-005  | S5-REQ-05         | AC-005 | EYT-95, EYT-109  | DST; Mitternachtsgrenze; Property-Test Summenerhaltung; fehlender Satz blockiert                              | spätere Satzänderung verändert alten Snapshot; Entwurf als Quelle akzeptiert (FMC-001)       | offen                          |
+| TRC-S5-006 | VIS-003 | CAN-F05          | S5·REQ-006  | S5-REQ-06         | AC-006 | EYT-109          | reale Browserreise; Netzwerknachweis gegen API; keine LocalStorage-Wahrheit; Accessibility                    | Clientberechnung ersetzt Serverwert                                                          | offen                          |
+| TRC-S5-007 | VIS-003 | INV-006          | S5·REQ-007  | S5-REQ-07         | AC-007 | EYT-110          | UI-/DB-/Zell-Parität; Formula-Injection; manipulierte Snapshot-ID; fremder Tenant; MIME/Dateiname             | abweichende Exportzelle bleibt grün                                                          | offen                          |
+| TRC-S5-008 | VIS-005 | CAN-006          | S5·REQ-008  | S5-REQ-08         | AC-008 | alle sieben      | durchgehende reale E2E-Reise **plus** acht Negativreisen; zehn CI-Gates bleiben erforderlich                  | sieben REQs grün, aber eine Negativreise fehlt → darf nicht „nachgewiesen" heißen            | offen                          |
+| TRC-S5-G01 | VIS-005 | CAN-006          | S5·REQ-G01  | _kein Gegenstück_ | AC-G01 | Intake-Hypothese | vier Pflichtszenarien: PASS · BLOCK (nicht geplant) · BLOCK (skipped) · EVIDENCE_MISMATCH                     | ungeplanter Test wird als Nachweis akzeptiert                                                | **Vorschlag, nicht bestätigt** |
+| TRC-S5-G02 | VIS-005 | CAN-006          | S5·REQ-G02  | _kein Gegenstück_ | AC-G02 | Intake-Hypothese | Gate-Summary mit vier getrennten Statuslinien                                                                 | `5/5 Nutzerreise` bei offenem Must gilt als Done                                             | **Vorschlag, nicht bestätigt** |
+
+### Pflicht-Falsifier aus den Failure-Mode-Ketten (Baseline §10)
+
+| ID      | Kette                                                                                                                                                      | Pflicht-Falsifier                                                                                                               | zugeordnet zu          |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| FMC-001 | Entwurfs-/veränderliche Planversion als Quelle → Daten ändern sich nach der Berechnung → UI/Export/Plan divergieren → falsche wirtschaftliche Entscheidung | Snapshot gegen eine **Entwurfs**-Planversions-ID muss fehlschlagen; Prüfung entfernen ⇒ Test rot                                | S5·REQ-003, S5·REQ-005 |
+| FMC-002 | Kostenrechte nur in der UI geprüft → Mitarbeiter ruft API direkt → interne Personalkosten offengelegt                                                      | direkter API-Aufruf mit Mitarbeiter-Token abgelehnt **und** RLS lehnt unabhängig ab; API-Guard entfernen ⇒ RLS blockiert weiter | S5·REQ-002             |
+
+## S5 Tabelle B — Canvas-Pflichtfelder (sechs, je Top-Level-REQ)
+
+| Requirement | canvas-problem | canvas-target-user | canvas-value-claim                          | canvas-success-signal | canvas-risk-status                                                                           |
+| ----------- | -------------- | ------------------ | ------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------- |
+| S5·REQ-001  | CAN-F01        | CAN-F02            | CAN-F04 — eine serverseitige Wahrheit       | CAN-F05               | `risk-introduced` — `costs` fehlt im eingefrorenen `MODULE_SLUGS`, ADR-Pflicht (CAN-RISK-03) |
+| S5·REQ-002  | CAN-F01        | CAN-F02            | CAN-F04 — geschützter Kostenstand           | CAN-F05               | `blocked` — keine reale Auth-Testumgebung (`OQ-005`, CAN-RISK-02)                            |
+| S5·REQ-003  | CAN-F01        | CAN-F02            | CAN-F04 — reproduzierbar                    | CAN-F05               | `aligned`                                                                                    |
+| S5·REQ-004  | CAN-F01        | CAN-F02            | CAN-F04 — nachvollziehbar                   | CAN-F05               | `aligned`                                                                                    |
+| S5·REQ-005  | CAN-F01        | CAN-F02            | CAN-F04 — reproduzierbar                    | CAN-F05               | `aligned`                                                                                    |
+| S5·REQ-006  | CAN-F01        | CAN-F02            | CAN-F04 — nachvollziehbar                   | CAN-F05               | `aligned`                                                                                    |
+| S5·REQ-007  | CAN-F01        | CAN-F02            | CAN-F04 — kein getrennter Rechenweg         | CAN-F05               | `risk-introduced` — erste XLSX-Laufzeitabhängigkeit (CAN-RISK-04)                            |
+| S5·REQ-008  | CAN-F01        | CAN-F02            | CAN-F04 — Wert nur bei durchgehender Reise  | CAN-F05               | `value-risk` — CI-Bindung 0 von 8 (CAN-RISK-05)                                              |
+| S5·REQ-G01  | CAN-F01        | CAN-F02            | verlässliche Done-Aussage statt False Green | CAN-F05               | `value-risk` — Vorschlag, nicht bestätigt                                                    |
+| S5·REQ-G02  | CAN-F01        | CAN-F02            | verlässliche Done-Aussage statt False Green | CAN-F05               | `aligned` — Vorschlag, nicht bestätigt                                                       |
+
+**Übergreifend:** Produktbaseline ist Confluence PRD v1.4 (7766017). Zuordnung: REQ-004 → FR-008,
+REQ-005 → FR-009, REQ-006 → FR-011, REQ-007 → FR-012, REQ-003 → FR-009/FR-001/FR-002. Der
+Sprint-5-Schnitt ist bewusst enger als die FR (DIV-S5-009) — kein Widerspruch, v1.4 spricht
+selbst von einem „begrenzten modularen Schnitt". FR-010 (Ist-Kosten) ist nicht im Schnitt.
+
+## S5 Tabelle C — True-Line-Felder und Reality Ledger
+
+| Requirement | value-check-id | true-line-status  | evidence-class | wired-in-prod? | CI-Bindung (Workflow · Job · Schritt) |
+| ----------- | -------------- | ----------------- | -------------- | -------------- | ------------------------------------- |
+| S5·REQ-001  | VC-S5-001      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-002  | VC-S5-002      | `blocked`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-003  | VC-S5-003      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-004  | VC-S5-004      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-005  | VC-S5-005      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-006  | VC-S5-006      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-007  | VC-S5-007      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-008  | VC-S5-008      | `review-required` | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-G01  | VC-S5-G01      | `review-required` | `none`         | no             | **MISSING** (`OQ-003`)                |
+| S5·REQ-G02  | VC-S5-G02      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+
+`production-verified` ist in Sprint 5 unerreichbar — die Baseline schließt produktives
+Deployment und Produktionsfreigabe ausdrücklich aus. Höchster erreichbarer Wert:
+`real-boundary-smoke`.
+
+## S5 Dokumentationsdrift-Ledger
+
+| ID                | Typ        | Inhalt                                                                                                                                                                                                                                  | Wirkung                                                                                                                  |
+| ----------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| DOC-DRIFT-S5-001  | DOKU-DRIFT | PRD v1.4 (Confluence 7766017, 28.07.2026) ist die fachliche Produktbaseline und ersetzt v1.3 für MVP-Scope und Phasen; das Repository bildet das nicht ab (`docs/prd/` nur v1.3, `CLAUDE.md` nennt Planungsökonomie pauschal Post-MVP). | **kein Implementierungsblocker.** Sichtbar halten, per eigenem Ticket synchronisieren.                                   |
+| ~~CONTRA-S5-001~~ | aufgelöst  | Befund „kein PRD v1.4, Kosten nur Post-MVP" beruhte auf einer Prüfung, die nur das Repository und nicht Confluence umfasste.                                                                                                            | **`FALSE_POSITIVE_SOURCE_SCOPE_ERROR` / `RESOLVED_NO_SCOPE_CHANGE`** (PO, 30.07.2026). PRD v1.4 gelesen und verifiziert. |
+
+## S5 Missing / Assumption / Blocker Ledger
+
+| ID     | Typ         | Inhalt                                              | Wirkung                                                                                     |
+| ------ | ----------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| OQ-001 | MISSING     | exakte Repository-Pfadliste                         | Stufe 1 geliefert (Canvas CAN-004), Rest offen                                              |
+| OQ-002 | MISSING     | Testdatei je Requirement                            | Pre-Coding-Gate — Preflight                                                                 |
+| OQ-003 | MISSING     | Workflow, Job und Schritt je Evidence               | Pre-Coding-Gate — Preflight                                                                 |
+| OQ-004 | geschlossen | bestätigte Entwicklerkapazität                      | **PO-Entscheidung 30.07.2026** — Start-Gate geschlossen, keine Fertigstellungszusage        |
+| OQ-005 | MISSING     | reale Auth-Testumgebung (lokal und/oder CI)         | S5·REQ-002 — Kürzung ausgeschlossen, Ort des Nachweises offen                               |
+| OQ-006 | gelöst      | Confluence „Sprintkandidat" vs. aktiver Jira-Sprint | gemessen 30.07.2026 — nur Etiketten nachziehen                                              |
+| OQ-007 | aufgelöst   | früher `CONTRA-S5-001`                              | **`FALSE_POSITIVE_SOURCE_SCOPE_ERROR`** (PO, 30.07.2026) → `DOC-DRIFT-S5-001`; kein Blocker |
+| AS-001 | ASSUMPTION  | Typed Scope reduziert spätere Freigaben             | Experiment messen                                                                           |
+| AS-002 | ASSUMPTION  | Evidence Binding reduziert False-Green              | Experiment messen                                                                           |
+
+## S5 Traceability Summary
+
+- Requirements aus der Baseline: 8 · lokale Vorschläge ohne Baseline-Gegenstück: 2
+- mit Nutzerwert verknüpft: 10 · mit Akzeptanzkriterien: 10 · mit Falsifier: 10
+- mit allen sechs Canvas-Pflichtfeldern: 10 · mit True-Line-Feldern: 10
+- **mit exakter CI-Ausführungsbindung: 0** ← vor Coding zu schließen
+- `evidence-class` besser als `none`: 0 · `wired-in-prod?` = yes: 0
+- offene Widersprüche: **0** · Dokumentationsdrift: **1** (`DOC-DRIFT-S5-001`, kein Blocker)
+
+## S5 User Confirmation
+
+**Erteilt am 30.07.2026** durch den Product Owner (Benjamin Poersch), auf Grundlage der
+Scope-Entscheidung und der ausdrücklichen Freigabe, nach erfolgreichem Baseline-Abgleich zu
+markieren. Bedingung geprüft: keine materielle Abweichung offen. Wortlaut der Formel:
+
+> Ich bestätige, dass Product Canvas und Product Vision meine Absicht korrekt wiedergeben und als Grundlage für AgileTeam Planning verwendet werden dürfen.
+
+**Nicht mitbestätigt:** technische Kapazität für die Fertigstellung (nur der Start), die lokalen
+Zusätze REQ-G01/REQ-G02, und das **Vision-GO** für den Entwicklungsstart — ein eigenes Signal,
+das weiterhin beim Product Owner liegt.
