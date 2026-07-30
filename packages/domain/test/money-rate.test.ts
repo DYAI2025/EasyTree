@@ -46,11 +46,14 @@ import {
   computeCostPosition,
   COST_RATE_DENOMINATOR,
   COST_RULE_VERSION,
+  costCurrencyFromUnknown,
   costOfDuration,
   CURRENCIES,
   dayAfter,
   durationMilliseconds,
   findRateVersionOverlaps,
+  HOURLY_RATE_AMOUNT_ERRORS,
+  hourlyRateAmount,
   hourlyRateVersion,
   MONEY_ERRORS,
   moneyFromNumber,
@@ -102,6 +105,20 @@ const ms = (value: bigint): DurationMilliseconds => {
   return quantity.quantity;
 };
 
+/**
+ * Nichtnegativer Stundensatz oder lauter Abbruch (V5.6).
+ *
+ * Seit V5.6 nimmt `hourlyRateVersion` nur noch bereits validierte, gebrandete
+ * Werte entgegen; die Vorzeichenpruefung sitzt an `hourlyRateAmount`. Diese
+ * Fixture ist die EINE Stelle, an der die Schichtung durchlaufen wird — aendert
+ * sich die Grenze noch einmal, aendert sich nur diese Funktion.
+ */
+const rateAmount = (minorUnitsPerHour: bigint) => {
+  const result = hourlyRateAmount(moneyOfMinorUnits(minorUnitsPerHour, "EUR"));
+  if (!result.ok) throw new Error(`Fixture: Satz ${minorUnitsPerHour} abgelehnt: ${result.error}`);
+  return result.rate;
+};
+
 /** Gueltige Satzversion oder lauter Abbruch. */
 const validRate = (
   id: string,
@@ -111,7 +128,7 @@ const validRate = (
 ): HourlyRateVersion => {
   const version = hourlyRateVersion({
     rateVersionId: rateId(id),
-    amountPerHour: moneyOfMinorUnits(minorUnitsPerHour, "EUR"),
+    amountPerHour: rateAmount(minorUnitsPerHour),
     validFrom,
     validTo,
   });
@@ -119,11 +136,25 @@ const validRate = (
   return version.version;
 };
 
-/** Betrag aus einem erfolgreichen Kostenergebnis; scheitert laut statt `undefined`. */
+/**
+ * Betrag aus einem Kostenergebnis.
+ *
+ * Bewusst tolerant gegenueber BEIDEN Rueckgabeformen. V5.2 schafft den
+ * unerreichbaren Fehlerzweig von `costOfDuration` ab; damit hat die Funktion
+ * keinen erreichbaren Fehlerausgang mehr und sollte den Betrag direkt liefern.
+ * Diese Formaussage steht als EINE benannte Zusicherung weiter unten
+ * ("liefert den Betrag direkt, ohne unerreichbaren Fehlerzweig") — nicht
+ * fuenfzehnmal verstreut in jedem Rundungstest. Der Helfer bleibt deshalb
+ * formunabhaengig, damit ein Formwechsel genau eine Zeile rot macht und nicht
+ * die halbe Datei.
+ */
 const amountOf = (result: unknown): PlanCostAmount => {
-  const typed = result as { ok: true; amount: PlanCostAmount } | { ok: false; error: string };
-  if (!typed.ok) throw new Error(`Erwartet: Erfolg. Bekommen: ${typed.error}`);
-  return typed.amount;
+  if (result !== null && typeof result === "object" && "ok" in result) {
+    const typed = result as { ok: true; amount: PlanCostAmount } | { ok: false; error: string };
+    if (!typed.ok) throw new Error(`Erwartet: Erfolg. Bekommen: ${typed.error}`);
+    return typed.amount;
+  }
+  return result as PlanCostAmount;
 };
 
 const minorUnitsOf = (result: unknown): bigint => amountOf(result).minorUnits;
@@ -299,6 +330,79 @@ describe("Money — exakte EUR-Minor-Units (AK1, V1)", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) continue;
       expect(result.amount.minorUnits).toBe(value);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5.4-korrigiert — Waehrung an der untrusted Eingangsgrenze
+// ---------------------------------------------------------------------------
+
+/**
+ * Warum diese Grenze ueberhaupt existiert — und warum sie die EINZIGE Stelle
+ * ist, an der eine Waehrung noch abgelehnt werden kann.
+ *
+ * `Currency` ist das Einzelliteral `"EUR"`. Innerhalb der Domain ist ein
+ * Waehrungskonflikt damit nicht konstruierbar, und jeder Vergleich zweier
+ * `Money.currency` waere ein toter Zweig. Ungeprueft sind Waehrungen nur dort,
+ * wo sie von aussen hereinkommen: HTTP/JSON, PostgreSQL, Importe. Genau dort
+ * — und nur dort — sitzt die Pruefung.
+ *
+ * Dasselbe Muster tragen `moneyFromNumber` und `toDurationMilliseconds`
+ * bereits: der getypte Kern ist unerreichbar-by-construction, die untrusted
+ * Grenze ist prueffbar und wird geprueft.
+ *
+ * Diese Testgruppe ist die Lehre aus dem gemessenen Befund: eine
+ * Gegenmutation, die BEIDE alten Waehrungswaechter abschaltete, liess das
+ * Testergebnis unveraendert. Die Regeln waren von keinem Test gemessen. Die
+ * Faelle unten sind gemessen.
+ */
+describe("Waehrung — untrusted Eingangsgrenze (V5.4-korrigiert)", () => {
+  it("nimmt genau den String EUR an", () => {
+    // Der Gegenpol zu den Ablehnungen darunter. Ohne ihn bliebe "lehne jede
+    // Waehrung ab" gruen — dieselbe Luecke, die auf vier anderen Grenzen schon
+    // aufgefallen ist.
+    // Gegenmutation: pauschal ok:false liefern -> rot.
+    const result = costCurrencyFromUnknown("EUR");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBe("EUR");
+  });
+
+  it("lehnt eine fremde Waehrung ab", () => {
+    // Gegenmutation: Pruefung entfernen und jeden String durchlassen -> rot.
+    const result = costCurrencyFromUnknown("USD");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("UNSUPPORTED_COST_CURRENCY");
+  });
+
+  it("lehnt Kleinschreibung ab, statt still zu normalisieren", () => {
+    // Der wichtigste der Ablehnungsfaelle. `"eur".toUpperCase()` ist die
+    // naheliegende Bequemlichkeit — und sie waere eine stillschweigende
+    // Datenkorrektur an einer Systemgrenze. Was als `"eur"` ankommt, stammt
+    // aus einer Quelle, die den Vertrag nicht einhaelt; das gehoert gemeldet,
+    // nicht repariert.
+    // Gegenmutation: `value.toUpperCase() === "EUR"` pruefen -> ok:true, rot.
+    const result = costCurrencyFromUnknown("eur");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("UNSUPPORTED_COST_CURRENCY");
+  });
+
+  it("lehnt jeden Nicht-String und den leeren String ab", () => {
+    // `unknown` heisst wirklich unknown: aus JSON kommt `null`, aus einer
+    // leeren Spalte `""`, aus einem Mapping-Fehler `42` oder `{}`. Alle vier
+    // nennt der Vertrag ausdruecklich.
+    // Gegenmutation: nur auf `!== "EUR"` pruefen, ohne Typpruefung -> bei
+    // `{ toString: () => "EUR" }` oder einer String-Koerzierung faellt die
+    // Grenze; mindestens aber wird der Fehlercode fuer diese Werte nicht
+    // gemeldet, rot.
+    for (const value of ["", null, undefined, 42, {}]) {
+      const result = costCurrencyFromUnknown(value);
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error).toBe("UNSUPPORTED_COST_CURRENCY");
     }
   });
 });
@@ -482,10 +586,34 @@ describe("Berechnung und Rundung — HALF_UP, genau einmal (V1, V2)", () => {
     // Forward-Fix.
     // Gegenmutation: die Regel ueber Konfiguration oder Umgebungsvariable
     // einstellbar machen -> mindestens einer dieser Werte weicht ab, rot.
+    // V5.3: der Modus heisst `HALF_UP_NON_NEGATIVE`, nicht `HALF_UP`. Das ist
+    // keine Kosmetik, sondern die Ruecknahme eines Ueberklaims: "Halbwert von
+    // null weg" ist im Kostenpfad nicht beobachtbar, weil Menge und Satz beide
+    // nichtnegativ sind. Der Name sagt jetzt genau so viel, wie nachgewiesen ist.
     expect(COST_RULE_VERSION).toBe("personnel-plan-cost-v1");
-    expect(ROUNDING_MODE).toBe("HALF_UP");
+    expect(ROUNDING_MODE).toBe("HALF_UP_NON_NEGATIVE");
     expect(ROUNDING_STAGE).toBe("COST_POSITION_FINAL_AMOUNT");
     expect(COST_RATE_DENOMINATOR).toBe(3_600_000n);
+  });
+
+  it("liefert den Betrag direkt, ohne unerreichbaren Fehlerzweig", () => {
+    // V5.2: bei validierter nichtnegativer Menge und validiertem nichtnegativem
+    // Satz kann die Multiplikation keinen negativen Betrag ergeben. Ein
+    // oeffentlicher Result-Zweig, der mit zulaessigen Eingaben nie eintritt,
+    // ist Scheingenauigkeit — er zwingt jeden Aufrufer zu einer Fallunter-
+    // scheidung, die nie greift, und taeuscht Sorgfalt vor.
+    //
+    // Diese eine Zusicherung haelt die FORM fest. Die uebrigen Rundungstests
+    // benutzen bewusst einen formunabhaengigen Helfer, damit ein Formwechsel
+    // hier auffaellt und nicht fuenfzehnmal.
+    // Gegenmutation: `costOfDuration` weiter ein `{ ok, amount }` zurueckgeben
+    // lassen -> rot.
+    const rate = validRate("r-form", 10_000n, from, null);
+    const ergebnis: unknown = costOfDuration(rate, ms(30n * MIN));
+
+    expect(ergebnis).not.toHaveProperty("ok");
+    expect(ergebnis).toHaveProperty("minorUnits");
+    expect((ergebnis as PlanCostAmount).minorUnits).toBe(5_000n);
   });
 
   it("rechnet eine volle Stunde exakt", () => {
@@ -505,12 +633,16 @@ describe("Berechnung und Rundung — HALF_UP, genau einmal (V1, V2)", () => {
     expect(minorUnitsOf(costOfDuration(rate, ms(30n * MIN)))).toBe(5_000n);
   });
 
-  it("rundet den Halbwert von null weg", () => {
+  it("rundet einen exakten halben Cent auf den naechsthoeheren Cent", () => {
     // Das Beispiel aus V2 woertlich: 10.001 Cent/h x 1.800.000 ms
     // = 18.001.800.000 / 3.600.000 = 5.000,5 -> 5.001 Cent = 50,01 EUR.
     // Dies ist der eine Fall, der HALF_UP von HALF_EVEN trennt: 5000 ist
     // gerade, bankuebliches Runden lieferte 5000.
-    // Gegenmutation: HALF_EVEN statt HALF_UP -> 5000, rot.
+    //
+    // Der Testname sagt seit V5.3 genau das, was gemessen wird — "von null weg"
+    // waere ein Ueberklaim, denn ein negativer Halbwert kommt im Kostenpfad
+    // nicht vor und wird hier auch nicht geprueft.
+    // Gegenmutation: HALF_EVEN statt HALF_UP_NON_NEGATIVE -> 5000, rot.
     // Zweite Gegenmutation: `Math.floor` -> 5000, rot.
     const rate = validRate("r-halb", 10_001n, from, null);
     expect(minorUnitsOf(costOfDuration(rate, ms(30n * MIN)))).toBe(5_001n);
@@ -638,6 +770,31 @@ describe("Berechnung und Rundung — HALF_UP, genau einmal (V1, V2)", () => {
     // Und ausdruecklich NICHT der Wert, den eine Neuberechnung aus der
     // ungerundeten Gesamtmenge liefern wuerde:
     expect(summe.amount.minorUnits).not.toBe(minorUnitsOf(costOfDuration(rate, ms(21n * MIN))));
+  });
+
+  it("summiert eine leere Menge zu null Euro", () => {
+    // V5.1: die leere Summe hat eine eindeutige additive Identitaet, weil
+    // Sprint 5 ausschliesslich EUR kennt. Vorher war das offen — ein Vertrag,
+    // der hier wirft oder `null` liefert, zwingt jeden Aufrufer zu einer
+    // Sonderbehandlung fuer den haeufigsten Fall der Welt: eine Baustelle ohne
+    // Positionen.
+    //
+    // Ausdruecklich mitgeprueft: der Nullbetrag laeuft durch DENSELBEN
+    // Validator wie jeder andere Betrag — er kommt als gueltiger
+    // PlanCostAmount heraus, nicht als roher Sonderwert.
+    // Gegenmutation: leere Menge werfen oder ok:false liefern lassen -> rot.
+    // Zweite Gegenmutation: `{ minorUnits: 0n, currency: "EUR" }` am Validator
+    // vorbei konstruieren -> die Marke fehlt, der Typ passt nicht mehr.
+    const summe = sumPlanCostAmounts([]);
+    expect(summe.ok).toBe(true);
+    if (!summe.ok) return;
+    expect(summe.amount.minorUnits).toBe(0n);
+    expect(summe.amount.currency).toBe("EUR");
+    // Derselbe Wert, den der regulaere Validator fuer 0 liefert.
+    const ueberValidator = planCostAmount(moneyOfMinorUnits(0n, "EUR"));
+    expect(ueberValidator.ok).toBe(true);
+    if (!ueberValidator.ok) return;
+    expect(summe.amount).toEqual(ueberValidator.amount);
   });
 });
 
@@ -783,7 +940,7 @@ describe("Satzversion — Gueltigkeit einschliessend, intern halboffen (AK3, V3)
     // Gegenmutation: `hourlyRateVersion` pauschal ok:false liefern lassen -> rot.
     const version = hourlyRateVersion({
       rateVersionId: rateId("r-gueltig"),
-      amountPerHour: moneyOfMinorUnits(4500n, "EUR"),
+      amountPerHour: rateAmount(4500n),
       validFrom: day(2026, 1, 1),
       validTo: day(2026, 6, 30),
     });
@@ -799,16 +956,31 @@ describe("Satzversion — Gueltigkeit einschliessend, intern halboffen (AK3, V3)
     // V4: `Rate >= 0 sonst RATE_NEGATIVE`. Ein negativer Satz erzeugte eine
     // Gutschrift, die niemand angeordnet hat. Stornobuchungen brauchen laut V4
     // einen eigenen fachlichen Typ und duerfen nicht nebenbei entstehen.
+    //
+    // V5.6 hat die GRENZE verschoben, nicht die Regel: die Pruefung sitzt jetzt
+    // am gebrandeten Satzkonstruktor `hourlyRateAmount`, nicht mehr in
+    // `hourlyRateVersion`. Die Factory bekommt gar keinen unvalidierten Betrag
+    // mehr zu sehen, und es entsteht keine willkuerliche Priorisierung
+    // mehrerer roher Eingabefehler.
     // Gegenmutation: Vorzeichenpruefung entfernen -> ok:true, rot.
-    const version = hourlyRateVersion({
-      rateVersionId: rateId("r-negativ"),
-      amountPerHour: moneyOfMinorUnits(-1n, "EUR"),
-      validFrom: day(2026, 1, 1),
-      validTo: null,
-    });
-    expect(version.ok).toBe(false);
-    if (version.ok) return;
-    expect(version.error).toBe("RATE_NEGATIVE");
+    const amount = hourlyRateAmount(moneyOfMinorUnits(-1n, "EUR"));
+    expect(amount.ok).toBe(false);
+    if (amount.ok) return;
+    expect(amount.error).toBe("RATE_NEGATIVE");
+  });
+
+  it("nimmt einen nichtnegativen Stundensatz an, einschliesslich null", () => {
+    // Der Gegenpol, damit "lehne jeden Satz ab" nicht gruen bleibt — dieselbe
+    // Luecke, die bei `moneyFromNumber`, `toDurationMilliseconds` und
+    // `hourlyRateVersion` schon dreimal aufgefallen ist. Der ausdrueckliche
+    // Nullsatz ist laut V4 zulaessig und bleibt von RATE_MISSING unterscheidbar.
+    // Gegenmutation: `hourlyRateAmount` pauschal ok:false liefern lassen -> rot.
+    for (const value of [0n, 4500n]) {
+      const amount = hourlyRateAmount(moneyOfMinorUnits(value, "EUR"));
+      expect(amount.ok).toBe(true);
+      if (!amount.ok) continue;
+      expect(amount.rate.minorUnits).toBe(value);
+    }
   });
 
   it("lehnt eine Version ab, deren gueltig-bis vor gueltig-ab liegt", () => {
@@ -819,7 +991,7 @@ describe("Satzversion — Gueltigkeit einschliessend, intern halboffen (AK3, V3)
     // Gegenmutation: Pruefung entfernen -> ok:true, rot.
     const version = hourlyRateVersion({
       rateVersionId: rateId("r-verkehrt"),
-      amountPerHour: moneyOfMinorUnits(4500n, "EUR"),
+      amountPerHour: rateAmount(4500n),
       validFrom: day(2026, 7, 1),
       validTo: day(2026, 6, 30),
     });
@@ -876,6 +1048,103 @@ describe("Satzversion — Gueltigkeit einschliessend, intern halboffen (AK3, V3)
     expect(dayAfter(day(2026, 12, 31))).toEqual(day(2027, 1, 1));
     expect(dayAfter(day(2028, 2, 28))).toEqual(day(2028, 2, 29));
     expect(dayAfter(day(2028, 2, 29))).toEqual(day(2028, 3, 1));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V5.5 — kanonische, deduplizierte Ueberlappungsstruktur
+// ---------------------------------------------------------------------------
+
+/**
+ * Bis V5.5 pruefte die Suite an dieser Stelle nur die LAENGE des Ergebnisses,
+ * nie seinen Inhalt — ein Validator, der die Ueberlappung zwar findet, aber die
+ * falsche Spanne oder eine zufaellige Paarreihenfolge meldet, waere gruen
+ * geblieben. V5.5 gibt der Struktur vier Felder und eine kanonische Ordnung;
+ * hier stehen die fuenf vom PO benannten Mindesttests.
+ *
+ * Kette fuer die ersten drei Faelle:
+ *   A  gueltig 01.01.2026 bis 31.07.2026  ->  intern [01.01.2026, 01.08.2026)
+ *   B  gueltig ab 01.07.2026, offen       ->  intern [01.07.2026, unbegrenzt)
+ *   Schnitt = [01.07.2026, 01.08.2026)
+ */
+describe("Satzversionsueberlappung — kanonische Paarstruktur (V5.5)", () => {
+  const a = () => validRate("r-a", 4500n, day(2026, 1, 1), day(2026, 7, 31));
+  const b = () => validRate("r-b", 4700n, day(2026, 7, 1), null);
+
+  it("meldet zwei ueberlappende Versionen als genau ein Element mit voller Spanne", () => {
+    // Der Inhalt, nicht nur die Anzahl: `overlapFrom` ist einschliessend der
+    // erste doppelt gedeckte Tag, `overlapEndExclusive` die interne halboffene
+    // Grenze — also der Folgetag des letzten doppelt gedeckten Tages.
+    // Gegenmutation: `overlapEndExclusive` auf `validTo` statt auf
+    // `dayAfter(validTo)` setzen -> 31.07. statt 01.08., rot.
+    // Zweite Gegenmutation: Paarreihenfolge nach Eingabeindex statt nach
+    // `validFrom` -> firstVersionId falsch, rot.
+    expect(findRateVersionOverlaps([a(), b()])).toEqual([
+      {
+        firstVersionId: rateId("r-a"),
+        secondVersionId: rateId("r-b"),
+        overlapFrom: day(2026, 7, 1),
+        overlapEndExclusive: day(2026, 8, 1),
+      },
+    ]);
+  });
+
+  it("meldet dasselbe ungeordnete Paar kein zweites Mal", () => {
+    // A ueberlappt B und B ueberlappt A sind DIESELBE Tatsache. Eine naive
+    // Doppelschleife ueber alle geordneten Paare meldet sie zweimal und
+    // verdoppelt damit jede Konfliktanzeige in der spaeteren Oberflaeche.
+    // Gegenmutation: `i < j` durch `i !== j` ersetzen -> zwei Elemente, rot.
+    expect(findRateVersionOverlaps([a(), b()])).toHaveLength(1);
+  });
+
+  it("liefert unabhaengig von der Eingabereihenfolge dasselbe Ergebnis", () => {
+    // Die Eingabereihenfolge ist ein Zufall der Datenbankabfrage und darf
+    // weder ueber das Finden noch ueber die Paarordnung entscheiden.
+    // Gegenmutation: Sortierschritt entfernen -> Reihenfolge schlaegt durch, rot.
+    expect(findRateVersionOverlaps([b(), a()])).toEqual(findRateVersionOverlaps([a(), b()]));
+  });
+
+  it("meldet benachbarte, nicht ueberlappende Intervalle gar nicht", () => {
+    // bis 30.06. / ab 01.07. ist laut V3 lueckenlos UND ueberlappungsfrei —
+    // intern [.., 01.07.) und [01.07., ..). Der Beruehrungspunkt ist keine
+    // Ueberlappung. Wer die halboffene Grenze als geschlossen rechnet, meldet
+    // hier faelschlich einen Konflikt und blockiert eine zulaessige Kette.
+    // Gegenmutation: Ueberlappung mit `<=` auf der Exklusivgrenze pruefen ->
+    // ein Element, rot.
+    const alt = validRate("r-alt", 4500n, day(2026, 1, 1), day(2026, 6, 30));
+    const neu = validRate("r-neu", 4700n, day(2026, 7, 1), null);
+    expect(findRateVersionOverlaps([alt, neu])).toEqual([]);
+  });
+
+  it("traegt bei zwei offenen Intervallen die kanonische Endgrenze null", () => {
+    // Zwei unbegrenzte Versionen ueberlappen ab dem spaeteren Beginn bis
+    // unendlich. `null` ist dafuer der kanonische Wert — kein erfundenes
+    // Maximaldatum, kein 9999-12-31.
+    // Gegenmutation: offenes Ende auf ein festes Maximaldatum abbilden -> rot.
+    const offenA = validRate("r-offen-a", 4500n, day(2026, 1, 1), null);
+    const offenB = validRate("r-offen-b", 4700n, day(2026, 7, 1), null);
+    expect(findRateVersionOverlaps([offenA, offenB])).toEqual([
+      {
+        firstVersionId: rateId("r-offen-a"),
+        secondVersionId: rateId("r-offen-b"),
+        overlapFrom: day(2026, 7, 1),
+        overlapEndExclusive: null,
+      },
+    ]);
+  });
+
+  it("ordnet bei gleichem Beginn nach der Satzversions-ID", () => {
+    // Die zweite Haelfte der kanonischen Ordnung: `validFrom`, DANN ID. Ohne
+    // den Nachrang waere die Paarordnung bei gleichem Beginn undefiniert und
+    // das Ergebnis nicht mehr vergleichbar — genau das, was der Test darueber
+    // ueber die Eingabereihenfolge zusichert.
+    // Gegenmutation: nur nach `validFrom` sortieren -> bei gleichem Beginn
+    // entscheidet die Eingabereihenfolge, rot.
+    const zweite = validRate("r-z", 4500n, day(2026, 1, 1), null);
+    const erste = validRate("r-a", 4700n, day(2026, 1, 1), null);
+    const [treffer] = findRateVersionOverlaps([zweite, erste]);
+    expect(treffer?.firstVersionId).toBe(rateId("r-a"));
+    expect(treffer?.secondVersionId).toBe(rateId("r-z"));
   });
 });
 
@@ -1008,6 +1277,32 @@ describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
     return [...codes].sort();
   };
 
+  it("fuehrt CURRENCY_MISMATCH in keiner oeffentlichen Fehlerliste", () => {
+    // V5.4-korrigiert: der Code entfaellt in Sprint 5 vollstaendig, weil zwei
+    // gueltig konstruierte `Money`-Werte keine unterschiedlichen Waehrungen
+    // haben koennen. Ausdruecklich OHNE Ausnahme fuer "strukturell
+    // unerreichbare Codes" — eine solche Ausnahme wuerde genau den
+    // Waisenvalidator schwaechen, der den Befund sichtbar gemacht hat.
+    //
+    // Diese Zusicherung ist die Sperre gegen ein stilles Wiedereinfuehren:
+    // sie prueft alle sechs oeffentlichen Listen auf einmal, nicht nur die,
+    // in der der Code frueher stand.
+    // Gegenmutation: `CURRENCY_MISMATCH` in irgendeine dieser Listen
+    // zurueckschreiben -> rot.
+    const alleCodes = [
+      ...MONEY_ERRORS,
+      ...QUANTITY_ERRORS,
+      ...PLAN_COST_AMOUNT_ERRORS,
+      ...HOURLY_RATE_AMOUNT_ERRORS,
+      ...RATE_VERSION_ERRORS,
+      ...RATE_SELECTION_ERRORS,
+    ] as readonly string[];
+    expect(alleCodes).not.toContain("CURRENCY_MISMATCH");
+    // Nicht-Leerlauf-Bremse: waeren die Listen leer oder falsch importiert,
+    // waere die Zeile darueber trivial gruen.
+    expect(alleCodes.length).toBeGreaterThan(8);
+  });
+
   it("fuehrt jeden Money-Fehlercode genau einmal und erreicht jeden", () => {
     // Gegenmutation: einen vierten Code in MONEY_ERRORS aufnehmen, ohne eine
     // Eingabe zu benennen, die ihn ausloest -> rot.
@@ -1051,25 +1346,40 @@ describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
   });
 
   it("fuehrt jeden Satzversions-Fehlercode genau einmal und erreicht jeden", () => {
-    // Gegenmutation: einen dritten Code in RATE_VERSION_ERRORS aufnehmen, ohne
-    // ausloesende Eingabe -> rot.
+    // Seit V5.6 prueft die Factory nur noch RELATIONALE Invarianten; die
+    // Vorzeichenpruefung ist an `hourlyRateAmount` gewandert. Die Liste ist
+    // damit kuerzer geworden — und genau das misst diese Zeile: bliebe
+    // `RATE_NEGATIVE` hier stehen, waere er ein verwaister Code, weil die
+    // Factory ihn nicht mehr erzeugen kann.
+    // Gegenmutation: `RATE_NEGATIVE` in RATE_VERSION_ERRORS belassen -> rot,
+    // weil keine Eingabe der Factory ihn noch ausloest.
     expect(new Set(RATE_VERSION_ERRORS).size).toBe(RATE_VERSION_ERRORS.length);
     expect(
       beobachte([
         hourlyRateVersion({
-          rateVersionId: rateId("r-negativ"),
-          amountPerHour: moneyOfMinorUnits(-1n, "EUR"),
-          validFrom: day(2026, 1, 1),
-          validTo: null,
-        }),
-        hourlyRateVersion({
           rateVersionId: rateId("r-verkehrt"),
-          amountPerHour: moneyOfMinorUnits(4500n, "EUR"),
+          amountPerHour: rateAmount(4500n),
           validFrom: day(2026, 7, 1),
           validTo: day(2026, 6, 30),
         }),
       ]),
     ).toEqual([...RATE_VERSION_ERRORS].sort());
+  });
+
+  it("fuehrt jeden Stundensatz-Fehlercode genau einmal und erreicht jeden", () => {
+    // Die Grenze aus V5.6. Erreichbar — und damit zulaessig — ist genau
+    // `RATE_NEGATIVE`.
+    //
+    // `UNSUPPORTED_COST_CURRENCY` stand hier vorruebergehend und war NICHT
+    // ausloesbar: `hourlyRateAmount` nimmt einen bereits getypten `Money`, und
+    // `Currency` ist `"EUR"`. V5.4-korrigiert hat den Code an die untrusted
+    // Eingangsgrenze verschoben, wo er echt erreichbar ist (siehe die
+    // Waehrungsgruppe weiter oben). Steht er wieder hier, ist er eine Waise.
+    // Gegenmutation: einen zweiten Code aufnehmen, ohne ausloesende Eingabe -> rot.
+    expect(new Set(HOURLY_RATE_AMOUNT_ERRORS).size).toBe(HOURLY_RATE_AMOUNT_ERRORS.length);
+    expect(beobachte([hourlyRateAmount(moneyOfMinorUnits(-1n, "EUR"))])).toEqual(
+      [...HOURLY_RATE_AMOUNT_ERRORS].sort(),
+    );
   });
 
   it("fuehrt jeden Satzauswahl-Fehlercode genau einmal und erreicht jeden", () => {

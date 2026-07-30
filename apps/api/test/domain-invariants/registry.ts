@@ -448,12 +448,48 @@ export const INVARIANTS: readonly Invariant[] = [
   // EYT-95 — Satzversionen (AK3, V3, V4)
   // ---------------------------------------------------------------------------
   {
+    exportName: "costCurrencyFromUnknown",
+    statement:
+      'Die untrusted Eingangsgrenze akzeptiert ausschliesslich den exakten String "EUR" — keine Grossschreibung, keine stillschweigende Normalisierung (V5.4-korrigiert).',
+    kind: "regel",
+    positive: { file: MONEY, title: "nimmt genau den String EUR an" },
+    // Der unterscheidende Gegenfall ist bewusst `"eur"` und nicht `"USD"`:
+    // eine Implementierung mit `toUpperCase()` faellt nur hier auf und wuerde
+    // an einer Systemgrenze stillschweigend Daten korrigieren.
+    negative: { file: MONEY, title: "lehnt Kleinschreibung ab, statt still zu normalisieren" },
+  },
+  {
+    exportName: "hourlyRateAmount",
+    statement:
+      "Ein Stundensatz ist nichtnegativ; seit V5.6 sitzt diese Pruefung am gebrandeten Satzkonstruktor, nicht mehr in der Versionsfactory.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "nimmt einen nichtnegativen Stundensatz an, einschliesslich null",
+    },
+    negative: { file: MONEY, title: "lehnt einen negativen Stundensatz ab" },
+  },
+  {
+    exportName: "HOURLY_RATE_AMOUNT_ERRORS",
+    statement:
+      "Der Satzkonstruktor kennt genau einen Ablehnungsgrund, RATE_NEGATIVE, und der ist erreichbar. UNSUPPORTED_COST_CURRENCY sitzt seit V5.4-korrigiert an der untrusted Eingangsgrenze, wo er echt ausloesbar ist.",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Stundensatz-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
+  },
+  {
     exportName: "hourlyRateVersion",
     statement:
-      "Eine Satzversion entsteht nur mit nichtnegativem Satz und wohlgeformtem Gueltigkeitsintervall.",
+      "Eine Satzversion entsteht nur aus bereits validierten Werten und prueft danach nur noch relationale Invarianten (V5.6) — validTo nicht vor validFrom.",
     kind: "regel",
     positive: { file: MONEY, title: "nimmt eine Satzversion mit gueltigem Intervall an" },
-    negative: { file: MONEY, title: "lehnt einen negativen Stundensatz ab" },
+    negative: {
+      file: MONEY,
+      title: "lehnt eine Version ab, deren gueltig-bis vor gueltig-ab liegt",
+    },
   },
   {
     exportName: "selectRateVersion",
@@ -491,7 +527,10 @@ export const INVARIANTS: readonly Invariant[] = [
     statement:
       "Betrag = roundHalfUp(satz * millisekunden / 3_600_000), genau einmal gerundet und erst am Ende.",
     kind: "regel",
-    positive: { file: MONEY, title: "rundet den Halbwert von null weg" },
+    positive: {
+      file: MONEY,
+      title: "rundet einen exakten halben Cent auf den naechsthoeheren Cent",
+    },
     // Unterscheidender Gegenfall gegen jede Zwischenrundung: wer den
     // Minutensatz vorab rundet, rechnet 14 statt 12.
     negative: { file: MONEY, title: "rundet nicht auf einem Minuten- oder Sekundensatz" },
@@ -513,7 +552,8 @@ export const INVARIANTS: readonly Invariant[] = [
   // ---------------------------------------------------------------------------
   {
     exportName: "CURRENCIES",
-    statement: "Sprint 5 kennt genau eine Waehrung: netto EUR.",
+    statement:
+      "Sprint 5 kennt genau eine Waehrung: netto EUR. Damit ist ein Waehrungskonflikt im Kern nicht konstruierbar — CURRENCY_MISMATCH entfaellt vollstaendig (V5.4-korrigiert).",
     kind: "konstante",
     positive: { file: MONEY, title: "fuehrt genau eine Waehrung und traegt sie am Betrag mit" },
     negative: null,

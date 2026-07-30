@@ -141,7 +141,8 @@ describe("Architekturgrenzen", () => {
 
   it("meldet keine Grenzverletzung", () => {
     const rendered = violations.map((v) => `${v.file}:${v.line} [${v.rule}] ${v.message}`);
-    // eslint-disable-next-line no-console -- greppbare Zeile, wie beim Tenant-Gate.
+    // Greppbare Zeile, wie beim Tenant-Gate. Kein eslint-disable noetig:
+    // `no-console` ist fuer test/** nicht aktiv, die Direktive war tot.
     console.log(
       `[architecture] files=${files.length} imports=${refs.length} modules=${SCAFFOLDED_MODULES.length} rules=${RULES.length} violations=${rendered.length}`,
     );

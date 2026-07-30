@@ -52,6 +52,7 @@ import {
   costOfDuration,
   durationMilliseconds,
   findRateVersionOverlaps,
+  hourlyRateAmount,
   hourlyRateVersion,
   moneyFromNumber,
   moneyOfMinorUnits,
@@ -171,9 +172,13 @@ const rateSpecArb: fc.Arbitrary<RateSpec> = fc.record({
 });
 
 const buildVersion = (spec: RateSpec, index: number): HourlyRateVersion => {
+  // V5.6: die Factory nimmt nur bereits validierte, gebrandete Werte — der
+  // Generator durchlaeuft dieselbe Schichtung wie der Produktionsaufrufer.
+  const amount = hourlyRateAmount(moneyOfMinorUnits(spec.minorUnitsPerHour, "EUR"));
+  if (!amount.ok) throw new Error(`Generator: Satz abgelehnt (${amount.error})`);
   const built = hourlyRateVersion({
     rateVersionId: unsafeIdentifier<RateVersionId>(`gen-${index}`),
-    amountPerHour: moneyOfMinorUnits(spec.minorUnitsPerHour, "EUR"),
+    amountPerHour: amount.rate,
     validFrom: dayAt(spec.startOffset),
     validTo: spec.spanDays === null ? null : dayAt(spec.startOffset + spec.spanDays),
   });
@@ -194,9 +199,17 @@ const openRate = (minorUnitsPerHour: bigint): HourlyRateVersion =>
 
 /** Betrag aus einem erfolgreichen Kostenergebnis; scheitert laut. */
 const amountOf = (result: unknown): PlanCostAmount => {
-  const typed = result as { ok: true; amount: PlanCostAmount } | { ok: false; error: string };
-  if (!typed.ok) throw new Error(`Erwartet: Erfolg. Bekommen: ${typed.error}`);
-  return typed.amount;
+  // Formunabhaengig, aus demselben Grund wie in `money-rate.test.ts`: V5.2
+  // schafft den unerreichbaren Fehlerzweig von `costOfDuration` ab, damit
+  // liefert die Funktion den Betrag direkt. Die Formaussage steht dort als eine
+  // benannte Zusicherung ("liefert den Betrag direkt, ohne unerreichbaren
+  // Fehlerzweig") und nicht verstreut in jeder Eigenschaft.
+  if (result !== null && typeof result === "object" && "ok" in result) {
+    const typed = result as { ok: true; amount: PlanCostAmount } | { ok: false; error: string };
+    if (!typed.ok) throw new Error(`Erwartet: Erfolg. Bekommen: ${typed.error}`);
+    return typed.amount;
+  }
+  return result as PlanCostAmount;
 };
 
 // ---------------------------------------------------------------------------
@@ -402,7 +415,7 @@ describe("Rundungsregel — Eigenschaften ueber erzeugte Mengen (V1, V2)", () =>
     expect(gerundeteFaelle).toBeGreaterThan(RUNS / 10);
   });
 
-  it("rundet jeden exakten Halbwert von null weg", () => {
+  it("rundet jeden exakten halben Cent auf den naechsthoeheren Cent", () => {
     // Gezielt konstruierte Halbwertfamilie: bei Satz 1 Cent/h und
     // ms = 1.800.000 + k * 3.600.000 ist das Produkt exakt k + 1/2. HALF_UP
     // liefert immer k + 1.
@@ -587,14 +600,20 @@ describe("Satzversion — Eigenschaften ueber erzeugte Kataloge (AK3, V3)", () =
     // Das Orakel benutzt die Ueberlappungsformel aus V3 woertlich.
     // Gegenmutation: nur benachbarte Paare nach dem Sortieren vergleichen ->
     // eine lange Version, die zwei kurze ueberspannt, wird uebersehen, rot.
+    // Seit V5.5 wird nicht mehr nur "gibt es eine Ueberlappung" verglichen,
+    // sondern die ANZAHL ungeordneter Paare. Damit misst die Eigenschaft auch
+    // die Deduplizierung: eine naive Doppelschleife ueber alle geordneten Paare
+    // liefert doppelt so viele Elemente und faellt hier auf, waehrend die alte
+    // Boolean-Fassung sie durchgelassen haette.
     let ueberlappendeKataloge = 0;
     assertProperty(
       fc.property(catalogueArb, (versions) => {
-        const orakel = versions.some((a, i) =>
-          versions.some((b, j) => i < j && rangesIntersect(a, b)),
+        const orakel = versions.reduce(
+          (summe, a, i) => summe + versions.filter((b, j) => i < j && rangesIntersect(a, b)).length,
+          0,
         );
-        if (orakel) ueberlappendeKataloge++;
-        expect(findRateVersionOverlaps(versions).length > 0).toBe(orakel);
+        if (orakel > 0) ueberlappendeKataloge++;
+        expect(findRateVersionOverlaps(versions).length).toBe(orakel);
       }),
     );
     expect(ueberlappendeKataloge).toBeGreaterThan(0);
