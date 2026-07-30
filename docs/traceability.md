@@ -296,18 +296,18 @@ selbst von einem „begrenzten modularen Schnitt". FR-010 (Ist-Kosten) ist nicht
 
 ## S5 Tabelle C — True-Line-Felder und Reality Ledger
 
-| Requirement | value-check-id | true-line-status  | evidence-class | wired-in-prod? | CI-Bindung (Workflow · Job · Schritt) |
-| ----------- | -------------- | ----------------- | -------------- | -------------- | ------------------------------------- |
-| S5·REQ-001  | VC-S5-001      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-002  | VC-S5-002      | `blocked`         | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-003  | VC-S5-003      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-004  | VC-S5-004      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-005  | VC-S5-005      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-006  | VC-S5-006      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-007  | VC-S5-007      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-008  | VC-S5-008      | `review-required` | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-G01  | VC-S5-G01      | `review-required` | `none`         | no             | **MISSING** (`OQ-003`)                |
-| S5·REQ-G02  | VC-S5-G02      | `pending`         | `none`         | no             | **MISSING** (`OQ-003`)                |
+| Requirement | value-check-id | true-line-status  | evidence-class | wired-in-prod? | CI-Bindung (Workflow · Job · Schritt)                                           |
+| ----------- | -------------- | ----------------- | -------------- | -------------- | ------------------------------------------------------------------------------- |
+| S5·REQ-001  | VC-S5-001      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` **+** `db-gates` · `supabase test db`                |
+| S5·REQ-002  | VC-S5-002      | `blocked`         | `none`         | no             | `db-gates` · Tenant-Gate + `supabase test db` **+** `read-through` · Harness    |
+| S5·REQ-003  | VC-S5-003      | `pending`         | `none`         | no             | `db-gates` · Planungsinvarianten-Gate **+** `read-through` · Harness            |
+| S5·REQ-004  | VC-S5-004      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` **+** `db-gates` · `supabase test db`                |
+| S5·REQ-005  | VC-S5-005      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` + TZ-Matrix **+** `db-gates` · Tenant-Gate           |
+| S5·REQ-006  | VC-S5-006      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` **+** `read-through` · Harness                       |
+| S5·REQ-007  | VC-S5-007      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` **+** `read-through` · Harness                       |
+| S5·REQ-008  | VC-S5-008      | `review-required` | `none`         | no             | `read-through` · `bash scripts/read-through-harness.sh` — **nicht blockierend** |
+| S5·REQ-G01  | VC-S5-G01      | `review-required` | `none`         | no             | n/a — Governance-Vorschlag, nicht baseline-bestätigt                            |
+| S5·REQ-G02  | VC-S5-G02      | `pending`         | `none`         | no             | n/a — Governance-Vorschlag, nicht baseline-bestätigt                            |
 
 `production-verified` ist in Sprint 5 unerreichbar — die Baseline schließt produktives
 Deployment und Produktionsfreigabe ausdrücklich aus. Höchster erreichbarer Wert:
@@ -339,7 +339,8 @@ Deployment und Produktionsfreigabe ausdrücklich aus. Höchster erreichbarer Wer
 - Requirements aus der Baseline: 8 · lokale Vorschläge ohne Baseline-Gegenstück: 2
 - mit Nutzerwert verknüpft: 10 · mit Akzeptanzkriterien: 10 · mit Falsifier: 10
 - mit allen sechs Canvas-Pflichtfeldern: 10 · mit True-Line-Feldern: 10
-- **mit exakter CI-Ausführungsbindung: 0** ← vor Coding zu schließen
+- **mit exakter CI-Ausführungsbindung: 8 von 8** (Preflight 30.07.2026, [`docs/plans/2026-07-30-sprint-5-daily-cost-export.md`](plans/2026-07-30-sprint-5-daily-cost-export.md))
+- **davon in einem blockierenden Job: 4 von 8** — `read-through` ist kein Pflichtcheck (`BLOCKED_CI_EVIDENCE`)
 - `evidence-class` besser als `none`: 0 · `wired-in-prod?` = yes: 0
 - offene Widersprüche: **0** · Dokumentationsdrift: **1** (`DOC-DRIFT-S5-001`, kein Blocker)
 
