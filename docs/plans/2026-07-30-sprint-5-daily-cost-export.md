@@ -87,49 +87,79 @@ strukturell unmöglich.
 Beide Failure-Mode-Ketten der Baseline sind darin als falsifizierende Tests verankert
 (FMC-001 in REQ-005, FMC-002 in REQ-002) und bleiben damit nicht Prosa.
 
-## 5. Offener Blocker
+## 5. `BLOCKED_CI_EVIDENCE` — aufgeloest am 30.07.2026
 
-### `BLOCKED_CI_EVIDENCE` — die Kernevidenz läuft in einem Job, der nicht blockieren kann
+Der Befund war: `read-through` war **kein** Pflichtcheck, obwohl sieben der siebzehn
+Evidence-Zeilen und damit der gesamte sichtbare Sprintwert dort haengen. Ein roter
+Kernnachweis haette keinen Merge verhindert.
 
-Gemessen: `read-through` ist **kein Pflichtcheck**.
+**Behoben.** Nach ausdruecklicher PO-Freigabe wurde `scripts/setup-branch-protection.sh`
+angewendet. Vorher wurde der vollstaendige Ruleset-Zustand gesichert (Ruleset-Liste,
+Volljson je Ruleset, wirksame Regeln, Default-Branch).
 
+| Attribut              | vorher                                           | nachher                                                       |
+| --------------------- | ------------------------------------------------ | ------------------------------------------------------------- |
+| Ruleset               | `19718704` „EasyTree master protection (EYT-67)" | **dasselbe** `19718704`, aktualisiert — kein zweites angelegt |
+| Pflichtchecks         | 9                                                | **10**                                                        |
+| Diff                  | —                                                | genau eine Zeile: `+ read-through`                            |
+| `enforcement`         | `active`                                         | `active`                                                      |
+| `bypass_actors`       | `[]`                                             | `[]`                                                          |
+| `conditions.ref_name` | `~DEFAULT_BRANCH`                                | `~DEFAULT_BRANCH`                                             |
+| `strict_..._policy`   | `true`                                           | `true`                                                        |
+
+Wirksame Pflichtchecks, unabhaengig aus der API gelesen
+(`gh api /repos/DYAI2025/EasyTree/rules/branches/master`):
+
+```text
+build-api, build-web, db-gates, format, lint, read-through,
+secret-scan, typecheck, unit-tests, web-smoke        (10)
 ```
-$ bash scripts/verify-branch-protection.sh
-FAIL  AC3 — fehlende Pflichtchecks: read-through
-$ gh api /repos/DYAI2025/EasyTree/rules/branches/master --jq '…'
-build-api, build-web, db-gates, format, lint, secret-scan, typecheck, unit-tests, web-smoke
+
+`bash scripts/verify-branch-protection.sh`:
+
+```text
+PASS  AC1/AC2 — pull_request-Regel ist auf master wirksam; direkte Pushes serverseitig abgelehnt.
+PASS  AC1 — kein Bypass-Akteur in allen 1 gelesenen Ruleset(s); die Sperre gilt auch fuer Repo-Admins.
+PASS  AC3 — alle 10 Pflichtchecks sind als required_status_checks gesetzt.
+PASS  AC3 — strict_required_status_checks_policy=true; der Branch muss vor dem Merge aktuell sein.
+PASS  AC4 — dismiss_stale_reviews_on_push=true; Freigaben verfallen bei neuen Commits.
+PASS  AC5 — required_review_thread_resolution=true; ungeloeste Kommentare blockieren den Merge.
+PASS  AC6 — non_fast_forward-Regel wirksam; Force Push auf master ist gesperrt.
+PASS  AC6 — deletion-Regel wirksam; master kann nicht geloescht werden.
+PASS  AC7 — Runbook vorhanden: docs/runbooks/branch-protection.md
+SKIP  AC8 — kein NEGATIVE_PR gesetzt.
+
+=== Ergebnis: 0 offen, 1 uebersprungen ===
 ```
 
-Sieben von siebzehn Evidence-Zeilen oben — darunter der **gesamte** sichtbare Sprintwert
-(REQ-002-Browserlogin, REQ-006-Reise, REQ-007-Parität, REQ-008-Gesamtgate) — hängen an
-`read-through`. Ein roter Kernnachweis würde einen Merge heute **nicht** verhindern. Die
-Baseline-Aussage „die bestehenden zehn CI-Gates bleiben erforderlich" ist damit heute
-faktisch falsch: es sind neun.
+**Ehrliche Restgrenze.** AC8 bleibt uebersprungen: dass die Sperre einen Merge _tatsaechlich_
+serverseitig ablehnt, ist fuer den Stand vom 27.07.2026 mit PR #7 belegt (`format` rot,
+`mergeable_state=blocked`, Merge serverseitig zurueckgewiesen), fuer den jetzt ergaenzten Check
+`read-through` aber noch **nicht** einzeln gemessen. Das ist eine gelesene Konfiguration, kein
+ausgefuehrter Negativfall. Die naechstliegende Messung ergibt sich von selbst: sobald der erste
+Sprint-5-PR offen ist und `read-through` einmal rot laeuft, wird sie zur Beobachtung statt zum
+Extraaufwand.
 
-**Der Fix ist vorbereitet und einzeilig.** `scripts/setup-branch-protection.sh` führt
-`read-through` bereits in `REQUIRED_CHECKS` (Z. 40); `DRY_RUN=true` läuft ohne Drift-Fehler und
-gibt eine Payload mit allen zehn Kontexten aus. Es fehlt allein das **Anwenden**, und das ist
-eine Änderung an der GitHub-Repository-Konfiguration: nach außen wirksam, betrifft jeden PR.
-Deshalb nicht ohne ausdrückliche Freigabe:
+Rollback des Rulesets, falls je noetig:
 
 ```bash
-DRY_RUN=true bash scripts/setup-branch-protection.sh   # erledigt, driftfrei
-bash scripts/setup-branch-protection.sh                # ← braucht Freigabe
-bash scripts/verify-branch-protection.sh               # muss danach AC3 PASS zeigen
+gh api --method PUT repos/DYAI2025/EasyTree/rulesets/19718704 \
+  --input <gesicherte ruleset-19718704.json>
 ```
-
-Bis dahin darf kein `read-through`-Ergebnis als blockierendes Gate berichtet werden.
 
 ## 6. Status nach Preflight
 
 ```text
 SCOPE_DEPENDENCY_CLOSURE:    PASS        (Stufen 1-2 abgeschlossen, Guard falsifiziert)
+PREFLIGHT:                   PASS        READY_FOR_IMPLEMENTATION
 USER_JOURNEY_STATUS:         0/6
 REQUIREMENT_CONTRACT_STATUS: 0/8
-CI_EVIDENCE_STATUS:          0/8 geplant, 8/8 einem Job und Schritt zugeordnet
+CI_EVIDENCE_STATUS:          0/8 erfuellt; 8/8 einem Job und Schritt zugeordnet;
+                                         8/8 in einem BLOCKIERENDEN Job
 RELEASE_STATUS:              NOT_READY
 OQ-002:                      geschlossen (Abschnitt 3)
 OQ-003:                      geschlossen (Abschnitt 3)
 OQ-005:                      geschlossen (Abschnitt 2) - CI-only, keine Anforderung gesenkt
-BLOCKER:                     BLOCKED_CI_EVIDENCE (Abschnitt 5)
+BLOCKED_CI_EVIDENCE:         aufgeloest (Abschnitt 5)
+OFFENE BLOCKER:              keine
 ```
