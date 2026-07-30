@@ -17,7 +17,7 @@
  * Rot-Fall fuer „schreibt fremde Tabellen" auf die echte `TABLE_OWNERSHIP`
  * warten muessen und waere bis dahin nicht ausfuehrbar gewesen.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -287,21 +287,131 @@ describe("Rot-Fall Kostenmodul", () => {
         'export const b = "update public.plan_versions set published_at = now() where id = $1";',
         'export const c = "delete from public.items where id = $1";',
         'export const d = "insert into cost_secrets (id) values ($1)";',
+        // `merge into` und `truncate` waren bis hierher ungedeckt: gemessen liess
+        // sich JEDE der beiden Zeilen aus SQL_WRITE_TARGETS ersatzlos loeschen,
+        // ohne dass ein einziger Test rot wurde. Beide funktionierten — ihr
+        // Verschwinden waere nur still gewesen.
+        'export const e = "merge into public.assignments t using public.cost_snapshots s on t.id = s.id";',
+        'export const f = "truncate table public.plan_versions";',
+        // `update <tabelle> <alias> set` — die uebliche Form, sobald das UPDATE
+        // einen Selbstbezug hat. Gemessen war sie STILL, weil das Muster `set`
+        // unmittelbar hinter dem Ziel verlangte.
+        'export const g = "update public.assignments a set a.note = $1 where a.id = $2";',
+        // `update only` war dieselbe Bauart wie merge/truncate vor diesem
+        // Commit: funktioniert, aber ersatzlos loeschbar ohne roten Test.
+        //
+        // EIGENES Ziel, nicht `public.plan_versions`: die erste Fassung dieser
+        // Zeile nahm dieselbe Tabelle wie Literal `b`, und damit war die
+        // zugehoerige Zusicherung schon durch `b` erfuellt — die Gegenmutation
+        // lief gruen. Ein Test, der sich selbst bestaetigt, ist genau die
+        // Attrappenform, gegen die dieses Projekt seine Gegenmutationsregel
+        // fuehrt.
+        'export const h = "update only public.only_ledger set published_at = now()";',
       ].join("\n") + "\n",
     );
     const messages = messagesOf("costs-touches-only-own-tables");
+    // Beide Zusicherungen nennen seit dieser Runde das VERB. Vorher pruefte die
+    // erste nur `public.assignments && planning && schreibend` und die zweite
+    // nur `public.plan_versions` — beides wurde, nachdem `g` und `f`
+    // dazukamen, von einem anderen Literal derselben Fixture miterfuellt:
+    // Literal `a` bzw. `b` einzeln loeschen liess die Suite gruen. Kein Loch
+    // (jedes der fuenf Schreibverben ist einzeln gedeckt), aber zwei
+    // Zusicherungen, die nichts mehr messen konnten.
     expect(
       messages.some(
         (m) =>
-          m.includes("public.assignments") && m.includes("planning") && m.includes("schreibend"),
+          m.includes('"insert into public.assignments"') &&
+          m.includes("planning") &&
+          m.includes("schreibend"),
       ),
+      "insert into wurde nicht als Schreibziel erkannt.",
     ).toBe(true);
-    expect(messages.some((m) => m.includes("public.plan_versions"))).toBe(true);
+    expect(
+      messages.some((m) => m.includes('"update … set public.plan_versions"')),
+      "update ohne Alias wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
     expect(messages.some((m) => m.includes("public.items") && m.includes("global"))).toBe(true);
     expect(messages.some((m) => m.includes("public.cost_secrets") && m.includes("fehlt"))).toBe(
       true,
     );
+    // Gegenmutation: Zeile `merge into` aus SQL_WRITE_TARGETS entfernen -> rot.
+    expect(
+      messages.some((m) => m.includes('"merge into public.assignments"')),
+      "merge into wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
+    // Gegenmutation: Zeile `truncate` aus SQL_WRITE_TARGETS entfernen -> rot.
+    expect(
+      messages.some((m) => m.includes('"truncate public.plan_versions"')),
+      "truncate wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
+    // Gegenmutation: die optionale Aliasgruppe aus dem `update`-Muster
+    // entfernen -> rot.
+    expect(
+      messages.some((m) => m.includes('"update … set public.assignments"')),
+      "update mit Alias wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
+    // Gegenmutation: `(?:\s+only\b)?` aus dem `update`-Muster entfernen -> rot.
+    // Ohne die Gruppe wird `only` selbst zum Ziel und die echte Tabelle
+    // verschwindet.
+    expect(
+      messages.some((m) => m.includes('"update … set public.only_ledger"')),
+      "update only wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
     drop("apps/api/src/modules/costs/infrastructure/foreign-write.repository.ts");
+  });
+
+  it("laesst eine CTE nur UNqualifizierte Referenzen beschatten", () => {
+    // Eine CTE, die nach der Tabelle benannt ist, die sie filtert, ist die
+    // verbreitetste CTE-Konvention — und schaltete den Waechter gemessen stumm,
+    // lesend UND schreibend, weil CTE-Namen ueber `qualify()` in denselben
+    // Namensraum wie echte Tabellen gelegt wurden. In SQL heisst eine CTE nie
+    // schemaqualifiziert; sie darf nur unqualifizierte Referenzen beschatten.
+    //
+    // Gegenmutation: `cteNames.add(bare(name))` auf `qualify(name)`
+    // zurueckdrehen -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/cte-kollision.repository.ts",
+      [
+        "export const a =",
+        '  "with assignments as (select id from public.assignments where org_id = $1) select * from assignments";',
+        'export const b = "with items as (select 1) delete from public.items where id = $1";',
+      ].join("\n") + "\n",
+    );
+    const messages = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/cte-kollision.repository.ts");
+    expect(
+      messages.some((m) => m.includes('"from public.assignments"')),
+      "Eine gleichnamige CTE hat den qualifizierten Lesezugriff stumm geschaltet.",
+    ).toBe(true);
+    expect(
+      messages.some((m) => m.includes('"delete from public.items"')),
+      "Eine gleichnamige CTE hat den qualifizierten Schreibzugriff stumm geschaltet.",
+    ).toBe(true);
+  });
+
+  it("faengt die Kommafortsetzung auch am Anfang eines Templateliteral-Stuecks", () => {
+    // Das Stueck hinter der Interpolation beginnt mit `, public.assignments` und
+    // traegt kein `from` mehr, an dem die Fortsetzungsschleife haette starten
+    // koennen. Gemessen war das Ziel VOLL QUALIFIZIERT und trotzdem unsichtbar —
+    // kein Fall von "ueber Literalgrenzen zusammengesetztes SQL", sondern eine
+    // echte Luecke, die der push()-Kommentar ausdruecklich ausschloss.
+    //
+    // Gegenmutation: den Aufruf `fortsetzung("from", 0)` entfernen -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/komma-stueck.repository.ts",
+      [
+        'const SNAPSHOTS = "public.cost_snapshots";',
+        "export const query = `select s.id",
+        "  from ${SNAPSHOTS} s, public.assignments a",
+        "  where s.org_id = $1`;",
+      ].join("\n") + "\n",
+    );
+    const messages = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/komma-stueck.repository.ts");
+    expect(
+      messages.some((m) => m.includes('"from public.assignments"')),
+      "Die Kommafortsetzung am Stueckanfang wurde still verworfen.",
+    ).toBe(true);
   });
 
   it("faengt Lesezugriffe auf fremde und auf unregistrierte Tabellen", () => {
@@ -369,6 +479,14 @@ describe("Rot-Fall Kostenmodul", () => {
         '  "with tage as (select d from public.cost_snapshot_items) select * from tage";',
         'export const b = "select extract(day from occurred_on) from public.cost_snapshots";',
         'export const c = "select * from unnest($1::uuid[]) as t(id)";',
+        // Der Klammer-Waechter stand nur auf dem Schluesselwortpfad, nicht auf
+        // dem Fortsetzungspfad. Gemessen meldete `from public.x s, unnest($1) t`
+        // die "Tabelle" `public.unnest` und `…, lateral (select 1) x` die
+        // "Tabelle" `public.lateral` — Fehlalarme auf KORREKTEM Modul-SQL, und
+        // genau solche haben diesen Waechter sechsmal in die Nachjustierung
+        // getrieben.
+        'export const d = "select 1 from public.cost_snapshots s, unnest($1::uuid[]) t";',
+        'export const e = "select 1 from public.cost_snapshots s, lateral (select 1) x";',
       ].join("\n") + "\n",
     );
     expect(
@@ -393,12 +511,32 @@ describe("Rot-Fall Kostenmodul", () => {
     //     `public.mehrerer`, "stammt from planung" ergab `public.planung`.
     //     Ein Waechter, der bei einer harmlosen Meldung feuert, wird
     //     abgeschaltet — und faengt dann auch das Echte nicht mehr.
+    // (3) Vier weitere Prosaformen, die eine SPAETERE Fassung der Vorpruefung
+    //     wieder durchliess, weil sie nur `raw.includes(".")` testete: der
+    //     Satzpunkt hinter dem Ziel gehoert bei `SQL_READ_TARGETS` mit ins Ziel,
+    //     also sahen `planung.`, `mehrerer.`, `.` (aus `./infrastructure`) und
+    //     `2.5` alle "qualifiziert" aus. Diese vier standen in der Fixture
+    //     bewusst OHNE Satzpunkt und konnten den Rueckfall deshalb nicht sehen.
+    // (4) Ein englischer Satz mit `with`: solange `with` als Statement-Verb
+    //     galt, machte "Compare with … taken from planung" daraus
+    //     `public.planung`.
+    //
+    // NICHT hier: "Vorlage stammt from vorlage.xlsx". Diese Form hat exakt die
+    // Gestalt eines qualifizierten Ziels und feuert bewusst — siehe die
+    // Begruendung an `SQL_QUALIFIED_TARGET`. Sie hier aufzunehmen hiesse, das
+    // Ueberfeuer zu verbieten und damit die Schema-Positivliste
+    // zurueckzuholen, die beim Veralten still wird.
     write(
       "apps/api/src/modules/costs/infrastructure/ueberfeuer.repository.ts",
       [
         'import type { PublishedPlanFacts } from "../../planning";',
         'export const hinweis = "Konflikt entsteht beim join mehrerer Zeilen";',
         'export const grund = "Wert stammt from planung und ist unveraendert";',
+        'export const satzende = "Der Wert stammt from planung.";',
+        'export const satzendeJoin = "Konflikt entsteht beim join mehrerer.";',
+        'export const pfad = "Adapter kommt from ./infrastructure";',
+        'export const zahl = "Berechnet using 2.5 Stunden je Einsatz";',
+        'export const englisch = "Compare with the published plan, values taken from planung";',
         "export type X = PublishedPlanFacts;",
       ].join("\n") + "\n",
     );
@@ -444,6 +582,135 @@ describe("Rot-Fall Kostenmodul", () => {
     drop("apps/api/src/modules/costs/infrastructure/gestueckelt.repository.ts");
   });
 
+  it("faengt ein gestueckeltes Fragment auch bei einem UNGEWOEHNLICHEN Schema", () => {
+    // Der Fall, an dem eine Schema-Positivliste still geworden waere. Eine
+    // Zwischenfassung von `SQL_QUALIFIED_TARGET` fuehrte `public|app|auth|storage`
+    // als Liste — von Hand aus den Migrationen abgelesen und dabei
+    // unvollstaendig. `pg_catalog` ist nicht hypothetisch: Migration
+    // `20260727020000_0004_org_settings.sql` liest `pg_catalog.pg_timezone_names`.
+    //
+    // Die Regel meldet auch UNregistrierte Tabellen ("fehlt im Besitzregister"),
+    // ein unbekanntes Schema waere also nicht bloss falsch einsortiert, sondern
+    // spurlos verschwunden — im Stueck hinter der Interpolation, wo kein
+    // Statement-Verb steht und die erste Zulassung nicht greift.
+    //
+    // Gegenmutation: `SQL_QUALIFIED_TARGET` wieder auf eine Positivliste ohne
+    // `pg_catalog` verengen -> rot.
+    // Die zweite Zeile deckt die DREITEILIGE Form ab. Eine erste Fassung von
+    // `SQL_QUALIFIED_TARGET` liess nur zwei Bezeichner zu und verwarf
+    // `mydb.public.assignments` im gestueckelten Fragment still — dieselbe
+    // Schadensform wie die Positivliste, nur eine Ebene tiefer. Gemessen kommt
+    // ein dreiteiliger Name im Repo heute nirgends vor; das macht ihn zu genau
+    // der Luecke, die ohne Dauertest niemand bemerkt.
+    //
+    // Zweite Gegenmutation: `(?:"?[a-z_][\w$]*"?\.)?` aus dem Muster entfernen
+    // -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/fremdschema.repository.ts",
+      [
+        'const SNAPSHOTS = "public.cost_snapshots";',
+        "export const query = `select s.id",
+        "  from ${SNAPSHOTS} s",
+        "  join pg_catalog.pg_timezone_names z on z.name = s.time_zone",
+        "  where s.org_id = $1`;",
+        'const ITEMS = "public.cost_snapshot_items";',
+        "export const dreiteilig = `select i.id",
+        "  from ${ITEMS} i",
+        "  join mydb.public.assignments a on a.id = i.assignment_id`;",
+      ].join("\n") + "\n",
+    );
+    const meldungen = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/fremdschema.repository.ts");
+    expect(
+      meldungen.some((m) => m.includes('"join pg_catalog.pg_timezone_names"')),
+      "Ein qualifizierter Zugriff mit unbekanntem Schema wurde still verworfen.",
+    ).toBe(true);
+    expect(
+      meldungen.some((m) => m.includes('"join mydb.public.assignments"')),
+      "Ein dreiteilig qualifizierter Zugriff wurde still verworfen.",
+    ).toBe(true);
+  });
+
+  it("faengt ein UNqualifiziertes Ziel im CTE-Stueck ohne Statement-Verb", () => {
+    // Der einzige Fall, den ausschliesslich `|| cteNames.size > 0` erreicht.
+    //
+    // `with` wurde aus SQL_STATEMENT_HINT entfernt, weil es ein gewoehnliches
+    // englisches Wort ist; als Ersatz erkennt `SQL_CTE_NAMES` die Form
+    // `x as (`. Dass dieser Ersatz WIRKT, war bis hierher nur behauptet:
+    // gemessen blieb die Datei 44/44 gruen, nachdem `|| cteNames.size > 0`
+    // entfernt wurde. Genau die Bauart, die dieser Strang schon viermal
+    // korrigiert hat — Waechterlogik, deren Wirkung nur im Kommentar steht.
+    //
+    // Das Stueck hinter der Interpolation traegt weder ein Statement-Verb noch
+    // ein qualifiziertes Ziel; ohne die CTE-Zulassung faellt der `join` auf
+    // `assignments` still unter den Tisch.
+    //
+    // Der CTE-Rumpf ist bewusst `( 1 )` und NICHT `( select 1 )`: mit `select`
+    // greift bereits SQL_STATEMENT_HINT, und der Test waere gruen geblieben,
+    // ohne die CTE-Zulassung je zu beruehren. Genau so war die erste Fassung
+    // dieser Fixture gebaut — gemessen blieb sie unter der Gegenmutation gruen.
+    //
+    // Gegenmutation: `|| cteNames.size > 0` entfernen -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/cte.repository.ts",
+      [
+        'const SNAPSHOTS = "public.cost_snapshots";',
+        "export const query = `select s.id from ${SNAPSHOTS} s`;",
+        "export const zweiter = `), b as ( 1 )",
+        "  join assignments a on a.id = t.id`;",
+      ].join("\n") + "\n",
+    );
+    const meldungen = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/cte.repository.ts");
+    expect(
+      meldungen.some((m) => m.includes('"join public.assignments"')),
+      "Das unqualifizierte Ziel im CTE-Stueck wurde nicht gemeldet — die CTE-Zulassung wirkt nicht.",
+    ).toBe(true);
+  });
+
+  it("meldet ein Prosaziel in Tabellenform — der benannte Preis, gemessen", () => {
+    // Der Preis der Entscheidung an `SQL_QUALIFIED_TARGET`: ein Prosaziel der
+    // Form `bezeichner.bezeichner` feuert. Das steht dort als bewusst gewaehlte
+    // Richtung ("Ueberfeuer ist laut, Unterfeuer still") — war aber nirgends
+    // GEMESSEN, sondern nur behauptet.
+    //
+    // Ohne diese Zusicherung koennte jemand das Ueberfeuer spaeter
+    // "aufraeumen", etwa ueber einen Ausschluss bekannter Dateiendungen. Der
+    // pg_catalog-Test bliebe dabei gruen, und der Waechter wuerde genau an der
+    // Stelle wieder still, an der diese Zeile aus der Ueberfeuer-Fixture
+    // entfernt wurde.
+    //
+    // Gegenmutation: `.xlsx` oder qualifizierte Ziele mit Dateiendung vom
+    // Melden ausnehmen -> rot.
+    // Die zweite Zeile ist der ZWEITE, groessere Preis: seit der Fortsetzung am
+    // Stueckanfang feuert Prosa auch ganz OHNE SQL-Schluesselwort, sobald ein
+    // Komma und ein punktierter Bezeichner darin vorkommen. Lexikalisch ist
+    // `alias.spalte` von `schema.tabelle` nicht zu unterscheiden; eine Verengung
+    // wuerde den Fall verlieren, um den es geht (`from ${X} s, public.y a`).
+    // Auch das gehoert gemessen, nicht bloss in den Kommentar.
+    write(
+      "apps/api/src/modules/costs/infrastructure/preis.repository.ts",
+      [
+        'export const hinweis = "Vorlage stammt from vorlage.xlsx";',
+        'export const zweiter = "Achtung, config.json fehlt";',
+      ].join("\n") + "\n",
+    );
+    const meldungen = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/preis.repository.ts");
+    expect(
+      meldungen.some((m) => m.includes('"from vorlage.xlsx"')),
+      "Der benannte Preis ist nicht mehr eingetreten — das Ueberfeuer wurde wegoptimiert.",
+    ).toBe(true);
+    // Gegenmutation: `fortsetzung("from", 0)` entfernen -> rot. Derselbe Aufruf
+    // haelt "faengt die Kommafortsetzung auch am Anfang eines
+    // Templateliteral-Stuecks" gruen — die beiden Tests sind die zwei Seiten
+    // derselben Entscheidung.
+    expect(
+      meldungen.some((m) => m.includes('"from config.json"')),
+      "Die Fortsetzung am Stueckanfang feuert nicht mehr auf Prosa — Verhalten geaendert, ohne den Kommentar mitzuaendern.",
+    ).toBe(true);
+  });
+
   it("faengt eine relativ importierte Datei NICHT als XLSX-Bibliothek", () => {
     // Gemessen: XLSX_LIBRARY_PATTERN traf `./infrastructure/xlsx-cost-renderer`
     // und `../infrastructure/xlsx-cost-renderer`, weil `([/-]|$)` den Bindestrich
@@ -462,15 +729,17 @@ describe("Rot-Fall Kostenmodul", () => {
         "export const XlsxCostRenderer: CostExportPort | null = null;",
       ].join("\n") + "\n",
     );
-    expect(
-      messagesOf("costs-xlsx-behind-application-port"),
-      "Ein relativer Importpfad wurde als XLSX-Bibliothek gemeldet.",
-    ).toEqual([]);
+    // Erst messen, DANN aufraeumen, DANN zusichern. Waere die Zusicherung wie
+    // frueher die erste Anweisung, liefe der Aufraeumteil bei einem Fehlschlag
+    // gar nicht — und die Folgetests liefen gegen einen zerstoerten Baum. Das
+    // ist dieselbe Bauart, die diesen Befund ueberhaupt erst erzeugt hat.
+    const meldungen = messagesOf("costs-xlsx-behind-application-port");
     drop("apps/api/src/modules/costs/infrastructure/xlsx-cost-renderer.ts");
     // `index.ts` wird hier UEBERSCHRIEBEN, nicht angelegt — ohne diese Zeile
     // liefen die beiden Abschlusszusicherungen "am sauberen Baum" gegen einen
     // anderen Baum als den, den `beforeAll` beschreibt.
     write("apps/api/src/modules/costs/index.ts", SAUBERE_INDEX_TS);
+    expect(meldungen, "Ein relativer Importpfad wurde als XLSX-Bibliothek gemeldet.").toEqual([]);
   });
 
   it("faengt einen generischen Sammelcontainer, auch verschachtelt und unter anderem Namen", () => {
@@ -574,6 +843,18 @@ describe("Rot-Fall Kostenmodul", () => {
   });
 
   it("ist am sauberen Baum gruen — der Rot-Fall kommt von den Verstoessen, nicht vom Aufbau", () => {
+    // Zuerst pruefen, GEGEN WELCHEN Baum hier gemessen wird. Ohne diese Zeile
+    // war der Baumzustand ungeprueft: gemessen blieb die Datei 21/21 gruen,
+    // nachdem die Wiederherstellung von `index.ts` im XLSX-Fall entfernt wurde
+    // — eine `index.ts`, die auf eine geloeschte Datei re-exportiert, erzeugt
+    // schlicht null Befunde. Die beiden Abschlusszusicherungen bestaetigten
+    // damit die Sauberkeit eines Baums, den sie nicht kannten.
+    // Gegenmutation: die Wiederherstellung in "faengt eine relativ importierte
+    // Datei NICHT als XLSX-Bibliothek" entfernen -> rot.
+    expect(
+      readFileSync(join(root, "apps/api/src/modules/costs/index.ts"), "utf8"),
+      "Ein vorheriger Test hat den Referenzbaum veraendert und nicht wiederhergestellt.",
+    ).toBe(SAUBERE_INDEX_TS);
     const result = run();
     expect(
       result.findings.map((f) => `${f.location} [${f.rule}] ${f.message}`),

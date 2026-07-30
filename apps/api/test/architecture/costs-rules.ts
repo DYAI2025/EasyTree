@@ -134,11 +134,41 @@ const MONEY_FUNCTION_PATTERN =
  *   dort greift weder die Statement- noch die Qualifizierungs-Zulassung. Der
  *   Hausstil schreibt schema-qualifiziert; die Luecke steht hier, damit sie
  *   nicht als Abdeckung gelesen wird.
+ * - **Ziel hinter einem Blockkommentar** (`from /* hint *\/ public.assignments`):
+ *   `SQL_READ_TARGETS` verlangt das Ziel unmittelbar hinter dem Schluesselwort.
+ * - **Zweites und folgendes Ziel eines `truncate a, b`.** Nur das erste wird
+ *   erfasst; die Kommafortsetzung laeuft ausschliesslich auf dem Lesepfad.
+ * - **`select … into <tabelle>`** (DDL-nah, erzeugt die Zieltabelle).
+ * - **Die ganze Kommakette hinter einer mengenliefernden Funktion.** Gemessen:
+ *   `select 1 from unnest($1) t, public.assignments a` meldet NICHTS. Der
+ *   Klammer-Waechter ueberspringt den Schluesselworttreffer komplett, und der
+ *   Cursor steht hinter `from unnest`, nicht hinter der schliessenden Klammer —
+ *   fuer das Weiterzaehlen braeuchte es einen Klammerzaehler. Vorbestehend,
+ *   nicht durch die Fortsetzung am Stueckanfang eingefuehrt.
+ *
+ * Diese Liste ist das Ergebnis eines systematischen Durchlaufs ueber 173
+ * Eingaben (30.07.2026), nicht einer Stichprobe. Sechs vorangegangene
+ * Stichprobenrunden haben je ein bis zwei stille Formen gefunden und dabei
+ * jedes Mal eine neue erzeugt; wer hier etwas aendert, misst bitte wieder die
+ * ganze Matrix statt einzelner Faelle.
  */
 const SQL_WRITE_TARGETS: ReadonlyArray<readonly [string, RegExp]> = [
   ["insert into", /\binsert\s+into\b\s+([\w$".]+)/gi],
   ["merge into", /\bmerge\s+into\b\s+([\w$".]+)/gi],
-  ["update … set", /\bupdate\b\s+([\w$".]+)\s+set\b/gi],
+  // `only` und ein optionaler Alias stehen zwischen Verb und `set`. Ohne beide
+  // war `update public.assignments a set x = 1` — die uebliche Form, sobald das
+  // UPDATE eine FROM-Klausel oder einen Selbstbezug hat — gemessen STILL, und
+  // `update … as a set` ebenso. ADR-003 fuehrt "kein fremder Tabellenzugriff,
+  // lesend UND schreibend" als von dieser Regel gedeckt; das hielt sie nicht.
+  // Das nachfolgende `set` bleibt Pflicht — deckt seit der Aliasgruppe aber die
+  // Form `update <a> <b> set` mit ab, und damit auch englische Prosa dieser
+  // Gestalt. Gemessen: "we update the value set by the user" meldet
+  // `public.the`; vorher war der Satz still. Laut statt still, also die
+  // gewaehlte Richtung — aber die Prosabremse ist schwaecher als der Satz oben
+  // frueher behauptete. Weiterhin still (gegengeprueft): "…beim update der
+  // Werte im set…", "on conflict … do update set a = 1" und
+  // "when matched then update set a = 1".
+  ["update … set", /\bupdate\b(?:\s+only\b)?\s+([\w$".]+)(?:\s+(?:as\s+)?[\w$"]+)?\s+set\b/gi],
   ["delete from", /\bdelete\s+from\b\s+([\w$".]+)/gi],
   ["truncate", /\btruncate\b(?:\s+table\b)?\s+([\w$".]+)/gi],
 ];
@@ -146,10 +176,16 @@ const SQL_WRITE_TARGETS: ReadonlyArray<readonly [string, RegExp]> = [
 /**
  * Sieht das Literal ueberhaupt nach SQL aus?
  *
- * Verlangt ein einleitendes Statement-Verb. Das ist absichtlich eng: `from` und
- * `join` allein kommen in deutscher Prosa vor, `select … from` nicht.
+ * Verlangt ein Statement-Verb. Das ist absichtlich eng: `from` und `join`
+ * allein kommen in deutscher Prosa vor, `select … from` nicht.
+ *
+ * `with` steht bewusst NICHT in dieser Liste, obwohl es ein Statement einleitet:
+ * es ist ein gewoehnliches englisches Wort, und gemessen genuegte es, um
+ * "Compare with the published plan, values taken from planung" zu einem
+ * Tabellenzugriff `public.planung` zu machen. CTEs werden stattdessen an
+ * `SQL_CTE_NAMES` erkannt — die Form `with x as (` kommt in Prosa nicht vor.
  */
-const SQL_STATEMENT_HINT = /\b(select|insert|update|delete|merge|truncate|with)\b/i;
+const SQL_STATEMENT_HINT = /\b(select|insert|update|delete|merge|truncate)\b/i;
 
 /** `from`, `join` und `using` als Lesequellen. */
 const SQL_READ_TARGETS = /\b(from|join|using)\b\s+([\w$".]+)/gi;
@@ -167,6 +203,38 @@ const SQL_FROM_OPERATOR = /\b(extract|substring|trim|overlay|position)\s*\([^()]
 /** Namen von Common Table Expressions — sie sind keine Tabellen. */
 const SQL_CTE_NAMES = /(?:\bwith\s+(?:recursive\s+)?|,\s*)("?[\w$]+"?)\s+as\s*\(/gi;
 
+/**
+ * Ein qualifiziertes Ziel: `schema.tabelle` oder `datenbank.schema.tabelle`,
+ * GANZ, nicht bloss irgendwo ein Punkt.
+ *
+ * Der Anker `^…$` ist der Kern der Aussage. `SQL_READ_TARGETS` zieht ein
+ * folgendes Satzzeichen mit ins Ziel, also verwirft ein blosser Punkttest
+ * nichts: gemessen las er `from planung.` (deutscher Satzpunkt),
+ * `from ./infrastructure` und `using 2.5` als Tabellenzugriffe. Der Anker
+ * verwirft sie, weil keine davon beidseits des Punktes einen vollstaendigen
+ * Bezeichner hat.
+ *
+ * Die DREITEILIGE Form ist ausdruecklich zugelassen. Eine erste Fassung liess
+ * nur zwei Bezeichner zu und verwarf `mydb.public.assignments` im gestueckelten
+ * Fragment still — ein Unterfeuer, also die schlechtere Richtung, auch wenn im
+ * Repo heute kein dreiteiliger Name vorkommt.
+ *
+ * BEWUSST KEINE SCHEMA-LISTE. Eine erste Fassung fuehrte hier
+ * `public|app|auth|storage` als Positivliste — von Hand aus den Migrationen
+ * abgelesen und dabei unvollstaendig: `pg_catalog` (z. B.
+ * `pg_catalog.pg_timezone_names` in Migration `0004`) und `extensions` fehlten.
+ * Die Folge waere still gewesen, nicht laut: Regel `costs-touches-only-own-tables`
+ * meldet auch UNregistrierte Tabellen, ein Zugriff auf ein unbekanntes Schema
+ * waere also einfach verschwunden. Eine Positivliste, die veralten kann und
+ * beim Veralten stumm wird, ist an einem Waechter die falsche Bauart.
+ *
+ * Preis dieser Entscheidung, benannt statt verschwiegen: ein Prosaziel der Form
+ * `bezeichner.bezeichner` — etwa "Vorlage stammt from vorlage.xlsx" — feuert.
+ * Das ist die gewollte Richtung: ein Ueberfeuer macht `unit-tests` rot und wird
+ * bemerkt, ein Unterfeuer nicht.
+ */
+const SQL_QUALIFIED_TARGET = /^"?[a-z_][\w$]*"?\.(?:"?[a-z_][\w$]*"?\.)?"?[a-z_][\w$]*"?$/i;
+
 interface SqlAccess {
   readonly verb: string;
   readonly access: "lesend" | "schreibend";
@@ -176,9 +244,14 @@ interface SqlAccess {
   readonly line: number;
 }
 
+/** Anfuehrungszeichen weg, kleingeschrieben — noch OHNE Schemaergaenzung. */
+function bare(raw: string): string {
+  return raw.replace(/"/g, "").toLowerCase();
+}
+
 function qualify(raw: string): string {
-  const bare = raw.replace(/"/g, "").toLowerCase();
-  return bare.includes(".") ? bare : `public.${bare}`;
+  const name = bare(raw);
+  return name.includes(".") ? name : `public.${name}`;
 }
 
 /**
@@ -206,24 +279,82 @@ export function sqlAccesses(literal: string): SqlAccess[] {
   // schlechtere Richtung, weil ein stummer Waechter nicht auffaellt.
   //
   // Deshalb ZWEI Zulassungen statt eines Tors: entweder das Literal sieht nach
-  // einem Statement aus, oder das Ziel ist schema-qualifiziert (`public.x`).
-  // Prosa nennt keine qualifizierten Tabellennamen; SQL-Fragmente tun es.
-  const looksLikeSql = SQL_STATEMENT_HINT.test(literal);
+  // einem Statement aus, oder das Ziel traegt ein Schemapraefix dieses Projekts.
+  //
+  // Die zweite Zulassung war zuerst ein blosser Punkttest (`raw.includes(".")`),
+  // begruendet mit "Prosa nennt keine qualifizierten Tabellennamen". Gemessen ist
+  // das falsch: `SQL_READ_TARGETS` zieht den Satzpunkt mit ins Ziel, also wurden
+  // "Der Wert stammt from planung." zu `from planung.`, "…beim join mehrerer." zu
+  // `join mehrerer.`, "from ./infrastructure" zu `from .` und "using 2.5 Stunden"
+  // zu `using 2.5`. `SQL_QUALIFIED_TARGET` verlangt stattdessen zwei
+  // vollstaendige Bezeichner um den Punkt, ueber dem GANZEN Ziel.
+  // CTE-Namen bleiben UNqualifiziert. Eine fruehere Fassung legte sie ueber
+  // `qualify()` in denselben Namensraum wie echte Tabellen — mit der Folge, dass
+  // eine CTE, die nach der Tabelle benannt ist, die sie filtert, den Zugriff auf
+  // ebendiese Tabelle stumm schaltete. Gemessen:
+  //   `with assignments as (select id from public.assignments …) select * from assignments`
+  //     -> KEIN Befund; mit anderem CTE-Namen -> `from public.assignments`.
+  //   Dasselbe schreibend: `with items as (select 1) delete from public.items`.
+  // In SQL heisst eine CTE nie schemaqualifiziert; sie darf ausschliesslich
+  // UNqualifizierte Referenzen beschatten. Genau das tut `push` jetzt.
   const cteNames = new Set<string>();
   for (const match of literal.matchAll(SQL_CTE_NAMES)) {
     const name = match[1];
-    if (name !== undefined) cteNames.add(qualify(name));
+    if (name !== undefined) cteNames.add(bare(name));
   }
+  // CTEs sind der Grund, warum `with` aus SQL_STATEMENT_HINT entfernt wurde: die
+  // Form `with x as (` erkennt sie praeziser als das blosse englische Wort.
+  const looksLikeSql = SQL_STATEMENT_HINT.test(literal) || cteNames.size > 0;
 
   const push = (verb: string, access: SqlAccess["access"], raw: string, index: number): void => {
-    // Die Restluecke ist benannt statt verschwiegen: ein UNqualifiziertes Ziel in
-    // einem verblosen Fragment (`join assignments a on …` ohne `public.`) faellt
-    // durch beide Zulassungen. Der Hausstil schreibt schema-qualifiziert; wer das
-    // aendert, muss diese Zeile mitaendern.
-    if (!looksLikeSql && !raw.includes(".")) return;
-    const table = qualify(raw);
-    if (cteNames.has(table)) return;
-    out.push({ verb, access, table, line: lineOf(literal, index) });
+    // Zwei Restluecken, beide benannt statt verschwiegen:
+    //
+    // UNTERFEUER: ein unqualifiziertes Ziel in einem verblosen Fragment
+    // (`join assignments a on …` ohne `public.`) faellt durch beide Zulassungen.
+    // Der Hausstil schreibt schema-qualifiziert — gemessen ist JEDES Ziel im
+    // echten `apps/api/src/modules/` `public.`-qualifiziert; wer das aendert,
+    // muss diese Zeile mitaendern.
+    //
+    // UEBERFEUER: Prosa, die ein Statement-Verb UND ein `from`/`join`/`using`
+    // enthaelt ("Diese Methode wird beim update aufgerufen, Werte kommen from
+    // planung"), meldet weiterhin einen Zugriff. Das ist die bewusst gewaehlte
+    // Richtung: ein Ueberfeuer macht `unit-tests` rot und wird bemerkt, ein
+    // Unterfeuer ist still.
+    if (!looksLikeSql && !SQL_QUALIFIED_TARGET.test(raw)) return;
+    const name = bare(raw);
+    // Nur UNqualifizierte Ziele koennen von einer CTE beschattet werden.
+    if (!name.includes(".") && cteNames.has(name)) return;
+    out.push({ verb, access, table: qualify(raw), line: lineOf(literal, index) });
+  };
+
+  /** `from unnest(...)`, `from now()`: mengenliefernde Funktion, keine Tabelle. */
+  const istFunktionsaufruf = (at: number): boolean => /^\s*\(/.test(literal.slice(at));
+
+  /**
+   * Kommagetrennte Fortsetzung ab `cursor` abarbeiten: `from a x, b y, c z`.
+   *
+   * Eigene Funktion, weil sie an ZWEI Stellen gebraucht wird — nach einem
+   * Schluesselworttreffer und am Anfang eines Templateliteral-Stuecks. Ohne die
+   * zweite Stelle fiel `from ${SNAPSHOTS} s, public.assignments a` still durch:
+   * das Stueck hinter der Interpolation beginnt mit `, public.assignments`, hat
+   * also kein `from` mehr, an dem die Schleife haette starten koennen. Gemessen
+   * war das Ziel voll qualifiziert und trotzdem unsichtbar — kein Fall von
+   * "ueber Literalgrenzen zusammengesetztes SQL", sondern eine echte Luecke.
+   */
+  const fortsetzung = (verb: string, startAt: number): void => {
+    let cursor = startAt;
+    for (;;) {
+      const next = SQL_READ_CONTINUATION.exec(literal.slice(cursor));
+      const target = next?.[1];
+      if (next === null || next === undefined || target === undefined) break;
+      const nach = cursor + next[0].length;
+      // Derselbe Klammer-Waechter wie auf dem Schluesselwortpfad. Ohne ihn
+      // meldete `from public.a s, unnest($1) t` die "Tabelle" `public.unnest` —
+      // ein Fehlalarm auf korrektem Modul-SQL, und genau solche Fehlalarme
+      // haben diesen Waechter schon sechsmal in die Nachjustierung getrieben.
+      if (!istFunktionsaufruf(nach)) push(verb, "lesend", target, cursor);
+      cursor = nach;
+    }
   };
 
   for (const [verb, pattern] of SQL_WRITE_TARGETS) {
@@ -234,6 +365,24 @@ export function sqlAccesses(literal: string): SqlAccess[] {
     }
   }
 
+  // Fortsetzung am STUECKANFANG: `from a s` stand im vorigen Stueck, dieses
+  // beginnt mit `, b`. Das Verb wird als `from` angenommen, weil es im Stueck
+  // nicht mehr steht — eine Annahme, keine Invariante: Kommalisten stehen in SQL
+  // auch in der SELECT-Liste, in GROUP BY und in Argumentlisten.
+  //
+  // Diese Stelle zahlt den an `SQL_QUALIFIED_TARGET` benannten Preis ZUSAETZLICH
+  // ohne jedes SQL-Schluesselwort — gemessen, nicht vermutet:
+  //   ", a.employee_id from public.cost_snapshots"  -> auch `from a.employee_id`
+  //                                                    (eine SPALTE, keine Tabelle)
+  //   "Achtung, config.json fehlt"                  -> `from config.json`
+  //   "Fehler, docs.easytree.de nicht erreichbar"   -> `from docs.easytree.de`
+  // Lexikalisch ist `alias.spalte` von `schema.tabelle` nicht zu unterscheiden;
+  // eine Verengung auf `^\s*,` wuerde genau den Fall verlieren, um den es geht
+  // (`from ${X} s, public.assignments a` beginnt mit ` s,`, nicht mit `,`).
+  // Die Exposition ist begrenzt, gegengeprueft bleiben still: "Stunden, 2.5 pro
+  // Einsatz", "id, org_id, created_at", "Konflikt, mehrere Zeilen betroffen".
+  fortsetzung("from", 0);
+
   for (const match of literal.matchAll(SQL_READ_TARGETS)) {
     const keyword = match[1]?.toLowerCase();
     const raw = match[2];
@@ -242,17 +391,10 @@ export function sqlAccesses(literal: string): SqlAccess[] {
     // `delete from` ist bereits als Schreibziel erfasst — nicht doppelt melden.
     if (keyword === "from" && /\bdelete\s+$/i.test(before)) continue;
     if (keyword === "from" && SQL_FROM_OPERATOR.test(before)) continue;
-    let cursor = match.index + match[0].length;
-    // `from unnest(...)`, `from now()`: mengenliefernde Funktion, keine Tabelle.
-    if (/^\s*\(/.test(literal.slice(cursor))) continue;
+    const cursor = match.index + match[0].length;
+    if (istFunktionsaufruf(cursor)) continue;
     push(keyword, "lesend", raw, match.index);
-    for (;;) {
-      const next = SQL_READ_CONTINUATION.exec(literal.slice(cursor));
-      const table = next?.[1];
-      if (next === undefined || next === null || table === undefined) break;
-      push(keyword, "lesend", table, cursor);
-      cursor += next[0].length;
-    }
+    fortsetzung(keyword, cursor);
   }
 
   return out;

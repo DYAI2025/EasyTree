@@ -14,9 +14,10 @@
  * `Date`-Werte den sicheren Bereich verlässt (Spanne 1,7e16 gegen 9,0e15).
  *
  * Eine frühere Fassung behauptete hier, bereits ein gewöhnlicher Stundensatz mal
- * einer mehrtägigen Dauer verlasse den Bereich. Nachgerechnet stimmt das nicht —
- * der nächstliegende Fall ist rund 3000-fach entfernt. Die Schlussfolgerung
- * bleibt, der Beleg war falsch.
+ * einer mehrtägigen Dauer verlasse den Bereich. Nachgerechnet stimmt das nicht:
+ * der oben genannte Extremfall (1000 EUR/h × 30 Tage) liegt Faktor 35 unter der
+ * Grenze, ein gewöhnlicher Satz von 50 EUR/h über 7 Tage mit 3,0e12 sogar Faktor
+ * 3000. Die Schlussfolgerung bleibt, der Beleg war falsch.
  *
  * ## Warum `Money` ein Vorzeichen tragen darf, ein Plan-Kostenbetrag aber nicht
  *
