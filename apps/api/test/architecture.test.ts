@@ -16,7 +16,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { MODULE_SLUGS, SCAFFOLDED_MODULES } from "../src/modules/module-catalogue";
+import { MODULE_SLUGS, SCAFFOLDED_MODULES, TABLE_OWNERSHIP } from "../src/modules/module-catalogue";
 import { evaluate, findStarReExports, RULES } from "./architecture/rules";
 import {
   collectFilesNamed,
@@ -161,5 +161,76 @@ describe("Architekturgrenzen", () => {
     expect(onDisk.filter((dir) => !known.has(dir))).toEqual([]);
     // Jedes geruestete Modul muss auch wirklich auf der Platte liegen.
     expect([...SCAFFOLDED_MODULES].filter((slug) => !onDisk.includes(slug))).toEqual([]);
+  });
+});
+
+/**
+ * Kostenmodul im Katalog (EYT-105 / REQ-001, Baseline S5-REQ-01).
+ *
+ * Diese drei Zusicherungen koennen NICHT registergetrieben sein — das ist ihr
+ * ganzer Zweck. `it.each([...SCAFFOLDED_MODULES])` weiter oben prueft nur, was
+ * bereits im Register steht; fehlt `costs` dort, laeuft die Schleife
+ * vollstaendig gruen an ihm vorbei. Der Katalog ist damit gegenueber einem
+ * unregistrierten Modul blind, und genau diese Luecke schliesst der namentliche
+ * Eintrag hier.
+ *
+ * Die uebrigen Grenzen des Moduls (Schichten, Importrichtungen,
+ * SQL-Schreibziele, Verzeichnis- und Exportnamen) stehen in
+ * `costs-module-boundaries.test.ts`; ihre Gegenmutationen in
+ * `costs-module-boundaries.red-case.test.ts`.
+ */
+describe("Kostenmodul im Katalog (EYT-105, REQ-001)", () => {
+  it("fuehrt `costs` als Modul-Slug", () => {
+    expect(
+      [...MODULE_SLUGS] as string[],
+      "MODULE_SLUGS kennt `costs` nicht. Die Liste ist aus ADR-001 Z. 60 abgeleitet und gilt als eingefroren — die Ergaenzung ist eine Architekturaenderung mit ADR-Pflicht (EYT-105 AC 1, CAN-RISK-03).",
+    ).toContain("costs");
+  });
+
+  it("fuehrt `costs` als geruestetes Modul", () => {
+    // Erst dieser Eintrag richtet die bestehende Inhaltspruefung oben auf das
+    // Kostenmodul aus. Ohne ihn duerfte `costs/` leer bleiben.
+    expect(
+      [...SCAFFOLDED_MODULES] as string[],
+      "SCAFFOLDED_MODULES kennt `costs` nicht — der Architekturtest verlangt dann keine echten Dateien in domain/ und application/.",
+    ).toContain("costs");
+  });
+
+  it("weist `costs` mindestens eine eigene, mandantengebundene Tabelle zu", () => {
+    // Tabellenbesitz ist zur Laufzeit NICHT erzwungen (siehe Kopfkommentar von
+    // module-catalogue.ts): eine Anwendungsrolle, RLS filtert nach Mandant,
+    // nicht nach Modul. Das hier ist die Registereintragung, kein Nachweis
+    // durchgesetzter Rechte — und darf auch nicht als solcher gemeldet werden.
+    const owned = TABLE_OWNERSHIP.filter((entry) => (entry.owner as string | null) === "costs");
+    expect(
+      owned.map((entry) => entry.table),
+      "TABLE_OWNERSHIP weist dem Kostenmodul keine Tabelle zu (EYT-105 AC 1: Registrierung in ADR, MODULE_SLUGS, SCAFFOLDED_MODULES und Tabellenbesitz).",
+    ).not.toEqual([]);
+    expect(
+      owned.filter((entry) => !entry.tenantOwned).map((entry) => entry.table),
+      "Kostentabellen ohne org_id: Kostendaten sind mandantengebunden (ADR-001 Z. 82).",
+    ).toEqual([]);
+  });
+
+  it("ist in einer ADR beschlossen, nicht nur im Katalog eingetragen", () => {
+    // `MODULE_SLUGS` bezeichnet sich selbst als aus ADR-001 Z. 60 abgeleitet und
+    // eingefroren. Ein elfter Slug ohne Beschluss waere eine stille Aenderung
+    // des bindenden Architekturvertrags — EYT-105 AC 1 nennt die ADR deshalb an
+    // erster Stelle. Welche Nummer sie traegt und ob sie ADR-001 fortschreibt
+    // oder neu ist, entscheidet der Beschluss, nicht dieser Test.
+    const adrDir = resolve(repoRoot, "docs/architecture");
+    const adrs = readdirSync(adrDir).filter((name) => /^ADR-\d+.*\.md$/.test(name));
+    expect(
+      adrs.length,
+      "keine ADR gefunden — die Suche ist kaputt, nicht das Repository.",
+    ).toBeGreaterThan(1);
+    const deciding = adrs.filter((name) => {
+      const text = readFileSync(resolve(adrDir, name), "utf8");
+      return text.includes("EYT-105") && /(^|[^a-z])costs([^a-z]|$)/.test(text);
+    });
+    expect(
+      deciding,
+      "Keine ADR unter docs/architecture/ nennt `costs` zusammen mit EYT-105 (EYT-105 AC 1).",
+    ).not.toEqual([]);
   });
 });
