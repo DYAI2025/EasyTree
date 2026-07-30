@@ -12,8 +12,10 @@ Diese Datei trägt inzwischen **zwei** Features. Die Kopfzeile darunter gehört 
 > **Warnung an Leser und an `plumbline-context-check`.** Das Werkzeug prüft _eine_ Datei
 > `docs/traceability.md` auf _einen_ Bestätigungsmarker. Der Marker unten gehört zu
 > `planning-draft-conflict-slice`. Für `sprint-5-daily-cost-export` würde er die Prüfung
-> **fälschlich** bestehen lassen. Der maßgebliche Sprint-5-Stand steht im eigenen Abschnitt
-> und ist `draft`.
+> **fälschlich** bestehen lassen — die Prüfung liest einen Marker, dieses Repository führt
+> aber zwei Features in einer Datei. Beide sind inzwischen `user-confirmed` (Sprint 4 am
+> 28.07.2026, Sprint 5 am 30.07.2026); der maßgebliche Sprint-5-Stand steht trotzdem im
+> eigenen Abschnitt und nicht in der Kopfzeile unten.
 
 Feature Slug: `planning-draft-conflict-slice`
 Status: user-confirmed

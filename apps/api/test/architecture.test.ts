@@ -184,7 +184,7 @@ describe("Kostenmodul im Katalog (EYT-105, REQ-001)", () => {
   it("fuehrt `costs` als Modul-Slug", () => {
     expect(
       [...MODULE_SLUGS] as string[],
-      "MODULE_SLUGS kennt `costs` nicht. Die Liste ist aus ADR-001 Z. 60 abgeleitet und gilt als eingefroren — die Ergaenzung ist eine Architekturaenderung mit ADR-Pflicht (EYT-105 AC 1, CAN-RISK-03).",
+      "MODULE_SLUGS kennt `costs` nicht. Die Liste stammt aus ADR-001 Z. 60 plus ADR-003 §1 und gilt als eingefroren — die Ergaenzung ist eine Architekturaenderung mit ADR-Pflicht (EYT-105 AC 1, CAN-RISK-03).",
     ).toContain("costs");
   });
 
@@ -214,7 +214,7 @@ describe("Kostenmodul im Katalog (EYT-105, REQ-001)", () => {
   });
 
   it("ist in einer ADR beschlossen, nicht nur im Katalog eingetragen", () => {
-    // `MODULE_SLUGS` bezeichnet sich selbst als aus ADR-001 Z. 60 abgeleitet und
+    // `MODULE_SLUGS` nennt als Quellen ADR-001 Z. 60 plus ADR-003 §1 und
     // eingefroren. Ein elfter Slug ohne Beschluss waere eine stille Aenderung
     // des bindenden Architekturvertrags — EYT-105 AC 1 nennt die ADR deshalb an
     // erster Stelle. Welche Nummer sie traegt und ob sie ADR-001 fortschreibt

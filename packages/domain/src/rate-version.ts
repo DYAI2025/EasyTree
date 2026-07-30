@@ -274,7 +274,18 @@ export function findRateVersionOverlaps(
     for (let j = i + 1; j < versions.length; j += 1) {
       const a = versions[i];
       const b = versions[j];
-      if (a === undefined || b === undefined) continue;
+      if (a === undefined || b === undefined) {
+        // Unerreichbar: beide Indizes liegen per Schleifenbedingung unter
+        // `versions.length`; der Zweig ist ein Artefakt von
+        // `noUncheckedIndexedAccess`. Er bricht trotzdem LAUT ab statt still zu
+        // ueberspringen — ein Waechter, der bei internem Fehler eine
+        // Ueberlappung schlicht nicht meldet, faellt in die falsche Richtung,
+        // und kein Test koennte es bemerken. Gleiche Konvention wie
+        // `costOfDuration` und `daysInMonth`.
+        throw new RangeError(
+          `Invariante verletzt: Luecke im Satzkatalog an Index ${i} oder ${j} bei Laenge ${versions.length}.`,
+        );
+      }
       if (overlaps(a, b)) found.push(canonicalOverlap(a, b));
     }
   }

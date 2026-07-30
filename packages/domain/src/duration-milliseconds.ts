@@ -69,6 +69,14 @@ function checkedQuantity(milliseconds: bigint): DurationMilliseconds {
  * und ganzzahlig, und eine obere Schranke gibt es nicht — genau dafür ist der
  * Typ gewählt. `0` ist laut V4 eine zulässige Nullmenge, deshalb `< 0n` und
  * nicht `<= 0n`.
+ *
+ * Der Ergebnistyp ist mit {@link toDurationMilliseconds} geteilt und deshalb
+ * WEITER als noetig: aus einem `bigint` sind `QUANTITY_NOT_FINITE`,
+ * `QUANTITY_NOT_INTEGER` und `QUANTITY_NOT_SAFE_INTEGER` nicht erzeugbar. Das
+ * ist Bequemlichkeit, keine Zusicherung — wer hier `switch`t, behandelt drei
+ * Faelle, die nie eintreten. Eine engere Union waere praeziser; sie wurde
+ * bewusst nicht gebaut, weil ein zweiter Ergebnistyp fuer eine
+ * Vorzeichenpruefung mehr Vertrag kostet als er traegt.
  */
 export function durationMilliseconds(value: bigint): DurationMillisecondsResult {
   if (value < 0n) return { ok: false, error: "QUANTITY_NEGATIVE" };

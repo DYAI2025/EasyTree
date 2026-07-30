@@ -640,14 +640,23 @@ describe("Satzversion — Eigenschaften ueber erzeugte Kataloge (AK3, V3)", () =
     // EINSCHLIESSEND. Eine exklusiv gerechnete Implementierung verliert genau
     // diesen einen Tag — bei einem Monatswechsel ein ganzer Arbeitstag ohne Satz.
     // Gegenmutation: `validTo` exklusiv rechnen -> RATE_MISSING, rot.
+    let begrenzteFaelle = 0;
     assertProperty(
       fc.property(rateSpecArb, (spec) => {
         if (spec.spanDays === null) return;
+        begrenzteFaelle += 1;
         const version = buildVersion(spec, 0);
         const result = selectRateVersion([version], dayAt(spec.startOffset + spec.spanDays));
         expect(result.ok).toBe(true);
       }),
     );
+    // Nicht-Leerlauf-Bremse, wie bei jeder anderen gefilterten Eigenschaft dieser
+    // Datei. Ohne sie wuerde die Zusicherung gruen bleiben, wenn `fc.option` nur
+    // noch unbegrenzte Versionen erzeugt — dann prueft sie die einschliessende
+    // Endgrenze gar nicht mehr.
+    // Gegenmutation: `spanDays` im Generator auf `fc.constant(null)` stellen ->
+    // die Eigenschaft laeuft leer und genau diese Zeile wird rot.
+    expect(begrenzteFaelle).toBeGreaterThan(0);
   });
 
   it("liefert am Tag vor dem ersten Gueltigkeitstag kein Ergebnis", () => {

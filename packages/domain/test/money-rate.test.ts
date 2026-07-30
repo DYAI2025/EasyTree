@@ -1186,7 +1186,11 @@ describe("Kostenposition — Herkunft und historische Stabilitaet (AK4, AK5)", (
     // im Inneren von der Uhr gelesen wird — eine reine Domainfunktion kennt
     // keine Uhr. Das ist zugleich die Bedingung dafuer, dass eine Wiederholung
     // keine Doppelwirkung erzeugen kann.
-    // Gegenmutation: `new Date()` im Inneren lesen -> computedAt weicht ab, rot.
+    // Gegenmutation: verborgener Zustand im Inneren — ein Zaehler, ein Cache oder eine
+    // Mutation der Eingabeliste -> die beiden Ergebnisse weichen ab, rot. NICHT `new Date()`:
+    // zwei unmittelbar aufeinanderfolgende Aufrufe liefern in aller Regel dieselbe
+    // Millisekunde, diesen Test macht die Uhr also nicht zuverlaessig rot. Sie faengt der
+    // Nachbartest, der computedAt gegen die uebergebene Fixture haelt.
     const rate = validRate("r-1", 4500n, day(2026, 1, 1), null);
     expect(computeCostPosition(eingabe([rate]))).toEqual(computeCostPosition(eingabe([rate])));
   });

@@ -561,21 +561,23 @@ export const INVARIANTS: readonly Invariant[] = [
   {
     exportName: "COST_RULE_VERSION",
     statement:
-      "Die Regelversion ist fest verdrahtet und nicht konfigurierbar; ein Wechsel laeuft nur ueber Forward-Fix (V1).",
+      "personnel-plan-cost-v1: die Regelversion ist fest verdrahtet und nicht konfigurierbar; ein Wechsel laeuft nur ueber Forward-Fix (V1).",
     kind: "konstante",
     positive: { file: MONEY, title: "benennt Regelversion, Rundungsmodus und Rundungsstufe fest" },
     negative: null,
   },
   {
     exportName: "ROUNDING_MODE",
-    statement: "HALF_UP, Halbwert von null weg — nicht mandanten- oder nutzerkonfigurierbar (V1).",
+    statement:
+      "HALF_UP_NON_NEGATIVE: bei exakt 0,5 Cent wird auf den naechsthoeheren Cent gerundet; fuer negative Werte ist nichts nachgewiesen — die bigint-Division schneidet zur Null hin ab, ein negativer Halbwert faellt also nach OBEN und nicht von null weg (V5.3). Nicht mandanten- oder nutzerkonfigurierbar (V1, V5.3).",
     kind: "konstante",
     positive: { file: MONEY, title: "benennt Regelversion, Rundungsmodus und Rundungsstufe fest" },
     negative: null,
   },
   {
     exportName: "ROUNDING_STAGE",
-    statement: "Gerundet wird genau einmal, beim Erzeugen der persistenten Kostenposition (V1).",
+    statement:
+      "COST_POSITION_FINAL_AMOUNT: gerundet wird genau einmal, beim Erzeugen der persistenten Kostenposition (V1).",
     kind: "konstante",
     positive: { file: MONEY, title: "benennt Regelversion, Rundungsmodus und Rundungsstufe fest" },
     negative: null,
