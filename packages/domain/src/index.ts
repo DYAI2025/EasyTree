@@ -18,6 +18,7 @@ export type {
   IdentifierBrand,
   OrgId,
   PlanVersionId,
+  RateVersionId,
   ResourceId,
   UserId,
   WorksiteId,
@@ -73,3 +74,77 @@ export {
   NO_CAPACITY_LIMIT,
   projectWeeks,
 } from "./weekly-capacity.js";
+
+// ---------------------------------------------------------------------------
+// Kostenvertrag (EYT-95, REQ-004/REQ-005)
+//
+// Die Tests importieren ausschliesslich ueber diese Datei, nicht ueber die
+// Einzelmodule — was hier nicht steht, existiert fuer sie nicht.
+// ---------------------------------------------------------------------------
+
+export type {
+  Currency,
+  Money,
+  MoneyError,
+  MoneyResult,
+  PlanCostAmount,
+  PlanCostAmountError,
+  PlanCostAmountResult,
+} from "./money.js";
+export {
+  addMoney,
+  CURRENCIES,
+  MONEY_ERRORS,
+  moneyFromNumber,
+  moneyOfMinorUnits,
+  PLAN_COST_AMOUNT_ERRORS,
+  planCostAmount,
+  subtractMoney,
+  sumPlanCostAmounts,
+} from "./money.js";
+
+export type {
+  DurationMilliseconds,
+  DurationMillisecondsResult,
+  QuantityError,
+} from "./duration-milliseconds.js";
+export {
+  durationMilliseconds,
+  QUANTITY_ERRORS,
+  toDurationMilliseconds,
+} from "./duration-milliseconds.js";
+
+export { compareLocalBusinessDate, dayAfter } from "./local-business-date.js";
+
+export type {
+  HourlyRateVersion,
+  HourlyRateVersionInput,
+  HourlyRateVersionResult,
+  RateSelectionError,
+  RateSelectionResult,
+  RateVersionError,
+  RateVersionOverlap,
+} from "./rate-version.js";
+export {
+  findRateVersionOverlaps,
+  hourlyRateVersion,
+  RATE_SELECTION_ERRORS,
+  RATE_VERSION_ERRORS,
+  selectRateVersion,
+} from "./rate-version.js";
+
+export type {
+  CostPosition,
+  CostPositionError,
+  CostPositionInput,
+  CostPositionResult,
+  CostSource,
+} from "./cost-position.js";
+export {
+  computeCostPosition,
+  COST_RATE_DENOMINATOR,
+  COST_RULE_VERSION,
+  costOfDuration,
+  ROUNDING_MODE,
+  ROUNDING_STAGE,
+} from "./cost-position.js";
