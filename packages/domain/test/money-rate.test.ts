@@ -1,0 +1,940 @@
+/**
+ * Beispiel- und Grenzfalltests fuer den Money-, Rate- und Rundungsvertrag
+ * (EYT-95, REQ-004/REQ-005).
+ *
+ * Massgeblich ist `docs/prd/sprint-5-daily-cost-export.prd.md`, Abschnitt
+ * "Berechnungsvertrag (PO-Entscheidungen vom 30.07.2026, verbindlich)" — V1
+ * bis V4. Diese Datei ist die zweite Fassung: die erste rechnete in Minuten
+ * mit `number`, was V2 ausdruecklich ausschliesst.
+ *
+ * ## Der Vertrag in drei Zeilen (V1, V2)
+ *
+ *   amountNumerator   = rateMinorUnitsPerHour x durationMilliseconds
+ *   amountDenominator = 3_600_000
+ *   amountMinorUnits  = roundHalfUp(amountNumerator / 3_600_000)
+ *
+ * Kanonische Menge ist die ganzzahlige Millisekunde, nicht die Minute.
+ * Zwischenergebnisse werden NICHT gerundet; gerundet wird genau einmal, beim
+ * Erzeugen der persistenten Kostenposition (`ROUNDING_STAGE`). Multiplikation
+ * und Division laufen in `bigint`.
+ *
+ * ## Diese Datei entsteht VOR dem Produktionscode
+ *
+ * Nichts vom importierten Vertrag existiert in `src/`. Der Lauf scheitert
+ * deshalb an der Aufloesung — nach PO-Weisung §4 ein SCHWACHER Rotnachweis,
+ * der als solcher gemeldet und nicht als erfuellt gebucht wird.
+ *
+ * ## Scopegrenze EYT-95 / EYT-109 (unveraendert)
+ *
+ * Keine Zeitzone, keine Mitternachtsteilung, kein DST, keine Summenerhaltung
+ * ueber lokale Kalendertage. Kalendertage sind reine (Jahr, Monat, Tag)-Tripel;
+ * Dauern sind reine Millisekundenmengen. Die Ableitung der Dauer aus
+ * Assignment-Intervallen gehoert laut PRD-Tabelle "Evidenz-Eigentum" zu EYT-109.
+ *
+ * ## Keine Gleitkommaarithmetik in den Erwartungswerten
+ *
+ * Erwartete Betraege stehen als `bigint`-Literal, die exakte Herleitung steht
+ * daneben. Wo verglichen statt gesetzt wird, wird kreuzmultipliziert
+ * (`betrag * 3_600_000n` gegen `satz * ms`) statt geteilt. Alle Literale sind
+ * gegen eine Referenzrechnung geprueft, nicht von Hand geschaetzt.
+ */
+import { describe, expect, it } from "vitest";
+
+import {
+  addMoney,
+  compareLocalBusinessDate,
+  computeCostPosition,
+  COST_RATE_DENOMINATOR,
+  COST_RULE_VERSION,
+  costOfDuration,
+  CURRENCIES,
+  dayAfter,
+  durationMilliseconds,
+  findRateVersionOverlaps,
+  hourlyRateVersion,
+  moneyFromNumber,
+  moneyOfMinorUnits,
+  planCostAmount,
+  ROUNDING_MODE,
+  ROUNDING_STAGE,
+  selectRateVersion,
+  subtractMoney,
+  sumPlanCostAmounts,
+  toDurationMilliseconds,
+  unsafeIdentifier,
+} from "../src/index.js";
+import type {
+  AssignmentId,
+  CostSource,
+  DurationMilliseconds,
+  HourlyRateVersion,
+  LocalBusinessDate,
+  PlanCostAmount,
+  PlanVersionId,
+  RateVersionId,
+} from "../src/index.js";
+
+// ---------------------------------------------------------------------------
+// Testhilfen — klein, zonenfrei, ohne Gleitkomma
+// ---------------------------------------------------------------------------
+
+/** Eine Minute in Millisekunden. Nur Lesbarkeit der Fixtures, nie Rechenweg. */
+const MIN = 60_000n;
+
+/** Kalendertag als Literal. `LocalBusinessDate` ist strukturell, keine Zone noetig. */
+const day = (year: number, month: number, dayOfMonth: number): LocalBusinessDate => ({
+  year,
+  month,
+  day: dayOfMonth,
+});
+
+const rateId = (value: string): RateVersionId => unsafeIdentifier<RateVersionId>(value);
+
+/** Nichtnegative Millisekundenmenge oder lauter Abbruch — nie stillschweigend. */
+const ms = (value: bigint): DurationMilliseconds => {
+  const quantity = durationMilliseconds(value);
+  if (!quantity.ok) throw new Error(`Fixture: Menge ${value} abgelehnt: ${quantity.error}`);
+  return quantity.quantity;
+};
+
+/** Gueltige Satzversion oder lauter Abbruch. */
+const validRate = (
+  id: string,
+  minorUnitsPerHour: bigint,
+  validFrom: LocalBusinessDate,
+  validTo: LocalBusinessDate | null,
+): HourlyRateVersion => {
+  const version = hourlyRateVersion({
+    rateVersionId: rateId(id),
+    amountPerHour: moneyOfMinorUnits(minorUnitsPerHour, "EUR"),
+    validFrom,
+    validTo,
+  });
+  if (!version.ok) throw new Error(`Fixture: Satzversion ${id} abgelehnt: ${version.error}`);
+  return version.version;
+};
+
+/** Betrag aus einem erfolgreichen Kostenergebnis; scheitert laut statt `undefined`. */
+const amountOf = (result: unknown): PlanCostAmount => {
+  const typed = result as { ok: true; amount: PlanCostAmount } | { ok: false; error: string };
+  if (!typed.ok) throw new Error(`Erwartet: Erfolg. Bekommen: ${typed.error}`);
+  return typed.amount;
+};
+
+const minorUnitsOf = (result: unknown): bigint => amountOf(result).minorUnits;
+
+/**
+ * Herkunftsreferenz im Sinne von AK4. EYT-95 legt das Innenleben fachlich NICHT
+ * fest — geprueft wird nur, dass die uebergebene Referenz unveraendert wieder
+ * erscheint.
+ *
+ * Die FORM ist trotzdem verbindlich und in beiden Testdateien identisch: echte
+ * UUIDs, gebaut ueber die vorhandenen Marken `PlanVersionId` und `AssignmentId`.
+ * Solange eine Datei Platzhalter wie "p" uebergibt, kann `CostSource` seine
+ * Felder nicht branden, ohne diese Datei zu brechen — die Marke bliebe fuer
+ * immer aus. Mit dieser Form ist die Verschaerfung von `string` auf die beiden
+ * Bezeichnerarten eine reine Typaenderung in `src/`, ohne Testanpassung.
+ */
+const SOURCE: CostSource = {
+  planVersionId: unsafeIdentifier<PlanVersionId>("11111111-1111-4111-8111-111111111111"),
+  assignmentId: unsafeIdentifier<AssignmentId>("22222222-2222-4222-8222-222222222222"),
+};
+
+// ---------------------------------------------------------------------------
+// Money — exakte Minor Units, Vorzeichen offen (AK1, V1, V4)
+// ---------------------------------------------------------------------------
+
+describe("Money — exakte EUR-Minor-Units (AK1, V1)", () => {
+  it("fuehrt Minor Units als bigint und gibt sie unveraendert zurueck", () => {
+    // 45,00 EUR = 4500 Minor Units. `bigint` ist nicht Geschmack, sondern V2:
+    // eine `number`-Darstellung faellt spaetestens beim Zwischenprodukt
+    // (Satz x Millisekunden) aus dem sicheren Ganzzahlbereich.
+    // Gegenmutation: `minorUnits` als `number` fuehren -> `toBe(4500n)` faellt,
+    // weil `Object.is(4500, 4500n)` falsch ist, rot.
+    const money = moneyOfMinorUnits(4500n, "EUR");
+    expect(money.minorUnits).toBe(4500n);
+    expect(typeof money.minorUnits).toBe("bigint");
+    expect(money.currency).toBe("EUR");
+  });
+
+  it("nimmt an der Zahlengrenze einen sicheren ganzzahligen Betrag an", () => {
+    // Der Gegenpol zu den drei Ablehnungen darunter. Ohne ihn bleibt die
+    // Mutation "lehne pauschal alles ab" gruen — derselbe Fehler, den N1 auf
+    // der Mengenseite verhindert. Eine Grenze, die nichts durchlaesst, ist
+    // keine Grenze, sondern eine Mauer: die Kostenrechnung bekaeme nie einen
+    // Betrag aus Datenbank oder JSON.
+    // Gegenmutation: `moneyFromNumber` pauschal ok:false liefern lassen -> rot.
+    const result = moneyFromNumber(4500, "EUR");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.money.minorUnits).toBe(4500n);
+    expect(typeof result.money.minorUnits).toBe("bigint");
+    expect(result.money.currency).toBe("EUR");
+  });
+
+  it("lehnt an der Zahlengrenze einen gebrochenen Betrag ab", () => {
+    // `moneyFromNumber` ist die einzige Stelle, an der ein ungeprueftes `number`
+    // aus JSON oder Datenbank hereinkommt. Ein halber Cent ist kein Geldbetrag;
+    // wer ihn annimmt und rundet, hat eine zweite, undokumentierte Rundungsstufe
+    // eingefuehrt — genau das verbietet V1 Punkt 5.
+    // Gegenmutation: `Math.round` in `moneyFromNumber` -> ok:true, rot.
+    const result = moneyFromNumber(4500.5, "EUR");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("AMOUNT_NOT_INTEGER");
+  });
+
+  it("lehnt an der Zahlengrenze NaN und Infinity als nicht endlich ab", () => {
+    // Keine erfundenen Fehlermodi: genau das liefert eine vorgelagerte
+    // Gleitkommarechnung (0/0, Ueberlauf). V1 Punkt 3 schliesst
+    // Gleitkommaarithmetik aus, also muss ihr Ergebnis an der Grenze scheitern.
+    //
+    // VERTRAGSERGAENZUNG (siehe Bericht): erwartet wird `AMOUNT_NOT_FINITE`,
+    // nicht `AMOUNT_NOT_INTEGER`. `toDurationMilliseconds` meldet fuer dieselbe
+    // Eingabeklasse laut V2b `QUANTITY_NOT_FINITE`; zwei benachbarte Grenzen
+    // duerfen denselben Fall nicht verschieden benennen. Die Codes werden Teil
+    // des HTTP-Vertrags, sobald EYT-105 Betraege annimmt — dann waere die
+    // Asymmetrie nicht mehr geraeuschlos korrigierbar.
+    //
+    // Damit gilt fuer `moneyFromNumber` dieselbe Reihenfolge wie in V2b:
+    // endlich -> ganzzahlig -> sicher. `Number.isSafeInteger(NaN)` ist
+    // ebenfalls falsch, deshalb ist die Reihenfolge nicht beliebig.
+    // Gegenmutation: Endlichkeitspruefung entfernen -> NaN faellt in den
+    // Ganzzahlzweig und meldet AMOUNT_NOT_INTEGER, rot.
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = moneyFromNumber(value, "EUR");
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error).toBe("AMOUNT_NOT_FINITE");
+    }
+  });
+
+  it("benennt nicht endliche und gebrochene Betraege unterscheidbar", () => {
+    // Dieselbe Vertragsergaenzung, aber typunabhaengig formuliert: NaN und 4500,5
+    // sind zwei verschiedene Eingabeklassen und muessen zwei verschiedene Codes
+    // liefern. Diese Zusicherung bleibt auch dann gueltig, wenn der PO sich fuer
+    // einen anderen Namen als `AMOUNT_NOT_FINITE` entscheidet.
+    // Gegenmutation: beide Klassen auf einen Code zusammenlegen -> rot.
+    const nichtEndlich = moneyFromNumber(Number.NaN, "EUR");
+    const gebrochen = moneyFromNumber(4500.5, "EUR");
+    expect(nichtEndlich.ok).toBe(false);
+    expect(gebrochen.ok).toBe(false);
+    if (nichtEndlich.ok || gebrochen.ok) return;
+    expect(nichtEndlich.error).not.toBe(gebrochen.error);
+  });
+
+  it("lehnt an der Zahlengrenze einen Betrag jenseits der sicheren Ganzzahl ab", () => {
+    // Oberhalb von 2^53 ist eine Ganzzahl als `number` nicht mehr eindeutig:
+    // `MAX_SAFE_INTEGER + 2` ist von `+ 1` nicht unterscheidbar. Genau hier
+    // endet "verlustfrei", und genau deshalb rechnet der Kern in `bigint`.
+    // Gegenmutation: `Number.isSafeInteger` durch `Number.isInteger` ersetzen
+    // -> Wert wird angenommen, rot.
+    const result = moneyFromNumber(Number.MAX_SAFE_INTEGER + 2, "EUR");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("AMOUNT_NOT_SAFE_INTEGER");
+  });
+
+  it("fuehrt genau eine Waehrung und traegt sie am Betrag mit", () => {
+    // V1: `CURRENCY = "EUR"`. Die eingefrorene Liste ist der Testanker — eine
+    // zweite Waehrung laesst sich nicht nebenbei einfuehren, ohne dass jemand
+    // ueber Mischbetraege entscheidet.
+    // Gegenmutation: zweite Waehrung in CURRENCIES ohne Mischverbot -> rot.
+    expect([...CURRENCIES]).toEqual(["EUR"]);
+  });
+
+  it("addiert zwei Betraege exakt in Minor Units", () => {
+    // 45,00 EUR + 0,01 EUR = 45,01 EUR. Als Gleitkommazahl waere 45 + 0.01
+    // bereits 45.010000000000005.
+    // Gegenmutation: Addition ueber Euro-Gleitkommawerte -> 4500 oder 4502, rot.
+    const summe = addMoney(moneyOfMinorUnits(4500n, "EUR"), moneyOfMinorUnits(1n, "EUR"));
+    expect(summe.minorUnits).toBe(4501n);
+  });
+
+  it("laesst bei der Subtraktion ein negatives Delta zu", () => {
+    // V4 ausdruecklich: `Money` darf intern ein Vorzeichen tragen, damit
+    // Differenzen, Vergleiche und Abweichungen modellierbar bleiben. Wer das
+    // hier verbietet, macht spaetere Abweichungsrechnung unmoeglich.
+    // Gegenmutation: Vorzeichen schon in `Money` verbieten -> Wurf oder
+    // abgeschnittene 0, rot.
+    const delta = subtractMoney(moneyOfMinorUnits(100n, "EUR"), moneyOfMinorUnits(250n, "EUR"));
+    expect(delta.minorUnits).toBe(-150n);
+  });
+
+  it("nimmt ein negatives Delta nicht als Plan-Kostenbetrag an", () => {
+    // Die Domaenengrenze aus V4: vorzeichenoffener `Money` ja, aber kein
+    // negativer Plan-Kostenbetrag. Das ist der Uebergang, an dem der Wert
+    // persistierfaehig wird — und der einzige Ort, an dem
+    // `COST_AMOUNT_NEGATIVE` ueberhaupt auftreten kann.
+    // Gegenmutation: `planCostAmount` das Vorzeichen durchreichen lassen ->
+    // ok:true mit -150, rot.
+    const delta = subtractMoney(moneyOfMinorUnits(100n, "EUR"), moneyOfMinorUnits(250n, "EUR"));
+    const result = planCostAmount(delta);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("COST_AMOUNT_NEGATIVE");
+  });
+
+  it("nimmt einen nichtnegativen Betrag als Plan-Kostenbetrag an, einschliesslich null", () => {
+    // Die Gegenrichtung. Ohne sie waere die Zeile darueber auch dann gruen,
+    // wenn `planCostAmount` jeden Betrag ablehnte.
+    // Gegenmutation: `> 0` statt `>= 0` fordern -> der zulaessige Nullbetrag
+    // wird abgelehnt, rot.
+    for (const value of [0n, 1n, 4500n]) {
+      const result = planCostAmount(moneyOfMinorUnits(value, "EUR"));
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.amount.minorUnits).toBe(value);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Menge — nichtnegative ganzzahlige Millisekunden (V2, V4)
+// ---------------------------------------------------------------------------
+
+describe("Menge — nichtnegative ganzzahlige Millisekunden (V2, V4)", () => {
+  it("nimmt null Millisekunden als zulaessige Menge an", () => {
+    // V4 woertlich: "durationMilliseconds = 0 ist eine zulaessige Nullmenge".
+    // Kein Fehler, kein Sonderweg — eine Menge von null ergibt spaeter einen
+    // deterministischen Nullbetrag.
+    // Gegenmutation: `> 0` fordern -> QUANTITY_NEGATIVE fuer 0, rot.
+    const quantity = durationMilliseconds(0n);
+    expect(quantity.ok).toBe(true);
+    if (!quantity.ok) return;
+    expect(quantity.quantity.milliseconds).toBe(0n);
+  });
+
+  it("lehnt eine negative Dauer ab", () => {
+    // V4: `Quantity >= 0 sonst QUANTITY_NEGATIVE`. `end < start` ist ein
+    // Intervallfehler VOR der Kostenberechnung; hier faengt die Kosten-Domaene
+    // ihn trotzdem ab, statt sich auf den Aufrufer zu verlassen.
+    // Gegenmutation: Vorzeichenpruefung entfernen -> ok:true mit -1, rot.
+    const quantity = durationMilliseconds(-1n);
+    expect(quantity.ok).toBe(false);
+    if (quantity.ok) return;
+    expect(quantity.error).toBe("QUANTITY_NEGATIVE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V2b — Sicherheitsgrenze vor BigInt
+// ---------------------------------------------------------------------------
+
+/**
+ * V2b nennt vier verbotene Konvertierungen, die je einzeln abzuweisen sind.
+ *
+ * Drei davon WERFEN in `BigInt()` von selbst — `BigInt(7.5)`, `BigInt(NaN)` und
+ * `BigInt(Infinity)` sind alle ein `RangeError`. Der vierte ist der gefaehrliche:
+ * `BigInt(Number.MAX_SAFE_INTEGER + 2)` wirft NICHT, sondern liefert klaglos
+ * `9007199254740992n` — einen plausibel aussehenden, aber nicht mehr eindeutig
+ * herleitbaren Wert. Genau deshalb steht `Number.isSafeInteger` im Vertrag und
+ * nicht nur ein `try/catch` um die Konvertierung.
+ *
+ * Reihenfolge der Pruefungen ist deshalb Teil des Vertrags und nicht beliebig:
+ * endlich -> ganzzahlig -> nichtnegativ -> sicher. Wer `isSafeInteger` zuerst
+ * prueft, meldet fuer `NaN` faelschlich QUANTITY_NOT_SAFE_INTEGER, weil
+ * `Number.isSafeInteger(NaN)` ebenfalls falsch ist.
+ */
+describe("Sicherheitsgrenze vor BigInt — toDurationMilliseconds (V2b)", () => {
+  it("nimmt einen sicheren ganzzahligen Wert an und konvertiert ihn exakt", () => {
+    // Die Gegenrichtung zu den vier Ablehnungen. Ohne sie waeren alle vier auch
+    // dann gruen, wenn die Grenze pauschal ALLES abwiese — und die
+    // Kostenrechnung bekaeme nie eine Menge.
+    // Gegenmutation: pauschal ablehnen -> ok:false, rot.
+    const result = toDurationMilliseconds(1_830_000);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.quantity.milliseconds).toBe(1_830_000n);
+    expect(typeof result.quantity.milliseconds).toBe("bigint");
+  });
+
+  it("weist eine gebrochene Zahl ab, statt sie zu konvertieren", () => {
+    // Schnittstellenfalle: `durationMinutes()` aus `time-interval.ts` rechnet
+    // `durationMs / 60_000` und liefert bei Millisekundenanteil einen
+    // Gleitkommawert. V2 verbietet diesen Weg im Kostenpfad; der statische
+    // Waechter dazu gehoert nach `apps/api/test/**` (siehe Bericht) — hier
+    // steht die Laufzeitgrenze.
+    // Gegenmutation: Menge vor der Konvertierung runden -> ok:true, rot.
+    // Zweite Gegenmutation: `BigInt(value)` ungeschuetzt aufrufen -> RangeError
+    // statt eines benannten Fehlercodes, rot.
+    const result = toDurationMilliseconds(450_000.5);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("QUANTITY_NOT_INTEGER");
+  });
+
+  it("weist NaN ab, statt zu konvertieren", () => {
+    // NaN ist das Ergebnis von 0/0 und damit genau das, was eine vorgelagerte
+    // Gleitkommarechnung liefert.
+    // Gegenmutation: Endlichkeitspruefung entfernen -> `BigInt(NaN)` wirft
+    // RangeError statt QUANTITY_NOT_FINITE, rot.
+    const result = toDurationMilliseconds(Number.NaN);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("QUANTITY_NOT_FINITE");
+  });
+
+  it("weist Infinity ab, statt zu konvertieren", () => {
+    // Zweiter Fall derselben Klasse, vom PO ausdruecklich einzeln gelistet.
+    // Gegenmutation: Endlichkeitspruefung entfernen -> `BigInt(Infinity)` wirft
+    // RangeError statt QUANTITY_NOT_FINITE, rot.
+    const result = toDurationMilliseconds(Number.POSITIVE_INFINITY);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("QUANTITY_NOT_FINITE");
+  });
+
+  it("weist einen unsicheren Number-Wert ab, obwohl BigInt ihn klaglos annaehme", () => {
+    // DER gefaehrliche der vier Faelle. `Number.MAX_SAFE_INTEGER + 2` ist eine
+    // ganze Zahl (`Number.isInteger` ist wahr) und nichtnegativ — die ersten
+    // drei Pruefungen lassen ihn durch. `BigInt(...)` wirft nicht, sondern
+    // liefert 9007199254740992n. Der Wert ist ab hier nicht mehr eindeutig auf
+    // seine Herkunft zurueckfuehrbar, und die "verlustfreie" Rechnung ist
+    // stillschweigend falsch geworden.
+    // Gegenmutation: `Number.isSafeInteger` weglassen und nur `try/catch` um
+    // `BigInt(value)` legen -> ok:true, rot.
+    const result = toDurationMilliseconds(Number.MAX_SAFE_INTEGER + 2);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("QUANTITY_NOT_SAFE_INTEGER");
+  });
+
+  it("weist eine negative Zahl an derselben Grenze ab", () => {
+    // Dieselbe Vorzeichenregel wie auf der bigint-Seite (V4), aber am
+    // Zahleneingang — sonst haette der Vertrag zwei Eingaenge mit zwei
+    // verschiedenen Regeln.
+    // Gegenmutation: Vorzeichenpruefung nur auf der bigint-Seite fuehren ->
+    // ok:true mit -1n, rot.
+    const result = toDurationMilliseconds(-1);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("QUANTITY_NEGATIVE");
+  });
+
+  it("traegt die Differenz zweier Epoch-Millisekunden ueber ein realistisches Einsatzintervall", () => {
+    // V2b woertlich: "Die Differenz zweier Epoch-Millisekunden ist fuer
+    // realistische Einsatzintervalle sicher darstellbar — diese Annahme ist zu
+    // pruefen und darf nicht still vorausgesetzt werden."
+    //
+    // Gemessen wird hier die OBERE Haelfte der Annahme: ein volles Jahr am
+    // Stueck (366 Tage = 31.622.400.000 ms) muss die Grenze passieren. Das ist
+    // keine Konstante gegen sich selbst, sondern faengt eine zu ENG gesetzte
+    // Grenze: wer intern auf 32 Bit begrenzt, scheitert hier, denn
+    // 31.622.400.000 ist rund fuenfzehnmal groesser als 2^31.
+    // Gegenmutation: Grenze auf `value <= 2 ** 31` verschaerfen -> rot.
+    const start = Date.UTC(2026, 0, 1);
+    const end = Date.UTC(2027, 0, 2);
+    const differenz = end - start;
+
+    expect(differenz).toBeGreaterThan(2 ** 31);
+    const result = toDurationMilliseconds(differenz);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.quantity.milliseconds).toBe(BigInt(differenz));
+  });
+
+  it("weist die Differenz zweier extremer Epoch-Zeitpunkte fail-closed ab", () => {
+    // Die UNTERE Haelfte derselben Annahme, und der Grund, warum sie eine
+    // Annahme ist und keine Tatsache: `Date` stellt +/- 8.64e15 ms dar, die
+    // Spanne zwischen beiden Enden ist 1,728e16 — GROESSER als
+    // Number.MAX_SAFE_INTEGER (9,007e15). Die Differenz zweier gueltiger
+    // Date-Werte kann also sehr wohl unsicher werden. Sie ist damit kein
+    // hypothetischer Ueberlauf, sondern mit echten Date-Objekten erreichbar.
+    // Gegenmutation: obere Schranke weglassen -> BigInt nimmt den unsicheren
+    // Wert klaglos an, ok:true, rot.
+    const maxDate = 8.64e15;
+    const differenz = maxDate - -maxDate;
+
+    expect(Number.isSafeInteger(differenz)).toBe(false);
+    const result = toDurationMilliseconds(differenz);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("QUANTITY_NOT_SAFE_INTEGER");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rundungsregel und Berechnung (V1, V2)
+// ---------------------------------------------------------------------------
+
+describe("Berechnung und Rundung — HALF_UP, genau einmal (V1, V2)", () => {
+  const from = day(2026, 1, 1);
+
+  it("benennt Regelversion, Rundungsmodus und Rundungsstufe fest", () => {
+    // V1 legt diese Werte verbindlich fest und erklaert sie ausdruecklich fuer
+    // NICHT mandanten- oder nutzerkonfigurierbar. Jede Position referenziert
+    // die Regelversion; ein Wechsel laeuft nur ueber neue Regelversion und
+    // Forward-Fix.
+    // Gegenmutation: die Regel ueber Konfiguration oder Umgebungsvariable
+    // einstellbar machen -> mindestens einer dieser Werte weicht ab, rot.
+    expect(COST_RULE_VERSION).toBe("personnel-plan-cost-v1");
+    expect(ROUNDING_MODE).toBe("HALF_UP");
+    expect(ROUNDING_STAGE).toBe("COST_POSITION_FINAL_AMOUNT");
+    expect(COST_RATE_DENOMINATOR).toBe(3_600_000n);
+  });
+
+  it("rechnet eine volle Stunde exakt", () => {
+    // 100,01 EUR/h x 60 min: 10001 x 3_600_000 / 3_600_000 = 10001. Kein
+    // Rundungsschritt beteiligt — dieser Fall trennt Einheitenfehler von
+    // Rundungsfehlern.
+    // Gegenmutation: den Satz als Minuten- oder Millisekundensatz lesen ->
+    // vollkommen andere Groessenordnung, rot.
+    const rate = validRate("r-stunde", 10_001n, from, null);
+    expect(minorUnitsOf(costOfDuration(rate, ms(60n * MIN)))).toBe(10_001n);
+  });
+
+  it("rechnet dreissig Minuten exakt", () => {
+    // 100,00 EUR/h x 30 min: 10000 x 1_800_000 / 3_600_000 = 5000 = 50,00 EUR.
+    // Gegenmutation: Nenner auf 60_000 (Minuten) aendern -> 300000, rot.
+    const rate = validRate("r-30", 10_000n, from, null);
+    expect(minorUnitsOf(costOfDuration(rate, ms(30n * MIN)))).toBe(5_000n);
+  });
+
+  it("rundet den Halbwert von null weg", () => {
+    // Das Beispiel aus V2 woertlich: 10.001 Cent/h x 1.800.000 ms
+    // = 18.001.800.000 / 3.600.000 = 5.000,5 -> 5.001 Cent = 50,01 EUR.
+    // Dies ist der eine Fall, der HALF_UP von HALF_EVEN trennt: 5000 ist
+    // gerade, bankuebliches Runden lieferte 5000.
+    // Gegenmutation: HALF_EVEN statt HALF_UP -> 5000, rot.
+    // Zweite Gegenmutation: `Math.floor` -> 5000, rot.
+    const rate = validRate("r-halb", 10_001n, from, null);
+    expect(minorUnitsOf(costOfDuration(rate, ms(30n * MIN)))).toBe(5_001n);
+  });
+
+  it("rechnet dreissig Minuten und dreissig Sekunden ohne Minutenraster", () => {
+    // 100,00 EUR/h x 1.830.000 ms = 18.300.000.000 / 3.600.000 = 5083,33...
+    // -> 5083. Sekundenanteile werden weder verworfen noch auf die Minute
+    // gerundet: V2 sagt ausdruecklich, die minutengenaue UI-Eingabe zwinge die
+    // Geldarithmetik nicht dazu.
+    // Gegenmutation: Menge auf volle Minuten abschneiden -> 5000, rot.
+    const rate = validRate("r-30-30", 10_000n, from, null);
+    expect(minorUnitsOf(costOfDuration(rate, ms(1_830_000n)))).toBe(5_083n);
+  });
+
+  it("rechnet siebeneinhalb Minuten exakt", () => {
+    // Unter dem Minutenvertrag war 7,5 eine abzulehnende gebrochene Menge.
+    // Unter V2 sind das schlicht 450.000 ms, und die Rechnung geht exakt auf:
+    // 10000 x 450_000 / 3_600_000 = 1250 = 12,50 EUR (100 EUR/h x 0,125 h).
+    // Genau dafuer ist die Millisekunde die kanonische Einheit.
+    // Gegenmutation: Menge auf volle Minuten abschneiden -> 1166 oder 1167, rot.
+    const rate = validRate("r-7-5", 10_000n, from, null);
+    expect(minorUnitsOf(costOfDuration(rate, ms(450_000n)))).toBe(1_250n);
+  });
+
+  it("rechnet eine einzelne Millisekunde zu null Cent", () => {
+    // 10000 x 1 / 3.600.000 = 0,00277... -> 0. Kein Fehler, kein aufgerundeter
+    // Cent: die kleinste Menge ergibt bei realistischen Saetzen null.
+    // Gegenmutation: pauschal aufrunden -> 1, rot.
+    const rate = validRate("r-1ms", 10_000n, from, null);
+    expect(minorUnitsOf(costOfDuration(rate, ms(1n)))).toBe(0n);
+  });
+
+  it("rechnet null Millisekunden zu einem deterministischen Nullbetrag", () => {
+    // V4: die zulaessige Nullmenge ergibt einen gueltigen Nullbetrag, kein
+    // blockierendes Ergebnis. Unterscheidbar bleibt sie vom fehlenden Satz
+    // ueber `RATE_MISSING`, nicht ueber den Betrag.
+    // Gegenmutation: Nullmenge als Fehler behandeln -> ok:false, rot.
+    const rate = validRate("r-0ms", 10_000n, from, null);
+    expect(minorUnitsOf(costOfDuration(rate, ms(0n)))).toBe(0n);
+    expect(minorUnitsOf(costOfDuration(rate, ms(0n)))).toBe(0n);
+  });
+
+  it("rundet nicht auf einem Minuten- oder Sekundensatz", () => {
+    // 100 Cent/h x 420.000 ms (7 min) = 42.000.000 / 3.600.000 = 11,666... -> 12.
+    // Wer zuerst den Minutensatz rundet, rechnet round(100/60) = 2 und danach
+    // 2 x 7 = 14. V1 Punkt 4 verbietet jedes Zwischenrunden.
+    // Gegenmutation: Minutensatz vorab runden -> 14, rot.
+    const rate = validRate("r-spaet", 100n, from, null);
+    expect(minorUnitsOf(costOfDuration(rate, ms(7n * MIN)))).toBe(12n);
+  });
+
+  it("liefert fuer denselben exakten Bruch denselben Betrag, unabhaengig vom Rechenweg", () => {
+    // Zwei Wege zum selben Produkt 42.000.000: (100 Cent/h, 7 min) und
+    // (700 Cent/h, 1 min). Beide muessen 12 liefern. Eine Implementierung, die
+    // zwischendurch auf den Minutensatz rundet, liefert 14 und 12 — sie ist
+    // wegabhaengig und faellt hier auf.
+    // Gegenmutation: Minutensatz vorab runden -> 14 gegen 12, rot.
+    const langsam = validRate("r-weg-a", 100n, from, null);
+    const schnell = validRate("r-weg-b", 700n, from, null);
+    expect(minorUnitsOf(costOfDuration(langsam, ms(7n * MIN)))).toBe(12n);
+    expect(minorUnitsOf(costOfDuration(schnell, ms(1n * MIN)))).toBe(12n);
+  });
+
+  it("rechnet eine sehr lange, zulaessige Dauer exakt", () => {
+    // 99.999.999 volle Stunden zu 10.001 Cent je Stunde. Weil die Dauer ein
+    // ganzzahliges Vielfaches einer Stunde ist, ist das Ergebnis von Hand
+    // ableitbar: Satz x Stunden = 10.001 x 99.999.999 = 1.000.099.989.999.
+    //
+    // Der Punkt ist das ZWISCHENPRODUKT: 10.001 x 359.999.996.400.000 liegt bei
+    // rund 3,6e18 und damit weit ausserhalb des sicheren Ganzzahlbereichs von
+    // `number`. Deshalb steht in V2 `bigint`.
+    // Gegenmutation: `minorUnits` als `number` fuehren -> `toBe(...n)` faellt,
+    // weil `Object.is(1000099989999, 1000099989999n)` falsch ist, rot.
+    const stunden = 99_999_999n;
+    const rate = validRate("r-lang", 10_001n, from, null);
+    const dauer = ms(stunden * 3_600_000n);
+
+    expect(minorUnitsOf(costOfDuration(rate, dauer))).toBe(10_001n * stunden);
+    // Dokumentiert, dass dieser Fall den sicheren Bereich wirklich verlaesst —
+    // ohne diese Zeile waere unklar, ob der Test die Grenze ueberhaupt beruehrt.
+    expect(Number.isSafeInteger(10_001 * Number(stunden * 3_600_000n))).toBe(false);
+  });
+
+  it("bleibt auch dort exakt, wo eine Gleitkommarechnung nachweislich driftet", () => {
+    // Maschinell gesuchter Gegenfall (kein von Hand geratener Wert): fuer
+    // Satz 10.007 Cent/h und 999.300.489.657.140 ms liegt das exakte Produkt
+    // 20 unterhalb einer exakten Haelfte. Die Gleitkommadarstellung schiebt es
+    // darueber, und `Math.round(satz * ms / 3_600_000)` liefert einen Cent zu
+    // viel.
+    //
+    // Geprueft wird bewusst KEIN Magic-Number-Erwartungswert, sondern die
+    // Kreuzmultiplikationsschranke: der Betrag darf hoechstens eine halbe
+    // Minor Unit vom exakten Bruch abweichen. Gemessen: die exakte Rechnung
+    // haelt 1.799.980, die Gleitkommarechnung verfehlt mit 1.800.020.
+    // Gegenmutation: Zwischenprodukt in `number` bilden -> Schranke gerissen, rot.
+    const satz = 10_007n;
+    const dauerMs = 999_300_489_657_140n;
+    const rate = validRate("r-drift", satz, from, null);
+
+    const betrag = minorUnitsOf(costOfDuration(rate, ms(dauerMs)));
+    const abweichung = betrag * COST_RATE_DENOMINATOR - satz * dauerMs;
+    const abstand = abweichung < 0n ? -abweichung : abweichung;
+    expect(abstand).toBeLessThanOrEqual(COST_RATE_DENOMINATOR / 2n);
+  });
+
+  it("bildet Summen ausschliesslich aus den bereits gerundeten Positionsbetraegen", () => {
+    // V1 Punkt 7 und 8, und der teuerste Buchhaltungsfehler der ganzen Regel.
+    // Drei Positionen zu je 7 Minuten bei 100,00 EUR/h:
+    //   je Position exakt 11,666... -> gerundet 1167 Cent
+    //   Summe der gerundeten Positionen = 3 x 1167 = 3501 Cent = 35,01 EUR
+    //   Rundung der exakten Gesamtmenge = 21 min   = 3500 Cent = 35,00 EUR
+    // Die beiden Wege sind um einen Cent verschieden, und der Vertrag schreibt
+    // den ersten vor. Ohne diesen Test bleibt die Regel Prosa.
+    // Gegenmutation: Gesamtsumme aus der ungerundeten Gesamtmenge rechnen ->
+    // 3500, rot.
+    const rate = validRate("r-summe", 10_000n, from, null);
+    const position = amountOf(costOfDuration(rate, ms(7n * MIN)));
+    expect(position.minorUnits).toBe(1_167n);
+
+    const summe = sumPlanCostAmounts([position, position, position]);
+    expect(summe.ok).toBe(true);
+    if (!summe.ok) return;
+    expect(summe.amount.minorUnits).toBe(3_501n);
+    // Und ausdruecklich NICHT der Wert, den eine Neuberechnung aus der
+    // ungerundeten Gesamtmenge liefern wuerde:
+    expect(summe.amount.minorUnits).not.toBe(minorUnitsOf(costOfDuration(rate, ms(21n * MIN))));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Satzversionsauswahl an Intervallgrenzen (AK3, V3)
+// ---------------------------------------------------------------------------
+
+describe("Satzversion — Gueltigkeit einschliessend, intern halboffen (AK3, V3)", () => {
+  it("waehlt am ersten Gueltigkeitstag bereits die Version", () => {
+    // "gueltig ab" ist einschliessend. Der Grenztag selbst gehoert dazu — die
+    // haeufigste Off-by-one-Stelle des Vertrags.
+    // Gegenmutation: `>` statt `>=` bei validFrom -> RATE_MISSING, rot.
+    const rate = validRate("r-start", 4500n, day(2026, 7, 1), null);
+    const result = selectRateVersion([rate], day(2026, 7, 1));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.version.rateVersionId).toBe(rate.rateVersionId);
+  });
+
+  it("waehlt am Tag vor dem ersten Gueltigkeitstag noch nicht", () => {
+    // Gegenrichtung derselben Grenze. Ohne sie waere die Zeile darueber auch
+    // dann gruen, wenn die Auswahl jedes Datum akzeptierte.
+    // Gegenmutation: validFrom-Pruefung entfernen -> ok:true, rot.
+    const rate = validRate("r-start", 4500n, day(2026, 7, 1), null);
+    const result = selectRateVersion([rate], day(2026, 6, 30));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("RATE_MISSING");
+  });
+
+  it("laesst die Kette bis 30.06. / ab 01.07. lueckenlos und ueberlappungsfrei zu", () => {
+    // V3 woertlich: "bis 30.06. / ab 01.07. ist lueckenlos und zulaessig".
+    // `validTo` ist fachlich EINSCHLIESSEND; intern normalisiert der Vertrag auf
+    // `[validFrom, dayAfter(validTo))`. Beide Grenztage treffen genau eine
+    // Version, kein Tag doppelt, kein Tag leer.
+    // Gegenmutation: `validTo` exklusiv rechnen -> der 30.06. faellt in die
+    // Luecke, rot.
+    const alt = validRate("r-alt", 4500n, day(2026, 1, 1), day(2026, 6, 30));
+    const neu = validRate("r-neu", 4700n, day(2026, 7, 1), null);
+    const versions = [alt, neu];
+
+    const letzterAlterTag = selectRateVersion(versions, day(2026, 6, 30));
+    const ersterNeuerTag = selectRateVersion(versions, day(2026, 7, 1));
+    expect(letzterAlterTag.ok && ersterNeuerTag.ok).toBe(true);
+    if (!letzterAlterTag.ok || !ersterNeuerTag.ok) return;
+    expect(letzterAlterTag.version.rateVersionId).toBe(alt.rateVersionId);
+    expect(ersterNeuerTag.version.rateVersionId).toBe(neu.rateVersionId);
+    expect(findRateVersionOverlaps(versions)).toEqual([]);
+  });
+
+  it("wertet die Kette bis 30.06. / ab 30.06. als Ueberlappung", () => {
+    // V3 woertlich: "bis 30.06. / ab 30.06. ist eine Ueberlappung". Der
+    // Ein-Tages-Ueberhang ist der Fall, den eine exklusiv gerechnete
+    // Implementierung fuer harmlos haelt — und er erzeugt fuer genau einen Tag
+    // zwei gueltige Saetze.
+    // Gegenmutation: Ueberlappung mit `<` statt `<=` pruefen -> leer, rot.
+    const alt = validRate("r-alt", 4500n, day(2026, 1, 1), day(2026, 6, 30));
+    const neu = validRate("r-neu", 4700n, day(2026, 6, 30), null);
+    expect(findRateVersionOverlaps([alt, neu])).toHaveLength(1);
+
+    const amGrenztag = selectRateVersion([alt, neu], day(2026, 6, 30));
+    expect(amGrenztag.ok).toBe(false);
+    if (amGrenztag.ok) return;
+    expect(amGrenztag.error).toBe("RATE_AMBIGUOUS");
+  });
+
+  it("meldet zwei ueberlappende Versionen als blockierend statt die erste zu nehmen", () => {
+    // A laeuft bis 31.07., B beginnt am 01.07. Der 15.07. ist doppelt gedeckt.
+    // `versions.find(...)` liefert klaglos die erste und erzeugt einen Betrag,
+    // den niemand belegen kann.
+    // Gegenmutation: Auswahl auf `find` umstellen -> ok:true, rot.
+    const a = validRate("r-a", 4500n, day(2026, 1, 1), day(2026, 7, 31));
+    const b = validRate("r-b", 4700n, day(2026, 7, 1), null);
+    const result = selectRateVersion([a, b], day(2026, 7, 15));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("RATE_AMBIGUOUS");
+  });
+
+  it("findet die Ueberlappung auch dann, wenn die Versionen unsortiert kommen", () => {
+    // Die Eingabereihenfolge darf ueber Blockieren oder Durchlassen nicht
+    // entscheiden. Wer nur benachbarte Paare vergleicht, ohne zu sortieren,
+    // uebersieht genau das.
+    // Gegenmutation: Sortierschritt entfernen -> leer, rot.
+    const a = validRate("r-a", 4500n, day(2026, 1, 1), day(2026, 7, 31));
+    const b = validRate("r-b", 4700n, day(2026, 7, 1), null);
+    expect(findRateVersionOverlaps([b, a])).toHaveLength(1);
+  });
+
+  it("deckt mit unbegrenztem Ende auch weit spaetere Daten ab", () => {
+    // V3: `validTo = null` ist unbegrenzt. Eine Implementierung, die `null`
+    // heimlich auf "heute" oder das Jahresende normalisiert, faellt hier auf.
+    // Gegenmutation: `null` auf ein festes Enddatum abbilden -> RATE_MISSING
+    // fuer 2099, rot.
+    const rate = validRate("r-offen", 4500n, day(2026, 1, 1), null);
+    const result = selectRateVersion([rate], day(2099, 12, 31));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.version.rateVersionId).toBe(rate.rateVersionId);
+  });
+
+  it("meldet eine Luecke als blockierend und niemals als null Euro", () => {
+    // WERTPRUEFUNG. Der teuerste Fehler des Tickets: A endet am 30.06.,
+    // B beginnt am 01.08., gefragt ist der 15.07. Liefert der Vertrag hier
+    // stillschweigend 0,00 EUR, sieht die Kostenansicht vollstaendig aus und
+    // ist falsch — niemand sucht nach einer Position, die es scheinbar gibt.
+    // Gegenmutation: Rueckfall auf `moneyOfMinorUnits(0n, "EUR")` -> ok:true
+    // mit Betrag 0, rot.
+    const a = validRate("r-a", 4500n, day(2026, 1, 1), day(2026, 6, 30));
+    const b = validRate("r-b", 4700n, day(2026, 8, 1), null);
+    const result = selectRateVersion([a, b], day(2026, 7, 15));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("RATE_MISSING");
+    // Ein blockierendes Ergebnis darf keinen lesbaren Geldwert mitfuehren.
+    expect(result).not.toHaveProperty("amount");
+  });
+
+  it("unterscheidet den ausdruecklichen Nullsatz vom fehlenden Satz", () => {
+    // V4 woertlich: "Ein Satz von 0 ist zulaessig und bleibt von RATE_MISSING
+    // unterscheidbar." Beide zeigen dem Menschen 0,00 EUR und bedeuten das
+    // Gegenteil — bewusst unentgeltlich gegen fehlende Datenpflege.
+    // Gegenmutation: Nullsatz wie fehlenden behandeln -> RATE_MISSING, rot.
+    const nullsatz = validRate("r-null", 0n, day(2026, 1, 1), null);
+    const gewaehlt = selectRateVersion([nullsatz], day(2026, 7, 15));
+    expect(gewaehlt.ok).toBe(true);
+    if (!gewaehlt.ok) return;
+    expect(gewaehlt.version.amountPerHour.minorUnits).toBe(0n);
+    expect(minorUnitsOf(costOfDuration(gewaehlt.version, ms(480n * MIN)))).toBe(0n);
+
+    const fehlt = selectRateVersion([], day(2026, 7, 15));
+    expect(fehlt.ok).toBe(false);
+    if (fehlt.ok) return;
+    expect(fehlt.error).toBe("RATE_MISSING");
+  });
+
+  it("lehnt einen negativen Stundensatz ab", () => {
+    // V4: `Rate >= 0 sonst RATE_NEGATIVE`. Ein negativer Satz erzeugte eine
+    // Gutschrift, die niemand angeordnet hat. Stornobuchungen brauchen laut V4
+    // einen eigenen fachlichen Typ und duerfen nicht nebenbei entstehen.
+    // Gegenmutation: Vorzeichenpruefung entfernen -> ok:true, rot.
+    const version = hourlyRateVersion({
+      rateVersionId: rateId("r-negativ"),
+      amountPerHour: moneyOfMinorUnits(-1n, "EUR"),
+      validFrom: day(2026, 1, 1),
+      validTo: null,
+    });
+    expect(version.ok).toBe(false);
+    if (version.ok) return;
+    expect(version.error).toBe("RATE_NEGATIVE");
+  });
+
+  it("lehnt eine Version ab, deren gueltig-bis vor gueltig-ab liegt", () => {
+    // Ein verkehrtes Intervall deckt kein Datum ab und wuerde je nach
+    // Implementierung entweder still verschwinden oder jedes Datum treffen.
+    // Dieselbe Entscheidung, die `TimeInterval.create` fuer END_BEFORE_START
+    // trifft.
+    // Gegenmutation: Pruefung entfernen -> ok:true, rot.
+    const version = hourlyRateVersion({
+      rateVersionId: rateId("r-verkehrt"),
+      amountPerHour: moneyOfMinorUnits(4500n, "EUR"),
+      validFrom: day(2026, 7, 1),
+      validTo: day(2026, 6, 30),
+    });
+    expect(version.ok).toBe(false);
+    if (version.ok) return;
+    expect(version.error).toBe("VALID_TO_BEFORE_VALID_FROM");
+  });
+
+  it("ordnet zwei Kalendertage desselben Monats und erkennt Gleichheit", () => {
+    // POSITIVRICHTUNG des Vergleichers: die gewoehnliche Ordnung innerhalb
+    // eines Monats, plus der Gleichheitsfall, an dem jede Grenzentscheidung
+    // "gilt am Stichtag selbst" haengt.
+    // Gegenmutation: `a.day - b.day` durch `b.day - a.day` ersetzen (Vorzeichen
+    // drehen) -> die Ordnung kehrt sich um, rot.
+    expect(compareLocalBusinessDate(day(2026, 7, 1), day(2026, 7, 2))).toBeLessThan(0);
+    expect(compareLocalBusinessDate(day(2026, 7, 2), day(2026, 7, 1))).toBeGreaterThan(0);
+    expect(compareLocalBusinessDate(day(2026, 7, 1), day(2026, 7, 1))).toBe(0);
+  });
+
+  it("widerlegt die Tagesnummer als Ordnungskriterium", () => {
+    // NEGATIVRICHTUNG: der unterscheidende Gegenfall im Sinne des
+    // Invariantenregisters — die naheliegende falsche Implementierung liefert
+    // hier nachweislich etwas anderes. In beiden Paaren ist die TAGESZAHL des
+    // frueheren Datums groesser (31 > 1, 30 > 1); wer nur `day` vergleicht,
+    // bekommt beide Male das falsche Vorzeichen. Der Fall ist nicht
+    // theoretisch: die Satzketten aus V3 wechseln genau an Monatsgrenzen.
+    // Gegenmutation: nur `day` vergleichen -> beide Zeilen rot.
+    expect(compareLocalBusinessDate(day(2026, 12, 31), day(2027, 1, 1))).toBeLessThan(0);
+    expect(compareLocalBusinessDate(day(2026, 6, 30), day(2026, 7, 1))).toBeLessThan(0);
+  });
+
+  it("bildet den Folgetag innerhalb des Monats und ueber die Monatsgrenze", () => {
+    // POSITIVRICHTUNG. `dayAfter` ist laut V3 die EINZIGE zulaessige
+    // Normalisierung nach halboffen. Ausdruecklich verboten sind:
+    // `23:59:59.999` erzeugen, Kalendertage in UTC-Zeitpunkte wandeln,
+    // Millisekunden vom Folgezeitpunkt abziehen. Getestet wird die
+    // Kalenderarithmetik selbst; dass kein Zeitpunkt gebaut wird, kann nur ein
+    // statischer Waechter zeigen (siehe Bericht).
+    // Gegenmutation: `dayAfter` die Eingabe unveraendert zurueckgeben lassen
+    // -> beide Zeilen rot.
+    expect(dayAfter(day(2026, 7, 15))).toEqual(day(2026, 7, 16));
+    expect(dayAfter(day(2026, 6, 30))).toEqual(day(2026, 7, 1));
+  });
+
+  it("widerlegt die blosse Tagesinkrementierung an Jahres- und Schaltjahresgrenze", () => {
+    // NEGATIVRICHTUNG: drei Faelle, in denen `day + 1` bzw. ein fester
+    // Februar nachweislich etwas anderes liefert.
+    //   31.12.2026 -> `day + 1` ergaebe den 32.12.2026
+    //   28.02.2028 -> "Februar hat 28 Tage" ergaebe den 01.03., richtig ist
+    //                 der 29.02., denn 2028 ist ein Schaltjahr
+    //   29.02.2028 -> nur ein echter Kalender kommt hier auf den 01.03.
+    // Gegenmutation: `{ ...date, day: date.day + 1 }` -> erste Zeile rot.
+    // Zweite Gegenmutation: Februar fest mit 28 Tagen -> zweite Zeile rot.
+    expect(dayAfter(day(2026, 12, 31))).toEqual(day(2027, 1, 1));
+    expect(dayAfter(day(2028, 2, 28))).toEqual(day(2028, 2, 29));
+    expect(dayAfter(day(2028, 2, 29))).toEqual(day(2028, 3, 1));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Herkunft, Wiederholbarkeit, historische Stabilitaet (AK4, AK5)
+// ---------------------------------------------------------------------------
+
+describe("Kostenposition — Herkunft und historische Stabilitaet (AK4, AK5)", () => {
+  const on = day(2026, 7, 15);
+  const computedAt = new Date("2026-07-30T08:00:00.000Z");
+
+  const eingabe = (versions: readonly HourlyRateVersion[]) => ({
+    source: SOURCE,
+    versions,
+    on,
+    quantity: ms(480n * MIN),
+    computedAt,
+  });
+
+  it("traegt Quelle, Regelversion, Satzversion und Erzeugungszeitpunkt im Ergebnis", () => {
+    // AK4 woertlich, und V1: "Jeder Snapshot und jede Position referenzieren
+    // die Regelversion." Ohne diese vier Felder laesst sich ein historischer
+    // Betrag spaeter nicht mehr erklaeren.
+    // Gegenmutation: `rateVersionId` aus dem Ergebnis entfernen -> rot.
+    const rate = validRate("r-1", 4500n, day(2026, 1, 1), null);
+    const result = computeCostPosition(eingabe([rate]));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.position.rateVersionId).toBe(rate.rateVersionId);
+    expect(result.position.ruleVersion).toBe(COST_RULE_VERSION);
+    expect(result.position.source).toEqual(SOURCE);
+    expect(result.position.computedAt.getTime()).toBe(computedAt.getTime());
+    // 4500 Cent/h x 480 min = 4500 x 28.800.000 / 3.600.000 = 36000 Cent.
+    expect(result.position.amount.minorUnits).toBe(36_000n);
+  });
+
+  it("liefert bei identischem fachlichem Input zweimal dasselbe Ergebnis", () => {
+    // AK5. Nur erfuellbar, wenn der Erzeugungszeitpunkt EINGABE ist und nicht
+    // im Inneren von der Uhr gelesen wird — eine reine Domainfunktion kennt
+    // keine Uhr. Das ist zugleich die Bedingung dafuer, dass eine Wiederholung
+    // keine Doppelwirkung erzeugen kann.
+    // Gegenmutation: `new Date()` im Inneren lesen -> computedAt weicht ab, rot.
+    const rate = validRate("r-1", 4500n, day(2026, 1, 1), null);
+    expect(computeCostPosition(eingabe([rate]))).toEqual(computeCostPosition(eingabe([rate])));
+  });
+
+  it("bleibt unveraendert, wenn der Satzkatalog danach ergaenzt wird", () => {
+    // Historische Stabilitaet und Forward-Fix: eine spaeter angelegte
+    // Satzversion darf einen bereits berechneten Stand nicht ruecklaufend
+    // veraendern. Der Katalog wird NACH der Berechnung veraendert — eine
+    // Implementierung, die die uebergebene Liste festhaelt und erst beim Lesen
+    // auswertet, faellt hier auf.
+    // Gegenmutation: Ergebnis lazy aus der referenzierten Liste berechnen
+    // (Getter statt Wert) -> der alte Stand aendert sich mit, rot.
+    const alt = validRate("r-alt", 4500n, day(2026, 1, 1), day(2026, 6, 30));
+    const gueltig = validRate("r-gueltig", 4700n, day(2026, 7, 1), day(2026, 7, 31));
+    const katalog: HourlyRateVersion[] = [alt, gueltig];
+
+    const stand = computeCostPosition(eingabe(katalog));
+    expect(stand.ok).toBe(true);
+    if (!stand.ok) return;
+    // 4700 Cent/h x 480 min = 4700 x 28.800.000 / 3.600.000 = 37600 Cent.
+    expect(stand.position.amount.minorUnits).toBe(37_600n);
+
+    katalog.push(validRate("r-korrektur", 9900n, day(2026, 7, 1), day(2026, 7, 31)));
+
+    expect(stand.position.amount.minorUnits).toBe(37_600n);
+    expect(stand.position.rateVersionId).toBe(gueltig.rateVersionId);
+  });
+
+  it("kopiert den Erzeugungszeitpunkt defensiv", () => {
+    // Gleiche Begruendung wie bei `TimeInterval.startUtc`: ein `Date` ist
+    // veraenderlich, und ein herausgereichter Verweis macht einen angeblich
+    // unveraenderlichen Stand veraenderbar.
+    // Gegenmutation: dieselbe Date-Instanz zurueckgeben -> rot.
+    const rate = validRate("r-1", 4500n, day(2026, 1, 1), null);
+    const result = computeCostPosition(eingabe([rate]));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const geliehen = result.position.computedAt;
+    geliehen.setUTCFullYear(1999);
+    expect(result.position.computedAt.getUTCFullYear()).not.toBe(1999);
+  });
+
+  it("blockiert die Position, wenn am Stichtag kein Satz gilt", () => {
+    // Die Kette bis nach oben: ein fehlender Satz darf nicht erst in der
+    // Anzeige auffallen, sondern muss die Position selbst verhindern.
+    // Gegenmutation: bei RATE_MISSING eine Position mit Betrag 0 erzeugen ->
+    // ok:true, rot.
+    const rate = validRate("r-1", 4500n, day(2026, 1, 1), day(2026, 6, 30));
+    const result = computeCostPosition(eingabe([rate]));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("RATE_MISSING");
+    expect(result).not.toHaveProperty("position");
+  });
+});
