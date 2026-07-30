@@ -402,6 +402,12 @@ describe("Rot-Fall Kostenmodul", () => {
     // (4) Ein englischer Satz mit `with`: solange `with` als Statement-Verb
     //     galt, machte "Compare with … taken from planung" daraus
     //     `public.planung`.
+    //
+    // NICHT hier: "Vorlage stammt from vorlage.xlsx". Diese Form hat exakt die
+    // Gestalt eines qualifizierten Ziels und feuert bewusst — siehe die
+    // Begruendung an `SQL_QUALIFIED_TARGET`. Sie hier aufzunehmen hiesse, das
+    // Ueberfeuer zu verbieten und damit die Schema-Positivliste
+    // zurueckzuholen, die beim Veralten still wird.
     write(
       "apps/api/src/modules/costs/infrastructure/ueberfeuer.repository.ts",
       [
@@ -412,7 +418,6 @@ describe("Rot-Fall Kostenmodul", () => {
         'export const satzendeJoin = "Konflikt entsteht beim join mehrerer.";',
         'export const pfad = "Adapter kommt from ./infrastructure";',
         'export const zahl = "Berechnet using 2.5 Stunden je Einsatz";',
-        'export const datei = "Vorlage stammt from vorlage.xlsx";',
         'export const englisch = "Compare with the published plan, values taken from planung";',
         "export type X = PublishedPlanFacts;",
       ].join("\n") + "\n",
@@ -457,6 +462,39 @@ describe("Rot-Fall Kostenmodul", () => {
       "Der Lesezugriff im gestueckelten Templateliteral wurde nicht gemeldet.",
     ).toBe(true);
     drop("apps/api/src/modules/costs/infrastructure/gestueckelt.repository.ts");
+  });
+
+  it("faengt ein gestueckeltes Fragment auch bei einem UNGEWOEHNLICHEN Schema", () => {
+    // Der Fall, an dem eine Schema-Positivliste still geworden waere. Eine
+    // Zwischenfassung von `SQL_QUALIFIED_TARGET` fuehrte `public|app|auth|storage`
+    // als Liste — von Hand aus den Migrationen abgelesen und dabei
+    // unvollstaendig. `pg_catalog` ist nicht hypothetisch: Migration
+    // `20260727020000_0004_org_settings.sql` liest `pg_catalog.pg_timezone_names`.
+    //
+    // Die Regel meldet auch UNregistrierte Tabellen ("fehlt im Besitzregister"),
+    // ein unbekanntes Schema waere also nicht bloss falsch einsortiert, sondern
+    // spurlos verschwunden — im Stueck hinter der Interpolation, wo kein
+    // Statement-Verb steht und die erste Zulassung nicht greift.
+    //
+    // Gegenmutation: `SQL_QUALIFIED_TARGET` wieder auf eine Positivliste ohne
+    // `pg_catalog` verengen -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/fremdschema.repository.ts",
+      [
+        'const SNAPSHOTS = "public.cost_snapshots";',
+        "export const query = `select s.id",
+        "  from ${SNAPSHOTS} s",
+        "  join pg_catalog.pg_timezone_names z on z.name = s.time_zone",
+        "  where s.org_id = $1`;",
+      ].join("\n") + "\n",
+    );
+    expect(
+      messagesOf("costs-touches-only-own-tables").some((m) =>
+        m.includes('"join pg_catalog.pg_timezone_names"'),
+      ),
+      "Ein qualifizierter Zugriff mit unbekanntem Schema wurde still verworfen.",
+    ).toBe(true);
+    drop("apps/api/src/modules/costs/infrastructure/fremdschema.repository.ts");
   });
 
   it("faengt eine relativ importierte Datei NICHT als XLSX-Bibliothek", () => {

@@ -174,21 +174,31 @@ const SQL_FROM_OPERATOR = /\b(extract|substring|trim|overlay|position)\s*\([^()]
 const SQL_CTE_NAMES = /(?:\bwith\s+(?:recursive\s+)?|,\s*)("?[\w$]+"?)\s+as\s*\(/gi;
 
 /**
- * Ein schemaqualifizierter Tabellenname, gemessen am Schemabestand dieses
- * Projekts (`supabase/migrations/`: `public`, `app`, `auth`, `storage`).
+ * Ein qualifiziertes Ziel: `bezeichner.bezeichner`, GANZ, nicht bloss irgendwo
+ * ein Punkt.
  *
- * Das Schemapraefix ist das EINZIGE Merkmal, an dem sich ein Tabellenname von
- * einem Dateinamen unterscheiden laesst — `vorlage.xlsx` und `public.assignments`
- * haben dieselbe Form. Ein blosser Punkttest genuegt deshalb nicht; gemessen las
- * er `from planung.` (deutscher Satzpunkt), `from ./infrastructure` und
- * `using 2.5` als Tabellenzugriffe.
+ * Der Anker `^…$` ist der Kern der Aussage. `SQL_READ_TARGETS` zieht ein
+ * folgendes Satzzeichen mit ins Ziel, also verwirft ein blosser Punkttest
+ * nichts: gemessen las er `from planung.` (deutscher Satzpunkt),
+ * `from ./infrastructure` und `using 2.5` als Tabellenzugriffe. Der Anker
+ * verwirft genau diese drei Formen, weil keine davon zwei vollstaendige
+ * Bezeichner um den Punkt hat.
  *
- * Der Anker `^…$` ist Teil der Aussage: `SQL_READ_TARGETS` faengt den Satzpunkt
- * mit ein, also muss das GANZE Ziel qualifiziert sein, nicht bloss irgendwo
- * einen Punkt enthalten. Wer ein Schema hinzufuegt, muss diese Liste mitpflegen —
- * sonst wird der Waechter fuer dessen Tabellen still.
+ * BEWUSST KEINE SCHEMA-LISTE. Eine erste Fassung fuehrte hier
+ * `public|app|auth|storage` als Positivliste — von Hand aus den Migrationen
+ * abgelesen und dabei unvollstaendig: `pg_catalog` (z. B.
+ * `pg_catalog.pg_timezone_names` in Migration `0004`) und `extensions` fehlten.
+ * Die Folge waere still gewesen, nicht laut: Regel `costs-touches-only-own-tables`
+ * meldet auch UNregistrierte Tabellen, ein Zugriff auf ein unbekanntes Schema
+ * waere also einfach verschwunden. Eine Positivliste, die veralten kann und
+ * beim Veralten stumm wird, ist an einem Waechter die falsche Bauart.
+ *
+ * Preis dieser Entscheidung, benannt statt verschwiegen: ein Prosaziel der Form
+ * `bezeichner.bezeichner` — etwa "Vorlage stammt from vorlage.xlsx" — feuert.
+ * Das ist die gewollte Richtung: ein Ueberfeuer macht `unit-tests` rot und wird
+ * bemerkt, ein Unterfeuer nicht.
  */
-const SQL_QUALIFIED_TARGET = /^"?(?:public|app|auth|storage)"?\."?[a-z_][\w$]*"?$/i;
+const SQL_QUALIFIED_TARGET = /^"?[a-z_][\w$]*"?\."?[a-z_][\w$]*"?$/i;
 
 interface SqlAccess {
   readonly verb: string;
@@ -236,8 +246,8 @@ export function sqlAccesses(literal: string): SqlAccess[] {
   // das falsch: `SQL_READ_TARGETS` zieht den Satzpunkt mit ins Ziel, also wurden
   // "Der Wert stammt from planung." zu `from planung.`, "…beim join mehrerer." zu
   // `join mehrerer.`, "from ./infrastructure" zu `from .` und "using 2.5 Stunden"
-  // zu `using 2.5`. `SQL_QUALIFIED_TARGET` verlangt stattdessen ein bekanntes
-  // Schema ueber dem GANZEN Ziel.
+  // zu `using 2.5`. `SQL_QUALIFIED_TARGET` verlangt stattdessen zwei
+  // vollstaendige Bezeichner um den Punkt, ueber dem GANZEN Ziel.
   const cteNames = new Set<string>();
   for (const match of literal.matchAll(SQL_CTE_NAMES)) {
     const name = match[1];
