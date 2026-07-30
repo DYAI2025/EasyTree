@@ -391,6 +391,67 @@ mit **fail-closed** Validierung vor `BigInt(value)`. Die Differenz zweier Epoch-
 ist für realistische Einsatzintervalle sicher darstellbar — **diese Annahme ist zu prüfen und
 darf nicht still vorausgesetzt werden.**
 
+#### V2c — Gemessene Grundlage von V2b und die daraus folgende Prüfreihenfolge
+
+Die drei folgenden Punkte sind **gemessen** (Node, 30.07.2026), nicht angenommen. Sie sind der
+Grund, warum V2b `Number.isSafeInteger` fordert und nicht bloß eine Ausnahmebehandlung.
+
+**1. Drei der vier verbotenen Konvertierungen sind laut, die vierte ist still.**
+
+```text
+BigInt(7.5)                        -> wirft RangeError
+BigInt(NaN)                        -> wirft RangeError
+BigInt(Infinity)                   -> wirft RangeError
+BigInt(Number.MAX_SAFE_INTEGER+2)  -> wirft NICHT, liefert 9007199254740992n
+```
+
+Ein `try/catch` um `BigInt(value)` fängt die ersten drei und lässt **genau den gefährlichen**
+durch: einen plausibel aussehenden Wert, der nicht mehr eindeutig auf seine Herkunft
+zurückführbar ist. Deshalb ist die Prüfung Pflicht, nicht die Ausnahme.
+
+**2. Die Prüfreihenfolge ist Teil des Vertrags, nicht Kosmetik.**
+
+`Number.isSafeInteger(NaN)` ist ebenfalls `false`. Wer die Sicherheitsprüfung vorzieht, meldet
+für `NaN` fälschlich `QUANTITY_NOT_SAFE_INTEGER` statt `QUANTITY_NOT_FINITE`. Verbindlich:
+
+```text
+1. Number.isFinite(value)      sonst QUANTITY_NOT_FINITE
+2. Number.isInteger(value)     sonst QUANTITY_NOT_INTEGER
+3. value >= 0                  sonst QUANTITY_NEGATIVE
+4. Number.isSafeInteger(value) sonst QUANTITY_NOT_SAFE_INTEGER
+5. erst jetzt BigInt(value)
+```
+
+**3. Die zu prüfende Annahme ist wirklich eine Annahme.**
+
+```text
+Date-Spanne (-8.64e15 .. +8.64e15) = 17_280_000_000_000_000
+Number.MAX_SAFE_INTEGER            =      9_007_199_254_740_991
+```
+
+Die Spanne ist **größer** als der sichere Ganzzahlbereich. Die Differenz zweier **gültiger**
+`Date`-Werte kann damit unsicher werden — der Fail-closed-Fall ist kein hypothetischer
+Überlauf, sondern mit echten `Date`-Objekten erreichbar. Die Annahme „für realistische
+Einsatzintervalle sicher darstellbar" wird deshalb zweiseitig geprüft: die akzeptierte
+Bandbreite muss den realistischen Planungsraum tragen (366 Tage = 31.622.400.000 ms, das
+14,7-fache von 2³¹), **und** jenseits der Sicherheitsgrenze muss sie geschlossen sein.
+
+#### V2d — Zwei Schnittstellenentscheidungen, aus bestehenden Repo-Verträgen abgeleitet
+
+Beide sind **keine** Ermessensentscheidungen; sie folgen aus bindenden Konventionen.
+
+**Rückgabeform: `DurationMillisecondsResult`, nicht ein blanker Typ.** Der PO-Vertrag skizziert
+`toDurationMilliseconds(value: number): DurationMilliseconds`. Vier einzeln unterscheidbare
+Ablehnungen lassen sich so nur über Ausnahmen ausdrücken. `CLAUDE.md` ist dazu bindend —
+„Gateway ports model failure in the return type, not in exceptions" — und `TimeIntervalResult`
+im selben Paket ist das Vorbild. Der vom PO gesetzte **Name bleibt unverändert**; nur der
+Rückgabetyp ist die im Repo übliche diskriminierte Union.
+
+**Namensnähe `durationMilliseconds(bigint)` / `toDurationMilliseconds(number)` bleibt.** Die
+beiden sind beim Überfliegen ähnlich, aber ihre Parametertypen sind disjunkt — TypeScript
+verhindert die Verwechslung mechanisch. Ein Umbenennen brächte Änderungsaufwand ohne
+zusätzliche Sicherheit.
+
 #### V1b — Eigentum des Summenvertrags (PO 30.07.2026)
 
 Die Regel „Gesamtsummen entstehen durch Addition bereits gerundeter persistierter
