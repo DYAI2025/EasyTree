@@ -4,11 +4,19 @@
  *
  * ## Warum `bigint` und nicht `number`
  *
- * V2 rechnet `rateMinorUnitsPerHour × durationMilliseconds`. Bereits ein
- * gewöhnlicher Stundensatz mal einer mehrtägigen Dauer verlässt den sicheren
- * Ganzzahlbereich von `number` (2^53); dort ist eine ganze Zahl nicht mehr
- * eindeutig, und „verlustfrei" wird stillschweigend falsch. `minorUnits` ist
- * deshalb `bigint` — Vertragsbestandteil, nicht Geschmacksfrage.
+ * V2 rechnet `rateMinorUnitsPerHour × durationMilliseconds`. Ein realistischer
+ * Stundensatz mal einer mehrtägigen Dauer bleibt dabei noch im sicheren
+ * Ganzzahlbereich — 1000 EUR/h × 30 Tage sind 2,6e14 gegen `MAX_SAFE_INTEGER`
+ * 9,0e15. Der Grund für `bigint` ist deshalb nicht ein einzelner Rechenfall,
+ * sondern dass die Kette an keiner Stelle darauf angewiesen sein soll:
+ * `roundHalfUp` verdoppelt den Zähler, und die Sicherheitsgrenze in
+ * `duration-milliseconds.ts` zeigt, dass schon die Differenz zweier **gültiger**
+ * `Date`-Werte den sicheren Bereich verlässt (Spanne 1,7e16 gegen 9,0e15).
+ *
+ * Eine frühere Fassung behauptete hier, bereits ein gewöhnlicher Stundensatz mal
+ * einer mehrtägigen Dauer verlasse den Bereich. Nachgerechnet stimmt das nicht —
+ * der nächstliegende Fall ist rund 3000-fach entfernt. Die Schlussfolgerung
+ * bleibt, der Beleg war falsch.
  *
  * ## Warum `Money` ein Vorzeichen tragen darf, ein Plan-Kostenbetrag aber nicht
  *
@@ -147,11 +155,13 @@ export function moneyFromNumber(value: number, currency: Currency): MoneyResult 
  * Zweig, und ein `throw` statt eines Ergebniszweigs ändert daran nichts: es
  * verschiebt nur die Form, nicht die Erreichbarkeit.
  *
- * Die Laufzeitsicherheit kommt stattdessen aus der Kette
- * {@link costCurrencyFromUnknown} → gebrandeter Wert → keine öffentliche
- * unvalidierte Konstruktion → `z.literal("EUR")` → `CHECK (currency = 'EUR')`.
- * Ein trotz dieser Grenzen gefälschtes Objekt ist eine Invariantenverletzung,
- * kein fachlicher Währungsfehler.
+ * Die Laufzeitsicherheit soll spaeter aus einer Kette kommen —
+ * `costCurrencyFromUnknown` an der untrusted Grenze, `z.literal("EUR")` im
+ * Gateway (EYT-105), `CHECK (currency = 'EUR')` in der Datenbank (EYT-108/109).
+ * HEUTE existiert davon nur die erste: die beiden anderen sind Zukunft, und
+ * `costCurrencyFromUnknown` hat noch keinen Produktionsaufrufer. Was aktuell
+ * traegt, ist allein der Einzelbewohner-Typ `Currency = "EUR"` — und der genuegt
+ * fuer die Schlussfolgerung, dass kein Waehrungsvergleich noetig ist.
  */
 export function addMoney(augend: Money, addend: Money): Money {
   return moneyOfMinorUnits(augend.minorUnits + addend.minorUnits, augend.currency);
@@ -166,8 +176,12 @@ export function subtractMoney(minuend: Money, subtrahend: Money): Money {
  * Übergang vom vorzeichenoffenen Betrag zum persistierfähigen Plan-Kostenbetrag (V4).
  *
  * Der Cast ist die Marke, nicht die Prüfung — die steht vollständig darüber.
- * Der Wert wird nicht neu erzeugt: jeder {@link Money} stammt aus
- * {@link moneyOfMinorUnits} und ist damit bereits eingefroren.
+ * Nicht eingefroren wird hier: `Money` ist unbrandet und strukturell
+ * konstruierbar, ein Literal kompiliert sauber und ist dann nicht eingefroren.
+ * Die Sperre traegt ueber `readonly` (TS2540 fuer getypte Aufrufer), nicht ueber
+ * eine Herkunftszusage. Eine fruehere Fassung behauptete, jeder `Money` stamme
+ * aus `moneyOfMinorUnits` und sei damit bereits eingefroren — das gilt nur fuer
+ * die dort erzeugten Werte.
  */
 export function planCostAmount(money: Money): PlanCostAmountResult {
   if (money.minorUnits < 0n) return { ok: false, error: "COST_AMOUNT_NEGATIVE" };

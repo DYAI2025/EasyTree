@@ -115,7 +115,22 @@ export interface CostPositionInput {
  * Bewusst die Vereinigung der bereits vergebenen Codes statt einer eigenen
  * Liste: eine zweite Benennung derselben Fehlerlage wäre ein zweiter Vertrag.
  */
-export type CostPositionError = RateSelectionError;
+/**
+ * Fehler der Positionserzeugung, die NICHT aus der Satzauswahl stammen.
+ *
+ * `COMPUTED_AT_INVALID` faengt `new Date("kaputt")` — ein gueltig getyptes
+ * `Date` mit `getTime() === NaN`, wie es beim Parsen eines kaputten JSON-Feldes
+ * entsteht. Ohne die Pruefung traege eine vollstaendig aussehende Position einen
+ * unbrauchbaren Erzeugungszeitpunkt, und genau den verlangt AK4, damit ein
+ * historischer Betrag spaeter erklaerbar bleibt. `TimeInterval.create` weist
+ * denselben Fall mit `START_INVALID` ab — gleiche Grenze, gleiche Behandlung.
+ */
+export const COST_POSITION_INPUT_ERRORS = ["COMPUTED_AT_INVALID"] as const;
+
+/** Ein Fehlercode der Positionseingabe. */
+export type CostPositionInputError = (typeof COST_POSITION_INPUT_ERRORS)[number];
+
+export type CostPositionError = RateSelectionError | CostPositionInputError;
 
 export type CostPositionResult =
   | { readonly ok: true; readonly position: CostPosition }
@@ -173,7 +188,7 @@ export function costOfDuration(
   const validated = planCostAmount(moneyOfMinorUnits(minorUnits, rate.amountPerHour.currency));
 
   // V5.2: KEIN öffentlicher Fehlerzweig hier. Satz und Menge sind durch ihre
-  // Konstruktoren nichtnegativ, `roundHalfUp` erhält das Vorzeichen — mit
+  // Konstruktoren nichtnegativ, `roundHalfUp bildet nichtnegative Zaehler auf nichtnegative Ergebnisse ab — mit
   // zulässigen Eingaben kann diese Validierung nicht fehlschlagen. Ein
   // `{ ok: false }` nach aussen wäre Scheingenauigkeit: der Aufrufer müsste
   // einen Fall behandeln, den er nie sieht, und der Vertrag verspräche eine
@@ -220,6 +235,7 @@ export function computeCostPosition(input: CostPositionInput): CostPositionResul
   // ein `setUTCFullYear` darauf veränderte einen angeblich unveränderlichen
   // Stand rückwirkend.
   const computedAtMs = input.computedAt.getTime();
+  if (Number.isNaN(computedAtMs)) return { ok: false, error: "COMPUTED_AT_INVALID" };
 
   return {
     ok: true,

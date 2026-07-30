@@ -71,6 +71,19 @@ function run(): ReturnType<typeof evaluateCostsRules> {
   return evaluateCostsRules({ repoRoot: root, files, refs, tableOwnership: TABLES });
 }
 
+/**
+ * Der `index.ts`-Stand des sauberen Baums.
+ *
+ * Eine Quelle fuer `beforeAll` UND fuer jeden Test, der die Datei ueberschreibt:
+ * sonst laufen die beiden Abschlusszusicherungen „am sauberen Baum" gegen einen
+ * anderen Baum als den, den `beforeAll` beschreibt.
+ */
+const SAUBERE_INDEX_TS =
+  [
+    'export type { CostExportPort } from "./application/cost-export.port";',
+    'export { COST_EXPORT_PORT } from "./application/cost-export.port";',
+  ].join("\n") + "\n";
+
 function findingsOf(ruleId: string): CostsFinding[] {
   return run().findings.filter((finding) => finding.rule === ruleId);
 }
@@ -114,13 +127,7 @@ beforeAll(() => {
   );
 
   // Sauberes Kostenmodul.
-  write(
-    "apps/api/src/modules/costs/index.ts",
-    [
-      'export type { CostExportPort } from "./application/cost-export.port";',
-      'export { COST_EXPORT_PORT } from "./application/cost-export.port";',
-    ].join("\n") + "\n",
-  );
+  write("apps/api/src/modules/costs/index.ts", SAUBERE_INDEX_TS);
   write(
     "apps/api/src/modules/costs/domain/daily-allocation.ts",
     [
@@ -395,16 +402,46 @@ describe("Rot-Fall Kostenmodul", () => {
         "export type X = PublishedPlanFacts;",
       ].join("\n") + "\n",
     );
-    const messages = messagesOf("costs-touches-only-own-tables");
+    // Geprueft wird die GESAMTE Fixture, nicht nur Meldungen mit "planning".
+    // Gemessen: ein Rohtextscan erzeugt aus `from "../../planning"` das Ziel
+    // `..`, nie einen Text mit "planning" — ein Filter darauf traefe den
+    // Fehlermodus nicht und koennte unter der benannten Regression gar nicht
+    // fehlschlagen. Ein leerer Befundsatz fuer diese Datei faengt jede
+    // Ueberfeuerform, auch `..`.
+    const ueberfeuer = findingsOf("costs-touches-only-own-tables").filter((f) =>
+      f.location.includes("ueberfeuer.repository.ts"),
+    );
     expect(
-      messages.filter((m) => m.includes("planning")),
-      "Ein Importspezifizierer wurde als Tabelle gelesen.",
-    ).toEqual([]);
-    expect(
-      messages.filter((m) => m.includes("mehrerer") || m.includes("planung")),
-      "Deutsche Prosa wurde als Tabellenzugriff gelesen.",
+      ueberfeuer.map((f) => `${f.location} ${f.message}`),
+      "Importpfad oder deutsche Prosa wurde als Tabellenzugriff gelesen.",
     ).toEqual([]);
     drop("apps/api/src/modules/costs/infrastructure/ueberfeuer.repository.ts");
+  });
+
+  it("faengt einen Lesezugriff auch aus einem gestueckelten Templateliteral", () => {
+    // Der Fall, an dem die SQL-Vorpruefung zu eng werden kann: `stringLiterals`
+    // liefert ein Templateliteral STUECKWEISE. Das Stueck hinter der
+    // Interpolation traegt kein einleitendes Statement-Verb — verlangt die
+    // Vorpruefung eines, faellt der `join` auf `public.assignments` still unter
+    // den Tisch. Ein Waechter, der zu weit war, meldet Falsches; einer, der zu
+    // eng ist, SCHWEIGT beim Echten, und das ist die schlechtere Richtung.
+    write(
+      "apps/api/src/modules/costs/infrastructure/gestueckelt.repository.ts",
+      [
+        'const SNAPSHOTS = "public.cost_snapshots";',
+        "export const query = `select s.id, a.employee_id",
+        "  from ${SNAPSHOTS} s",
+        "  join public.assignments a on a.id = s.assignment_id",
+        "  where s.org_id = $1`;",
+      ].join("\n") + "\n",
+    );
+    expect(
+      messagesOf("costs-touches-only-own-tables").some((m) =>
+        m.includes('"join public.assignments"'),
+      ),
+      "Der Lesezugriff im gestueckelten Templateliteral wurde nicht gemeldet.",
+    ).toBe(true);
+    drop("apps/api/src/modules/costs/infrastructure/gestueckelt.repository.ts");
   });
 
   it("faengt eine relativ importierte Datei NICHT als XLSX-Bibliothek", () => {
@@ -430,6 +467,10 @@ describe("Rot-Fall Kostenmodul", () => {
       "Ein relativer Importpfad wurde als XLSX-Bibliothek gemeldet.",
     ).toEqual([]);
     drop("apps/api/src/modules/costs/infrastructure/xlsx-cost-renderer.ts");
+    // `index.ts` wird hier UEBERSCHRIEBEN, nicht angelegt — ohne diese Zeile
+    // liefen die beiden Abschlusszusicherungen "am sauberen Baum" gegen einen
+    // anderen Baum als den, den `beforeAll` beschreibt.
+    write("apps/api/src/modules/costs/index.ts", SAUBERE_INDEX_TS);
   });
 
   it("faengt einen generischen Sammelcontainer, auch verschachtelt und unter anderem Namen", () => {

@@ -640,6 +640,17 @@ export const INVARIANTS: readonly Invariant[] = [
     negative: null,
   },
   {
+    exportName: "COST_POSITION_INPUT_ERRORS",
+    statement:
+      "COMPUTED_AT_INVALID: ein gueltig getyptes Date mit getTime() === NaN blockiert die Position, weil AK4 den Erzeugungszeitpunkt verlangt (V5.2, gleiche Grenze wie TimeInterval.START_INVALID).",
+    kind: "konstante",
+    positive: {
+      file: MONEY,
+      title: "fuehrt jeden Positionseingabe-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
+  },
+  {
     exportName: "RATE_SELECTION_ERRORS",
     statement:
       "Die Satzauswahl kennt genau zwei blockierende Ausgaenge und keinen dritten, stillen Null-Euro-Ausgang.",

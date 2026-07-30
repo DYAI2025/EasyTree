@@ -21,13 +21,12 @@
  * solange `apps/api/src/modules/costs/` fehlt — also ausgerechnet dann, wenn
  * REQ-001 nicht erfuellt ist.
  *
- * Eine Regel hat bewusst einen weiten Geltungsbereich (`costs-xlsx-…` sieht
- * ganz `apps/**` und `packages/**`). Ihr Nicht-Leerlauf-Zaehler ist damit heute
- * schon erfuellt, ihre Trefferseite aber nicht. Diese Trefferseite wird
- * ausschliesslich im synthetischen Baum von
- * `costs-module-boundaries.red-case.test.ts` bewiesen — dieselbe Aufteilung,
- * die `architecture.test.ts` und `architecture-red-case.test.ts` schon fuer
- * `no-fixtures-in-production-code` verwenden.
+ * Eine Regel hat bewusst eine weite TREFFERSEITE: `costs-xlsx-behind-application-port`
+ * sieht ganz `apps/**` und `packages/**`, damit eine XLSX-Bibliothek auch dann
+ * auffaellt, wenn sie ausserhalb von `costs/` landet. Ihr Nicht-Leerlauf-Zaehler ist
+ * davon getrennt und an `costs/` gebunden — er faellt ohne Modul auf 0, wie bei den
+ * sechs anderen. Eine fruehere Fassung zaehlte dort alle gescannten Dateien (224) und
+ * konnte deshalb nie fehlschlagen.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -130,6 +129,11 @@ const MONEY_FUNCTION_PATTERN =
  *   anderes, groesseres Problem als Tabellenbesitz.
  * - **Dynamisch zusammengebaute Tabellennamen** (`from ${schema}.${name}`):
  *   der Platzhalter ist kein Bezeichner und wird nicht geraten.
+ * - **Unqualifiziertes Ziel in einem verblosen Fragment** (`join assignments a`
+ *   ohne `public.`, in einem Templateliteral-Stueck hinter einer Interpolation):
+ *   dort greift weder die Statement- noch die Qualifizierungs-Zulassung. Der
+ *   Hausstil schreibt schema-qualifiziert; die Luecke steht hier, damit sie
+ *   nicht als Abdeckung gelesen wird.
  */
 const SQL_WRITE_TARGETS: ReadonlyArray<readonly [string, RegExp]> = [
   ["insert into", /\binsert\s+into\b\s+([\w$".]+)/gi],
@@ -187,15 +191,24 @@ function qualify(raw: string): string {
  */
 export function sqlAccesses(literal: string): SqlAccess[] {
   const out: SqlAccess[] = [];
-  // Gemessene Luecke: ohne diese Vorpruefung lief der Leseabgleich ueber JEDES
-  // Stringliteral des Moduls. Deutsche Prosa traf ihn sofort —
-  // "Konflikt entsteht beim join mehrerer Zeilen" ergab die "Tabelle"
-  // `public.mehrerer`, "Wert stammt from planung" ergab `public.planung`. Beide
-  // waeren als unregistrierte Fremdtabelle gemeldet worden. Heute faellt das
-  // niemandem auf, weil kein Kostenliteral die Woerter traegt; rot wird es beim
-  // ersten deutschen Nutzertext im Modul. Ein Waechter, der bei einer harmlosen
-  // Meldung feuert, wird abgeschaltet — und dann faengt er auch das Echte nicht.
-  if (!SQL_STATEMENT_HINT.test(literal)) return out;
+  // Zwei Ueberfeuer-/Unterfeuer-Faelle, beide gemessen, beide hier balanciert.
+  //
+  // Ohne jede Vorpruefung lief der Leseabgleich ueber JEDES Stringliteral, und
+  // deutsche Prosa traf ihn sofort: "Konflikt entsteht beim join mehrerer
+  // Zeilen" ergab `public.mehrerer`, "Wert stammt from planung" ergab
+  // `public.planung`. Ein Waechter, der bei einer harmlosen Meldung feuert,
+  // wird abgeschaltet.
+  //
+  // Ein FRUEHER ABBRUCH auf ein Statement-Verb war aber die Ueberkorrektur:
+  // `stringLiterals` liefert Templateliterale STUECKWEISE, und das Stueck hinter
+  // einer Interpolation (` s\n join public.assignments a on …`) traegt kein Verb.
+  // Gemessen ging damit ein echter EYT-105-Verstoss still durch — die
+  // schlechtere Richtung, weil ein stummer Waechter nicht auffaellt.
+  //
+  // Deshalb ZWEI Zulassungen statt eines Tors: entweder das Literal sieht nach
+  // einem Statement aus, oder das Ziel ist schema-qualifiziert (`public.x`).
+  // Prosa nennt keine qualifizierten Tabellennamen; SQL-Fragmente tun es.
+  const looksLikeSql = SQL_STATEMENT_HINT.test(literal);
   const cteNames = new Set<string>();
   for (const match of literal.matchAll(SQL_CTE_NAMES)) {
     const name = match[1];
@@ -203,6 +216,11 @@ export function sqlAccesses(literal: string): SqlAccess[] {
   }
 
   const push = (verb: string, access: SqlAccess["access"], raw: string, index: number): void => {
+    // Die Restluecke ist benannt statt verschwiegen: ein UNqualifiziertes Ziel in
+    // einem verblosen Fragment (`join assignments a on …` ohne `public.`) faellt
+    // durch beide Zulassungen. Der Hausstil schreibt schema-qualifiziert; wer das
+    // aendert, muss diese Zeile mitaendern.
+    if (!looksLikeSql && !raw.includes(".")) return;
     const table = qualify(raw);
     if (cteNames.has(table)) return;
     out.push({ verb, access, table, line: lineOf(literal, index) });

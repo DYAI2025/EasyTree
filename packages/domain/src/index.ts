@@ -154,4 +154,5 @@ export {
   costOfDuration,
   ROUNDING_MODE,
   ROUNDING_STAGE,
+  COST_POSITION_INPUT_ERRORS,
 } from "./cost-position.js";

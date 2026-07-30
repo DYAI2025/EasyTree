@@ -59,7 +59,12 @@ export type DurationMillisecondsResult =
  * der Grund, warum er zulässig ist.
  */
 function checkedQuantity(milliseconds: bigint): DurationMilliseconds {
-  return { milliseconds } as DurationMilliseconds;
+  // Eingefroren wie `moneyOfMinorUnits` und `hourlyRateVersion`. Gemessen war
+  // dieser Konstruktor als einziger der geprueften ohne `Object.freeze` — eine
+  // Inkonsistenz, kein Datenleck: `readonly` macht die Zuweisung fuer getypte
+  // Aufrufer zu einem Compilefehler (TS2540), und `typecheck` ist Pflichtjob.
+  // Die Sperre gilt jetzt auch fuer ungetypte Aufrufer.
+  return Object.freeze({ milliseconds }) as DurationMilliseconds;
 }
 
 /**

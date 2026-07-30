@@ -9,15 +9,15 @@ Lesender Preflight nach PO-GO vom 30.07.2026 §5. Schließt `OQ-002` (Testdatei 
 
 ## 1. Werkzeug- und Umgebungslage (gemessen)
 
-| Prüfung                           | Kommando                                                      | Ergebnis                                                                  |
-| --------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Docker lokal                      | `docker info`                                                 | **nicht erreichbar** → kein lokaler Supabase-Stack                        |
-| Auth-Grenze im Stack konfiguriert | `supabase/config.toml`                                        | `[auth] enabled = true`, `site_url`, `jwt_expiry = 3600`, `enable_signup` |
-| Wer startet den echten Stack?     | `.github/workflows/ci.yml`, `scripts/read-through-harness.sh` | `db-gates` (Z. 124) **und** `read-through` (Harness Z. 70)                |
-| `web-smoke` als E2E-Ort?          | `ci.yml` Z. 71–83                                             | **nein** — dort läuft ausdrücklich **keine API**                          |
-| Pflichtchecks heute               | `gh api …/rules/branches/master`                              | neun; **`read-through` fehlt**                                            |
-| Verifier                          | `bash scripts/verify-branch-protection.sh`                    | `FAIL AC3 — fehlende Pflichtchecks: read-through`                         |
-| Scope-Guard gegen `origin/master` | `bash scripts/plumbline-scope-guard.sh --self-test`           | 10 von 10 Proben bestanden                                                |
+| Prüfung                                               | Kommando                                                      | Ergebnis                                                                                                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker lokal                                          | `docker info`                                                 | **nicht erreichbar** → kein lokaler Supabase-Stack                                                                                       |
+| Auth-Grenze im Stack konfiguriert                     | `supabase/config.toml`                                        | `[auth] enabled = true`, `site_url`, `jwt_expiry = 3600`, `enable_signup`                                                                |
+| Wer startet den echten Stack?                         | `.github/workflows/ci.yml`, `scripts/read-through-harness.sh` | `db-gates` (Z. 124) **und** `read-through` (Harness Z. 70)                                                                               |
+| `web-smoke` als E2E-Ort?                              | `ci.yml` Z. 71–83                                             | **nein** — dort läuft ausdrücklich **keine API**                                                                                         |
+| Pflichtchecks **zum Preflight-Zeitpunkt** (vor 04:19) | `gh api …/rules/branches/master`                              | neun; **`read-through` fehlte**. Seit dem Anwenden des Rulesets `19718704` am 30.07.2026 um 04:19 sind es **zehn** — siehe Abschnitt 12. |
+| Verifier **zum Preflight-Zeitpunkt**                  | `bash scripts/verify-branch-protection.sh`                    | `FAIL AC3 — fehlende Pflichtchecks: read-through`. Danach: `PASS AC3 — alle 10 Pflichtchecks sind als required_status_checks gesetzt.`   |
+| Scope-Guard gegen `origin/master`                     | `bash scripts/plumbline-scope-guard.sh --self-test`           | 10 von 10 Proben bestanden                                                                                                               |
 
 ## 2. `OQ-005` — reale Auth-Grenze: **erreichbar, aber nur in CI**
 

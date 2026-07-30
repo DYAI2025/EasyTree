@@ -721,6 +721,7 @@ describe("Kostenposition — Eigenschaften ueber erzeugte Eingaben (AK4, AK5)", 
     // liest und keinen versteckten Zustand fuehrt.
     // Gegenmutation: `new Date()` im Inneren lesen oder einen Zaehler
     // hochzaehlen -> die Ergebnisse unterscheiden sich, rot.
+    let erfolgreicheLaeufe = 0;
     assertProperty(
       fc.property(catalogueArb, queryDayArb, msArb, (versions, on, milliseconds) => {
         const eingabe = {
@@ -730,9 +731,17 @@ describe("Kostenposition — Eigenschaften ueber erzeugte Eingaben (AK4, AK5)", 
           quantity: quantityOf(milliseconds),
           computedAt,
         };
-        expect(computeCostPosition(eingabe)).toEqual(computeCostPosition(eingabe));
+        const ergebnis = computeCostPosition(eingabe);
+        if (ergebnis.ok) erfolgreicheLaeufe += 1;
+        expect(ergebnis).toEqual(computeCostPosition(eingabe));
       }),
     );
+    // Nicht-Leerlauf-Bremse, wie bei den vier Schwestern dieser Datei. Ohne sie
+    // bliebe die Zusicherung gruen, wenn fast jeder erzeugte Katalog den
+    // Stichtag nicht abdeckt — dann vergliche sie zweimal dasselbe
+    // `RATE_MISSING` und sagte ueber den Determinismus der BERECHNUNG nichts.
+    // Gegenmutation: `catalogueArb` so verengen, dass nie abgedeckt wird -> rot.
+    expect(erfolgreicheLaeufe).toBeGreaterThan(0);
   });
 
   it("nennt im Erfolgsfall die Satzversion, die das Orakel ausgewaehlt haette", () => {

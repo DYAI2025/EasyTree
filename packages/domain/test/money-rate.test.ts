@@ -70,6 +70,7 @@ import {
   sumPlanCostAmounts,
   toDurationMilliseconds,
   unsafeIdentifier,
+  COST_POSITION_INPUT_ERRORS,
 } from "../src/index.js";
 import type {
   AssignmentId,
@@ -394,10 +395,11 @@ describe("Waehrung — untrusted Eingangsgrenze (V5.4-korrigiert)", () => {
     // `unknown` heisst wirklich unknown: aus JSON kommt `null`, aus einer
     // leeren Spalte `""`, aus einem Mapping-Fehler `42` oder `{}`. Alle vier
     // nennt der Vertrag ausdruecklich.
-    // Gegenmutation: nur auf `!== "EUR"` pruefen, ohne Typpruefung -> bei
-    // `{ toString: () => "EUR" }` oder einer String-Koerzierung faellt die
-    // Grenze; mindestens aber wird der Fehlercode fuer diese Werte nicht
-    // gemeldet, rot.
+    // KEINE Gegenmutation zur `typeof`-Haelfte: sie ist beweisbar redundant.
+    // Gemessen (siehe money.ts): entfernt man sie, bleiben alle 210 Tests gruen —
+    // es gibt keinen Wert, den sie faengt und der strikte Vergleich nicht, auch
+    // `new String("EUR") !== "EUR"` ist true. Diese Faelle messen den strikten
+    // Vergleich, nicht die Typpruefung.
     for (const value of ["", null, undefined, 42, {}]) {
       const result = costCurrencyFromUnknown(value);
       expect(result.ok).toBe(false);
@@ -1100,8 +1102,22 @@ describe("Satzversionsueberlappung — kanonische Paarstruktur (V5.5)", () => {
   it("liefert unabhaengig von der Eingabereihenfolge dasselbe Ergebnis", () => {
     // Die Eingabereihenfolge ist ein Zufall der Datenbankabfrage und darf
     // weder ueber das Finden noch ueber die Paarordnung entscheiden.
+    //
+    // ACHTUNG, gemessene Korrektur: diese Zusicherung verglich frueher
+    // `findRateVersionOverlaps([b, a])` mit `findRateVersionOverlaps([a, b])` —
+    // also die Funktion mit sich selbst. Ein Konstantenstub `return []` liess
+    // sie gruen, waehrend sechs Geschwistertests rot wurden. Verglichen wird
+    // jetzt gegen ein festes Literal, das denselben vier Feldern genuegt wie
+    // der Anker weiter oben.
     // Gegenmutation: Sortierschritt entfernen -> Reihenfolge schlaegt durch, rot.
-    expect(findRateVersionOverlaps([b(), a()])).toEqual(findRateVersionOverlaps([a(), b()]));
+    expect(findRateVersionOverlaps([b(), a()])).toEqual([
+      {
+        firstVersionId: rateId("r-a"),
+        secondVersionId: rateId("r-b"),
+        overlapFrom: day(2026, 7, 1),
+        overlapEndExclusive: day(2026, 8, 1),
+      },
+    ]);
   });
 
   it("meldet benachbarte, nicht ueberlappende Intervalle gar nicht", () => {
@@ -1140,11 +1156,27 @@ describe("Satzversionsueberlappung — kanonische Paarstruktur (V5.5)", () => {
     // ueber die Eingabereihenfolge zusichert.
     // Gegenmutation: nur nach `validFrom` sortieren -> bei gleichem Beginn
     // entscheidet die Eingabereihenfolge, rot.
+    //
+    // ACHTUNG, gemessene Korrektur: geprueft wurde frueher nur die Reihenfolge
+    // `[zweite, erste]`. Ohne Nachrang liefert die Sortierung dort zufaellig
+    // dasselbe Paar — die Mutation `aFirst = byStart < 0` liess alle 210 Tests
+    // gruen. Erst BEIDE Eingabereihenfolgen gegen dasselbe Literal trennen die
+    // kanonische Ordnung von der Eingabereihenfolge.
     const zweite = validRate("r-z", 4500n, day(2026, 1, 1), null);
     const erste = validRate("r-a", 4700n, day(2026, 1, 1), null);
-    const [treffer] = findRateVersionOverlaps([zweite, erste]);
-    expect(treffer?.firstVersionId).toBe(rateId("r-a"));
-    expect(treffer?.secondVersionId).toBe(rateId("r-z"));
+    const erwartet = { first: rateId("r-a"), second: rateId("r-z") };
+    for (const eingabe of [
+      [zweite, erste],
+      [erste, zweite],
+    ]) {
+      const [treffer] = findRateVersionOverlaps(eingabe);
+      expect(treffer?.firstVersionId, `Eingabereihenfolge entschied ueber firstVersionId`).toBe(
+        erwartet.first,
+      );
+      expect(treffer?.secondVersionId, `Eingabereihenfolge entschied ueber secondVersionId`).toBe(
+        erwartet.second,
+      );
+    }
   });
 });
 
@@ -1217,6 +1249,49 @@ describe("Kostenposition — Herkunft und historische Stabilitaet (AK4, AK5)", (
 
     expect(stand.position.amount.minorUnits).toBe(37_600n);
     expect(stand.position.rateVersionId).toBe(gueltig.rateVersionId);
+  });
+
+  it("fuehrt jeden Positionseingabe-Fehlercode genau einmal und erreicht jeden", () => {
+    // Wie bei den fuenf anderen Listen: Doppelfreiheit UND Erreichbarkeit. Ein
+    // Code, der im Vertrag steht, in der Typunion erscheint, von Aufrufern
+    // behandelt wird und nie eintritt, ist die teurere Haelfte des Defekts.
+    // Gegenmutation: zweiten Code ohne ausloesende Eingabe aufnehmen -> rot.
+    expect(new Set(COST_POSITION_INPUT_ERRORS).size).toBe(COST_POSITION_INPUT_ERRORS.length);
+    const rate = validRate("r-1", 4500n, day(2026, 1, 1), null);
+    const erreicht = new Set<string>();
+    for (const zeitpunkt of [new Date("kaputt")]) {
+      const r = computeCostPosition({
+        source: SOURCE,
+        versions: [rate],
+        on: day(2026, 7, 1),
+        quantity: ms(3_600_000n),
+        computedAt: zeitpunkt,
+      });
+      if (!r.ok) erreicht.add(r.error);
+    }
+    expect([...erreicht].sort()).toEqual([...COST_POSITION_INPUT_ERRORS].sort());
+  });
+
+  it("blockiert eine Position mit ungueltigem Erzeugungszeitpunkt", () => {
+    // `new Date("kaputt")` ist ein gueltig GETYPTES Date mit `getTime() === NaN`
+    // — kein Typsystem-Umweg noetig, es entsteht beim Parsen eines kaputten
+    // JSON-Feldes von selbst. Ohne Pruefung entstuende eine Position, die
+    // vollstaendig aussieht und deren Erzeugungszeitpunkt `Invalid Date` ist;
+    // AK4 verlangt ihn gerade, damit ein historischer Betrag spaeter erklaerbar
+    // bleibt. `TimeInterval.create` weist denselben Fall mit START_INVALID ab —
+    // gleiche Grenze, gleiche Behandlung.
+    // Gegenmutation: Pruefung entfernen -> ok:true mit Invalid Date, rot.
+    const rate = validRate("r-1", 4500n, day(2026, 1, 1), null);
+    const ergebnis = computeCostPosition({
+      source: SOURCE,
+      versions: [rate],
+      on: day(2026, 7, 1),
+      quantity: ms(3_600_000n),
+      computedAt: new Date("kaputt"),
+    });
+    expect(ergebnis.ok).toBe(false);
+    if (ergebnis.ok) return;
+    expect(ergebnis.error).toBe("COMPUTED_AT_INVALID");
   });
 
   it("kopiert den Erzeugungszeitpunkt defensiv", () => {
