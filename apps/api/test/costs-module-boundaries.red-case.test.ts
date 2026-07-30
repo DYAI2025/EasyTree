@@ -287,6 +287,16 @@ describe("Rot-Fall Kostenmodul", () => {
         'export const b = "update public.plan_versions set published_at = now() where id = $1";',
         'export const c = "delete from public.items where id = $1";',
         'export const d = "insert into cost_secrets (id) values ($1)";',
+        // `merge into` und `truncate` waren bis hierher ungedeckt: gemessen liess
+        // sich JEDE der beiden Zeilen aus SQL_WRITE_TARGETS ersatzlos loeschen,
+        // ohne dass ein einziger Test rot wurde. Beide funktionierten — ihr
+        // Verschwinden waere nur still gewesen.
+        'export const e = "merge into public.assignments t using public.cost_snapshots s on t.id = s.id";',
+        'export const f = "truncate table public.plan_versions";',
+        // `update <tabelle> <alias> set` — die uebliche Form, sobald das UPDATE
+        // einen Selbstbezug hat. Gemessen war sie STILL, weil das Muster `set`
+        // unmittelbar hinter dem Ziel verlangte.
+        'export const g = "update public.assignments a set a.note = $1 where a.id = $2";',
       ].join("\n") + "\n",
     );
     const messages = messagesOf("costs-touches-only-own-tables");
@@ -301,7 +311,77 @@ describe("Rot-Fall Kostenmodul", () => {
     expect(messages.some((m) => m.includes("public.cost_secrets") && m.includes("fehlt"))).toBe(
       true,
     );
+    // Gegenmutation: Zeile `merge into` aus SQL_WRITE_TARGETS entfernen -> rot.
+    expect(
+      messages.some((m) => m.includes('"merge into public.assignments"')),
+      "merge into wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
+    // Gegenmutation: Zeile `truncate` aus SQL_WRITE_TARGETS entfernen -> rot.
+    expect(
+      messages.some((m) => m.includes('"truncate public.plan_versions"')),
+      "truncate wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
+    // Gegenmutation: die optionale Aliasgruppe aus dem `update`-Muster
+    // entfernen -> rot.
+    expect(
+      messages.some((m) => m.includes('"update … set public.assignments"')),
+      "update mit Alias wurde nicht als Schreibziel erkannt.",
+    ).toBe(true);
     drop("apps/api/src/modules/costs/infrastructure/foreign-write.repository.ts");
+  });
+
+  it("laesst eine CTE nur UNqualifizierte Referenzen beschatten", () => {
+    // Eine CTE, die nach der Tabelle benannt ist, die sie filtert, ist die
+    // verbreitetste CTE-Konvention — und schaltete den Waechter gemessen stumm,
+    // lesend UND schreibend, weil CTE-Namen ueber `qualify()` in denselben
+    // Namensraum wie echte Tabellen gelegt wurden. In SQL heisst eine CTE nie
+    // schemaqualifiziert; sie darf nur unqualifizierte Referenzen beschatten.
+    //
+    // Gegenmutation: `cteNames.add(bare(name))` auf `qualify(name)`
+    // zurueckdrehen -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/cte-kollision.repository.ts",
+      [
+        "export const a =",
+        '  "with assignments as (select id from public.assignments where org_id = $1) select * from assignments";',
+        'export const b = "with items as (select 1) delete from public.items where id = $1";',
+      ].join("\n") + "\n",
+    );
+    const messages = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/cte-kollision.repository.ts");
+    expect(
+      messages.some((m) => m.includes('"from public.assignments"')),
+      "Eine gleichnamige CTE hat den qualifizierten Lesezugriff stumm geschaltet.",
+    ).toBe(true);
+    expect(
+      messages.some((m) => m.includes('"delete from public.items"')),
+      "Eine gleichnamige CTE hat den qualifizierten Schreibzugriff stumm geschaltet.",
+    ).toBe(true);
+  });
+
+  it("faengt die Kommafortsetzung auch am Anfang eines Templateliteral-Stuecks", () => {
+    // Das Stueck hinter der Interpolation beginnt mit `, public.assignments` und
+    // traegt kein `from` mehr, an dem die Fortsetzungsschleife haette starten
+    // koennen. Gemessen war das Ziel VOLL QUALIFIZIERT und trotzdem unsichtbar —
+    // kein Fall von "ueber Literalgrenzen zusammengesetztes SQL", sondern eine
+    // echte Luecke, die der push()-Kommentar ausdruecklich ausschloss.
+    //
+    // Gegenmutation: den Aufruf `fortsetzung("from", 0)` entfernen -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/komma-stueck.repository.ts",
+      [
+        'const SNAPSHOTS = "public.cost_snapshots";',
+        "export const query = `select s.id",
+        "  from ${SNAPSHOTS} s, public.assignments a",
+        "  where s.org_id = $1`;",
+      ].join("\n") + "\n",
+    );
+    const messages = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/komma-stueck.repository.ts");
+    expect(
+      messages.some((m) => m.includes('"from public.assignments"')),
+      "Die Kommafortsetzung am Stueckanfang wurde still verworfen.",
+    ).toBe(true);
   });
 
   it("faengt Lesezugriffe auf fremde und auf unregistrierte Tabellen", () => {
@@ -369,6 +449,14 @@ describe("Rot-Fall Kostenmodul", () => {
         '  "with tage as (select d from public.cost_snapshot_items) select * from tage";',
         'export const b = "select extract(day from occurred_on) from public.cost_snapshots";',
         'export const c = "select * from unnest($1::uuid[]) as t(id)";',
+        // Der Klammer-Waechter stand nur auf dem Schluesselwortpfad, nicht auf
+        // dem Fortsetzungspfad. Gemessen meldete `from public.x s, unnest($1) t`
+        // die "Tabelle" `public.unnest` und `…, lateral (select 1) x` die
+        // "Tabelle" `public.lateral` — Fehlalarme auf KORREKTEM Modul-SQL, und
+        // genau solche haben diesen Waechter sechsmal in die Nachjustierung
+        // getrieben.
+        'export const d = "select 1 from public.cost_snapshots s, unnest($1::uuid[]) t";',
+        'export const e = "select 1 from public.cost_snapshots s, lateral (select 1) x";',
       ].join("\n") + "\n",
     );
     expect(
