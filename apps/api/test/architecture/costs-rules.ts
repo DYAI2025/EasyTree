@@ -174,15 +174,20 @@ const SQL_FROM_OPERATOR = /\b(extract|substring|trim|overlay|position)\s*\([^()]
 const SQL_CTE_NAMES = /(?:\bwith\s+(?:recursive\s+)?|,\s*)("?[\w$]+"?)\s+as\s*\(/gi;
 
 /**
- * Ein qualifiziertes Ziel: `bezeichner.bezeichner`, GANZ, nicht bloss irgendwo
- * ein Punkt.
+ * Ein qualifiziertes Ziel: `schema.tabelle` oder `datenbank.schema.tabelle`,
+ * GANZ, nicht bloss irgendwo ein Punkt.
  *
  * Der Anker `^…$` ist der Kern der Aussage. `SQL_READ_TARGETS` zieht ein
  * folgendes Satzzeichen mit ins Ziel, also verwirft ein blosser Punkttest
  * nichts: gemessen las er `from planung.` (deutscher Satzpunkt),
  * `from ./infrastructure` und `using 2.5` als Tabellenzugriffe. Der Anker
- * verwirft genau diese drei Formen, weil keine davon zwei vollstaendige
- * Bezeichner um den Punkt hat.
+ * verwirft sie, weil keine davon beidseits des Punktes einen vollstaendigen
+ * Bezeichner hat.
+ *
+ * Die DREITEILIGE Form ist ausdruecklich zugelassen. Eine erste Fassung liess
+ * nur zwei Bezeichner zu und verwarf `mydb.public.assignments` im gestueckelten
+ * Fragment still — ein Unterfeuer, also die schlechtere Richtung, auch wenn im
+ * Repo heute kein dreiteiliger Name vorkommt.
  *
  * BEWUSST KEINE SCHEMA-LISTE. Eine erste Fassung fuehrte hier
  * `public|app|auth|storage` als Positivliste — von Hand aus den Migrationen
@@ -198,7 +203,7 @@ const SQL_CTE_NAMES = /(?:\bwith\s+(?:recursive\s+)?|,\s*)("?[\w$]+"?)\s+as\s*\(
  * Das ist die gewollte Richtung: ein Ueberfeuer macht `unit-tests` rot und wird
  * bemerkt, ein Unterfeuer nicht.
  */
-const SQL_QUALIFIED_TARGET = /^"?[a-z_][\w$]*"?\."?[a-z_][\w$]*"?$/i;
+const SQL_QUALIFIED_TARGET = /^"?[a-z_][\w$]*"?\.(?:"?[a-z_][\w$]*"?\.)?"?[a-z_][\w$]*"?$/i;
 
 interface SqlAccess {
   readonly verb: string;

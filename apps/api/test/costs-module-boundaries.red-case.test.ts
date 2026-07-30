@@ -478,6 +478,15 @@ describe("Rot-Fall Kostenmodul", () => {
     //
     // Gegenmutation: `SQL_QUALIFIED_TARGET` wieder auf eine Positivliste ohne
     // `pg_catalog` verengen -> rot.
+    // Die zweite Zeile deckt die DREITEILIGE Form ab. Eine erste Fassung von
+    // `SQL_QUALIFIED_TARGET` liess nur zwei Bezeichner zu und verwarf
+    // `mydb.public.assignments` im gestueckelten Fragment still — dieselbe
+    // Schadensform wie die Positivliste, nur eine Ebene tiefer. Gemessen kommt
+    // ein dreiteiliger Name im Repo heute nirgends vor; das macht ihn zu genau
+    // der Luecke, die ohne Dauertest niemand bemerkt.
+    //
+    // Zweite Gegenmutation: `(?:"?[a-z_][\w$]*"?\.)?` aus dem Muster entfernen
+    // -> rot.
     write(
       "apps/api/src/modules/costs/infrastructure/fremdschema.repository.ts",
       [
@@ -486,15 +495,85 @@ describe("Rot-Fall Kostenmodul", () => {
         "  from ${SNAPSHOTS} s",
         "  join pg_catalog.pg_timezone_names z on z.name = s.time_zone",
         "  where s.org_id = $1`;",
+        'const ITEMS = "public.cost_snapshot_items";',
+        "export const dreiteilig = `select i.id",
+        "  from ${ITEMS} i",
+        "  join mydb.public.assignments a on a.id = i.assignment_id`;",
       ].join("\n") + "\n",
     );
+    const meldungen = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/fremdschema.repository.ts");
     expect(
-      messagesOf("costs-touches-only-own-tables").some((m) =>
-        m.includes('"join pg_catalog.pg_timezone_names"'),
-      ),
+      meldungen.some((m) => m.includes('"join pg_catalog.pg_timezone_names"')),
       "Ein qualifizierter Zugriff mit unbekanntem Schema wurde still verworfen.",
     ).toBe(true);
-    drop("apps/api/src/modules/costs/infrastructure/fremdschema.repository.ts");
+    expect(
+      meldungen.some((m) => m.includes('"join mydb.public.assignments"')),
+      "Ein dreiteilig qualifizierter Zugriff wurde still verworfen.",
+    ).toBe(true);
+  });
+
+  it("faengt ein UNqualifiziertes Ziel im CTE-Stueck ohne Statement-Verb", () => {
+    // Der einzige Fall, den ausschliesslich `|| cteNames.size > 0` erreicht.
+    //
+    // `with` wurde aus SQL_STATEMENT_HINT entfernt, weil es ein gewoehnliches
+    // englisches Wort ist; als Ersatz erkennt `SQL_CTE_NAMES` die Form
+    // `x as (`. Dass dieser Ersatz WIRKT, war bis hierher nur behauptet:
+    // gemessen blieb die Datei 44/44 gruen, nachdem `|| cteNames.size > 0`
+    // entfernt wurde. Genau die Bauart, die dieser Strang schon viermal
+    // korrigiert hat — Waechterlogik, deren Wirkung nur im Kommentar steht.
+    //
+    // Das Stueck hinter der Interpolation traegt weder ein Statement-Verb noch
+    // ein qualifiziertes Ziel; ohne die CTE-Zulassung faellt der `join` auf
+    // `assignments` still unter den Tisch.
+    //
+    // Der CTE-Rumpf ist bewusst `( 1 )` und NICHT `( select 1 )`: mit `select`
+    // greift bereits SQL_STATEMENT_HINT, und der Test waere gruen geblieben,
+    // ohne die CTE-Zulassung je zu beruehren. Genau so war die erste Fassung
+    // dieser Fixture gebaut — gemessen blieb sie unter der Gegenmutation gruen.
+    //
+    // Gegenmutation: `|| cteNames.size > 0` entfernen -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/cte.repository.ts",
+      [
+        'const SNAPSHOTS = "public.cost_snapshots";',
+        "export const query = `select s.id from ${SNAPSHOTS} s`;",
+        "export const zweiter = `), b as ( 1 )",
+        "  join assignments a on a.id = t.id`;",
+      ].join("\n") + "\n",
+    );
+    const meldungen = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/cte.repository.ts");
+    expect(
+      meldungen.some((m) => m.includes('"join public.assignments"')),
+      "Das unqualifizierte Ziel im CTE-Stueck wurde nicht gemeldet — die CTE-Zulassung wirkt nicht.",
+    ).toBe(true);
+  });
+
+  it("meldet ein Prosaziel in Tabellenform — der benannte Preis, gemessen", () => {
+    // Der Preis der Entscheidung an `SQL_QUALIFIED_TARGET`: ein Prosaziel der
+    // Form `bezeichner.bezeichner` feuert. Das steht dort als bewusst gewaehlte
+    // Richtung ("Ueberfeuer ist laut, Unterfeuer still") — war aber nirgends
+    // GEMESSEN, sondern nur behauptet.
+    //
+    // Ohne diese Zusicherung koennte jemand das Ueberfeuer spaeter
+    // "aufraeumen", etwa ueber einen Ausschluss bekannter Dateiendungen. Der
+    // pg_catalog-Test bliebe dabei gruen, und der Waechter wuerde genau an der
+    // Stelle wieder still, an der diese Zeile aus der Ueberfeuer-Fixture
+    // entfernt wurde.
+    //
+    // Gegenmutation: `.xlsx` oder qualifizierte Ziele mit Dateiendung vom
+    // Melden ausnehmen -> rot.
+    write(
+      "apps/api/src/modules/costs/infrastructure/preis.repository.ts",
+      'export const hinweis = "Vorlage stammt from vorlage.xlsx";\n',
+    );
+    const meldungen = messagesOf("costs-touches-only-own-tables");
+    drop("apps/api/src/modules/costs/infrastructure/preis.repository.ts");
+    expect(
+      meldungen.some((m) => m.includes('"from vorlage.xlsx"')),
+      "Der benannte Preis ist nicht mehr eingetreten — das Ueberfeuer wurde wegoptimiert.",
+    ).toBe(true);
   });
 
   it("faengt eine relativ importierte Datei NICHT als XLSX-Bibliothek", () => {

@@ -1399,9 +1399,16 @@ describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
       }
     }
     expect(alleCodes).not.toContain("CURRENCY_MISMATCH");
-    // Zwei Nicht-Leerlauf-Bremsen, beide gegen ein STILLES Schrumpfen der
-    // Ableitung: waere der Namensraumimport kaputt, eine Liste umbenannt oder
-    // aus `index.ts` gefallen, waere die Zeile darueber trivial gruen.
+    // Bestandssperre, nicht bloss Schrumpfbremse — sie geht in BEIDE Richtungen
+    // rot, und das ist gewollt:
+    //
+    // - SCHRUMPFT die Ableitung (Namensraumimport kaputt, Liste umbenannt oder
+    //   aus `index.ts` gefallen), waere die Zeile darueber sonst trivial gruen;
+    // - WAECHST sie um eine legitime neunte `*_ERRORS`-Liste, geht sie ebenfalls
+    //   rot. Wer eine Liste hinzufuegt, traegt sie hier bewusst ein — die
+    //   Ableitung selbst deckt sie ab dem ersten Moment ab, der rote Test ist
+    //   nur die Quittung dafuer, dass es jemand gesehen hat.
+    //
     // Gegenmutation: eine `*_ERRORS`-Zeile aus `src/index.ts` entfernen -> rot.
     expect([...fehlerlisten].sort()).toEqual([
       "COST_POSITION_INPUT_ERRORS",
@@ -1512,7 +1519,12 @@ describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
   });
 });
 
-describe("Eingefrorene Konstruktorausgaben (V5.6)", () => {
+// Ohne Vertragsreferenz mit Absicht: `Object.freeze` steht in KEINER
+// V-Entscheidung des PRD. Die Begruendung steht an den Konstruktoren selbst
+// (z. B. duration-milliseconds.ts:63-66) und ist eine Umsetzungsentscheidung,
+// keine PO-Zusage. Eine frueherere Fassung schrieb hier "(V5.6)" — V5.6 sagt
+// aber nur, dass `hourlyRateVersion` bloss noch relationale Invarianten prueft.
+describe("Eingefrorene Konstruktorausgaben", () => {
   // Vier Konstruktoren dieses Vertrags rufen `Object.freeze`, und bis hierher
   // mass das NICHTS: gemessen blieb die Suite 212/212 gruen, nachdem der Freeze
   // aus `checkedQuantity` entfernt wurde. Ein Kommentar, der eine Sperre
