@@ -313,6 +313,135 @@ Modulliste aus ADR-001 **erweitert**, und der Doc-Kommentar in `module-catalogue
 beide Quellen umzustellen. Eine Ergänzung ohne diese Klarstellung hinterlässt eine falsche
 Herkunftsangabe im Katalog.
 
+### Berechnungsvertrag (PO-Entscheidungen vom 30.07.2026, verbindlich)
+
+Vier offene Punkte der Testableitung sind entschieden. Alle vier sind Geldkorrektheit und
+waren nicht ableitbar; sie wurden dem Product Owner vorgelegt und nicht geraten.
+
+#### V1 — Rundung: `HALF_UP`, genau einmal
+
+```text
+COST_RULE_VERSION = "personnel-plan-cost-v1"
+ROUNDING_MODE     = "HALF_UP"          # Halbwert von null weg
+ROUNDING_STAGE    = "COST_POSITION_FINAL_AMOUNT"
+CURRENCY          = "EUR"
+```
+
+1. Geld ausschließlich in EUR-Minor-Units.
+2. Dauer und Mengen als exakte Ganzzahl oder rationaler Bruch.
+3. **Keine Gleitkommaarithmetik.**
+4. Zwischenergebnisse werden **nicht** gerundet.
+5. Gerundet wird **genau einmal**, beim Erzeugen der persistenten Kostenposition.
+6. Halbwert von null weg: `0,5 Cent → 1 Cent`.
+7. Tages-, Baustellen- und Gesamtsummen entstehen **ausschließlich** durch Addition der
+   bereits gerundeten, persistierten Positionsbeträge.
+8. Summen werden **nie** erneut aus ungerundeten Ausgangswerten berechnet oder separat gerundet.
+
+Die Regel ist **nicht** mandanten- oder nutzerkonfigurierbar. Jeder Snapshot und jede Position
+referenzieren die Regelversion. Ein Wechsel erfolgt nur über neue Regelversion und Forward-Fix,
+nie rückwirkend.
+
+#### V2 — Mengeneinheit: ganzzahlige Millisekunden, BigInt
+
+Kanonische Dauer ist `endEpochMilliseconds - startEpochMilliseconds` als **ganzzahlige
+Millisekunden**. Minuten und Stunden sind Darstellung, nicht Rechengrundlage.
+
+```text
+amountNumerator   = rateMinorUnitsPerHour × durationMilliseconds
+amountDenominator = 3_600_000
+amountMinorUnits  = roundHalfUp(amountNumerator / 3_600_000)
+```
+
+Beispiel: `10.001 Cent/h × 1.800.000 ms = 18.001.800.000 / 3.600.000 = 5.000,5 → 5.001 Cent`.
+
+**`durationMinutes()` aus `time-interval.ts` darf im Kostenpfad nicht verwendet werden** — es
+rechnet `durationMs / 60_000` und liefert bei Millisekundenanteil einen Gleitkommawert. Die
+Division durch `3_600_000` erzeugt **keine** zusätzliche Rundungsstelle, solange Zähler und
+Nenner ganzzahlig bleiben und nur der Endbetrag gerundet wird. Multiplikation und Division mit
+`bigint` oder nachweislich exakter Entsprechung. Vor jeder Konvertierung nach `number` muss
+feststehen, dass der Wert nur der Anzeige dient und nicht in eine Berechnung zurückfließt.
+
+Dass Planeinsätze in der UI minutengenau eingegeben werden, ist eine Eingaberegel der
+Planungsdomäne. Sie zwingt die Geldarithmetik **nicht**, Sekunden- oder Millisekundenanteile zu
+runden oder still zu verwerfen; die Kosten-Domäne verlässt sich nicht ungeprüft darauf.
+
+#### V3 — Satzgültigkeit: `validTo` einschließend, intern halboffen
+
+Fachliche Oberfläche `[validFrom, validTo]`, beide einschließend, `validTo = null` unbegrenzt.
+Beide sind **lokale Geschäftsdaten**, keine UTC-Zeitpunkte.
+
+Intern kanonisch halboffen normalisiert: `[validFrom, dayAfter(validTo))`.
+PostgreSQL: `daterange(valid_from, valid_to + 1 Tag, '[)')` oder äquivalente Constraint-Logik.
+
+Verboten: `23:59:59.999` erzeugen; Kalendertage in UTC-Zeitpunkte wandeln; Sekunden oder
+Millisekunden vom Folgezeitpunkt abziehen. Der Nachfolger eines `LocalDate` ist die einzige
+zulässige Normalisierung.
+
+Überlappung: `a.validFrom <= b.validTo AND b.validFrom <= a.validTo`, unbegrenzte Enden
+berücksichtigt. `bis 30.06. / ab 01.07.` ist lückenlos und zulässig;
+`bis 30.06. / ab 30.06.` ist eine Überlappung.
+
+> Satzgültigkeiten verwenden einschließlich interpretierte lokale Geschäftsdaten. Zur
+> Speicherung und Überlappungsprüfung werden sie kanonisch als halboffene Datumsintervalle
+> normalisiert. Diese Semantik unterscheidet sich **bewusst** von Zeitintervallen: Kalendertage
+> sind fachliche Einheiten und keine Zeitpunkte.
+
+UI, Domain Service, PostgreSQL-Constraint und Tests dürfen keine abweichende Intervallsemantik
+führen.
+
+#### V4 — Vorzeichen
+
+```text
+Quantity                 >= 0        sonst QUANTITY_NEGATIVE
+Rate                     >= 0        sonst RATE_NEGATIVE
+PersistedPlanCostAmount  >= 0        sonst COST_AMOUNT_NEGATIVE
+generischer Money-Wert   vorzeichenbehaftet zulässig
+```
+
+`0` ist als Menge zulässig. Ein Satz von `0` ist zulässig und bleibt von `RATE_MISSING`
+unterscheidbar. `durationMilliseconds = 0` ist eine zulässige Nullmenge; `end < start` ist ein
+Intervallfehler **vor** der Kostenberechnung.
+
+`Money` darf intern ein Vorzeichen tragen, damit Differenzen, Vergleiche und Abweichungen
+modellierbar bleiben — ein vorzeichenbehafteter `Money`-Wert ist aber **kein** zulässiger
+Plan-Kostenbetrag. Dafür gilt eine eigene Domänengrenze (`NonNegativeMoney` /
+`PlanCostAmount`). Kein Controller, Command oder Repository darf einen negativen `Money`-Wert
+als Plan-Kostenposition persistieren.
+
+Die Prüfung auf `COST_AMOUNT_NEGATIVE` ist **Defense in Depth** zusätzlich zu Mengen- und
+Satzvalidierung — gegen Fehler in Berechnung, Rundung oder Datenübernahme.
+
+Negative Korrektur- und Stornobuchungen sind **nicht** im Sprint-5-Scope und dürfen später
+nicht durch bloßes Zulassen negativer Beträge nebenbei entstehen. Sie brauchen einen eigenen
+fachlichen Typ (`CostAdjustment` mit Grund, Referenz auf die korrigierte Position, Akteur,
+Audit, eigener Autorisierung und eigener Regelversion). Historische Snapshots werden nicht
+still überschrieben.
+
+Berechnungsinvariante:
+
+```text
+quantity >= 0 · rate >= 0 · roundedPositionAmount >= 0
+snapshotTotal = sum(persistedPositionAmounts) · snapshotTotal >= 0
+```
+
+Eine Verletzung blockiert die **gesamte** Snapshot-Erzeugung. Kein partieller Snapshot wird
+persistiert.
+
+#### Evidenz-Eigentum der Entscheidungen
+
+| Gegenstand                                                                     | Ticket      |
+| ------------------------------------------------------------------------------ | ----------- |
+| Money-Arithmetik, `NonNegativeMoney`/`PlanCostAmount`-Grenze                   | **EYT-95**  |
+| Quantity- und Rate-Vorzeichenregeln, Fehlerklassen                             | **EYT-95**  |
+| exakter Duration-Quantity-Typ, nichtnegative ganzzahlige Millisekunden         | **EYT-95**  |
+| BigInt-/Rational-Arithmetik, Stundenrate mit Nenner `3_600_000`                | **EYT-95**  |
+| einmalige finale `HALF_UP`-Rundung, Verbot von `number`-Gleitkomma im Geldpfad | **EYT-95**  |
+| Ableitung der Dauer aus Assignment-Intervallen                                 | **EYT-109** |
+| Aufteilung über lokale Kalendertage, DST- und Mitternachtslogik                | **EYT-109** |
+| Übergabe jedes exakten Teilintervalls als Millisekundenmenge an EYT-95         | **EYT-109** |
+| Snapshot blockiert negative Positionen, keine Teilpersistenz                   | **EYT-109** |
+| Snapshot-Summe aus gespeicherten Positionen, nichtnegativ                      | **EYT-109** |
+
 ### Schnittgrenze EYT-95 / EYT-109 (PO-Korrektur 30.07.2026)
 
 REQ-005 wird von **zwei** Tickets getragen. Die Grenze ist verbindlich; sie verschiebt keinen
