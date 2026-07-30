@@ -209,11 +209,16 @@ getrennt geführt.
 
 ```text
 JIRA:                   In Arbeit          (gesetzt 30.07.2026)
-RED_TEST_WRITTEN:       PASS               42 Zusicherungen in zwei Dateien
-RED_TEST_EXECUTED:      PASS               42 rot / 110 gruen, eigenhaendig reproduziert
+RED_TEST_WRITTEN:       PASS               78 Zusicherungen in zwei Dateien (b4b52f2)
+RED_TEST_EXECUTED:      PASS               48 rot / 140 gruen, eigenhaendig reproduziert
 RED_TEST_CI_MAPPED:     PASS               unit-tests, `pnpm test`
-RED_REASON_VALID:       OPEN               alle Fehler sind Aufloesungsfehler
-IMPLEMENTATION_ALLOWED: nein               nur nach starkem Red
+RED_REASON_VALID:       PASS               30.07.2026 nach dem Skelett (e1371c5):
+                                           48 von 48 mit NOT_IMPLEMENTED, kein
+                                           Aufloesungsfehler; 47 von 48 erreichen das
+                                           Subjekt, dessen Verhalten sie behaupten; alle
+                                           fuenf Vertragsklassen V1-V4 und sonstige tragen
+                                           mindestens einen solchen Test
+IMPLEMENTATION_ALLOWED: ja                 Bedingung der PO-Weisung Abschnitt 6 erfuellt
 ```
 
 ### EYT-105
@@ -285,3 +290,31 @@ benannten Stelle" — und damit der starke Nachweis, den der Massstab meint.
   Code verwendet, waere genau der Eintrag, der nichts misst. Noetig ist je ein Test nach dem
   Muster von `TIME_INTERVAL_ERRORS` — oder die Entscheidung, die Listen nur als Union-Typ und
   nicht als Laufzeitwert zu fuehren.
+
+## 10. Weg zur starken Rot-Evidenz bei EYT-95 (drei Skelettrunden)
+
+| Runde       | rot / gruen  | Fehlerklasse        | erreichen ihr Subjekt | Klassen mit starkem Rot |
+| ----------- | ------------ | ------------------- | --------------------- | ----------------------- |
+| vor Skelett | 73 / 110     | `is not a function` | 0 von 73              | keine                   |
+| Runde 1     | 60 / 123     | `NOT_IMPLEMENTED`   | 14 von 60             | drei von fuenf          |
+| Runde 2     | 52 / 136     | `NOT_IMPLEMENTED`   | 14 von 52             | drei von fuenf          |
+| Runde 3     | **48 / 140** | `NOT_IMPLEMENTED`   | **47 von 48**         | **fuenf von fuenf**     |
+
+Runde 2 sah nach Stillstand aus (14 zu 14), war aber der Schritt, der den Rueckstau auf einen
+einzigen benannten Punkt zusammenzog: 37 der 38 verbliebenen Zeilen hingen an
+`hourlyRateVersion`. Runde 3 hat genau den geloest.
+
+Die eine verbliebene Zeile — „nimmt ein negatives Delta nicht als Plan-Kostenbetrag an" — baut
+ihr Eingangsdatum ueber das korrekt eingefrorene `subtractMoney` und ist keine Luecke, sondern
+die naechste Runde.
+
+Beispiel fuer starkes Rot, woertlich:
+
+```text
+FAIL  test/money-rate.test.ts > Berechnung und Rundung > rundet den Halbwert von null weg
+Error: NOT_IMPLEMENTED
+ ❯ costOfDuration src/cost-position.ts:124:9
+```
+
+Der Test erreicht `costOfDuration` und scheitert dort am fehlenden Verhalten — nicht daran, dass
+ein Modul fehlt.
