@@ -391,6 +391,32 @@ mit **fail-closed** Validierung vor `BigInt(value)`. Die Differenz zweier Epoch-
 ist für realistische Einsatzintervalle sicher darstellbar — **diese Annahme ist zu prüfen und
 darf nicht still vorausgesetzt werden.**
 
+#### V2e — `AMOUNT_NOT_FINITE`: dieselbe Eingabeklasse, derselbe Name
+
+Beim Bauen des Skeletts fiel eine unbeabsichtigte Asymmetrie auf: `toDurationMilliseconds`
+meldet für `NaN` und `Infinity` laut V2b `QUANTITY_NOT_FINITE`, während `moneyFromNumber`
+dieselbe Eingabeklasse in `AMOUNT_NOT_INTEGER` faltete. Zwei benachbarte Zahlengrenzen, ein
+Eingabefall, zwei Namen.
+
+`MONEY_ERRORS` wird deshalb um **`AMOUNT_NOT_FINITE`** erweitert, und `moneyFromNumber` prüft in
+derselben Reihenfolge wie die Mengengrenze:
+
+```text
+1. Number.isFinite(value)      sonst AMOUNT_NOT_FINITE
+2. Number.isInteger(value)     sonst AMOUNT_NOT_INTEGER
+3. Number.isSafeInteger(value) sonst AMOUNT_NOT_SAFE_INTEGER
+```
+
+Die Reihenfolge ist aus demselben Grund verbindlich wie in V2b: `Number.isSafeInteger(NaN)` ist
+ebenfalls `false`, wer die Sicherheitsprüfung vorzieht meldet für `NaN` den falschen Code.
+
+**Warum jetzt und nicht später:** diese Codes werden Teil des HTTP-Vertrags, sobald EYT-105
+Beträge annimmt. Danach ist die Asymmetrie nicht mehr geräuschlos korrigierbar.
+
+Die Zusicherung dazu ist bewusst **zweigleisig** gebaut, damit sie eine spätere Umbenennung
+überlebt: ein Test pinnt den Namen, ein zweiter fordert nur, dass nicht endliche und gebrochene
+Beträge **unterscheidbare** Codes liefern.
+
 #### V2c — Gemessene Grundlage von V2b und die daraus folgende Prüfreihenfolge
 
 Die drei folgenden Punkte sind **gemessen** (Node, 30.07.2026), nicht angenommen. Sie sind der
