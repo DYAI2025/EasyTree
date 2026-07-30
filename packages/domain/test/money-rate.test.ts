@@ -52,9 +52,14 @@ import {
   durationMilliseconds,
   findRateVersionOverlaps,
   hourlyRateVersion,
+  MONEY_ERRORS,
   moneyFromNumber,
   moneyOfMinorUnits,
+  PLAN_COST_AMOUNT_ERRORS,
   planCostAmount,
+  QUANTITY_ERRORS,
+  RATE_SELECTION_ERRORS,
+  RATE_VERSION_ERRORS,
   ROUNDING_MODE,
   ROUNDING_STAGE,
   selectRateVersion,
@@ -189,12 +194,12 @@ describe("Money — exakte EUR-Minor-Units (AK1, V1)", () => {
     // Gleitkommarechnung (0/0, Ueberlauf). V1 Punkt 3 schliesst
     // Gleitkommaarithmetik aus, also muss ihr Ergebnis an der Grenze scheitern.
     //
-    // VERTRAGSERGAENZUNG (siehe Bericht): erwartet wird `AMOUNT_NOT_FINITE`,
-    // nicht `AMOUNT_NOT_INTEGER`. `toDurationMilliseconds` meldet fuer dieselbe
-    // Eingabeklasse laut V2b `QUANTITY_NOT_FINITE`; zwei benachbarte Grenzen
-    // duerfen denselben Fall nicht verschieden benennen. Die Codes werden Teil
-    // des HTTP-Vertrags, sobald EYT-105 Betraege annimmt — dann waere die
-    // Asymmetrie nicht mehr geraeuschlos korrigierbar.
+    // `AMOUNT_NOT_FINITE` ist ein eigener Code, nicht in `AMOUNT_NOT_INTEGER`
+    // gefaltet: `toDurationMilliseconds` meldet fuer dieselbe Eingabeklasse laut
+    // V2b `QUANTITY_NOT_FINITE`, und zwei benachbarte Grenzen duerfen denselben
+    // Fall nicht verschieden benennen. Die Codes werden Teil des HTTP-Vertrags,
+    // sobald EYT-105 Betraege annimmt — dann waere die Asymmetrie nicht mehr
+    // geraeuschlos korrigierbar.
     //
     // Damit gilt fuer `moneyFromNumber` dieselbe Reihenfolge wie in V2b:
     // endlich -> ganzzahlig -> sicher. `Number.isSafeInteger(NaN)` ist
@@ -249,6 +254,15 @@ describe("Money — exakte EUR-Minor-Units (AK1, V1)", () => {
     // Gegenmutation: Addition ueber Euro-Gleitkommawerte -> 4500 oder 4502, rot.
     const summe = addMoney(moneyOfMinorUnits(4500n, "EUR"), moneyOfMinorUnits(1n, "EUR"));
     expect(summe.minorUnits).toBe(4501n);
+  });
+
+  it("zieht einen kleineren Betrag exakt ab", () => {
+    // POSITIVRICHTUNG der Subtraktion: der gewoehnliche Fall, in dem der
+    // Minuend groesser ist. 2,50 EUR - 1,00 EUR = 1,50 EUR.
+    // Gegenmutation: Operanden vertauschen (`subtrahend - minuend`) -> -150n
+    // statt 150n, rot.
+    const delta = subtractMoney(moneyOfMinorUnits(250n, "EUR"), moneyOfMinorUnits(100n, "EUR"));
+    expect(delta.minorUnits).toBe(150n);
   });
 
   it("laesst bei der Subtraktion ein negatives Delta zu", () => {
@@ -760,6 +774,27 @@ describe("Satzversion — Gueltigkeit einschliessend, intern halboffen (AK3, V3)
     expect(fehlt.error).toBe("RATE_MISSING");
   });
 
+  it("nimmt eine Satzversion mit gueltigem Intervall an", () => {
+    // Der Gegenpol zu den beiden Ablehnungen darunter. Ohne ihn bliebe die
+    // Mutation "lehne jede Satzversion ab" gruen — dieselbe Luecke, die auf der
+    // Money- und der Mengenseite schon einmal aufgefallen ist. Zugleich die
+    // Positivrichtung, die das Invariantenregister fuer `hourlyRateVersion`
+    // verlangt.
+    // Gegenmutation: `hourlyRateVersion` pauschal ok:false liefern lassen -> rot.
+    const version = hourlyRateVersion({
+      rateVersionId: rateId("r-gueltig"),
+      amountPerHour: moneyOfMinorUnits(4500n, "EUR"),
+      validFrom: day(2026, 1, 1),
+      validTo: day(2026, 6, 30),
+    });
+    expect(version.ok).toBe(true);
+    if (!version.ok) return;
+    expect(version.version.rateVersionId).toBe(rateId("r-gueltig"));
+    expect(version.version.amountPerHour.minorUnits).toBe(4500n);
+    expect(version.version.validFrom).toEqual(day(2026, 1, 1));
+    expect(version.version.validTo).toEqual(day(2026, 6, 30));
+  });
+
   it("lehnt einen negativen Stundensatz ab", () => {
     // V4: `Rate >= 0 sonst RATE_NEGATIVE`. Ein negativer Satz erzeugte eine
     // Gutschrift, die niemand angeordnet hat. Stornobuchungen brauchen laut V4
@@ -936,5 +971,120 @@ describe("Kostenposition — Herkunft und historische Stabilitaet (AK4, AK5)", (
     if (result.ok) return;
     expect(result.error).toBe("RATE_MISSING");
     expect(result).not.toHaveProperty("position");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fehlercodelisten
+// ---------------------------------------------------------------------------
+
+/**
+ * Muster von `TIME_INTERVAL_ERRORS` in `time-interval.test.ts`, um eine zweite
+ * Messung erweitert.
+ *
+ * Jede Liste wird auf ZWEI Defekte geprueft, und der zweite ist der wichtigere:
+ *
+ *   1. **Doppelfrei.** Ein zweimal aufgefuehrter Code laesst eine Fehlerlage
+ *      doppelt benannt erscheinen und macht jede Vollzaehligkeitsaussage wertlos.
+ *   2. **Erreichbar.** Jeder Code der Liste wird von einer konkreten Eingabe
+ *      wirklich erzeugt. Ein verwaister Code ist kein Schoenheitsfehler: er
+ *      steht im Vertrag, erscheint in der Typunion, wird von Aufrufern
+ *      behandelt — und tritt nie ein. Umgekehrt zwingt diese Messung dazu, fuer
+ *      jeden NEUEN Code eine ausloesende Eingabe zu benennen, statt ihn nur in
+ *      die Liste zu schreiben.
+ *
+ * Verglichen wird gegen die Liste selbst, nicht gegen ein Literal: so passt
+ * sich der Test einer bewussten Vertragsaenderung an und schlaegt trotzdem an,
+ * wenn Liste und Verhalten auseinanderlaufen.
+ */
+describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
+  /** Sammelt die tatsaechlich aufgetretenen Codes einer Reihe von Eingaben. */
+  const beobachte = (ergebnisse: readonly { ok: boolean }[]): string[] => {
+    const codes = new Set<string>();
+    for (const ergebnis of ergebnisse) {
+      const typed = ergebnis as { ok: true } | { ok: false; error: string };
+      if (!typed.ok) codes.add(typed.error);
+    }
+    return [...codes].sort();
+  };
+
+  it("fuehrt jeden Money-Fehlercode genau einmal und erreicht jeden", () => {
+    // Gegenmutation: einen vierten Code in MONEY_ERRORS aufnehmen, ohne eine
+    // Eingabe zu benennen, die ihn ausloest -> rot.
+    // Zweite Gegenmutation: `AMOUNT_NOT_FINITE` doppelt eintragen -> rot.
+    expect(new Set(MONEY_ERRORS).size).toBe(MONEY_ERRORS.length);
+    expect(
+      beobachte([
+        moneyFromNumber(Number.NaN, "EUR"),
+        moneyFromNumber(Number.POSITIVE_INFINITY, "EUR"),
+        moneyFromNumber(4500.5, "EUR"),
+        moneyFromNumber(Number.MAX_SAFE_INTEGER + 2, "EUR"),
+      ]),
+    ).toEqual([...MONEY_ERRORS].sort());
+  });
+
+  it("fuehrt jeden Mengen-Fehlercode genau einmal und erreicht jeden", () => {
+    // Die vier Faelle aus V2b, je einer je Code — dieselben vier, die oben
+    // einzeln geprueft werden, hier als Vollstaendigkeitsaussage ueber die Liste.
+    // Gegenmutation: einen fuenften Code in QUANTITY_ERRORS aufnehmen, ohne
+    // ausloesende Eingabe -> rot.
+    expect(new Set(QUANTITY_ERRORS).size).toBe(QUANTITY_ERRORS.length);
+    expect(
+      beobachte([
+        toDurationMilliseconds(Number.NaN),
+        toDurationMilliseconds(450_000.5),
+        toDurationMilliseconds(-1),
+        toDurationMilliseconds(Number.MAX_SAFE_INTEGER + 2),
+      ]),
+    ).toEqual([...QUANTITY_ERRORS].sort());
+  });
+
+  it("fuehrt jeden Plan-Kostenbetrag-Fehlercode genau einmal und erreicht jeden", () => {
+    // Nur ein Code, und genau das ist die Aussage: die Domaenengrenze aus V4
+    // kennt einen einzigen Ablehnungsgrund. Kaeme ein zweiter hinzu, muesste
+    // jemand eine Eingabe dafuer benennen.
+    // Gegenmutation: einen zweiten Code aufnehmen, ohne ausloesende Eingabe -> rot.
+    expect(new Set(PLAN_COST_AMOUNT_ERRORS).size).toBe(PLAN_COST_AMOUNT_ERRORS.length);
+    expect(beobachte([planCostAmount(moneyOfMinorUnits(-1n, "EUR"))])).toEqual([
+      ...PLAN_COST_AMOUNT_ERRORS,
+    ]);
+  });
+
+  it("fuehrt jeden Satzversions-Fehlercode genau einmal und erreicht jeden", () => {
+    // Gegenmutation: einen dritten Code in RATE_VERSION_ERRORS aufnehmen, ohne
+    // ausloesende Eingabe -> rot.
+    expect(new Set(RATE_VERSION_ERRORS).size).toBe(RATE_VERSION_ERRORS.length);
+    expect(
+      beobachte([
+        hourlyRateVersion({
+          rateVersionId: rateId("r-negativ"),
+          amountPerHour: moneyOfMinorUnits(-1n, "EUR"),
+          validFrom: day(2026, 1, 1),
+          validTo: null,
+        }),
+        hourlyRateVersion({
+          rateVersionId: rateId("r-verkehrt"),
+          amountPerHour: moneyOfMinorUnits(4500n, "EUR"),
+          validFrom: day(2026, 7, 1),
+          validTo: day(2026, 6, 30),
+        }),
+      ]),
+    ).toEqual([...RATE_VERSION_ERRORS].sort());
+  });
+
+  it("fuehrt jeden Satzauswahl-Fehlercode genau einmal und erreicht jeden", () => {
+    // Die beiden blockierenden Ausgaenge der Auswahl. Dass es genau zwei sind
+    // und keinen dritten "stillschweigend null Euro"-Ausgang, ist die
+    // eigentliche Zusage von REQ-005.
+    // Gegenmutation: einen dritten Code aufnehmen, ohne ausloesende Eingabe -> rot.
+    const a = validRate("r-a", 4500n, day(2026, 1, 1), day(2026, 7, 31));
+    const b = validRate("r-b", 4700n, day(2026, 7, 1), null);
+    expect(new Set(RATE_SELECTION_ERRORS).size).toBe(RATE_SELECTION_ERRORS.length);
+    expect(
+      beobachte([
+        selectRateVersion([], day(2026, 7, 15)),
+        selectRateVersion([a, b], day(2026, 7, 15)),
+      ]),
+    ).toEqual([...RATE_SELECTION_ERRORS].sort());
   });
 });
