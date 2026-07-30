@@ -83,7 +83,11 @@ export {
 // ---------------------------------------------------------------------------
 
 export type {
+  CostCurrencyResult,
   Currency,
+  HourlyRateAmount,
+  HourlyRateAmountError,
+  HourlyRateAmountResult,
   Money,
   MoneyError,
   MoneyResult,
@@ -93,7 +97,10 @@ export type {
 } from "./money.js";
 export {
   addMoney,
+  costCurrencyFromUnknown,
   CURRENCIES,
+  HOURLY_RATE_AMOUNT_ERRORS,
+  hourlyRateAmount,
   MONEY_ERRORS,
   moneyFromNumber,
   moneyOfMinorUnits,

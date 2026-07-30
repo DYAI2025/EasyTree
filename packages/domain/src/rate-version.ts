@@ -22,14 +22,20 @@
 
 import type { RateVersionId } from "./identifiers.js";
 import { compareLocalBusinessDate, dayAfter } from "./local-business-date.js";
-import type { Money } from "./money.js";
+import type { HourlyRateAmount } from "./money.js";
 import type { LocalBusinessDate } from "./planning-week.js";
 
 /** Was {@link hourlyRateVersion} entgegennimmt — noch ungeprüft. */
 export interface HourlyRateVersionInput {
   readonly rateVersionId: RateVersionId;
-  /** Satz je Stunde in Minor Units. `0` ist zulässig (V4) und nicht dasselbe wie „fehlt". */
-  readonly amountPerHour: Money;
+  /**
+   * Satz je Stunde, **bereits geprüft** (V5.6 Schicht 2). `0` ist zulässig (V4)
+   * und nicht dasselbe wie „fehlt". Dass hier {@link HourlyRateAmount} und
+   * nicht `Money` steht, ist die ganze Aussage von V5.6: ein negativer Rohwert
+   * erreicht diese Factory gar nicht mehr, deshalb muss sie ihn auch nicht
+   * gegen einen zweiten Eingabefehler priorisieren.
+   */
+  readonly amountPerHour: HourlyRateAmount;
   /** Erster Gültigkeitstag, einschließend. */
   readonly validFrom: LocalBusinessDate;
   /** Letzter Gültigkeitstag, einschließend. `null` = unbegrenzt. */
@@ -51,10 +57,18 @@ export interface HourlyRateVersion extends HourlyRateVersionInput {
   readonly [hourlyRateVersionBrand]: "HourlyRateVersion";
 }
 
-/** Ablehnungsgründe beim Anlegen einer Satzversion. */
+/**
+ * Ablehnungsgründe beim Anlegen einer Satzversion — seit V5.6 **nur noch
+ * relationale** Invarianten.
+ *
+ * `RATE_NEGATIVE` ist hier bewusst nicht mehr aufgeführt: der Code ist nicht
+ * verschwunden, er hat die Grenze gewechselt und sitzt jetzt an
+ * `hourlyRateAmount`, also dort, wo der Rohwert geprüft wird. Damit gibt es bei
+ * mehrfach ungültigen Rohwerten keinen künstlich priorisierten Domainfehler
+ * mehr — die Gateway- bzw. Zod-Grenze darf mehrere Feldfehler gleichzeitig
+ * melden, und diese Factory bekommt solche Werte gar nicht erst.
+ */
 export const RATE_VERSION_ERRORS = [
-  /** V4: `Rate >= 0`. Ein negativer Satz erzeugte eine Gutschrift, die niemand angeordnet hat. */
-  "RATE_NEGATIVE",
   /** Verkehrtes Gültigkeitsintervall — deckt keinen Tag ab und darf nicht still verschwinden. */
   "VALID_TO_BEFORE_VALID_FROM",
 ] as const;
@@ -81,35 +95,47 @@ export type RateSelectionResult =
   | { readonly ok: false; readonly error: RateSelectionError };
 
 /**
- * Ein Paar Satzversionen, deren Gültigkeitsintervalle sich überschneiden.
+ * Ein Paar Satzversionen, deren Gültigkeitsintervalle sich überschneiden, mit
+ * dem überlappenden Bereich (V5.5).
  *
- * Nur die Identität der beiden Beteiligten ist Vertrag. Eine Reihenfolge der
- * Paare untereinander sagt EYT-95 bewusst nicht zu — wer darauf baut, baut auf
- * ein Implementierungsdetail.
+ * Kanonisch: `firstVersionId` und `secondVersionId` sind nach `validFrom`
+ * sortiert, bei Gleichstand nach ID. Jedes **ungeordnete** Versionspaar
+ * erscheint höchstens einmal — `A überlappt B` und `B überlappt A` sind
+ * dasselbe Fundstück, nicht zwei.
+ *
+ * Bewusst **keine** berechneten Kosten und keine UI-Texte darin: das ist ein
+ * Befund, keine Darstellung. Mitarbeiterbezug und handlungsorientierte
+ * Aufbereitung ergänzt EYT-108.
  */
 export interface RateVersionOverlap {
-  readonly first: RateVersionId;
-  readonly second: RateVersionId;
+  readonly firstVersionId: RateVersionId;
+  readonly secondVersionId: RateVersionId;
+  /** Erster Tag, an dem beide Versionen gelten — einschliessend. */
+  readonly overlapFrom: LocalBusinessDate;
+  /** Interne halboffene Grenze; `null`, wenn beide Enden offen sind. */
+  readonly overlapEndExclusive: LocalBusinessDate | null;
 }
 
 /**
  * Die einzige Stelle, an der eine geprüfte {@link HourlyRateVersion} entsteht.
  *
- * Beide Prüfungen zusammen, nicht eine davon: Ein Konstruktor, der ein
- * verkehrtes Gültigkeitsintervall als geprüft ausgibt, ist fail-open — die
- * Marke behauptete dann eine Zusicherung, die nicht gilt, und der Fehler fiele
- * erst in der Auswahl auf, wo er als fehlender oder mehrdeutiger Satz erscheint
- * statt als das, was er ist.
+ * Seit V5.6 prüft sie **nur relationale** Invarianten — Beziehungen zwischen
+ * bereits geprüften Feldern. Die Primitiven kommen validiert und gebrandet
+ * herein ({@link HourlyRateAmount}), die Frage „ist der Satz negativ" stellt
+ * sich hier also gar nicht mehr. Ein Konstruktor, der ein verkehrtes
+ * Gültigkeitsintervall als geprüft ausgäbe, wäre trotzdem fail-open: die Marke
+ * behauptete eine Zusicherung, die nicht gilt, und der Fehler fiele erst in der
+ * Auswahl auf, wo er als fehlender oder mehrdeutiger Satz erscheint statt als
+ * das, was er ist.
  *
- * Die Reihenfolge der beiden Prüfungen ist **nicht** Vertrag (anders als bei
- * den Zahlengrenzen): Satz und Intervall sind voneinander unabhängig, und für
- * eine Eingabe, die beides verletzt, legt kein Test einen Vorrang fest.
+ * **Überlappungen zwischen mehreren Versionen prüft diese Factory nicht** — das
+ * ist keine Eigenschaft einer einzelnen Version, sondern eines Katalogs, und
+ * gehört deshalb zu {@link findRateVersionOverlaps}.
  *
  * `validTo === validFrom` ist ein zulässiger Ein-Tages-Satz — deshalb `< 0` und
  * nicht `<= 0`.
  */
 export function hourlyRateVersion(input: HourlyRateVersionInput): HourlyRateVersionResult {
-  if (input.amountPerHour.minorUnits < 0n) return { ok: false, error: "RATE_NEGATIVE" };
   if (input.validTo !== null && compareLocalBusinessDate(input.validTo, input.validFrom) < 0) {
     return { ok: false, error: "VALID_TO_BEFORE_VALID_FROM" };
   }
@@ -167,6 +193,43 @@ function overlaps(a: HourlyRateVersion, b: HourlyRateVersion): boolean {
 }
 
 /**
+ * Der überlappende Bereich zweier Versionen, in kanonischer Reihenfolge (V5.5).
+ *
+ * Die Sortierung nach `validFrom` und bei Gleichstand nach ID macht das
+ * Ergebnis von der Eingabereihenfolge unabhängig — ohne sie lieferte
+ * `[a, b]` ein anderes Fundstück als `[b, a]`, und ein Vergleich zweier Läufe
+ * wäre wertlos.
+ *
+ * Der überlappende Bereich ist der Schnitt beider halboffener Intervalle:
+ * Beginn ist der spätere der beiden Starttage, Ende die frühere der beiden
+ * exklusiven Grenzen. `null` heisst „beide Enden offen", nicht „unbekannt".
+ */
+function canonicalOverlap(a: HourlyRateVersion, b: HourlyRateVersion): RateVersionOverlap {
+  const byStart = compareLocalBusinessDate(a.validFrom, b.validFrom);
+  const aFirst = byStart !== 0 ? byStart < 0 : a.rateVersionId <= b.rateVersionId;
+  const [first, second] = aFirst ? [a, b] : [b, a];
+
+  const firstEnd = exclusiveEnd(first);
+  const secondEnd = exclusiveEnd(second);
+  const earlierEnd =
+    firstEnd === null
+      ? secondEnd
+      : secondEnd === null
+        ? firstEnd
+        : compareLocalBusinessDate(firstEnd, secondEnd) <= 0
+          ? firstEnd
+          : secondEnd;
+
+  return {
+    firstVersionId: first.rateVersionId,
+    secondVersionId: second.rateVersionId,
+    // Der spätere Start — `second` per Konstruktion, ausser bei gleichem Start.
+    overlapFrom: second.validFrom,
+    overlapEndExclusive: earlierEnd,
+  };
+}
+
+/**
  * Die für `on` gültige Satzversion — oder ein blockierendes Ergebnis.
  *
  * Bewusst **kein** `versions.find(...)`: das liefert bei zwei deckenden
@@ -204,12 +267,15 @@ export function findRateVersionOverlaps(
   // `time-interval.ts` darf das, weil es nur die Existenz einer Überschneidung
   // meldet; hier werden die Beteiligten benannt, und eine lange Version, die
   // zwei kurze überspannt, wäre bei einem reinen Nachbarvergleich unsichtbar.
+  //
+  // `j > i` ist zugleich die Deduplizierung aus V5.5: jedes ungeordnete Paar
+  // wird genau einmal besucht, unabhängig von der Eingabereihenfolge.
   for (let i = 0; i < versions.length; i += 1) {
     for (let j = i + 1; j < versions.length; j += 1) {
       const a = versions[i];
       const b = versions[j];
       if (a === undefined || b === undefined) continue;
-      if (overlaps(a, b)) found.push({ first: a.rateVersionId, second: b.rateVersionId });
+      if (overlaps(a, b)) found.push(canonicalOverlap(a, b));
     }
   }
 

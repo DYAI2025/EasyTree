@@ -19,12 +19,13 @@
  * laut V4 einen eigenen fachlichen Typ; sie dürfen nicht nebenbei dadurch
  * entstehen, dass hier ein Vorzeichen durchrutscht.
  *
- * ## Skelettrümpfe (EYT-95, Phase 2)
+ * ## Zwei Verfeinerungen, zwei Grenzen (V5.6)
  *
- * Jede rechnende Funktion wirft `NOT_IMPLEMENTED`. Ein plausibler Rückgabewert
- * wäre ein versteckter Defaultwert und machte Tests zufällig grün — genau das
- * verbietet die PRD unter „Grenzen des compile-enabling Skeletts". Das
- * `void [...]` hält die Parameter am Leben, ohne einen Wert zu erfinden.
+ * {@link PlanCostAmount} ist ein **Ergebnis**, {@link HourlyRateAmount} eine
+ * **Eingabe**. Beide sind nichtnegative Geldbeträge, tragen aber eigene Marken,
+ * damit sie nicht gegeneinander austauschbar sind: ein Stundensatz, der
+ * versehentlich als Positionsbetrag persistiert wird, wäre kein Typfehler mehr,
+ * sondern ein falscher Betrag in der Buchhaltung.
  */
 
 /**
@@ -42,10 +43,6 @@ export interface Money {
   readonly currency: Currency;
 }
 
-/**
- * Ablehnungsgründe an der Zahlengrenze. Stabile Codes — sie werden Teil des
- * API-Vertrags, sobald EYT-105 Beträge über HTTP annimmt.
- */
 /**
  * Ablehnungsgründe an der Zahlengrenze. Die Reihenfolge dieser Liste spiegelt
  * die Prüfreihenfolge in {@link moneyFromNumber} und ist Teil des Vertrags:
@@ -144,10 +141,17 @@ export function moneyFromNumber(value: number, currency: Currency): MoneyResult 
 /**
  * Exakte Addition in Minor Units.
  *
- * Die Währung stammt vom ersten Summanden. Ein Mischbetrag ist heute
- * unerreichbar, weil {@link CURRENCIES} genau einen Eintrag hat — welchen Code
- * eine Mischung liefern soll, ist eine offene PO-Entscheidung und wird hier
- * bewusst **nicht** erfunden.
+ * **Kein Währungsvergleich** (V5.4-korrigiert). Zwei gültig konstruierte
+ * {@link Money}-Werte können keine unterschiedlichen Währungen besitzen —
+ * {@link Currency} hat genau einen Bewohner. Ein Vergleich hier wäre ein toter
+ * Zweig, und ein `throw` statt eines Ergebniszweigs ändert daran nichts: es
+ * verschiebt nur die Form, nicht die Erreichbarkeit.
+ *
+ * Die Laufzeitsicherheit kommt stattdessen aus der Kette
+ * {@link costCurrencyFromUnknown} → gebrandeter Wert → keine öffentliche
+ * unvalidierte Konstruktion → `z.literal("EUR")` → `CHECK (currency = 'EUR')`.
+ * Ein trotz dieser Grenzen gefälschtes Objekt ist eine Invariantenverletzung,
+ * kein fachlicher Währungsfehler.
  */
 export function addMoney(augend: Money, addend: Money): Money {
   return moneyOfMinorUnits(augend.minorUnits + addend.minorUnits, augend.currency);
@@ -181,16 +185,120 @@ export function planCostAmount(money: Money): PlanCostAmountResult {
  * versehentlich ein zweites Mal gerundet werden.
  */
 export function sumPlanCostAmounts(amounts: readonly PlanCostAmount[]): PlanCostAmountResult {
-  // OFFENE PO-ENTSCHEIDUNG: Was die LEERE Summe bedeutet, sagt weder die PRD
-  // noch ein Test. Hier gewählt: `0` in EUR — die neutrale Zahl der Addition.
-  // Denkbar wäre stattdessen ein blockierendes Ergebnis, weil "keine Position"
-  // und "Positionen im Wert von null" fachlich verschiedene Lagen sind. Wer das
-  // entscheidet, ändert diese Zeile und braucht dafür einen eigenen Test.
+  // V5.1: Die leere Summe ist `PlanCostAmount(0n, "EUR")`. Sprint 5 erlaubt
+  // ausschliesslich EUR-Plan-Personalkosten, deshalb hat die leere Menge eine
+  // eindeutige additive Identität — das ist entschieden, nicht ausgelegt.
+  // Kein Währungsvergleich (V5.4-korrigiert): alle Beträge sind EUR, weil
+  // `Currency` genau einen Bewohner hat. Ein Vergleich wäre ein toter Zweig.
   let total = 0n;
   for (const amount of amounts) total += amount.minorUnits;
 
-  // Über `planCostAmount`, nicht am Vorzeichentor vorbei: die Summe
-  // nichtnegativer Beträge ist zwar nichtnegativ, aber V4 verlangt die Prüfung
-  // ausdrücklich als Defense in Depth gegen Rechenfehler.
+  // V5.1: Der Nullbetrag läuft durch DENSELBEN Validator wie jeder andere
+  // Betrag — kein Sonderweg an der Vorzeichengrenze vorbei.
   return planCostAmount(moneyOfMinorUnits(total, CURRENCIES[0]));
+}
+
+declare const hourlyRateAmountBrand: unique symbol;
+
+/**
+ * Nichtnegativer Stundensatz in einer unterstützten Währung (V5.6).
+ *
+ * Eigene Marke neben {@link PlanCostAmount}, weil es eine andere Grenze ist:
+ * ein Plan-Kostenbetrag ist ein Ergebnis, ein Stundensatz eine Eingabe. Beide
+ * sind nichtnegativ, aber sie dürfen nicht gegeneinander austauschbar sein.
+ */
+export interface HourlyRateAmount extends Money {
+  readonly [hourlyRateAmountBrand]: "HourlyRateAmount";
+}
+
+export const HOURLY_RATE_AMOUNT_ERRORS = [
+  /**
+   * V4: `Rate >= 0`. Ein negativer Satz erzeugte eine Gutschrift, die niemand
+   * angeordnet hat. Der Code hat mit V5.6 die Grenze gewechselt — er kam bis
+   * dahin aus `hourlyRateVersion` und gehört jetzt hierher, an die Stelle, die
+   * den Rohwert prüft.
+   */
+  "RATE_NEGATIVE",
+] as const;
+
+export type HourlyRateAmountError = (typeof HOURLY_RATE_AMOUNT_ERRORS)[number];
+
+/**
+ * Erfolgsschlüssel `rate`.
+ *
+ * „Analog zu `planCostAmount`/`PlanCostAmountResult`" ist hier als **Form**
+ * umgesetzt — diskriminierte Union, blockierender Zweig ohne Wert —, beim
+ * Schlüsselnamen aber nicht: `rate` sagt, was der Wert ist, und unterscheidet
+ * ihn beim Auspacken vom Plan-Kostenbetrag. Beide Testdateien führen ihn so.
+ */
+export type HourlyRateAmountResult =
+  | { readonly ok: true; readonly rate: HourlyRateAmount }
+  | { readonly ok: false; readonly error: HourlyRateAmountError };
+
+/**
+ * Die einzige Stelle, an der ein Geldbetrag zum geprüften Stundensatz wird
+ * (V5.6, Schicht 1: primitive Eingaben werden **vor** dem Factory-Aufruf
+ * validiert).
+ *
+ * Ein Satz von `0` ist zulässig und bleibt von `RATE_MISSING` unterscheidbar
+ * (V4) — deshalb `< 0n` und nicht `<= 0n`.
+ *
+ * **Keine Währungsprüfung** (V5.4-korrigiert): ein {@link Money} trägt bereits
+ * eine gültige {@link Currency}, und die hat genau einen Bewohner. Die Währung
+ * wird dort geprüft, wo sie ungeprüft ankommt — an
+ * {@link costCurrencyFromUnknown}, nicht hier im getypten Kern.
+ */
+export function hourlyRateAmount(money: Money): HourlyRateAmountResult {
+  if (money.minorUnits < 0n) return { ok: false, error: "RATE_NEGATIVE" };
+
+  return { ok: true, rate: money as HourlyRateAmount };
+}
+
+/**
+ * Ergebnis der Währungsprüfung an einer Systemgrenze.
+ *
+ * Die Union steht bewusst **inline** statt hinter einer benannten Fehlerliste:
+ * bei genau einem Code kann keine verwaiste Konstante entstehen, und eine
+ * Liste mit einem Eintrag liesse die Waisenprüfung leer laufen.
+ */
+export type CostCurrencyResult =
+  | { readonly ok: true; readonly value: "EUR" }
+  | { readonly ok: false; readonly error: "UNSUPPORTED_COST_CURRENCY" };
+
+/**
+ * Die Währungsgrenze für ungeprüfte Werte (V5.4-korrigiert).
+ *
+ * Ungeprüfte Währungen entstehen ausschliesslich an Systemgrenzen: HTTP/JSON,
+ * PostgreSQL, importierte Daten, später Queue- oder Connector-Payloads. **Dort**
+ * gehört die Prüfung hin — dasselbe Muster, das {@link moneyFromNumber} und
+ * `toDurationMilliseconds` bereits tragen: der getypte Kern ist
+ * unerreichbar-by-construction, die untrusted Grenze ist prüfbar und testbar.
+ *
+ * ## Warum kein `toUpperCase()`
+ *
+ * Es wird **ausschliesslich** der exakte String `"EUR"` angenommen. `"eur"`
+ * stillschweigend hochzuschreiben wäre eine Datenkorrektur an einer
+ * Systemgrenze: was in falscher Schreibweise ankommt, stammt aus einer Quelle,
+ * die den Vertrag nicht einhält, und das gehört gemeldet, nicht repariert. Eine
+ * Normalisierung hier verdeckt genau den Fehler, den diese Funktion finden soll.
+ *
+ * Die `typeof`-Prüfung ist **beweisbar redundant** und steht nur als Absicht da.
+ * Gemessen: eine Gegenmutation, die sie entfernt, lässt alle 210 Tests grün — es
+ * gibt keinen Wert, den sie fängt und der strikte Vergleich nicht. Auch
+ * `new String("EUR") !== "EUR"` ist `true`, weil Objekt und Primitive nie strikt
+ * gleich sind. Sie bleibt trotzdem stehen: sie benennt am Aufrufort, dass hier
+ * wirklich alles ankommen kann — `null` aus JSON, `""` aus einer leeren Spalte,
+ * `42` aus einem Mapping-Fehler. Wer sie streicht, verliert keine Prüfung,
+ * sondern eine Lesehilfe.
+ *
+ * Eine frühere Fassung dieses Kommentars behauptete, die Testfälle `{}` und `42`
+ * würden „genau diese Hälfte" messen. Das ist falsch und war ungemessen: beide
+ * Werte scheitern schon am strikten Vergleich.
+ */
+export function costCurrencyFromUnknown(value: unknown): CostCurrencyResult {
+  if (typeof value !== "string" || value !== "EUR") {
+    return { ok: false, error: "UNSUPPORTED_COST_CURRENCY" };
+  }
+
+  return { ok: true, value };
 }

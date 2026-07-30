@@ -33,7 +33,7 @@
 import type { DurationMilliseconds } from "./duration-milliseconds.js";
 import type { AssignmentId, PlanVersionId, RateVersionId } from "./identifiers.js";
 import { moneyOfMinorUnits, planCostAmount } from "./money.js";
-import type { PlanCostAmountError, PlanCostAmountResult, PlanCostAmount } from "./money.js";
+import type { PlanCostAmount } from "./money.js";
 import type { LocalBusinessDate } from "./planning-week.js";
 import { selectRateVersion } from "./rate-version.js";
 import type { HourlyRateVersion, RateSelectionError } from "./rate-version.js";
@@ -41,8 +41,18 @@ import type { HourlyRateVersion, RateSelectionError } from "./rate-version.js";
 /** Regelversion. Jede Position und jeder Snapshot referenzieren sie (V1). */
 export const COST_RULE_VERSION = "personnel-plan-cost-v1";
 
-/** Halbwert von null weg: `0,5 Cent → 1 Cent`. Nicht bankübliches Runden. */
-export const ROUNDING_MODE = "HALF_UP";
+/**
+ * Bei exakt 0,5 Cent wird auf den nächsthöheren Cent gerundet — nicht
+ * bankübliches Runden.
+ *
+ * Der Name trägt seit V5.3 die Einschränkung, die vorher nur im Kommentar von
+ * {@link roundHalfUp} stand: nachgewiesen ist die Regel **nur für nichtnegative
+ * Werte**, und im Kostenpfad sind auch nur solche zulässig. „Negative Halbwerte
+ * werden von null weg gerundet" wäre ein Überklaim — eine vorzeichenbehaftete
+ * Rundungsprimitive gehört nicht zu Sprint 5 und wird auch nicht allein zum
+ * Testen eingeführt.
+ */
+export const ROUNDING_MODE = "HALF_UP_NON_NEGATIVE";
 
 /** Die eine Stelle, an der gerundet wird — der finale Betrag der Kostenposition. */
 export const ROUNDING_STAGE = "COST_POSITION_FINAL_AMOUNT";
@@ -105,7 +115,7 @@ export interface CostPositionInput {
  * Bewusst die Vereinigung der bereits vergebenen Codes statt einer eigenen
  * Liste: eine zweite Benennung derselben Fehlerlage wäre ein zweiter Vertrag.
  */
-export type CostPositionError = RateSelectionError | PlanCostAmountError;
+export type CostPositionError = RateSelectionError;
 
 export type CostPositionResult =
   | { readonly ok: true; readonly position: CostPosition }
@@ -142,7 +152,7 @@ function roundHalfUp(numerator: bigint, denominator: bigint): bigint {
 export function costOfDuration(
   rate: HourlyRateVersion,
   quantity: DurationMilliseconds,
-): PlanCostAmountResult {
+): PlanCostAmount {
   // Ein einziges exaktes Produkt in `bigint`, kein Zwischenergebnis, keine
   // Zwischenrundung (V1 Punkt 4). `durationMinutes()` aus `time-interval.ts`
   // käme hier nie in Frage: es rechnet `durationMs / 60_000` und liefert bei
@@ -150,13 +160,28 @@ export function costOfDuration(
   const numerator = rate.amountPerHour.minorUnits * quantity.milliseconds;
   const minorUnits = roundHalfUp(numerator, COST_RATE_DENOMINATOR);
 
-  // Die einzige Rundung des Vertrags ist gelaufen; jetzt das Vorzeichentor.
-  // Der `COST_AMOUNT_NEGATIVE`-Zweig ist heute UNERREICHBAR — `RATE_NEGATIVE`
-  // und `QUANTITY_NEGATIVE` haben beide Faktoren bereits auf `>= 0` festgelegt,
-  // und `roundHalfUp` erhält das Vorzeichen. V4 verlangt ihn trotzdem
-  // ausdrücklich als Defense in Depth gegen Fehler in Berechnung, Rundung oder
-  // Datenübernahme. Er bleibt deshalb stehen und wird nicht wegoptimiert.
-  return planCostAmount(moneyOfMinorUnits(minorUnits, rate.amountPerHour.currency));
+  const validated = planCostAmount(moneyOfMinorUnits(minorUnits, rate.amountPerHour.currency));
+
+  // V5.2: KEIN öffentlicher Fehlerzweig hier. Satz und Menge sind durch ihre
+  // Konstruktoren nichtnegativ, `roundHalfUp` erhält das Vorzeichen — mit
+  // zulässigen Eingaben kann diese Validierung nicht fehlschlagen. Ein
+  // `{ ok: false }` nach aussen wäre Scheingenauigkeit: der Aufrufer müsste
+  // einen Fall behandeln, den er nie sieht, und der Vertrag verspräche eine
+  // Prüfung, die nichts prüft.
+  //
+  // Schlägt sie trotzdem fehl, ist eine Invariante verletzt und nicht eine
+  // Eingabe falsch. Das ist fail-closed zu behandeln — lauter Abbruch, wie beim
+  // Monatsbereich in `dayAfter`, nicht ein vom Nutzer korrigierbarer
+  // Domainfehler. Die Defense in Depth bleibt an den zwei echten Grenzen:
+  // `planCostAmount` (hier, als Prüfung) und der Snapshotgrenze in EYT-109.
+  if (!validated.ok) {
+    throw new RangeError(
+      `Invariante verletzt: costOfDuration errechnete ${minorUnits} (${validated.error}). ` +
+        `Satz und Menge sind nichtnegativ, dieses Ergebnis kann nicht aus zulaessigen Eingaben stammen.`,
+    );
+  }
+
+  return validated.amount;
 }
 
 /**
@@ -174,8 +199,9 @@ export function computeCostPosition(input: CostPositionInput): CostPositionResul
   const selected = selectRateVersion(input.versions, input.on);
   if (!selected.ok) return { ok: false, error: selected.error };
 
-  const cost = costOfDuration(selected.version, input.quantity);
-  if (!cost.ok) return { ok: false, error: cost.error };
+  // Seit V5.2 liefert `costOfDuration` den Betrag direkt: der einzige Weg, auf
+  // dem die Positionserzeugung blockieren kann, ist die Satzauswahl.
+  const amount = costOfDuration(selected.version, input.quantity);
 
   // Der Zeitpunkt wird als Zahl festgehalten und bei JEDEM Zugriff frisch
   // ausgegeben — dieselbe Bauart wie `TimeInterval.startUtc`. Ein einmal
@@ -198,7 +224,7 @@ export function computeCostPosition(input: CostPositionInput): CostPositionResul
       }),
       rateVersionId: selected.version.rateVersionId,
       ruleVersion: COST_RULE_VERSION,
-      amount: cost.amount,
+      amount,
       get computedAt(): Date {
         return new Date(computedAtMs);
       },
