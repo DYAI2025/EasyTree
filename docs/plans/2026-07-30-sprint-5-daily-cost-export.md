@@ -47,25 +47,25 @@ neuer Job zwingt zur synchronen Änderung von `scripts/setup-branch-protection.s
 Gates passen fachlich: `db-gates` fährt den echten Stack, `read-through` fährt Stack **und**
 Browser.
 
-| REQ     | Testdatei(en) — neu, sofern nicht anders vermerkt                                                                              | Job            | Schritt                                      |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------ | -------------- | -------------------------------------------- |
-| REQ-001 | `apps/api/test/architecture.test.ts` (**vorhanden**, erweitern), `apps/api/test/architecture-red-case.test.ts` (**vorhanden**) | `unit-tests`   | `pnpm test`                                  |
-| REQ-001 | `supabase/tests/00NN_costs_tables.sql` — Tabellenbesitz und Katalogregistrierung                                               | `db-gates`     | `pnpm exec supabase test db` + Meta-Gate     |
-| REQ-002 | `apps/api/test/costs-authz.integration.test.ts` — atomare Rechte, Token abgelaufen/falsch signiert, Fremdtenant                | `db-gates`     | Tenant-Gate-Schritt                          |
-| REQ-002 | `supabase/tests/00NN_costs_rls.sql` — RLS lehnt Mitarbeiter unabhängig von der API ab                                          | `db-gates`     | `pnpm exec supabase test db`                 |
-| REQ-002 | `apps/web/e2e/cost-journey.spec.ts` — **echter** GoTrue-Browserlogin                                                           | `read-through` | `bash scripts/read-through-harness.sh`       |
-| REQ-003 | `apps/api/test/publish-plan.integration.test.ts` — Idempotenz, Stale Version, Fault Injection                                  | `db-gates`     | Planungsinvarianten-Gate                     |
-| REQ-003 | `apps/api/test/publish-plan.concurrency.test.ts` — **zwei echte Verbindungen** (Muster EYT-49)                                 | `db-gates`     | Planungsinvarianten-Gate                     |
-| REQ-004 | `packages/domain/test/rate-version.property.test.ts` — Effective Date, Grenzdatum, fester fast-check-Seed                      | `unit-tests`   | `pnpm test`                                  |
-| REQ-004 | `supabase/tests/00NN_cost_rates_overlap.sql` — Überlappung DB-seitig, auch parallel                                            | `db-gates`     | `pnpm exec supabase test db`                 |
-| REQ-005 | `packages/domain/test/daily-cost-allocation.property.test.ts` — Summenerhaltung, DST, Mitternacht                              | `unit-tests`   | `pnpm test` + Fremdzonen-Schritt (TZ-Matrix) |
-| REQ-005 | `apps/api/test/cost-snapshot.integration.test.ts` — Unveränderlichkeit, Idempotenz, fehlender Satz blockiert                   | `db-gates`     | Tenant-Gate-Schritt                          |
-| REQ-006 | `apps/web/test/kosten-page.test.tsx` — jsdom + axe, alle sechs Zustände unterscheidbar                                         | `unit-tests`   | `pnpm test`                                  |
-| REQ-006 | `apps/web/e2e/cost-journey.spec.ts` — Netzwerknachweis, Reload, zweiter Kontext                                                | `read-through` | `bash scripts/read-through-harness.sh`       |
-| REQ-007 | `apps/api/test/xlsx-export.contract.test.ts` — Snapshot-ID-only, MIME, Dateiname, leeres Ergebnis                              | `unit-tests`   | `pnpm test`                                  |
-| REQ-007 | `apps/api/test/xlsx-export.security.test.ts` — Formula-Injection, manipulierte ID, Fremdtenant                                 | `unit-tests`   | `pnpm test`                                  |
-| REQ-007 | `apps/web/e2e/cost-journey.spec.ts` — UI/DB/Zell-Parität                                                                       | `read-through` | `bash scripts/read-through-harness.sh`       |
-| REQ-008 | `apps/web/e2e/cost-journey.spec.ts` — durchgehende Reise **plus acht Negativreisen**                                           | `read-through` | `bash scripts/read-through-harness.sh`       |
+| REQ                      | Testdatei(en) — neu, sofern nicht anders vermerkt                                                                                                                                                                                      | Job            | Schritt                                      |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------- |
+| REQ-001                  | `apps/api/test/architecture.test.ts` (**vorhanden**, erweitern), `apps/api/test/architecture-red-case.test.ts` (**vorhanden**)                                                                                                         | `unit-tests`   | `pnpm test`                                  |
+| REQ-001                  | `supabase/tests/00NN_costs_tables.sql` — Tabellenbesitz und Katalogregistrierung                                                                                                                                                       | `db-gates`     | `pnpm exec supabase test db` + Meta-Gate     |
+| REQ-002                  | `apps/api/test/costs-authz.integration.test.ts` — atomare Rechte, Token abgelaufen/falsch signiert, Fremdtenant                                                                                                                        | `db-gates`     | Tenant-Gate-Schritt                          |
+| REQ-002                  | `supabase/tests/00NN_costs_rls.sql` — RLS lehnt Mitarbeiter unabhängig von der API ab                                                                                                                                                  | `db-gates`     | `pnpm exec supabase test db`                 |
+| REQ-002                  | `apps/web/e2e/cost-journey.spec.ts` — **echter** GoTrue-Browserlogin                                                                                                                                                                   | `read-through` | `bash scripts/read-through-harness.sh`       |
+| REQ-003                  | `apps/api/test/publish-plan.integration.test.ts` — Idempotenz, Stale Version, Fault Injection                                                                                                                                          | `db-gates`     | Planungsinvarianten-Gate                     |
+| REQ-003                  | `apps/api/test/publish-plan.concurrency.test.ts` — **zwei echte Verbindungen** (Muster EYT-49)                                                                                                                                         | `db-gates`     | Planungsinvarianten-Gate                     |
+| REQ-004/REQ-005 (EYT-95) | `packages/domain/test/rate-version.property.test.ts` — Money, Rate, Duration, zentrale Rundung, Satzversionsauswahl an Intervallgrenzen, fester fast-check-Seed                                                                        | `unit-tests`   | `pnpm test`                                  |
+| REQ-004                  | `supabase/tests/00NN_cost_rates_overlap.sql` — Überlappung DB-seitig, auch parallel                                                                                                                                                    | `db-gates`     | `pnpm exec supabase test db`                 |
+| REQ-005 (EYT-109)        | `packages/domain/test/daily-cost-allocation.property.test.ts` — Summenerhaltung, DST, Mitternacht. **PO-Korrektur 30.07.2026: gehört zu EYT-109, nicht zu EYT-95** — als vorbereiteter, noch nicht auszuführender Akzeptanztest führen | `unit-tests`   | `pnpm test` + Fremdzonen-Schritt (TZ-Matrix) |
+| REQ-005                  | `apps/api/test/cost-snapshot.integration.test.ts` — Unveränderlichkeit, Idempotenz, fehlender Satz blockiert                                                                                                                           | `db-gates`     | Tenant-Gate-Schritt                          |
+| REQ-006                  | `apps/web/test/kosten-page.test.tsx` — jsdom + axe, alle sechs Zustände unterscheidbar                                                                                                                                                 | `unit-tests`   | `pnpm test`                                  |
+| REQ-006                  | `apps/web/e2e/cost-journey.spec.ts` — Netzwerknachweis, Reload, zweiter Kontext                                                                                                                                                        | `read-through` | `bash scripts/read-through-harness.sh`       |
+| REQ-007                  | `apps/api/test/xlsx-export.contract.test.ts` — Snapshot-ID-only, MIME, Dateiname, leeres Ergebnis                                                                                                                                      | `unit-tests`   | `pnpm test`                                  |
+| REQ-007                  | `apps/api/test/xlsx-export.security.test.ts` — Formula-Injection, manipulierte ID, Fremdtenant                                                                                                                                         | `unit-tests`   | `pnpm test`                                  |
+| REQ-007                  | `apps/web/e2e/cost-journey.spec.ts` — UI/DB/Zell-Parität                                                                                                                                                                               | `read-through` | `bash scripts/read-through-harness.sh`       |
+| REQ-008                  | `apps/web/e2e/cost-journey.spec.ts` — durchgehende Reise **plus acht Negativreisen**                                                                                                                                                   | `read-through` | `bash scripts/read-through-harness.sh`       |
 
 `web-smoke` kommt bewusst in keiner Zeile vor: dort läuft keine API, ein Kostennachweis wäre dort
 strukturell unmöglich.
@@ -132,13 +132,30 @@ SKIP  AC8 — kein NEGATIVE_PR gesetzt.
 === Ergebnis: 0 offen, 1 uebersprungen ===
 ```
 
-**Ehrliche Restgrenze.** AC8 bleibt uebersprungen: dass die Sperre einen Merge _tatsaechlich_
-serverseitig ablehnt, ist fuer den Stand vom 27.07.2026 mit PR #7 belegt (`format` rot,
-`mergeable_state=blocked`, Merge serverseitig zurueckgewiesen), fuer den jetzt ergaenzten Check
-`read-through` aber noch **nicht** einzeln gemessen. Das ist eine gelesene Konfiguration, kein
-ausgefuehrter Negativfall. Die naechstliegende Messung ergibt sich von selbst: sobald der erste
-Sprint-5-PR offen ist und `read-through` einmal rot laeuft, wird sie zur Beobachtung statt zum
-Extraaufwand.
+**Offener Nachweis: `BRANCH_PROTECTION_NEGATIVE_EXECUTION`.** AC8 bleibt uebersprungen. Dass die
+Sperre einen Merge _tatsaechlich_ serverseitig ablehnt, ist fuer den Stand vom 27.07.2026 mit
+PR #7 belegt (`format` rot, `mergeable_state=blocked`, Merge serverseitig zurueckgewiesen), fuer
+den neu ergaenzten Check `read-through` aber noch **nicht** einzeln gemessen. Gelesene
+Konfiguration ist kein ausgefuehrter Negativfall.
+
+```text
+BRANCH_PROTECTION_CONFIGURATION:     PASS
+BRANCH_PROTECTION_NEGATIVE_EXECUTION: OPEN
+```
+
+**Kein Blocker fuer Schreiben und Testen auf dem Feature-Branch. Verbindlich vor dem Merge des
+ersten Sprint-5-PR** (PO-Weisung 30.07.2026 §1). Sechs Schritte:
+
+1. Sprint-5-PR ist geoeffnet.
+2. `read-through` wird kontrolliert rot gestellt **oder** laeuft aufgrund eines echten Fehlers rot.
+3. GitHub weist den PR wegen genau dieses Pflichtchecks als nicht mergebar aus.
+4. Fehler beheben bzw. den kontrollierten Gegenfall vollstaendig zuruecknehmen.
+5. `read-through` laeuft gruen.
+6. Mergefaehigkeit erneut pruefen.
+
+**Kein kuenstlicher Fehler gelangt nach `master`.** Ein temporaerer Gegenfall auf dem
+Feature-Branch ist zulaessig, sofern er vor dem Merge vollstaendig zurueckgenommen und
+dokumentiert wird.
 
 Rollback des Rulesets, falls je noetig:
 
@@ -161,5 +178,7 @@ OQ-002:                      geschlossen (Abschnitt 3)
 OQ-003:                      geschlossen (Abschnitt 3)
 OQ-005:                      geschlossen (Abschnitt 2) - CI-only, keine Anforderung gesenkt
 BLOCKED_CI_EVIDENCE:         aufgeloest (Abschnitt 5)
-OFFENE BLOCKER:              keine
+BRANCH_PROTECTION_CONFIGURATION:      PASS
+BRANCH_PROTECTION_NEGATIVE_EXECUTION: OPEN  - verbindlich vor dem ersten Merge, kein Startblocker
+OFFENE BLOCKER:              keine fuer Iteration 1
 ```

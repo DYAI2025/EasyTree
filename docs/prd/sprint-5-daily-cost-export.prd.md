@@ -295,6 +295,32 @@ Dauer und Betrag deterministisch auf echte lokale Kalendertage aufgeteilt.
   Doppelwirkung;
 - CI-Zuordnung: **MISSING** (`OQ-003`).
 
+### Schnittgrenze EYT-95 / EYT-109 (PO-Korrektur 30.07.2026)
+
+REQ-005 wird von **zwei** Tickets getragen. Die Grenze ist verbindlich; sie verschiebt keinen
+Umfang, sie ordnet ihn zu.
+
+| Liefergegenstand                                                    | Ticket      |
+| ------------------------------------------------------------------- | ----------- |
+| exakte Geldrepräsentation ohne Gleitkomma, EUR-Minor-Units          | **EYT-95**  |
+| dokumentierte zentrale Rundungsregel                                | **EYT-95**  |
+| Rate- und Einheitstypen, Duration bzw. Mengenbruch                  | **EYT-95**  |
+| eindeutige Auswahl der gültigen Satzversion **an Intervallgrenzen** | **EYT-95**  |
+| fehlende und mehrdeutige Sätze als **blockierende** Ergebnisse      | **EYT-95**  |
+| überlappende Satzintervalle                                         | **EYT-95**  |
+| historische Referenzen auf Quelle, Regel- und Satzversion           | **EYT-95**  |
+| deterministische Wiederholung ohne Doppelwirkung                    | **EYT-95**  |
+| Forward-Fix- und historische Stabilitätsregeln                      | **EYT-95**  |
+| Aufteilung eines Einsatzes **über Mitternacht**                     | **EYT-109** |
+| **IANA-Zeitzonenallokation** auf lokale Kalendertage                | **EYT-109** |
+| **Sommer-/Winterzeitwechsel**                                       | **EYT-109** |
+| **Summenerhaltung über lokale Kalendertage**                        | **EYT-109** |
+
+EYT-95 liefert dafür ausschließlich die wiederverwendbaren exakten Primitive. EYT-109 wird
+**nicht** vorzeitig unter dem Ticket EYT-95 implementiert. Umgekehrt darf **EYT-105 keinen
+eigenen Money-, Rate- oder Rundungsvertrag erfinden** — diese Fachverträge kommen aus EYT-95,
+und eine zweite Implementierung macht den Architektur-Gegenfall zu Recht rot.
+
 ### Hinweis zur bestehenden Zeitregel
 
 `apps/api/test/no-local-time-construction.test.ts` ist ein statischer Wächter: heute baut
@@ -418,6 +444,23 @@ nachgewiesen.
 - CI-Zuordnung: **MISSING** (`OQ-003`).
 
 ---
+
+## Maßstab für Red-Test-Evidenz (PO-Weisung 30.07.2026 §4)
+
+Vor jedem Produktionscode wird je Ticket festgehalten: Testdatei, Testname, Requirement bzw.
+Jira-Akzeptanzkriterium, erwarteter roter Grund, **tatsächlich beobachtete** rote Ausgabe,
+Schutz gegen vakuöse Tests, zugehöriger CI-Job.
+
+**Ein Test zählt nicht als Red Evidence**, wenn er scheitert wegen
+
+- Syntaxfehler,
+- fehlender Abhängigkeit,
+- falschem Importpfad,
+- kaputter Testkonfiguration.
+
+Der rote Fehler muss das **fehlende fachliche oder architektonische Verhalten** beweisen. Ein
+reiner Compile- oder Auflösungsfehler ist ein schwacher Rotnachweis und wird als solcher
+gekennzeichnet, nicht als erfüllt gebucht.
 
 ## Failure-Mode-Ketten (Baseline §10 — je Kette ein Pflicht-Falsifier)
 
