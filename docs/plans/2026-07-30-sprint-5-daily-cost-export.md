@@ -226,3 +226,62 @@ RED_TEST_CI_MAPPED:     PASS               unit-tests, `pnpm test`
 RED_REASON_VALID:       PASS               fehlendes Modul und sechs Leerlauf-Meldungen
 IMPLEMENTATION_ALLOWED: ja, nach EYT-95    Reihenfolge aus PO-Weisung Abschnitt 6
 ```
+
+## 9. Phase-2-Befund: die Skelettgrenze und der Red-Massstab widersprechen sich
+
+**Gemessen am 30.07.2026** nach dem compile-enabling Skelett: 60 rot / 123 gruen, **alle 60 mit
+`Error: NOT_IMPLEMENTED`**, kein einziger Aufloesungsfehler mehr. Das Skelett haelt seine
+Grenzen: kein `return` in den Verhaltensdateien, keine versteckten Defaultwerte, Pruefreihenfolge
+in `toDurationMilliseconds` exakt nach V2b.
+
+Der Widerspruch liegt zwischen zwei Vorgaben derselben PO-Weisung:
+
+- **Skelettgrenze:** jede Verhaltensfunktion wirft.
+- **Red-Massstab:** ein flaechendeckendes `NOT_IMPLEMENTED` ist **nicht ausreichend**; je
+  Vertragsklasse ist ein fachlich spezifischer roter Grund verlangt.
+
+Beides zugleich ist nicht erfuellbar, und zwar strukturell: die Fixture-Bauer der Testdateien
+rufen als erstes `moneyOfMinorUnits` bzw. `durationMilliseconds`. Solange die werfen, erreichen
+**46 von 60** Tests ihr eigenes Subjekt nie. Von **keinem** Test erreicht werden dadurch:
+`addMoney`, `subtractMoney`, `planCostAmount`, `sumPlanCostAmounts`, `hourlyRateVersion`,
+`costOfDuration`, `computeCostPosition`.
+
+### Aufloesung, aus der PO-Weisung selbst abgeleitet
+
+Die erlaubte Skelettliste nennt ausdruecklich **„gebrandete beziehungsweise validierte
+Grundtypen"**. Genau das sind `moneyOfMinorUnits(bigint, Currency)` und
+`durationMilliseconds(bigint)`: Konstruktoren validierter Grundtypen. Sie enthalten **keine**
+der sechs verbotenen Sachen — keine `HALF_UP`-Berechnung, keine Satzversionsauswahl, keine
+Intervalllogik, keine Kostenberechnung, keine Snapshotlogik, keinen versteckten Defaultwert.
+
+Sie zu implementieren liegt damit **innerhalb** der Grenze, nicht jenseits davon — und es ist
+die Bedingung dafuer, dass das zweite Ziel derselben Weisung ueberhaupt erreichbar wird. Das
+frueher gegebene „im Zweifel als Berechnung behandeln und werfen" war die sichere Vorgabe fuer
+den ersten Durchgang; sie hat den Widerspruch sauber sichtbar gemacht und wird jetzt fuer genau
+diese zwei Konstruktoren zurueckgenommen.
+
+Danach erreicht jeder Test sein benanntes Subjekt und scheitert dort am fehlenden Verhalten.
+Das ist der Unterschied zwischen „das Modul existiert nicht" und „das Verhalten fehlt an dieser
+benannten Stelle" — und damit der starke Nachweis, den der Massstab meint.
+
+### Zwei Punkte, die eine PO-Entscheidung brauchen
+
+| ID           | Punkt                                                                                                                                                       | Warum nicht selbst entscheidbar                                                                                                                                                                                                     |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OQ-S5-95-F` | `sumPlanCostAmounts([])` ist undefiniert — leere Summe `0n` oder blockierendes Ergebnis?                                                                    | Kein Test, keine PRD-Zeile. Ein Snapshot ohne Positionen mit Gesamtsumme `0` ist plausibel, aber „plausibel" ist keine Ableitung.                                                                                                   |
+| `OQ-S5-95-G` | Der Fehlerzweig von `costOfDuration` (`COST_AMOUNT_NEGATIVE`) ist **unerreichbar**, weil Satz und Menge durch ihre Konstruktoren bereits nichtnegativ sind. | V4 verlangt die Pruefung ausdruecklich als Defense in Depth. Sie bleibt damit untestbar, solange nichts sie ausloesen kann. Alternative waere ein nicht fehlschlagender Rueckgabetyp — dann entfaellt die von V4 geforderte Grenze. |
+
+### Weitere gemeldete Unterbestimmtheiten (nicht blockierend)
+
+- **`findRateVersionOverlaps`**: die Tests pruefen nur Laenge, nie den Inhalt. Gewaehlt wurde
+  `{ first, second }` ohne zugesagte Reihenfolge der Paare. Falls EYT-105 oder EYT-109 mehr
+  braucht (etwa den ueberlappenden Tagesbereich), ist das jetzt zu entscheiden, nicht spaeter.
+- **`CostSource`** ist zwischen den beiden Testdateien uneinheitlich (UUIDs gegen
+  `{ planVersionId, assignmentId }`) und deshalb heute typseitig ungeschuetzt. Vereinheitlichung
+  ist beauftragt.
+- **Fehlercode-Listen** (`MONEY_ERRORS`, `QUANTITY_ERRORS`, `PLAN_COST_AMOUNT_ERRORS`,
+  `RATE_VERSION_ERRORS`, `RATE_SELECTION_ERRORS`) lassen sich im Invariantenregister **nicht
+  ehrlich eintragen**: kein Testtitel nennt sie, und auf einen Test zu zeigen, der bloss einen
+  Code verwendet, waere genau der Eintrag, der nichts misst. Noetig ist je ein Test nach dem
+  Muster von `TIME_INTERVAL_ERRORS` — oder die Entscheidung, die Listen nur als Union-Typ und
+  nicht als Laufzeitwert zu fuehren.
