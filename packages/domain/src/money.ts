@@ -141,20 +141,34 @@ export function moneyFromNumber(value: number, currency: Currency): MoneyResult 
   return { ok: true, money: moneyOfMinorUnits(BigInt(value), currency) };
 }
 
+/**
+ * Exakte Addition in Minor Units.
+ *
+ * Die Währung stammt vom ersten Summanden. Ein Mischbetrag ist heute
+ * unerreichbar, weil {@link CURRENCIES} genau einen Eintrag hat — welchen Code
+ * eine Mischung liefern soll, ist eine offene PO-Entscheidung und wird hier
+ * bewusst **nicht** erfunden.
+ */
 export function addMoney(augend: Money, addend: Money): Money {
-  void [augend, addend];
-  throw new Error("NOT_IMPLEMENTED");
+  return moneyOfMinorUnits(augend.minorUnits + addend.minorUnits, augend.currency);
 }
 
+/** Exakte Differenz. Das Ergebnis darf negativ sein (V4) — siehe Kopfkommentar. */
 export function subtractMoney(minuend: Money, subtrahend: Money): Money {
-  void [minuend, subtrahend];
-  throw new Error("NOT_IMPLEMENTED");
+  return moneyOfMinorUnits(minuend.minorUnits - subtrahend.minorUnits, minuend.currency);
 }
 
-/** Übergang vom vorzeichenoffenen Betrag zum persistierfähigen Plan-Kostenbetrag (V4). */
+/**
+ * Übergang vom vorzeichenoffenen Betrag zum persistierfähigen Plan-Kostenbetrag (V4).
+ *
+ * Der Cast ist die Marke, nicht die Prüfung — die steht vollständig darüber.
+ * Der Wert wird nicht neu erzeugt: jeder {@link Money} stammt aus
+ * {@link moneyOfMinorUnits} und ist damit bereits eingefroren.
+ */
 export function planCostAmount(money: Money): PlanCostAmountResult {
-  void money;
-  throw new Error("NOT_IMPLEMENTED");
+  if (money.minorUnits < 0n) return { ok: false, error: "COST_AMOUNT_NEGATIVE" };
+
+  return { ok: true, amount: money as PlanCostAmount };
 }
 
 /**
@@ -167,6 +181,16 @@ export function planCostAmount(money: Money): PlanCostAmountResult {
  * versehentlich ein zweites Mal gerundet werden.
  */
 export function sumPlanCostAmounts(amounts: readonly PlanCostAmount[]): PlanCostAmountResult {
-  void amounts;
-  throw new Error("NOT_IMPLEMENTED");
+  // OFFENE PO-ENTSCHEIDUNG: Was die LEERE Summe bedeutet, sagt weder die PRD
+  // noch ein Test. Hier gewählt: `0` in EUR — die neutrale Zahl der Addition.
+  // Denkbar wäre stattdessen ein blockierendes Ergebnis, weil "keine Position"
+  // und "Positionen im Wert von null" fachlich verschiedene Lagen sind. Wer das
+  // entscheidet, ändert diese Zeile und braucht dafür einen eigenen Test.
+  let total = 0n;
+  for (const amount of amounts) total += amount.minorUnits;
+
+  // Über `planCostAmount`, nicht am Vorzeichentor vorbei: die Summe
+  // nichtnegativer Beträge ist zwar nichtnegativ, aber V4 verlangt die Prüfung
+  // ausdrücklich als Defense in Depth gegen Rechenfehler.
+  return planCostAmount(moneyOfMinorUnits(total, CURRENCIES[0]));
 }

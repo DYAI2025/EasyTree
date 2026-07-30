@@ -32,8 +32,10 @@
 
 import type { DurationMilliseconds } from "./duration-milliseconds.js";
 import type { AssignmentId, PlanVersionId, RateVersionId } from "./identifiers.js";
+import { moneyOfMinorUnits, planCostAmount } from "./money.js";
 import type { PlanCostAmountError, PlanCostAmountResult, PlanCostAmount } from "./money.js";
 import type { LocalBusinessDate } from "./planning-week.js";
+import { selectRateVersion } from "./rate-version.js";
 import type { HourlyRateVersion, RateSelectionError } from "./rate-version.js";
 
 /** Regelversion. Jede Position und jeder Snapshot referenzieren sie (V1). */
@@ -116,16 +118,90 @@ export type CostPositionResult =
  * der berechnete Betrag ohne Umweg auf eine belegbare Satzversion zurückführbar
  * bleibt.
  */
+/**
+ * `HALF_UP` auf einem exakten Bruch, ganz in `bigint` (V1 Punkt 6).
+ *
+ * `floor((2·zähler + nenner) / (2·nenner))` — algebraisch dasselbe wie
+ * `floor(zähler/nenner + 1/2)`, aber ohne je einen Bruch zu bilden. Der
+ * Halbwert fällt damit nach oben: `5000,5 → 5001`. Bankübliches Runden
+ * (`HALF_EVEN`) lieferte hier 5000, `Math.floor` ebenfalls — beide sind durch
+ * V1 ausgeschlossen.
+ *
+ * **Vorbedingung: `numerator >= 0`.** Nur dann ist die Division in `bigint`
+ * (die zur Null hin abschneidet) gleich `floor`. Die Vorbedingung ist keine
+ * Bitte, sondern durch die Typen gesichert: `RATE_NEGATIVE` und
+ * `QUANTITY_NEGATIVE` legen beide Faktoren an ihren einzigen Konstruktoren auf
+ * `>= 0` fest. Käme trotzdem ein negativer Zähler an, bliebe das Ergebnis
+ * negativ und `planCostAmount` weist es mit `COST_AMOUNT_NEGATIVE` ab — die von
+ * V4 dafür vorgesehene Stelle, statt einer zweiten hier.
+ */
+function roundHalfUp(numerator: bigint, denominator: bigint): bigint {
+  return (2n * numerator + denominator) / (2n * denominator);
+}
+
 export function costOfDuration(
   rate: HourlyRateVersion,
   quantity: DurationMilliseconds,
 ): PlanCostAmountResult {
-  void [rate, quantity];
-  throw new Error("NOT_IMPLEMENTED");
+  // Ein einziges exaktes Produkt in `bigint`, kein Zwischenergebnis, keine
+  // Zwischenrundung (V1 Punkt 4). `durationMinutes()` aus `time-interval.ts`
+  // käme hier nie in Frage: es rechnet `durationMs / 60_000` und liefert bei
+  // Millisekundenanteil einen Gleitkommawert.
+  const numerator = rate.amountPerHour.minorUnits * quantity.milliseconds;
+  const minorUnits = roundHalfUp(numerator, COST_RATE_DENOMINATOR);
+
+  // Die einzige Rundung des Vertrags ist gelaufen; jetzt das Vorzeichentor.
+  // Der `COST_AMOUNT_NEGATIVE`-Zweig ist heute UNERREICHBAR — `RATE_NEGATIVE`
+  // und `QUANTITY_NEGATIVE` haben beide Faktoren bereits auf `>= 0` festgelegt,
+  // und `roundHalfUp` erhält das Vorzeichen. V4 verlangt ihn trotzdem
+  // ausdrücklich als Defense in Depth gegen Fehler in Berechnung, Rundung oder
+  // Datenübernahme. Er bleibt deshalb stehen und wird nicht wegoptimiert.
+  return planCostAmount(moneyOfMinorUnits(minorUnits, rate.amountPerHour.currency));
 }
 
-/** Auswahl, Berechnung und Herkunft in einem Schritt — oder ein blockierendes Ergebnis. */
+/**
+ * Auswahl, Berechnung und Herkunft in einem Schritt — oder ein blockierendes
+ * Ergebnis.
+ *
+ * Der Katalog wird **sofort** ausgewertet und nichts von ihm behalten: das
+ * Ergebnis führt nur die aufgelöste Satzversion und den fertigen Betrag mit.
+ * Eine spätere Ergänzung des Katalogs kann einen berechneten Stand deshalb
+ * nicht rückwirkend verändern (AK5, Forward-Fix). Eine defensive Kopie der
+ * Liste bringt darüber hinaus nichts — es gibt keinen Verweis, den sie
+ * schützen könnte.
+ */
 export function computeCostPosition(input: CostPositionInput): CostPositionResult {
-  void input;
-  throw new Error("NOT_IMPLEMENTED");
+  const selected = selectRateVersion(input.versions, input.on);
+  if (!selected.ok) return { ok: false, error: selected.error };
+
+  const cost = costOfDuration(selected.version, input.quantity);
+  if (!cost.ok) return { ok: false, error: cost.error };
+
+  // Der Zeitpunkt wird als Zahl festgehalten und bei JEDEM Zugriff frisch
+  // ausgegeben — dieselbe Bauart wie `TimeInterval.startUtc`. Ein einmal
+  // kopiertes `Date` als Feld genügt nicht: der Empfänger hielte weiterhin
+  // denselben veränderlichen Verweis, den auch der nächste Leser bekommt, und
+  // ein `setUTCFullYear` darauf veränderte einen angeblich unveränderlichen
+  // Stand rückwirkend.
+  const computedAtMs = input.computedAt.getTime();
+
+  return {
+    ok: true,
+    position: Object.freeze({
+      // Eigene Hülle statt der Referenz des Aufrufers: die Position ist ein
+      // historisch stabiler Stand (AK4/AK5), und die Felder werden hier einzeln
+      // benannt, damit ein künftiges Feld an `CostSource` den Build bricht,
+      // statt still zu fehlen.
+      source: Object.freeze({
+        planVersionId: input.source.planVersionId,
+        assignmentId: input.source.assignmentId,
+      }),
+      rateVersionId: selected.version.rateVersionId,
+      ruleVersion: COST_RULE_VERSION,
+      amount: cost.amount,
+      get computedAt(): Date {
+        return new Date(computedAtMs);
+      },
+    }),
+  };
 }

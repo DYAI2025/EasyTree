@@ -39,8 +39,42 @@ export function compareLocalBusinessDate(a: LocalBusinessDate, b: LocalBusinessD
   return a.day - b.day;
 }
 
-/** Der nächste Kalendertag, über Monats-, Jahres- und Schaltjahresgrenze hinweg. */
+/** Länge der zwölf Monate im Gemeinjahr. Der Februar wird unten korrigiert. */
+const DAYS_PER_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+/** Gregorianische Schaltjahresregel — inklusive der 100er-Ausnahme und ihrer 400er-Ausnahme. */
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/**
+ * Wirft statt ein Ergebnis zurückzugeben: ein Monat ausserhalb 1..12 ist kein
+ * erwarteter Fehlerfall, sondern ein Programmierfehler — dieselbe Entscheidung,
+ * die der private Konstruktor von `TimeInterval` trifft. `LocalBusinessDate`
+ * trägt bewusst keine Laufzeitvalidierung, deshalb kann sie hier ankommen.
+ */
+function daysInMonth(year: number, month: number): number {
+  const days = DAYS_PER_MONTH[month - 1];
+  if (days === undefined) {
+    throw new RangeError(`Kalendermonat ausserhalb 1..12: ${month}`);
+  }
+  return month === 2 && isLeapYear(year) ? 29 : days;
+}
+
+/**
+ * Der nächste Kalendertag, über Monats-, Jahres- und Schaltjahresgrenze hinweg.
+ *
+ * Reine Ganzzahlarithmetik, **ohne** `Date`: V3 verbietet ausdrücklich,
+ * Kalendertage in UTC-Zeitpunkte zu wandeln. Der Umweg über `Date.UTC` wäre
+ * genau das — auch wenn der Zeitpunkt nur vorübergehend entstünde — und würde
+ * eine Zeitachse einführen, wo eine Kalenderachse gemeint ist.
+ */
 export function dayAfter(date: LocalBusinessDate): LocalBusinessDate {
-  void date;
-  throw new Error("NOT_IMPLEMENTED");
+  if (date.day < daysInMonth(date.year, date.month)) {
+    return { year: date.year, month: date.month, day: date.day + 1 };
+  }
+  if (date.month < 12) {
+    return { year: date.year, month: date.month + 1, day: 1 };
+  }
+  return { year: date.year + 1, month: 1, day: 1 };
 }

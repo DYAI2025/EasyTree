@@ -21,7 +21,7 @@
  */
 
 import type { RateVersionId } from "./identifiers.js";
-import { compareLocalBusinessDate } from "./local-business-date.js";
+import { compareLocalBusinessDate, dayAfter } from "./local-business-date.js";
 import type { Money } from "./money.js";
 import type { LocalBusinessDate } from "./planning-week.js";
 
@@ -129,13 +129,62 @@ export function hourlyRateVersion(input: HourlyRateVersionInput): HourlyRateVers
   };
 }
 
-/** Die für `on` gültige Satzversion — oder ein blockierendes Ergebnis. */
+/**
+ * Exklusives Ende der kanonischen Halboffen-Form `[validFrom, dayAfter(validTo))`;
+ * `null` heisst unbegrenzt (V3).
+ *
+ * Diese eine Funktion ist die **einzige** Stelle im Modul, an der die
+ * Intervallsemantik steht. Deckung und Überlappung bauen beide darauf auf,
+ * damit es keine zweite Lesart geben kann — V3 verlangt ausdrücklich, dass UI,
+ * Domain Service, Datenbank-Constraint und Tests dieselbe Semantik führen.
+ */
+function exclusiveEnd(version: HourlyRateVersion): LocalBusinessDate | null {
+  return version.validTo === null ? null : dayAfter(version.validTo);
+}
+
+/** Deckt die Version diesen Kalendertag ab? `validFrom` einschliessend. */
+function coversDay(version: HourlyRateVersion, on: LocalBusinessDate): boolean {
+  if (compareLocalBusinessDate(version.validFrom, on) > 0) return false;
+
+  const end = exclusiveEnd(version);
+  return end === null || compareLocalBusinessDate(on, end) < 0;
+}
+
+/**
+ * Überschneiden sich die Gültigkeiten zweier Versionen?
+ *
+ * Halboffen ausgewertet, was der einschliessenden Formel aus V3
+ * (`a.validFrom <= b.validTo && b.validFrom <= a.validTo`) für Kalendertage
+ * genau entspricht: `bis 30.06. / ab 01.07.` grenzt lückenlos an,
+ * `bis 30.06. / ab 30.06.` überlappt an einem Tag.
+ */
+function overlaps(a: HourlyRateVersion, b: HourlyRateVersion): boolean {
+  const aEnd = exclusiveEnd(a);
+  const bEnd = exclusiveEnd(b);
+  const aStartsBeforeBEnds = bEnd === null || compareLocalBusinessDate(a.validFrom, bEnd) < 0;
+  const bStartsBeforeAEnds = aEnd === null || compareLocalBusinessDate(b.validFrom, aEnd) < 0;
+  return aStartsBeforeBEnds && bStartsBeforeAEnds;
+}
+
+/**
+ * Die für `on` gültige Satzversion — oder ein blockierendes Ergebnis.
+ *
+ * Bewusst **kein** `versions.find(...)`: das liefert bei zwei deckenden
+ * Versionen klaglos die erste und erzeugt einen Betrag, den hinterher niemand
+ * belegen kann. Es werden deshalb alle Treffer gezählt, und mehr als einer ist
+ * ein Grund zu blockieren, keine Gelegenheit zu wählen.
+ */
 export function selectRateVersion(
   versions: readonly HourlyRateVersion[],
   on: LocalBusinessDate,
 ): RateSelectionResult {
-  void [versions, on];
-  throw new Error("NOT_IMPLEMENTED");
+  const covering = versions.filter((version) => coversDay(version, on));
+
+  const [only] = covering;
+  if (only === undefined) return { ok: false, error: "RATE_MISSING" };
+  if (covering.length > 1) return { ok: false, error: "RATE_AMBIGUOUS" };
+
+  return { ok: true, version: only };
 }
 
 /**
@@ -149,6 +198,20 @@ export function selectRateVersion(
 export function findRateVersionOverlaps(
   versions: readonly HourlyRateVersion[],
 ): readonly RateVersionOverlap[] {
-  void versions;
-  throw new Error("NOT_IMPLEMENTED");
+  const found: RateVersionOverlap[] = [];
+
+  // Alle Paare, nicht nur sortierte Nachbarn. `hasAnyOverlap` in
+  // `time-interval.ts` darf das, weil es nur die Existenz einer Überschneidung
+  // meldet; hier werden die Beteiligten benannt, und eine lange Version, die
+  // zwei kurze überspannt, wäre bei einem reinen Nachbarvergleich unsichtbar.
+  for (let i = 0; i < versions.length; i += 1) {
+    for (let j = i + 1; j < versions.length; j += 1) {
+      const a = versions[i];
+      const b = versions[j];
+      if (a === undefined || b === undefined) continue;
+      if (overlaps(a, b)) found.push({ first: a.rateVersionId, second: b.rateVersionId });
+    }
+  }
+
+  return found;
 }
