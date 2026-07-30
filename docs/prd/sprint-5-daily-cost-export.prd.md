@@ -102,7 +102,12 @@ schmale `index.ts`.
 
 - `costs` ist in ADR, `MODULE_SLUGS`, `SCAFFOLDED_MODULES` und Tabellenbesitz registriert.
 - Architekturtests lehnen ab: Frameworkimports in Domaincode, tiefe Querimporte, fremde
-  Tabellenwrites, zweite Geld-/Rundungsimplementierung.
+  Tabellenzugriffe (lesend **und** schreibend — EYT-105 AK: Planfakten werden „nur über eine
+  öffentliche Planning-Application-API … **gelesen**"), zweite Geld-/Rundungsimplementierung.
+  **Ehrliche Reichweite:** das ist ein **Quelltextwächter**, keine Laufzeitdurchsetzung. Zur
+  Laufzeit gibt es genau eine Anwendungsrolle, und RLS filtert nach Mandant, nicht nach Modul.
+  ADR-001s „Tabellenbesitzregeln werden in CI geprüft" gilt dadurch **nicht** als erfüllt und
+  darf so auch nicht gemeldet werden.
 - Planung stellt veröffentlichte Planfakten über eine **öffentliche Application-API** bereit;
   das Kostenmodul schreibt nur eigene Tabellen.
 - Kein generischer `shared`-/`services`-Container, keine direkte Browsermutation, kein
@@ -294,6 +299,19 @@ Dauer und Betrag deterministisch auf echte lokale Kalendertage aufgeteilt.
   blockiert; spätere Satzänderung verändert Snapshot nicht; gleicher Input erzeugt keine
   Doppelwirkung;
 - CI-Zuordnung: **MISSING** (`OQ-003`).
+
+### ADR-Entscheidung zu REQ-001 (abgeleitet aus der Jira-AK, keine Ermessensentscheidung)
+
+EYT-105 AK 1 verlangt wörtlich „**Eine neue ADR** ergänzt `costs` als Fachmodul". Damit ist
+entschieden: es entsteht **ADR-003**, keine stille Fortschreibung von ADR-001 (vorhanden sind
+ADR-001 und ADR-002).
+
+Folgewirkung, die zwingend mitgeht: `MODULE_SLUGS` trägt heute den Kommentar, die Liste sei
+„aus ADR-001 Z. 60 abgeleitet". Mit `costs` wird diese Herkunftsbehauptung **falsch** — ADR-001
+Z. 60 kennt kein Kostenmodul. ADR-003 muss deshalb ausdrücklich festhalten, dass es die
+Modulliste aus ADR-001 **erweitert**, und der Doc-Kommentar in `module-catalogue.ts` ist auf
+beide Quellen umzustellen. Eine Ergänzung ohne diese Klarstellung hinterlässt eine falsche
+Herkunftsangabe im Katalog.
 
 ### Schnittgrenze EYT-95 / EYT-109 (PO-Korrektur 30.07.2026)
 
