@@ -199,3 +199,30 @@ Zehn Befunde gemeldet. Triage, jeweils mit Autorität statt Ermessen:
 | 8   | Plan Abschnitt 4 war enger als die PRD-Evidence für REQ-001                                                                          | **Plan korrigiert**, jetzt vier benannte Gegenmutationen.                                                                                                                                                                                                                             |
 | 9   | Fremde Working-Tree-Änderungen: `docs/prd/CURRENT_PRD_v1.3.md` gelöscht, `docs/architecture/EasyTree – Softwaredokumentation.md` neu | **unverändert gemeldet.** Unabhängig zweimal beobachtet (Orchestrator und Tester). Eine gelöschte Rang-4-Autorität braucht eine PO-Bestätigung; nicht angefasst, in keinem Commit.                                                                                                    |
 | 10  | „keine direkte Browsermutation, kein verteilter Dienst" bewusst nicht abgedeckt                                                      | **akzeptiert.** „Kein verteilter Dienst" ist aus `apps/api/test/**` nicht redlich statisch prüfbar; die Browsermutation deckt `apps/web/test/no-supabase-import.test.ts` ab und gehört bei den Kosten zu REQ-004/REQ-006.                                                             |
+
+## 8. Getrennte Red-Evidence-Statuslinien (PO 30.07.2026)
+
+Der Jira-Status wird **nicht** mit der Qualität der Red Evidence gleichgesetzt. Beides wird
+getrennt geführt.
+
+### EYT-95
+
+```text
+JIRA:                   In Arbeit          (gesetzt 30.07.2026)
+RED_TEST_WRITTEN:       PASS               42 Zusicherungen in zwei Dateien
+RED_TEST_EXECUTED:      PASS               42 rot / 110 gruen, eigenhaendig reproduziert
+RED_TEST_CI_MAPPED:     PASS               unit-tests, `pnpm test`
+RED_REASON_VALID:       OPEN               alle Fehler sind Aufloesungsfehler
+IMPLEMENTATION_ALLOWED: nein               nur nach starkem Red
+```
+
+### EYT-105
+
+```text
+JIRA:                   In Arbeit          (gesetzt 30.07.2026)
+RED_TEST_WRITTEN:       PASS               vier Dateien unter apps/api/test/
+RED_TEST_EXECUTED:      PASS               24 rot / 164 gruen, eigenhaendig reproduziert
+RED_TEST_CI_MAPPED:     PASS               unit-tests, `pnpm test`
+RED_REASON_VALID:       PASS               fehlendes Modul und sechs Leerlauf-Meldungen
+IMPLEMENTATION_ALLOWED: ja, nach EYT-95    Reihenfolge aus PO-Weisung Abschnitt 6
+```

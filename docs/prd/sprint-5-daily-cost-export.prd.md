@@ -365,6 +365,69 @@ Dass Planeinsätze in der UI minutengenau eingegeben werden, ist eine Eingabereg
 Planungsdomäne. Sie zwingt die Geldarithmetik **nicht**, Sekunden- oder Millisekundenanteile zu
 runden oder still zu verwerfen; die Kosten-Domäne verlässt sich nicht ungeprüft darauf.
 
+#### V2b — Sicherheitsgrenze vor `BigInt` (PO 30.07.2026)
+
+Die Konvertierung nach `bigint` ist eine Fehlerquelle, keine Formalität. `durationMs` muss
+**vor** der Konvertierung geprüft sein:
+
+```text
+endlich · ganzzahlig · nichtnegativ · Number.isSafeInteger(durationMs)
+```
+
+Verboten und je einzeln abzuweisen:
+
+```text
+BigInt(7.5)        BigInt(NaN)        BigInt(Infinity)
+BigInt(eines unsicheren Number-Werts)
+```
+
+Vertrag:
+
+```text
+toDurationMilliseconds(value: number): DurationMilliseconds
+```
+
+mit **fail-closed** Validierung vor `BigInt(value)`. Die Differenz zweier Epoch-Millisekunden
+ist für realistische Einsatzintervalle sicher darstellbar — **diese Annahme ist zu prüfen und
+darf nicht still vorausgesetzt werden.**
+
+#### V1b — Eigentum des Summenvertrags (PO 30.07.2026)
+
+Die Regel „Gesamtsummen entstehen durch Addition bereits gerundeter persistierter
+Positionsbeträge" ist geteilt:
+
+| Anteil                                                                                | Ticket      |
+| ------------------------------------------------------------------------------------- | ----------- |
+| arithmetische Invariante `total = sum(positionAmounts)`                               | **EYT-95**  |
+| Persistenz, Snapshotpositionen, tatsächliche Summenbildung aus gespeicherten Beträgen | **EYT-109** |
+
+EYT-95 testet den reinen Summenvertrag und zieht dafür **keine Snapshotpersistenz vor**.
+
+#### Grenzen des compile-enabling Skeletts (PO 30.07.2026)
+
+Erlaubt: öffentliche Typen · Funktionssignaturen · gebrandete bzw. validierte Grundtypen ·
+Fehlercodes · sichere Konvertierungsgrenzen · Exporte und Modulstruktur.
+
+**Noch nicht erlaubt:** fertige `HALF_UP`-Berechnung · vollständige Satzversionsauswahl ·
+finale Intervalllogik · echte Kostenberechnung · Snapshotlogik · **versteckte Defaultwerte, die
+Tests zufällig grün machen**.
+
+Nach dem Skelett laufen die Tests erneut. **Starker Red-Nachweis** liegt erst vor, wenn die
+Tests die jeweilige Funktion tatsächlich erreichen und aus einem fachlich spezifischen Grund
+scheitern — mindestens je eine gezielte rote Prüfung pro Vertragsklasse:
+
+| Klasse        | fachlich spezifischer roter Grund                                                |
+| ------------- | -------------------------------------------------------------------------------- |
+| `V1 ROUNDING` | erwarteter Minor-Unit-Betrag stimmt noch nicht                                   |
+| `V2 QUANTITY` | exakte Millisekundenberechnung oder Zwischenrundungsverbot verletzt              |
+| `V3 VALIDITY` | einschließendes `validTo` bzw. Folgetag-Normalisierung falsch                    |
+| `V4 SIGN`     | negativer Quantity-, Rate- oder PlanCostAmount-Wert wird nicht korrekt abgelehnt |
+
+**Nicht ausreichend:** `module not found` · `X is not a function` · `NOT_IMPLEMENTED` für
+sämtliche Tests · falscher Fixture-Aufbau · fehlende Testkonfiguration. Ein einzelner
+ausdrücklicher `NOT_IMPLEMENTED`-Fehler darf den Übergang sichtbar machen, ersetzt aber nicht
+die starke Evidenz.
+
 #### V3 — Satzgültigkeit: `validTo` einschließend, intern halboffen
 
 Fachliche Oberfläche `[validFrom, validTo]`, beide einschließend, `validTo = null` unbegrenzt.
