@@ -307,7 +307,8 @@ describe("Rot-Fall Kostenmodul", () => {
         'export const a = "select id, starts_at from public.assignments where org_id = $1";',
         "export const b =",
         '  "select s.id from public.cost_snapshots s join public.plan_versions v on v.id = s.plan_version_id";',
-        'export const c = "select * from public.cost_snapshots c, public.assignments a where a.id = c.id";',
+        "export const c =",
+        '  "select * from public.cost_snapshots c, public.plan_versions_comma v where v.id = c.id";',
         'export const d = "delete from public.cost_snapshots using public.items where items.id = $1";',
         'export const e = "select * from public.unregistered_ledger";',
       ].join("\n") + "\n",
@@ -324,8 +325,13 @@ describe("Rot-Fall Kostenmodul", () => {
       messages.some((m) => m.includes('"join public.plan_versions"') && m.includes("lesend")),
       "join-Ziel nicht erkannt",
     ).toBe(true);
+    // Diese Zusicherung nannte frueher `public.assignments` — dasselbe Ziel, das
+    // schon Literal `a` liefert. Sie war damit byte-identisch zur Zusicherung
+    // oben und blieb gruen, auch wenn man SQL_READ_CONTINUATION komplett
+    // entfernte. Jetzt prueft sie ein Ziel, das AUSSCHLIESSLICH ueber die
+    // kommagetrennte Fortsetzung erreichbar ist.
     expect(
-      messages.some((m) => m.includes('"from public.assignments"')),
+      messages.some((m) => m.includes('"from public.plan_versions_comma"')),
       "kommagetrennte Lesequelle nicht erkannt",
     ).toBe(true);
     expect(
@@ -365,14 +371,65 @@ describe("Rot-Fall Kostenmodul", () => {
     drop("apps/api/src/modules/costs/infrastructure/legit-sql.repository.ts");
   });
 
-  it("meldet keinen Importpfad als Tabelle", () => {
-    // `import … from "…"` enthaelt das Schluesselwort `from`. Ein Rohtextscan
-    // haette daraus `public.../planning` gemacht — deshalb werden nur
-    // Literalinhalte gescannt, nie der Rohquelltext.
+  it("meldet weder einen Importpfad noch deutsche Prosa als Tabelle", () => {
+    // Zwei Ueberfeuer-Faelle in einem, beide mit eigener Fixture — die fruehere
+    // Fassung lief gegen den SAUBEREN Baum und blieb deshalb auch dann gruen,
+    // wenn man die Regel loeschte.
+    //
+    // (1) `import … from "…"` traegt das Schluesselwort `from` im ROHTEXT.
+    //     Gemessen: ein Rohtextscan haette daraus die "Tabelle" `..` gemacht,
+    //     nicht `public.../planning` — der Punkt bleibt derselbe, nur der
+    //     Fehlermodus war frueher falsch beschrieben. Gescannt werden deshalb
+    //     ausschliesslich Literalinhalte.
+    // (2) Deutsche Prosa enthaelt `from` und `join` als gewoehnliche Woerter.
+    //     Gemessen ohne Vorpruefung: "beim join mehrerer Zeilen" ergab
+    //     `public.mehrerer`, "stammt from planung" ergab `public.planung`.
+    //     Ein Waechter, der bei einer harmlosen Meldung feuert, wird
+    //     abgeschaltet — und faengt dann auch das Echte nicht mehr.
+    write(
+      "apps/api/src/modules/costs/infrastructure/ueberfeuer.repository.ts",
+      [
+        'import type { PublishedPlanFacts } from "../../planning";',
+        'export const hinweis = "Konflikt entsteht beim join mehrerer Zeilen";',
+        'export const grund = "Wert stammt from planung und ist unveraendert";',
+        "export type X = PublishedPlanFacts;",
+      ].join("\n") + "\n",
+    );
+    const messages = messagesOf("costs-touches-only-own-tables");
     expect(
-      messagesOf("costs-touches-only-own-tables").filter((m) => m.includes("planning")),
+      messages.filter((m) => m.includes("planning")),
       "Ein Importspezifizierer wurde als Tabelle gelesen.",
     ).toEqual([]);
+    expect(
+      messages.filter((m) => m.includes("mehrerer") || m.includes("planung")),
+      "Deutsche Prosa wurde als Tabellenzugriff gelesen.",
+    ).toEqual([]);
+    drop("apps/api/src/modules/costs/infrastructure/ueberfeuer.repository.ts");
+  });
+
+  it("faengt eine relativ importierte Datei NICHT als XLSX-Bibliothek", () => {
+    // Gemessen: XLSX_LIBRARY_PATTERN traf `./infrastructure/xlsx-cost-renderer`
+    // und `../infrastructure/xlsx-cost-renderer`, weil `([/-]|$)` den Bindestrich
+    // zulaesst. Sobald EYT-110 den Adapter liefert und `costs/index.ts` ihn
+    // re-exportiert, haette die Regel den eigenen, vertragskonformen Code als
+    // Verstoss gemeldet. Genau diese Zukunft sichert der Test ab, bevor sie
+    // eintritt.
+    write(
+      "apps/api/src/modules/costs/index.ts",
+      'export { XlsxCostRenderer } from "./infrastructure/xlsx-cost-renderer";\n',
+    );
+    write(
+      "apps/api/src/modules/costs/infrastructure/xlsx-cost-renderer.ts",
+      [
+        'import type { CostExportPort } from "../application/cost-export.port";',
+        "export const XlsxCostRenderer: CostExportPort | null = null;",
+      ].join("\n") + "\n",
+    );
+    expect(
+      messagesOf("costs-xlsx-behind-application-port"),
+      "Ein relativer Importpfad wurde als XLSX-Bibliothek gemeldet.",
+    ).toEqual([]);
+    drop("apps/api/src/modules/costs/infrastructure/xlsx-cost-renderer.ts");
   });
 
   it("faengt einen generischen Sammelcontainer, auch verschachtelt und unter anderem Namen", () => {

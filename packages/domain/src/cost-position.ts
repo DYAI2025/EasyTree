@@ -141,9 +141,19 @@ export type CostPositionResult =
  * (die zur Null hin abschneidet) gleich `floor`. Die Vorbedingung ist keine
  * Bitte, sondern durch die Typen gesichert: `RATE_NEGATIVE` und
  * `QUANTITY_NEGATIVE` legen beide Faktoren an ihren einzigen Konstruktoren auf
- * `>= 0` fest. Käme trotzdem ein negativer Zähler an, bliebe das Ergebnis
- * negativ und `planCostAmount` weist es mit `COST_AMOUNT_NEGATIVE` ab — die von
- * V4 dafür vorgesehene Stelle, statt einer zweiten hier.
+ * `>= 0` fest.
+ *
+ * **Die nachgelagerte Prüfung fängt einen negativen Zähler NICHT zuverlässig.**
+ * Gemessen: `roundHalfUp(-1n, 3_600_000n)` bis `roundHalfUp(-5_399_999n,
+ * 3_600_000n)` ergeben alle `0n`, und `0n` passiert `planCostAmount` als
+ * gültiger Betrag. Erst ab `|numerator| >= 1,5 × denominator` wird das Ergebnis
+ * negativ und damit abgewiesen. Für das ganze Band darunter entstünde still
+ * `0,00 EUR` — die Schadensform, die dieses Modul an anderer Stelle ausdrücklich
+ * „sieht vollständig aus und ist falsch" nennt.
+ *
+ * Die Vorbedingung wird deshalb **von den Typen** gehalten, nicht von einer
+ * Prüfung danach. Eine frühere Fassung dieses Kommentars behauptete das
+ * Gegenteil; sie war ungemessen und in einem berechenbaren Band falsch.
  */
 function roundHalfUp(numerator: bigint, denominator: bigint): bigint {
   return (2n * numerator + denominator) / (2n * denominator);

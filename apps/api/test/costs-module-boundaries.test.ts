@@ -117,24 +117,41 @@ describe("Kostenmodul — Struktur (EYT-105, REQ-001)", () => {
     ).not.toEqual([]);
   });
 
-  it("bezieht Geld und Rundung aus @easytree/domain statt sie neu zu bauen", () => {
-    // Die Gegenrichtung — eine eigene Money-Implementierung im Modul — prueft
-    // die Regel `costs-single-money-implementation`. Beide zusammen ergeben
-    // „genau eine Implementierung, und zwar die zentrale" (EYT-95).
+  it("bezieht seine gemeinsamen Typen aus @easytree/domain", () => {
+    // ACHTUNG, gemessene Praezisierung: diese Zusicherung hiess frueher „bezieht
+    // Geld und Rundung aus @easytree/domain" und zaehlte doch nur Importe des
+    // Pakets, gleich welchen Symbols. Gemessen sind das heute ausschliesslich
+    // `AssignmentId`, `EmployeeId`, `PlanVersionId`, `WorksiteId` und
+    // `unsafeIdentifier` — KEIN Geld- oder Rundungssymbol. Der Test war unter
+    // seinem alten Titel aus Gruenden gruen, die mit Geld nichts zu tun haben.
+    //
+    // Das ist kein Defekt des Moduls: `costs` ist heute eine Grenze und rechnet
+    // noch nichts; Money kommt erst mit EYT-109. Was die Doppelimplementierung
+    // wirklich verhindert, ist die Regel `costs-single-money-implementation` —
+    // sie feuert bei einer eigenen Money-Implementierung im Modul, unabhaengig
+    // davon, ob die zentrale importiert wird.
+    // Gegenmutation: den letzten `@easytree/domain`-Import unter costs/ entfernen
+    // -> rot.
     const usages = refs.filter(
       (ref) => ref.from.startsWith(`${COSTS_MODULE_DIR}/`) && ref.specifier === "@easytree/domain",
     );
     expect(
       usages.length,
-      "Keine Kostendatei importiert @easytree/domain — der zentrale Geld-/Rundungsvertrag aus EYT-95 waere damit nicht in Benutzung.",
+      "Keine Kostendatei importiert @easytree/domain — das Modul fuehrt dann eigene Typen statt der gemeinsamen.",
     ).toBeGreaterThan(0);
   });
 });
 
 describe("Kostenmodul — Grenzen (EYT-105, REQ-001)", () => {
   it("hat ueberhaupt Kostendateien gescannt", () => {
-    // Ohne diese Zusicherung waeren fuenf der sieben Regeln unten still gruen,
-    // solange das Modul fehlt — der Zustand, den REQ-001 gerade beendet.
+    // Gemessen, nicht geschaetzt: fehlt das Modul, liefern ALLE SIEBEN Regeln
+    // null Befunde, und sechs von sieben haben dann ein leeres `seen` — die
+    // Leerlaufbremse unten faengt diese sechs. Die siebte
+    // (`costs-xlsx-behind-application-port`) zaehlt nur noch Kostendateien und
+    // faellt damit ebenfalls. Diese Zusicherung ist die Eingangsbremse davor:
+    // sie sagt, dass ueberhaupt etwas zu pruefen da war.
+    // (Eine fruehere Fassung dieses Kommentars nannte „fuenf der sieben". Die
+    // Zahl entsprach keiner messbaren Groesse.)
     expect(
       costsFiles.length,
       `Keine Quelldatei unter ${COSTS_MODULE_DIR}/ gefunden.`,

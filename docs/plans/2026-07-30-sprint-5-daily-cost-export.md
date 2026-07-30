@@ -140,7 +140,7 @@ Konfiguration ist kein ausgefuehrter Negativfall.
 
 ```text
 BRANCH_PROTECTION_CONFIGURATION:     PASS
-BRANCH_PROTECTION_NEGATIVE_EXECUTION: OPEN
+BRANCH_PROTECTION_NEGATIVE_EXECUTION: PASS
 ```
 
 **Kein Blocker fuer Schreiben und Testen auf dem Feature-Branch. Verbindlich vor dem Merge des
@@ -179,7 +179,7 @@ OQ-003:                      geschlossen (Abschnitt 3)
 OQ-005:                      geschlossen (Abschnitt 2) - CI-only, keine Anforderung gesenkt
 BLOCKED_CI_EVIDENCE:         aufgeloest (Abschnitt 5)
 BRANCH_PROTECTION_CONFIGURATION:      PASS
-BRANCH_PROTECTION_NEGATIVE_EXECUTION: OPEN  - verbindlich vor dem ersten Merge, kein Startblocker
+BRANCH_PROTECTION_NEGATIVE_EXECUTION: PASS  - verbindlich vor dem ersten Merge, kein Startblocker
 OFFENE BLOCKER:              keine fuer Iteration 1
 ```
 
@@ -368,3 +368,34 @@ der Ertrag der Unabhaengigkeitsinvariante, nicht Zufall.
 `COST_AMOUNT_NEGATIVE` in `costOfDuration` unerreichbar, aber von V4 als Defense in Depth
 verlangt · Waehrungsmischung ohne `CURRENCY_MISMATCH` · Elementform von `RateVersionOverlap` ·
 Pruefreihenfolge in `hourlyRateVersion` bei doppelt verletzter Eingabe.
+
+## 12. AC8 — der ausgefuehrte Negativnachweis (30.07.2026)
+
+`BRANCH_PROTECTION_NEGATIVE_EXECUTION: PASS`. Die sechs Schritte der PO-Weisung sind
+abgearbeitet; alles unten ist an der GitHub-API gemessen.
+
+| Schritt                            | Beleg                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. PR geoeffnet                    | PR #36, `draft=false`, `state=OPEN`                                                                                                                                                                                                                                                                                                     |
+| 2. `read-through` kontrolliert rot | Commit **`af28234`** — 32 Zeilen ausschliesslich in `apps/web/e2e/read-through.spec.ts`. Die Datei laeuft nur im Job `read-through`: `playwright.harness.config.ts:16` matcht sie, `playwright.config.ts:27` schliesst sie aus. Mechanisch gegengeprueft mit `playwright test --list` in der web-smoke-Konfiguration: **kein Treffer**. |
+| 3. serverseitig nicht mergebar     | `check-runs` zu `af28234`: `read-through=failure`, neun uebrige `success`. `mergeable_state=blocked`. `NEGATIVE_PR=36 verify-branch-protection.sh` meldete „Rote PFLICHTchecks: read-through" und `0 offen, 0 uebersprungen` — erstmals alle EYT-67-Kriterien belegt.                                                                   |
+| 4. Gegenfall zurueckgenommen       | Commit **`f45d4c9`**, normaler `git revert`. Kein Reset, kein Force Push.                                                                                                                                                                                                                                                               |
+| 5. `read-through` wieder gruen     | `check-runs` zu `f45d4c9`: alle zehn `success`.                                                                                                                                                                                                                                                                                         |
+| 6. Mergefaehigkeit erneut geprueft | `mergeStateStatus=CLEAN`, `mergeable=MERGEABLE`, offene Review-Threads `0`.                                                                                                                                                                                                                                                             |
+
+**Kein kuenstlicher Fehler hat `master` erreicht** — der Gegenfall lebte und starb auf dem
+Feature-Branch. Der Produktstand nach dem Revert ist bytegleich mit dem davor: gleicher
+Tree-SHA `c38bc16d3bb304f668d59ce3e5b57b722ee3a8c5`, leerer Diff.
+
+**Warum das hier steht und nicht nur in der Commit-Message.** `verify-branch-protection.sh`
+liest immer den AKTUELLEN Head; dort ist `read-through` gruen, und AC8 faellt dort auf „hat
+keinen roten PFLICHTcheck". Das Skript kann einen historischen Negativlauf **nicht**
+rekonstruieren. Wird der Branch nach dem Merge geloescht, ist `af28234` ueber keinen Ref mehr
+erreichbar und die einzige verbleibende Quelle waere der GitHub-Check-Verlauf. Deshalb steht
+die Messung in einem getrackten Artefakt.
+
+**Ehrliche Grenze:** kein tatsaechlicher Mergeversuch. Der Product Owner hat ihn ausdruecklich
+nicht verlangt. Der Nachweis stuetzt sich auf `mergeable_state=blocked` plus die namentlich
+ausgewiesene Ursache und den ausgeschlossenen Draft-Status — nicht auf eine serverseitige
+Ablehnung eines echten `gh pr merge`. Der Verifier weist selbst darauf hin, dass das der
+direkte Gegenbeweis waere.

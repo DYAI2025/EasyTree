@@ -21,7 +21,7 @@
  * solange `apps/api/src/modules/costs/` fehlt — also ausgerechnet dann, wenn
  * REQ-001 nicht erfuellt ist.
  *
- * Zwei Regeln haben bewusst einen weiten Geltungsbereich (`costs-xlsx-…` sieht
+ * Eine Regel hat bewusst einen weiten Geltungsbereich (`costs-xlsx-…` sieht
  * ganz `apps/**` und `packages/**`). Ihr Nicht-Leerlauf-Zaehler ist damit heute
  * schon erfuellt, ihre Trefferseite aber nicht. Diese Trefferseite wird
  * ausschliesslich im synthetischen Baum von
@@ -139,6 +139,14 @@ const SQL_WRITE_TARGETS: ReadonlyArray<readonly [string, RegExp]> = [
   ["truncate", /\btruncate\b(?:\s+table\b)?\s+([\w$".]+)/gi],
 ];
 
+/**
+ * Sieht das Literal ueberhaupt nach SQL aus?
+ *
+ * Verlangt ein einleitendes Statement-Verb. Das ist absichtlich eng: `from` und
+ * `join` allein kommen in deutscher Prosa vor, `select … from` nicht.
+ */
+const SQL_STATEMENT_HINT = /\b(select|insert|update|delete|merge|truncate|with)\b/i;
+
 /** `from`, `join` und `using` als Lesequellen. */
 const SQL_READ_TARGETS = /\b(from|join|using)\b\s+([\w$".]+)/gi;
 
@@ -179,6 +187,15 @@ function qualify(raw: string): string {
  */
 export function sqlAccesses(literal: string): SqlAccess[] {
   const out: SqlAccess[] = [];
+  // Gemessene Luecke: ohne diese Vorpruefung lief der Leseabgleich ueber JEDES
+  // Stringliteral des Moduls. Deutsche Prosa traf ihn sofort —
+  // "Konflikt entsteht beim join mehrerer Zeilen" ergab die "Tabelle"
+  // `public.mehrerer`, "Wert stammt from planung" ergab `public.planung`. Beide
+  // waeren als unregistrierte Fremdtabelle gemeldet worden. Heute faellt das
+  // niemandem auf, weil kein Kostenliteral die Woerter traegt; rot wird es beim
+  // ersten deutschen Nutzertext im Modul. Ein Waechter, der bei einer harmlosen
+  // Meldung feuert, wird abgeschaltet — und dann faengt er auch das Echte nicht.
+  if (!SQL_STATEMENT_HINT.test(literal)) return out;
   const cteNames = new Set<string>();
   for (const match of literal.matchAll(SQL_CTE_NAMES)) {
     const name = match[1];
@@ -752,11 +769,25 @@ export const COSTS_RULES: readonly CostsRule[] = [
       "Eine XLSX-Bibliothek erscheint nur in costs/infrastructure/, haengt dort an einem Application-Port und rechnet nicht neu (S5-REQ-01, REQ-007).",
     evaluate: ({ refs, files }): CostsRuleResult => {
       const findings: CostsFinding[] = [];
-      const seen = new Set<string>(files);
+      // Gemessen: mit `new Set(files)` stand hier 224, waehrend die sechs anderen
+      // Regeln 1 bis 6 zaehlten — die Bremse konnte also nie fehlschlagen und war
+      // eine falsche Sicherheit, genau das Muster "zaehlt Dateien, die es nicht
+      // geprueft hat". Gezaehlt wird jetzt, was die Regel tatsaechlich entscheidet:
+      // jede Datei unterhalb von `costs/`, deren Importe sie durchsieht.
+      const seen = new Set<string>(files.filter((file) => isInCosts(file)));
       const rendererFiles = new Set<string>();
       const infrastructure = `${COSTS_MODULE_DIR}/infrastructure/`;
 
       for (const ref of refs) {
+        // Relative Pfade sind keine Bibliothek, sondern eigene Dateien. Ohne
+        // diesen Guard traf das Muster `./infrastructure/xlsx-cost-renderer`
+        // und `../infrastructure/xlsx-cost-renderer` — gemessen, beide `true`,
+        // weil `([/-]|$)` auch den Bindestrich zulaesst. Sobald EYT-110 den
+        // Adapter liefert und `costs/index.ts` ihn re-exportiert, haette die
+        // Regel den eigenen, vertragskonformen Code als Verstoss gemeldet:
+        // `ref.from` waere dann `costs/index.ts` und nicht `infrastructure/`.
+        // `costs-domain-purity` fuehrt denselben Guard (Zeile weiter unten).
+        if (ref.specifier.startsWith(".")) continue;
         if (!XLSX_LIBRARY_PATTERN.test(ref.specifier)) continue;
         if (!ref.from.startsWith(infrastructure)) {
           findings.push({
