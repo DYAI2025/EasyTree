@@ -144,6 +144,68 @@ Scope Dependency Closure (CAN-005).
 
 - `docs/**` — ADR, Vision, Canvas, PRD, Traceability, Reality Ledger, Runbooks.
 
+### Nachträgliche Scopeaufnahme — EYT-106, Supabase-TLS (Freigabe PO 31.07.2026)
+
+**Freigabe:** Product Owner, 31.07.2026. **Ticket:** EYT-106.
+
+**Anlass, gemessen:** die direkte Supabase-Verbindung erreicht über Railway-IPv6 die
+Datenbank — `ENETUNREACH` ist nach Aktivierung von Outbound-IPv6 verschwunden. Der Start
+scheitert seither **fail-closed** an der nicht vertrauten projektbezogenen
+Zertifikatskette: `self-signed certificate in certificate chain`. Ursache ist, dass
+`pg` 8.22 `sslmode=require` wie `verify-full` behandelt und Node Supabases CA nicht kennt.
+
+**Ziel:** eine zentrale, **vollständig verifizierende** PostgreSQL-TLS-Konfiguration für
+alle drei Zugriffspfade — Startgate (EYT-45), Readiness-Ping und fachliche
+Tenant-Abfragen. Heute baut jede der drei Stellen ihre Verbindung selbst; drei getrennte
+TLS-Implementierungen sind drei Gelegenheiten, an genau einer die Kettenprüfung zu
+verlieren, ohne dass es auffällt.
+
+**Ausdrücklich keine Abschwächung.** Weder `rejectUnauthorized: false` noch
+`sslmode=no-verify` noch `uselibpqcompat=true&sslmode=require` ohne Wurzelzertifikat noch
+`NODE_TLS_REJECT_UNAUTHORIZED=0`. Die Hostnamenprüfung bleibt aktiv. Ein Wechsel auf den
+Session-Pooler als **Umgehung** dieses TLS-Problems ist ebenfalls ausgeschlossen.
+
+**Diese Freigabe autorisiert genau die unten aufgeführten Pfade und keine weiteren.**
+
+- `packages/config/src/certificate.ts` — PEM-Normalisierung an der Konfigurationsgrenze.
+- `packages/config/src/schema.ts` — `DATABASE_SSL_ROOT_CERT` in `ENV_VAR_META`, allen drei
+  Presets und `AppConfig`; in `production` Pflicht ohne Default.
+- `packages/config/src/load.ts` — Mapping in die validierte Konfiguration.
+- `packages/config/src/redact.ts` — Schwärzung, damit kein PEM in Logs oder Meldungen steht.
+- `packages/config/test/**` — die roten Tests dazu.
+- `apps/api/src/platform/database/pg-connection.ts` — die **eine** gemeinsame Factory.
+- `apps/api/src/platform/database/role-privileges.ts` — Startgate nutzt die Factory.
+- `apps/api/src/platform/database/pg-database-ping.ts` — Readiness nutzt die Factory.
+- `apps/api/src/platform/database/tenant-query-runner.ts` — Tenant-Abfragen nutzen die Factory.
+- `.env.example` — Platzhalter, **niemals** ein echtes Zertifikat.
+- `CLAUDE.md` — Snapshotkorrektur nach Read-after-write.
+
+`packages/config/src/index.ts` ist **nicht** aufgenommen. Es wird nur ergänzt, wenn ein
+**gemessener** Consumer einen öffentlichen Export braucht — nicht vorsorglich.
+
+### Zweite nachträgliche Scopeaufnahme — EYT-106, Composition-Wiring (Freigabe PO 31.07.2026)
+
+**Freigabe:** Product Owner, 31.07.2026. **Ticket:** EYT-106.
+
+**Anlass:** Weitergabe der Supabase-Root-CA von `AppConfig` an alle realen
+PostgreSQL-Zugriffspfade. Die drei Dateien sind die notwendigen Composition- und
+Dependency-Wiring-Punkte: sie reichen das bereits validierte `databaseSslRootCert`
+aus `AppConfig` an API-Bootstrap, Worker-Bootstrap und `TenantQueryRunner` weiter.
+Ein direkter Zugriff auf `process.env` innerhalb der PostgreSQL-Factory ist nicht
+zulässig — die zentrale Zod-Validierung, Redaction und Dependency Injection dürfen
+nicht umgangen werden.
+
+**Keine Abschwächung:** vollständige Zertifikats- und Hostnamenprüfung bleibt
+erhalten; kein `rejectUnauthorized=false`, kein `NODE_TLS_REJECT_UNAUTHORIZED=0`,
+kein `sslmode=no-verify`.
+
+**Diese Freigabe autorisiert genau drei Dateien und keine weiteren** — keine
+breiteren Globs:
+
+- `apps/api/src/main.ts` — Einspritzpunkt der Rollenprüfung erhält `databaseUrl` + `databaseSslRootCert`.
+- `apps/api/src/worker.ts` — derselbe Einspritzpunkt im Worker-Bootstrap.
+- `apps/api/src/platform/database/tenant-query-runner.provider.ts` — Pool-Konstruktion über die Factory.
+
 ## Allowed change scope
 
 Maschinenlesbar für `plumbline-scope-check`. Inhaltlich identisch mit CAN-004 — **keine
@@ -186,6 +248,20 @@ aus einer Sektion mit genau dieser Überschrift). Der Governance-Block ist gegen
 - docs/runbooks/**
 - docs/retros/**
 - docs/traceability.md
+- packages/config/src/certificate.ts
+- packages/config/src/schema.ts
+- packages/config/src/load.ts
+- packages/config/src/redact.ts
+- packages/config/test/**
+- apps/api/src/platform/database/pg-connection.ts
+- apps/api/src/platform/database/role-privileges.ts
+- apps/api/src/platform/database/pg-database-ping.ts
+- apps/api/src/platform/database/tenant-query-runner.ts
+- .env.example
+- CLAUDE.md
+- apps/api/src/main.ts
+- apps/api/src/worker.ts
+- apps/api/src/platform/database/tenant-query-runner.provider.ts
 
 ### Nachtraegliche Scopeaufnahme (PO-Weisung 30.07.2026 §4)
 
