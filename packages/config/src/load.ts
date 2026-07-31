@@ -91,5 +91,6 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
     supabaseAnonKey: data.SUPABASE_ANON_KEY,
     apiPort: data.API_PORT,
     logLevel: data.LOG_LEVEL,
+    databaseSslRootCert: data.DATABASE_SSL_ROOT_CERT,
   };
 }

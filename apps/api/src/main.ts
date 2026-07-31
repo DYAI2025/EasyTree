@@ -7,6 +7,7 @@ import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { API_BASE_PATH } from "./common/api-base-path";
 import { APP_CONFIG } from "./config/config.module";
+import type { PgConnectionInput } from "./platform/database/pg-connection";
 import {
   createRolePrivilegeReader,
   verifyDatabaseRole,
@@ -29,7 +30,9 @@ import {
  */
 export async function createApiApp(
   /** Einspritzpunkt fuer die Rollenpruefung (EYT-45). Siehe worker.ts. */
-  readRolePrivileges: (databaseUrl: string) => RolePrivilegeReader = createRolePrivilegeReader,
+  readRolePrivileges: (
+    connection: PgConnectionInput,
+  ) => RolePrivilegeReader = createRolePrivilegeReader,
 ): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
   // Der Vertrag nennt "/api/v1" als Basispfad (packages/contracts/openapi/v1.json,
@@ -46,7 +49,12 @@ export async function createApiApp(
   // Vor dem ersten Request: die verbundene Rolle darf RLS nicht umgehen
   // koennen (EYT-45, ADR-001 Z. 85). Wirft und verhindert damit den Start.
   try {
-    await verifyDatabaseRole(readRolePrivileges(config.databaseUrl));
+    await verifyDatabaseRole(
+      readRolePrivileges({
+        databaseUrl: config.databaseUrl,
+        sslRootCert: config.databaseSslRootCert,
+      }),
+    );
   } catch (error) {
     await app.close();
     throw error;
@@ -55,7 +63,9 @@ export async function createApiApp(
 }
 
 export async function bootstrapApi(
-  readRolePrivileges: (databaseUrl: string) => RolePrivilegeReader = createRolePrivilegeReader,
+  readRolePrivileges: (
+    connection: PgConnectionInput,
+  ) => RolePrivilegeReader = createRolePrivilegeReader,
 ): Promise<INestApplication> {
   const app = await createApiApp(readRolePrivileges);
   const config = app.get<AppConfig>(APP_CONFIG);

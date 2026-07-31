@@ -99,6 +99,13 @@ describe("loadConfig — environment presets", () => {
       SUPABASE_URL: "https://project-ref.supabase.co",
       SUPABASE_ANON_KEY: "anon-placeholder",
       API_PORT: "3001",
+      // Seit EYT-106 ist das Wurzelzertifikat in production Pflicht. Es steht
+      // hier nur, damit dieser Fall weiterhin die LOCALHOST-Ablehnung isoliert
+      // prueft und nicht an einer anderen fehlenden Variablen scheitert.
+      // Syntaktisch gueltig, fachlich bedeutungslos — kein echtes Zertifikat
+      // im Repository.
+      DATABASE_SSL_ROOT_CERT:
+        "-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIJAKr4bJ1oXQ3f\n-----END CERTIFICATE-----",
     };
     expect(() => loadConfig(prod)).not.toThrow();
     expect(() =>

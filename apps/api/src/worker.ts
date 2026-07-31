@@ -6,6 +6,7 @@ import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
 import { APP_CONFIG } from "./config/config.module";
+import type { PgConnectionInput } from "./platform/database/pg-connection";
 import {
   createRolePrivilegeReader,
   verifyDatabaseRole,
@@ -28,7 +29,9 @@ export async function bootstrapWorker(
    * und wird von `scripts/smoke-worker.sh` und `smoke-api-role-gate.sh`
    * ausgefuehrt, nicht von dieser Signatur umgangen.
    */
-  readRolePrivileges: (databaseUrl: string) => RolePrivilegeReader = createRolePrivilegeReader,
+  readRolePrivileges: (
+    connection: PgConnectionInput,
+  ) => RolePrivilegeReader = createRolePrivilegeReader,
 ): Promise<INestApplicationContext> {
   const ctx = await NestFactory.createApplicationContext(AppModule);
   ctx.enableShutdownHooks();
@@ -36,7 +39,12 @@ export async function bootstrapWorker(
   // unterliegt derselben Auflage (EYT-45, ADR-001 Z. 85).
   const config = ctx.get<AppConfig>(APP_CONFIG);
   try {
-    await verifyDatabaseRole(readRolePrivileges(config.databaseUrl));
+    await verifyDatabaseRole(
+      readRolePrivileges({
+        databaseUrl: config.databaseUrl,
+        sslRootCert: config.databaseSslRootCert,
+      }),
+    );
   } catch (error) {
     // Kein halb gestarteter Kontext: sonst haelt der Worker Verbindungen offen,
     // obwohl er nicht arbeiten darf.

@@ -28,6 +28,8 @@
  */
 import { Client } from "pg";
 
+import { pgConnectionConfig, type PgConnectionInput } from "./pg-connection";
+
 /** Rollenattribute, die über RLS entscheiden. */
 export interface RolePrivileges {
   readonly role: string;
@@ -76,10 +78,10 @@ export function assertRoleCannotBypassRls(privileges: RolePrivileges): void {
 }
 
 /** Fragt die Attribute der verbundenen Rolle ab. */
-export function createRolePrivilegeReader(databaseUrl: string): RolePrivilegeReader {
+export function createRolePrivilegeReader(connection: PgConnectionInput): RolePrivilegeReader {
   return async (): Promise<RolePrivileges> => {
     const client = new Client({
-      connectionString: databaseUrl,
+      ...pgConnectionConfig(connection),
       connectionTimeoutMillis: 5000,
       query_timeout: 5000,
     });

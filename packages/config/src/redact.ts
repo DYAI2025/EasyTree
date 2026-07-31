@@ -8,8 +8,20 @@ export const SECRET_ENV_VARS: readonly EnvVarName[] = (
   Object.keys(ENV_VAR_META) as EnvVarName[]
 ).filter((name) => ENV_VAR_META[name].secret);
 
-/** AppConfig keys corresponding to the secret env variables. */
-export const SECRET_CONFIG_KEYS = ["databaseUrl", "supabaseAnonKey"] as const;
+/**
+ * AppConfig keys corresponding to the secret env variables.
+ *
+ * `databaseSslRootCert` steht hier, obwohl ein Wurzelzertifikat oeffentlich
+ * ist: ein mehrzeiliges PEM in einer Logzeile verdraengt jede andere Aussage.
+ * `redact.test.ts` ("every secret env var has its camelCase key") haelt diese
+ * Liste an `ENV_VAR_META` gekoppelt, damit eine neue Geheimvariable nicht
+ * ungeschwaerzt durchrutscht.
+ */
+export const SECRET_CONFIG_KEYS = [
+  "databaseUrl",
+  "supabaseAnonKey",
+  "databaseSslRootCert",
+] as const;
 export type SecretConfigKey = (typeof SECRET_CONFIG_KEYS)[number];
 
 export type Redacted<T> = {
