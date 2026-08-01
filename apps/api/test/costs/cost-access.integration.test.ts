@@ -38,9 +38,16 @@ const gate = new FailClosedGate("cost-access", TENANT_TESTS_MODE, "EYT-106");
 
 /** Seed-Fixtures (supabase/seed.sql). */
 const EMPLOYEE_ALPHA = "00000000-0000-4000-8000-0000004010a1";
-/** Frei gewaehlte, kollisionsfreie IDs dieser Suite. */
+/**
+ * Frei gewaehlte, kollisionsfreie IDs dieser Suite.
+ *
+ * VERSION_1 ist der persistierte Bestand (beforeAll). VERSION_2 und
+ * VERSION_3 entstehen nur INNERHALB einer Transaktion, die zurueckgerollt
+ * wird — sie duerfen den Bestand nie erreichen.
+ */
 const VERSION_1 = "00000000-0000-4000-8000-0000006ca001";
 const VERSION_2 = "00000000-0000-4000-8000-0000006ca002";
+const VERSION_3 = "00000000-0000-4000-8000-0000006ca003";
 
 let dbAvailable = false;
 let client: Client;
@@ -92,6 +99,25 @@ describe("Kostenrechte in PostgreSQL — unabhaengig von der Anwendungsschicht (
     }
     client = new Client({ connectionString: DB_URL });
     await client.connect();
+
+    // Bestandszeile als Vorbedingung, NICHT ueber inTenantTx: der Helfer
+    // rollt jede Transaktion zurueck (tenant-context.helper.ts) — was in ihm
+    // eingefuegt wird, ist nach dem Test wieder weg. Der erste CI-Lauf hat
+    // genau das aufgedeckt: der Manager-Fall sah zu Recht null Zeilen, weil
+    // die vermeintlich angelegte Version nie persistiert war.
+    //
+    // Das Einfuegen laeuft hier bewusst OHNE Rollenwechsel, also an RLS
+    // vorbei: es ist Fixture-Aufbau, keine Zusicherung. Was RLS zulaesst,
+    // pruefen die Faelle unten.
+    await client.query(
+      `insert into public.employee_rate_versions
+         (id, org_id, employee_id, amount_minor_units, currency,
+          valid_from, valid_to, reason, created_by, correlation_id)
+       values ($1, $2, $3, 3850, 'EUR', date '2026-01-01', date '2026-06-01',
+               'Bestand fuer den Integrationstest', $4, 'test-korrelation')
+       on conflict (id) do nothing`,
+      [VERSION_1, ORG_ALPHA, EMPLOYEE_ALPHA, USER_A],
+    );
   });
 
   afterAll(async () => {
@@ -99,7 +125,7 @@ describe("Kostenrechte in PostgreSQL — unabhaengig von der Anwendungsschicht (
       // Aufraeumen als Superuser: die Zeilen sind fuer `authenticated`
       // unloeschbar (Grants), und genau das ist gewollt.
       await client.query("delete from public.employee_rate_versions where id = any($1::uuid[])", [
-        [VERSION_1, VERSION_2],
+        [VERSION_1, VERSION_2, VERSION_3],
       ]);
       await setRole("owner");
       await client.end();
@@ -111,19 +137,21 @@ describe("Kostenrechte in PostgreSQL — unabhaengig von der Anwendungsschicht (
     gate.assertOrThrow();
   });
 
-  dbIt("owner darf eine Satzversion anlegen und sie danach lesen", async () => {
+  dbIt("owner darf eine Satzversion anlegen und sie in derselben Transaktion lesen", async () => {
+    // Selbstenthalten: Anlegen und Lesen in EINER Transaktion, die danach
+    // zurueckgerollt wird. Der Fall belegt das Duerfen, nicht den Bestand.
     await setRole("owner");
     await inTenantTx(client, USER_A, async (tx) => {
       await tx.query(
         `insert into public.employee_rate_versions
            (id, org_id, employee_id, amount_minor_units, currency,
-            valid_from, valid_to, reason, created_by, correlation_id)
-         values ($1, $2, $3, 3850, 'EUR', date '2026-01-01', date '2026-06-01',
-                 'Integrationstest', $4, 'test-korrelation')`,
-        [VERSION_1, ORG_ALPHA, EMPLOYEE_ALPHA, USER_A],
+            valid_from, reason, created_by, correlation_id)
+         values ($1, $2, $3, 4200, 'EUR', date '2028-01-01',
+                 'owner darf das', $4, 'test-korrelation')`,
+        [VERSION_2, ORG_ALPHA, EMPLOYEE_ALPHA, USER_A],
       );
       const gelesen = await tx.query("select id from public.employee_rate_versions where id = $1", [
-        VERSION_1,
+        VERSION_2,
       ]);
       expect(gelesen.rowCount).toBe(1);
     });
@@ -145,7 +173,12 @@ describe("Kostenrechte in PostgreSQL — unabhaengig von der Anwendungsschicht (
     // Die atomare Trennung: costs.read ja, costs.manage_rates nein.
     await setRole("manager");
     await inTenantTx(client, USER_A, async (tx) => {
-      const gelesen = await tx.query("select id from public.employee_rate_versions");
+      // Gezielt auf die Bestandszeile, nicht auf "irgendwie viele": eine
+      // Gesamtzahl waere von jeder kuenftigen Zeile abhaengig und damit ein
+      // Test, der aus fremdem Grund kippt.
+      const gelesen = await tx.query("select id from public.employee_rate_versions where id = $1", [
+        VERSION_1,
+      ]);
       expect(gelesen.rowCount).toBe(1);
     });
 
@@ -157,7 +190,7 @@ describe("Kostenrechte in PostgreSQL — unabhaengig von der Anwendungsschicht (
               valid_from, reason, created_by, correlation_id)
            values ($1, $2, $3, 9999, 'EUR', date '2027-01-01',
                    'manager darf das nicht', $4, 'test-korrelation')`,
-          [VERSION_2, ORG_ALPHA, EMPLOYEE_ALPHA, USER_A],
+          [VERSION_3, ORG_ALPHA, EMPLOYEE_ALPHA, USER_A],
         );
       }),
     );
@@ -167,9 +200,10 @@ describe("Kostenrechte in PostgreSQL — unabhaengig von der Anwendungsschicht (
 
   dbIt("die abgelehnte Anlage blieb wirkungslos", async () => {
     // Ohne diesen Nachweis koennte die Ablehnung oben auch NACH einem
-    // erfolgreichen Insert kommen.
+    // erfolgreichen Insert kommen. Geprueft wird ausserhalb jeder Transaktion
+    // und ohne Rollenwechsel — also der tatsaechliche Bestand.
     const alle = await client.query("select id from public.employee_rate_versions where id = $1", [
-      VERSION_2,
+      VERSION_3,
     ]);
     expect(alle.rowCount).toBe(0);
   });
