@@ -7,11 +7,21 @@
  *   1. Identitaet (Cookie ODER Bearer, verifiziert, Session lebt)
  *   2. Mitgliedschaften und Rechte SERVERSEITIG aufloesen
  *   3. `CostAccessPolicy`: Organisation waehlen und Recht pruefen
- *   4. erst dann die fachliche Arbeit
+ *   4. Entscheidung protokollieren — erlaubt wie abgelehnt
+ *   5. erst dann die fachliche Arbeit
  *
  * Keine Rollenabfrage in diesem Controller (PO-Entscheidung): er fragt die
  * Policy, nie die Rolle. Und selbst wenn die Policy irrte, lehnte RLS
  * unabhaengig ab (Migration 0013) — das ist die Unabhaengigkeitszusage AK4.
+ *
+ * ## Warum das Protokoll hier steht und nicht in einem Interceptor
+ *
+ * Ein Interceptor saehe den Statuscode, nicht die Entscheidung. `403` sagt
+ * nicht, WELCHES Recht gefehlt hat, und `ORG_NOT_A_MEMBER` und
+ * `PERMISSION_MISSING` antworten absichtlich identisch, damit die Antwort
+ * nicht verraet, ob eine fremde Organisation existiert. Nur hier, an der
+ * einen Zugangskette, sind Recht, bestaetigte Organisation und stabiler
+ * Ablehnungsgrund gleichzeitig bekannt (EYT-106 AK9).
  */
 import {
   BadRequestException,
@@ -51,6 +61,14 @@ import {
 // gehoert dort hin, und `costs` liest ausschliesslich eigene Tabellen.
 import { EMPLOYEE_DIRECTORY_FACTORY, type EmployeeDirectoryFactory } from "../../../workforce";
 import {
+  COST_ACCESS_AUDIT,
+  COST_ACCESS_DECISION_EVENT,
+  pseudonymSubjekt,
+  type CostAccessAuditLog,
+  type CostAccessDecisionEvent,
+  type CostAccessDenyReason,
+} from "../../application/cost-access-audit.port";
+import {
   COST_ACCESS_POLICY,
   type CostAccessPolicy,
   type CostPermission,
@@ -79,6 +97,7 @@ export class CostsController {
     @Inject(RATE_REPOSITORY_FACTORY) private readonly repositoryFor: RateRepositoryFactory,
     @Inject(EMPLOYEE_DIRECTORY_FACTORY)
     private readonly employeeDirectoryFor: EmployeeDirectoryFactory,
+    @Inject(COST_ACCESS_AUDIT) private readonly audit: CostAccessAuditLog,
   ) {}
 
   @Get("mitarbeiter")
@@ -86,7 +105,12 @@ export class CostsController {
     @Req() req: Request,
     @Headers(ORGANISATION_HEADER) organisationHeader?: string,
   ): Promise<EmployeesForRates> {
-    const { subjectUserId } = await this.zugang(req, organisationHeader, "costs.read");
+    const { subjectUserId } = await this.zugang(
+      req,
+      organisationHeader,
+      "costs.read",
+      "GET /kosten/mitarbeiter",
+    );
     const mitarbeiter = await this.employeeDirectoryFor(subjectUserId).list();
     return {
       employees: mitarbeiter.map((person) => ({
@@ -103,7 +127,12 @@ export class CostsController {
     @Param("employeeId") employeeId: string,
     @Headers(ORGANISATION_HEADER) organisationHeader?: string,
   ): Promise<RateHistory> {
-    const { repository } = await this.zugang(req, organisationHeader, "costs.read");
+    const { repository } = await this.zugang(
+      req,
+      organisationHeader,
+      "costs.read",
+      "GET /kosten/stundensaetze/{employeeId}",
+    );
     const versionen = await repository.versionsFor(employeeId);
     const heute = heutigesGeschaeftsdatum();
     const wirksam = effectiveRateVersion(versionen, heute);
@@ -126,6 +155,7 @@ export class CostsController {
       req,
       organisationHeader,
       "costs.manage_rates",
+      "POST /kosten/stundensaetze",
     );
 
     const geprueft = CreateRateVersionCommandSchema.safeParse(body);
@@ -155,11 +185,28 @@ export class CostsController {
     req: Request,
     organisationHeader: string | undefined,
     permission: CostPermission,
+    route: string,
   ): Promise<{ repository: RateRepository; organisationId: string; subjectUserId: string }> {
-    const identitaet = await this.identitaet.identify({
-      cookieHeader: req.headers.cookie,
-      authorizationHeader: req.headers.authorization,
-    });
+    let identitaet;
+    try {
+      identitaet = await this.identitaet.identify({
+        cookieHeader: req.headers.cookie,
+        authorizationHeader: req.headers.authorization,
+      });
+    } catch (fehler) {
+      // Ohne Identitaet gibt es kein Subjekt und keine Organisation — aber
+      // sehr wohl eine Entscheidung ueber eine Kostenressource. Genau diese
+      // Zeile will man bei einem Angriff sehen. Der urspruengliche Fehler
+      // laeuft unveraendert weiter zum AuthProblemFilter.
+      this.protokolliere(req, route, permission, {
+        decision: "deny",
+        reason: "UNAUTHENTICATED",
+        organisationId: null,
+        subject: null,
+      });
+      throw fehler;
+    }
+
     const mitgliedschaften = await this.organisationen.organisationsFor(identitaet.userId);
     const entscheidung = this.policy.authorize(
       mitgliedschaften.map((m) => ({
@@ -169,8 +216,22 @@ export class CostsController {
       organisationHeader ?? null,
       permission,
     );
+    const subject = pseudonymSubjekt(identitaet.userId);
 
     if (!entscheidung.ok) {
+      this.protokolliere(req, route, permission, {
+        decision: "deny",
+        reason: entscheidung.problem,
+        // Nur bei PERMISSION_MISSING steht die Zugehoerigkeit fest. Bei den
+        // anderen beiden waere jede Organisations-Id im Protokoll erfunden:
+        // der Header ist unbestaetigt, und ohne Auswahl gibt es keine.
+        organisationId:
+          entscheidung.problem === "PERMISSION_MISSING"
+            ? (organisationHeader ?? mitgliedschaften[0]?.organisationId ?? null)
+            : null,
+        subject,
+      });
+
       if (entscheidung.problem === "ORG_CONTEXT_REQUIRED") {
         throw new BadRequestException({
           type: COSTS_ERROR_TYPE.NO_ORGANISATION,
@@ -179,17 +240,65 @@ export class CostsController {
       }
       // ORG_NOT_A_MEMBER und PERMISSION_MISSING beantworten wir GLEICH:
       // sonst verriete die Antwort, ob eine fremde Organisation existiert.
+      // Im Protokoll bleiben sie getrennt — dort ist das kein Leck, sondern
+      // der Zweck.
       throw new ForbiddenException({
         type: COSTS_ERROR_TYPE.NO_ORGANISATION,
         message: "Kein Zugriff auf die Kostendaten dieser Organisation.",
       });
     }
 
+    this.protokolliere(req, route, permission, {
+      decision: "allow",
+      reason: null,
+      organisationId: entscheidung.organisationId,
+      subject,
+    });
+
     return {
       repository: this.repositoryFor(identitaet.userId),
       organisationId: entscheidung.organisationId,
       subjectUserId: identitaet.userId,
     };
+  }
+
+  /**
+   * Schreibt die Entscheidung fort — und niemals mehr als das.
+   *
+   * Der `catch` ist Absicht und keine Nachlaessigkeit: eine unerreichbare
+   * Auditsenke darf eine Ablehnung nicht in einen Serverfehler und eine
+   * Erlaubnis nicht in eine Ablehnung verwandeln. Fail-closed waere hier der
+   * falsche Reflex — es hiesse, dass ein kaputter Logger den gesamten
+   * Kostenzugriff sperrt (EYT-106 AK9, PO: "Loggerfehler veraendern keine
+   * Autorisierungsentscheidung").
+   */
+  private protokolliere(
+    req: Request,
+    route: string,
+    permission: CostPermission,
+    ausgang: {
+      decision: "allow" | "deny";
+      reason: CostAccessDenyReason | null;
+      organisationId: string | null;
+      subject: string | null;
+    },
+  ): void {
+    const ereignis: CostAccessDecisionEvent = {
+      event: COST_ACCESS_DECISION_EVENT,
+      correlationId: (req as Partial<RequestWithCorrelationId>).correlationId ?? "unbekannt",
+      decision: ausgang.decision,
+      permission,
+      organisationId: ausgang.organisationId,
+      subject: ausgang.subject,
+      reason: ausgang.reason,
+      at: new Date().toISOString(),
+      route,
+    };
+    try {
+      this.audit.record(ereignis);
+    } catch {
+      // bewusst verschluckt — siehe oben
+    }
   }
 }
 
