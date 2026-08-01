@@ -220,15 +220,30 @@ defaults, `test` has **no** connection defaults, `production` has no defaults _a
 localhost URLs. `ConfigValidationError` names variables only, never values — do not attach
 the ZodError or log raw config; use `redact()`.
 
-The canonical variable set is exactly six: `NODE_ENV`, `DATABASE_URL`, `SUPABASE_URL`,
-`SUPABASE_ANON_KEY`, `API_PORT`, `LOG_LEVEL`. Because the schema is strict _and_ the `test`
-preset has no defaults, **adding or renaming one touches every site below** — miss any and the
-build or a whole suite fails: `packages/config/src/schema.ts` (`ENV_VAR_META` _and_ all three
-presets _and_ the `AppConfig` interface), the mapping at the end of
-`packages/config/src/load.ts`, `apps/api/test/setup.ts` (sets every variable explicitly),
-`.env.example`, and the `env:` blocks of the `db-gates` job in `.github/workflows/ci.yml` plus
-`scripts/smoke-api.sh` / `scripts/smoke-worker.sh`. `EASYTREE_*` variables are _not_ part of
-this set — they steer tests, never the app, and must never enter `ENV_VAR_META`.
+The canonical variable set is exactly seven: `NODE_ENV`, `DATABASE_URL`, `SUPABASE_URL`,
+`SUPABASE_ANON_KEY`, `API_PORT`, `LOG_LEVEL`, and since EYT-106 `DATABASE_SSL_ROOT_CERT`
+(secret; **required in `production`**, optional in `development`/`test`; accepts raw PEM,
+PEM with literal `\n`, or base64 — normalized once in `packages/config/src/certificate.ts`).
+Because the schema is strict _and_ the `test` preset has no defaults, **adding or renaming
+one touches every site below** — miss any and the build or a whole suite fails:
+`packages/config/src/schema.ts` (`ENV_VAR_META` _and_ all three presets _and_ the
+`AppConfig` interface), the mapping at the end of `packages/config/src/load.ts`,
+`apps/api/test/setup.ts` (sets every mandatory variable explicitly), `.env.example`, and
+the `env:` blocks of the `db-gates` job in `.github/workflows/ci.yml` plus
+`scripts/smoke-api.sh` / `scripts/smoke-worker.sh`. A secret variable additionally needs its
+camelCase key in `SECRET_CONFIG_KEYS` (`redact.ts`) — `redact.test.ts` couples that list to
+`ENV_VAR_META` and goes red if you forget. `EASYTREE_*` variables are _not_ part of this
+set — they steer tests, never the app, and must never enter `ENV_VAR_META`.
+
+**PostgreSQL connections are built in exactly one place** (EYT-106, fix(deploy)):
+`apps/api/src/platform/database/pg-connection.ts`. With a root certificate the factory
+returns `ssl: { ca, rejectUnauthorized: true }` and strips the **entire query** from
+`DATABASE_URL` — measured 31.07.2026: pg 8.22 merges the parsed connection string OVER the
+explicit `ssl` object (`Object.assign`), so `?ssl=no-verify`, percent-encoded names and
+`?sslnegotiation=direct` defeat any parameter denylist. Never reintroduce SSL parameters in
+`DATABASE_URL`, never build a `pg` config outside the factory — static guards in
+`apps/api/test/pg-connection.test.ts` (including one asserting the EFFECTIVE pg config)
+go red if you try.
 
 **Web never talks to Supabase or bare `fetch`.** Components get an `ApiClient` and a
 `PlanningGateway` from React context (`lib/api-client-provider.tsx`,
@@ -345,9 +360,9 @@ skipped=…` line that CI asserts. `apps/api/test/tenant-gate.fail-closed.test.t
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every PR. Jobs on `master`: `format`, `lint`, `typecheck`,
-`unit-tests`, `build-web`, `web-smoke`, `build-api`, `secret-scan`, `db-gates`. Branch
-`feat/eyt-50-read-through-slice` adds a tenth, `read-through` (EYT-50). None uses
+`.github/workflows/ci.yml` runs on every PR. Ten jobs on `master`: `format`, `lint`,
+`typecheck`, `unit-tests`, `build-web`, `web-smoke`, `build-api`, `secret-scan`, `db-gates`,
+`read-through` (measured 01.08.2026 on run `30672178539`, all ten green). None uses
 `continue-on-error`.
 
 **A green job is not a blocking job.** `read-through` passes but is _not_ a required status
@@ -385,6 +400,32 @@ pooler (tenant id and port are derived from the running container, not hardcoded
 planning-invariants gate (EYT-49 — two real connections, because one session can show a
 constraint _rejecting_ but not _serialising_), then the API/worker process smokes. Every gate
 asserts its own greppable `[…] mode=required executed=… skipped=0` line.
+
+## Deployment (Railway) — measured 01.08.2026
+
+- The API runs as Railway service `EasyTree` (project `EasyTree`, environment `production`),
+  public domain `easytree-production.up.railway.app`. `/health` and `/ready` are the
+  operational endpoints; the root path `/` is **not** a health check — a 404 there is fine
+  for a pure API service, a 502 is not. The worker is deliberately **not** a Railway service
+  yet, and the web app is not deployed against this API yet.
+- Builder is Railpack; build and start commands come from the service variables
+  `RAILPACK_BUILD_CMD` / `RAILPACK_START_CMD`. `PORT` = `API_PORT` = 3001.
+- The direct Supabase DB host is **IPv6-only** (AAAA record, no A record). The service needs
+  outbound IPv6 enabled, otherwise connections die with `ENETUNREACH`. This Mac has no IPv6
+  route — measurements against that host run via the DYAI VPS.
+- TLS chain verification runs against `DATABASE_SSL_ROOT_CERT` (Supabase Root 2021 CA,
+  cryptographically verified against the live chain before use). See the config section
+  above for why the factory strips the whole URL query.
+- The hosted customer DB carries all twelve migrations since 01.08.2026 (`supabase db push
+--db-url`, verified by reading `supabase_migrations.schema_migrations` — count 12) and the
+  role `easytree_app` (NOSUPERUSER, NOBYPASSRLS, NOINHERIT, LOGIN; password provisioned out
+  of band, stored nowhere but the Railway variable). On hosted Supabase, `postgres` is not a
+  superuser but carries **BYPASSRLS** — the EYT-45 start gate refuses it by design, so
+  `DATABASE_URL` must connect as `easytree_app`. `seed.sql` is synthetic dev data and was
+  **not** applied to production.
+- Evidence for "it runs" (01.08.2026): single Nest boot, role gate passed, `/health` and
+  `/ready` HTTP 200 with `database: true`, 11/11 probes over 5m20s Online, zero restarts,
+  zero `self-signed` and zero pg SSL warnings in the deployment log.
 
 ## Testing notes
 
