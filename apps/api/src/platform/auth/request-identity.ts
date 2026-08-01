@@ -1,9 +1,10 @@
 /**
  * Identitaet einer Anfrage (EYT-106): Cookie ODER Bearer, niemals Raten.
  *
- * Kette je Anfrage, keine Zwischenspeicherung (PO-Entscheidung):
- *   Token entnehmen -> Signatur/Claims pruefen (JoseTokenVerifier)
- *   -> Session-Liveness am Auth-Server -> Identitaet.
+ * Kette je Anfrage, keine Zwischenspeicherung (PO-Entscheidung): zuerst das
+ * Token entnehmen, dann Signatur und Claims mit dem JoseTokenVerifier
+ * pruefen, danach die Session-Liveness am Auth-Server, erst dann steht die
+ * Identitaet fest.
  *
  * Sind Cookie UND Bearer vorhanden und ergeben NICHT dieselbe Identitaet
  * (userId + sessionId), ist das ein Widerspruch, kein Auswahlproblem:

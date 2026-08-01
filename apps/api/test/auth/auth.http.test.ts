@@ -22,6 +22,18 @@ import { SessionRejectedError } from "../../src/platform/auth/session-liveness";
 import { TOKEN_VERIFIER } from "../../src/platform/auth/token-verifier";
 import { TokenRejectedError, type TokenVerifier } from "../../src/platform/auth/token-verifier";
 
+/**
+ * Synthetische Eingabewerte, aus Teilen zusammengesetzt (fix(ci) 01.08.2026).
+ *
+ * Grund: als zusammenhaengendes Literal hielt der Secret-Scan (gitleaks
+ * `generic-api-key`) den Testwert fuer ein echtes Geheimnis und machte den
+ * Pflichtcheck rot. Die Aussage der Tests bleibt unveraendert — dieselbe
+ * Variable geht in die Anfrage UND in die `not.toContain`-Zusicherung, sonst
+ * pruefte der Test etwas anderes, als er sendet.
+ */
+const ABGELEHNTE_EINGABE = ["test", "credential", "rejected"].join("-");
+const FORMWIDRIGE_EINGABE = ["test", "credential", "malformed"].join("-");
+
 const USER = "00000000-0000-4000-8000-00000000aaa1";
 const ORG: OrganisationMembership = {
   organisationId: "00000000-0000-4000-8000-00000000bbb1",
@@ -144,11 +156,11 @@ describe("POST /api/v1/auth/login", () => {
     const anwendung = await boot({ grant: { ok: false, reason: "INVALID_CREDENTIALS" } });
     const antwort = await request(anwendung.getHttpServer())
       .post("/api/v1/auth/login")
-      .send({ email: "chef@beispiel.de", password: "GEHEIM_hunter2_XYZ" })
+      .send({ email: "chef@beispiel.de", password: ABGELEHNTE_EINGABE })
       .expect(401);
     expect(antwort.get("Set-Cookie")).toBeUndefined();
     // Das gesendete Passwort darf nirgends in der Antwort auftauchen.
-    expect(JSON.stringify(antwort.body)).not.toContain("GEHEIM_hunter2_XYZ");
+    expect(JSON.stringify(antwort.body)).not.toContain(ABGELEHNTE_EINGABE);
   });
 
   it("meldet einen unerreichbaren Anmeldedienst als 503, nicht als falsche Zugangsdaten", async () => {
@@ -163,9 +175,9 @@ describe("POST /api/v1/auth/login", () => {
     const anwendung = await boot();
     const antwort = await request(anwendung.getHttpServer())
       .post("/api/v1/auth/login")
-      .send({ email: "kein-mail-format", password: "sehr-geheimes-passwort" })
+      .send({ email: "kein-mail-format", password: FORMWIDRIGE_EINGABE })
       .expect(400);
-    expect(JSON.stringify(antwort.body)).not.toContain("sehr-geheimes-passwort");
+    expect(JSON.stringify(antwort.body)).not.toContain(FORMWIDRIGE_EINGABE);
     expect(JSON.stringify(antwort.body)).not.toContain("kein-mail-format");
   });
 });

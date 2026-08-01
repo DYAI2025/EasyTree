@@ -20,8 +20,14 @@ const VIEWPORTS = [
  * gekostet: der Test rechnete mit "http://localhost:3000", Playwright meldete
  * "http://127.0.0.1:3000". Beide sind dieselbe Adresse und verschiedene
  * Zeichenketten.
+ *
+ * Seit EYT-106 gehoert `/api/v1/auth/session` dazu: die Shell fragt beim
+ * Laden die reale Sitzung ab. Ohne API scheitert auch dieser Aufruf — und
+ * wird ebenso BEHANDELT (die Kopfleiste zeigt dann "Anmelden" statt eines
+ * Benutzerbereichs). Der Test unten belegt das mit einer eigenen Zusicherung,
+ * damit die Filterzeile hier keinen unbehandelten Fehler verdeckt.
  */
-const PROXIED_OPERATIONAL_PATHS = new Set(["/health", "/ready"]);
+const PROXIED_OPERATIONAL_PATHS = new Set(["/health", "/ready", "/api/v1/auth/session"]);
 
 /** Ist die Meldung der gehandelte Ausfall einer Betriebsschnittstelle? */
 function istGehandelterBetriebsfehler(url: string): boolean {
@@ -45,6 +51,11 @@ test("laedt ohne ungefangene Console-Fehler", async ({ page }) => {
   await expect(page.getByRole("main")).toBeVisible();
   // Beweis, dass der fehlgeschlagene Health-Check gehandelt ist:
   await expect(page.getByRole("status")).toHaveText(/API nicht erreichbar/);
+  // Beweis, dass auch die fehlgeschlagene Sitzungsabfrage gehandelt ist
+  // (EYT-106): die Kopfleiste zeigt den Anmelden-Zugang, keinen leeren
+  // Benutzerbereich — und "Kosten" erscheint ohne Recht gar nicht erst.
+  await expect(page.getByRole("link", { name: "Anmelden" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Kosten" })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

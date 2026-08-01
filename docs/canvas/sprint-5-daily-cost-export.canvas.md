@@ -233,6 +233,9 @@ keine Repository-Globs, kein erneuter Freigabestopp):
 - `apps/web/components/**` — AppShell-Navigation mit Rechtefilter, CostSnapshotTable, Kostenansichten (Schritt 4).
 - `packages/ui/src/**`, `packages/ui/test/**` — PageHeader, StatusBadge, StateBanner, PrimaryAction, EmptyState, ErrorState (Basisdesign §6; Schritt 4).
 - `docs/runbooks/**` — Demoablauf für den Kunden (Schritt 7, bereits gedeckt über docs/runbooks).
+- `.gitleaksignore` — einzelne geprüfte Fingerprints für den `secret-scan`-Pflichtcheck
+  (CI-Fix 01.08.2026). Ausschließlich Fingerprint-Einträge; keine Pfad-, RuleID- oder
+  Regex-Allowlist, keine Abschwächung der Gitleaks-Konfiguration.
 
 ## Allowed change scope
 
@@ -303,6 +306,7 @@ aus einer Sektion mit genau dieser Überschrift). Der Governance-Block ist gegen
 - apps/web/components/**
 - packages/ui/src/**
 - packages/ui/test/**
+- .gitleaksignore
 
 ### Nachtraegliche Scopeaufnahme (PO-Weisung 30.07.2026 §4)
 
