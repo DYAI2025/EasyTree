@@ -1,11 +1,16 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, type ReactNode } from "react";
 
 import { createApiClient } from "../lib/api-client";
 import { ApiClientProvider } from "../lib/api-client-provider";
+import { AuthGatewayProvider } from "../lib/auth-gateway-provider";
+import { createAuthGateway } from "../lib/auth-gateway-factory";
+import { CostsGatewayProvider } from "../lib/costs-gateway-provider";
+import { createCostsGateway } from "../lib/costs-gateway-factory";
 import { createPlanningGateway } from "../lib/planning-gateway-factory";
 import { PlanningGatewayProvider } from "../lib/planning-gateway-provider";
+import { SessionProvider } from "../lib/session-provider";
 
 /**
  * Leere Origin: der Browser ruft RELATIV. Die Weiterleitung an die API macht
@@ -22,24 +27,45 @@ const SAME_ORIGIN = "";
  * ApiClient oder ein Gateway konstruiert wird. Alle Komponenten erhalten sie
  * per Hook aus dem Kontext (ADR-001 §5).
  *
- * Der Vertragspfad wird nicht hier zusammengesetzt: `createPlanningGateway`
- * (../lib/planning-gateway-factory) ist die einzige Stelle, an der die URL
- * entsteht, und `test/api-base-path.test.ts` prueft GENAU diese Funktion.
- *
- * Hier stand zuvor eine lokale Kopie "/api/v1" samt Kommentar, der auf einen
- * Test verwies, den es nicht gab.
+ * Die Organisationsauswahl fliesst ueber eine Ref in das CostsGateway: der
+ * Header waehlt nur aus, autorisiert nichts — und die Gateways bleiben
+ * stabil (kein Neubau bei jedem Orgwechsel).
  */
-
 export function Providers({ children }: { children: ReactNode }) {
   const client = useMemo(() => createApiClient(SAME_ORIGIN), []);
   const planning = useMemo(
     () => createPlanningGateway(SAME_ORIGIN, (input, init) => fetch(input, init)),
     [],
   );
+  const auth = useMemo(
+    () => createAuthGateway(SAME_ORIGIN, (input, init) => fetch(input, init)),
+    [],
+  );
+
+  const organisationRef = useRef<string | null>(null);
+  const costs = useMemo(
+    () =>
+      createCostsGateway(
+        SAME_ORIGIN,
+        (input, init) => fetch(input, init),
+        () => organisationRef.current,
+      ),
+    [],
+  );
+
+  const setOrganisation = useCallback((id: string | null) => {
+    organisationRef.current = id;
+  }, []);
 
   return (
     <ApiClientProvider client={client}>
-      <PlanningGatewayProvider gateway={planning}>{children}</PlanningGatewayProvider>
+      <PlanningGatewayProvider gateway={planning}>
+        <AuthGatewayProvider gateway={auth}>
+          <CostsGatewayProvider gateway={costs}>
+            <SessionProvider onOrganisationChange={setOrganisation}>{children}</SessionProvider>
+          </CostsGatewayProvider>
+        </AuthGatewayProvider>
+      </PlanningGatewayProvider>
     </ApiClientProvider>
   );
 }

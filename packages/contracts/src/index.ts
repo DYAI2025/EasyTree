@@ -129,6 +129,31 @@ export type { AuthGateway } from "./auth/gateway.js";
 export { HttpAuthGateway } from "./http/auth-gateway.js";
 export type { HttpAuthGatewayOptions } from "./http/auth-gateway.js";
 
+// EYT-108 ff.: Kostenbereich. Betraege reisen als Minor-Unit-String, nie Float;
+// Versionen sind unveraenderlich, es gibt kein Update-Kommando.
+export {
+  BusinessDateSchema,
+  CreateRateVersionCommandSchema,
+  EmployeeForRatesDtoSchema,
+  EmployeesForRatesSchema,
+  MinorUnitsSchema,
+  RATE_VERSION_STATUS,
+  RateHistorySchema,
+  RateVersionDtoSchema,
+  RateVersionStatusSchema,
+} from "./costs/schemas.js";
+export type {
+  CreateRateVersionCommand,
+  EmployeeForRatesDto,
+  EmployeesForRates,
+  RateHistory,
+  RateVersionDto,
+  RateVersionStatus,
+} from "./costs/schemas.js";
+export type { CostsGateway } from "./costs/gateway.js";
+export { HttpCostsGateway, ORGANISATION_HEADER } from "./http/costs-gateway.js";
+export type { HttpCostsGatewayOptions } from "./http/costs-gateway.js";
+
 /**
  * Der Mock ist ABSICHTLICH nicht Teil der oeffentlichen Oberflaeche (EYT-50).
  *

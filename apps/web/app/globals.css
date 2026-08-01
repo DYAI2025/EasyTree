@@ -1,17 +1,63 @@
 /*
- * easyTree Web-Shell (EYT-41) — mobile-first, System-Font-Stack
- * (bewusst KEINE Google-Font-Imports: Build muss offline funktionieren).
+ * easyTree Web-Shell — Basisdesign v2.0 „Werkbank & Feld — ruhig verdichtet"
+ * (Confluence 8814623, verbindliche Tokenbasis). System-Font-Stack, bewusst
+ * KEINE Google-Font-Imports: Build muss offline funktionieren.
+ *
+ * Die semantischen Tokens tragen die Palette aus §2.1; die aelteren
+ * --color-*-Namen bleiben als Aliasse bestehen, damit Bestandsstile nicht
+ * doppelt gepflegt werden.
  */
 
 :root {
-  --color-bg: #ffffff;
-  --color-text: #1f2937;
-  --color-brand: #166534;
-  --color-brand-contrast: #ffffff;
-  --color-border: #d1d5db;
+  /* Basisdesign v2.0 §2.1 — hell */
+  --eyt-bg-canvas: #f6f4ef;
+  --eyt-bg-surface: #ffffff;
+  --eyt-text-primary: #1d1b18;
+  --eyt-text-secondary: #5b564e;
+  --eyt-border-default: #d8d4cb;
+  --eyt-action-primary: #1e5231;
+  --eyt-action-primary-contrast: #ffffff;
+  --eyt-state-published-bg: #e1ebe2;
+  --eyt-state-published-text: #1e5231;
+  --eyt-state-draft-text: #7a5300;
+  --eyt-state-draft-bg: #f4e8ce;
+  --eyt-state-danger-text: #9b2c1f;
+  --eyt-state-danger-bg: #f7e3df;
+  --eyt-state-info-text: #155e75;
+  --eyt-state-info-bg: #deedf2;
+
+  /* Aliasse fuer Bestandsstile */
+  --color-bg: var(--eyt-bg-canvas);
+  --color-text: var(--eyt-text-primary);
+  --color-brand: var(--eyt-action-primary);
+  --color-brand-contrast: var(--eyt-action-primary-contrast);
+  --color-border: var(--eyt-border-default);
   --color-focus: #1d4ed8;
+
+  /* 8-pt-Raster (§2.3); Desktop-Kartenradius 12 px */
   --space: 1rem;
-  --radius: 0.5rem;
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --eyt-bg-canvas: #161513;
+    --eyt-bg-surface: #211f1c;
+    --eyt-text-primary: #f1efe9;
+    --eyt-text-secondary: #b0aaa0;
+    --eyt-border-default: #3a3733;
+    --eyt-action-primary: #8fc7a2;
+    --eyt-action-primary-contrast: #161513;
+    --eyt-state-published-bg: #22352a;
+    --eyt-state-published-text: #8fc7a2;
+    --eyt-state-draft-text: #e3b95b;
+    --eyt-state-draft-bg: #3a2f17;
+    --eyt-state-danger-text: #f0a08f;
+    --eyt-state-danger-bg: #41211c;
+    --eyt-state-info-text: #7cc1db;
+    --eyt-state-info-bg: #1c3540;
+    --color-focus: #7cc1db;
+  }
 }
 
 *,
@@ -198,9 +244,286 @@ body {
 }
 
 .api-status--erreichbar {
-  color: #166534;
+  color: var(--eyt-state-published-text);
 }
 
 .api-status--nicht-erreichbar {
-  color: #991b1b;
+  color: var(--eyt-state-danger-text);
+}
+
+/* ============================================================
+ * Basisdesign v2.0 — Werkbank-Bausteine des Kosten-Slices
+ * ============================================================ */
+
+.app-header {
+  background: var(--eyt-bg-surface);
+}
+
+.app-session {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-org-name {
+  color: var(--eyt-text-secondary);
+  font-size: 0.9375rem;
+}
+
+.app-org-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-org-select__label {
+  font-size: 0.8125rem;
+  color: var(--eyt-text-secondary);
+}
+
+.app-logout,
+.app-login-link {
+  font: inherit;
+  background: transparent;
+  border: 1px solid var(--eyt-border-default);
+  border-radius: var(--radius);
+  padding: 0.375rem 0.75rem;
+  min-height: 40px;
+  color: var(--eyt-text-primary);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.eyt-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space);
+  margin-block: calc(var(--space) * 1.5) var(--space);
+}
+
+.eyt-page-header__title {
+  margin: 0;
+  font-size: 1.375rem;
+  line-height: 1.75rem;
+  font-weight: 700;
+}
+
+.eyt-page-header__description {
+  margin: 0.25rem 0 0;
+  color: var(--eyt-text-secondary);
+  max-width: 45rem;
+}
+
+.eyt-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.625rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.eyt-status-badge--published {
+  background: var(--eyt-state-published-bg);
+  color: var(--eyt-state-published-text);
+}
+
+.eyt-status-badge--draft {
+  background: var(--eyt-state-draft-bg);
+  color: var(--eyt-state-draft-text);
+}
+
+.eyt-status-badge--danger {
+  background: var(--eyt-state-danger-bg);
+  color: var(--eyt-state-danger-text);
+}
+
+.eyt-status-badge--info {
+  background: var(--eyt-state-info-bg);
+  color: var(--eyt-state-info-text);
+}
+
+.eyt-status-badge--neutral {
+  border-color: var(--eyt-border-default);
+  color: var(--eyt-text-secondary);
+}
+
+.eyt-state-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--eyt-border-default);
+  padding: 0.75rem var(--space);
+  margin-block-end: var(--space);
+  background: var(--eyt-bg-surface);
+}
+
+.eyt-state-banner--info {
+  background: var(--eyt-state-info-bg);
+  color: var(--eyt-state-info-text);
+}
+
+.eyt-state-banner--success {
+  background: var(--eyt-state-published-bg);
+  color: var(--eyt-state-published-text);
+}
+
+.eyt-state-banner--warning {
+  background: var(--eyt-state-draft-bg);
+  color: var(--eyt-state-draft-text);
+}
+
+.eyt-state-banner--danger {
+  background: var(--eyt-state-danger-bg);
+  color: var(--eyt-state-danger-text);
+}
+
+.eyt-state-banner__title {
+  display: block;
+}
+
+.eyt-primary-action {
+  font: inherit;
+  font-weight: 600;
+  min-height: 40px;
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--eyt-action-primary);
+  background: var(--eyt-action-primary);
+  color: var(--eyt-action-primary-contrast);
+  cursor: pointer;
+}
+
+.eyt-primary-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.eyt-empty-state,
+.eyt-error-state {
+  border: 1px dashed var(--eyt-border-default);
+  border-radius: var(--radius);
+  padding: var(--space);
+}
+
+.eyt-empty-state__title,
+.eyt-error-state__title {
+  margin: 0 0 0.25rem;
+  font-weight: 700;
+}
+
+.eyt-empty-state__description,
+.eyt-error-state__description {
+  margin: 0;
+  color: var(--eyt-text-secondary);
+}
+
+.eyt-error-state {
+  border-style: solid;
+  border-color: var(--eyt-state-danger-text);
+}
+
+.eyt-error-state__retry {
+  margin-top: 0.75rem;
+  font: inherit;
+  min-height: 40px;
+  padding: 0.375rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--eyt-border-default);
+  background: var(--eyt-bg-surface);
+  color: var(--eyt-text-primary);
+  cursor: pointer;
+}
+
+.eyt-card {
+  background: var(--eyt-bg-surface);
+}
+
+.eyt-card-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space);
+}
+
+@media (min-width: 48rem) {
+  .eyt-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.eyt-form {
+  display: grid;
+  gap: var(--space);
+}
+
+.eyt-form__row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space);
+}
+
+@media (min-width: 48rem) {
+  .eyt-form__row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.eyt-form__field {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.eyt-form__field label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.eyt-form :is(input, select) {
+  font: inherit;
+  min-height: 40px;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--eyt-border-default);
+  border-radius: var(--radius);
+  background: var(--eyt-bg-surface);
+  color: var(--eyt-text-primary);
+  width: 100%;
+  min-width: 0;
+}
+
+.eyt-login-form {
+  max-width: 24rem;
+}
+
+.eyt-rate-management {
+  display: grid;
+  gap: var(--space);
+}
+
+.eyt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.eyt-table th,
+.eyt-table td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--eyt-border-default);
+}
+
+/* Betraege mit tabellarischen Ziffern (Basisdesign §2.2). */
+.eyt-table__amount {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }

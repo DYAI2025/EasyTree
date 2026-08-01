@@ -45,6 +45,12 @@ import {
   ValidatePlanCommandSchema,
 } from "../planning/schemas.js";
 import { LoginCommandSchema, SessionDtoSchema } from "../auth/schemas.js";
+import {
+  CreateRateVersionCommandSchema,
+  EmployeesForRatesSchema,
+  RateHistorySchema,
+  RateVersionDtoSchema,
+} from "../costs/schemas.js";
 import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, ProblemDocumentSchema } from "../primitives.js";
 
 /** Vertragsversion. Aenderungen hier sind eine bewusste Entscheidung, kein Nebeneffekt. */
@@ -80,6 +86,11 @@ const NAMED_SCHEMAS = {
   // ausschliesslich in HttpOnly-Cookies (PO-Entscheidung 31.07.2026).
   LoginCommand: LoginCommandSchema,
   SessionDto: SessionDtoSchema,
+  // EYT-108 ff.: Kostenbereich — Betraege als Minor-Unit-String, nie Float.
+  EmployeesForRates: EmployeesForRatesSchema,
+  RateHistory: RateHistorySchema,
+  RateVersionDto: RateVersionDtoSchema,
+  CreateRateVersionCommand: CreateRateVersionCommandSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type NamedSchema = keyof typeof NAMED_SCHEMAS;
@@ -282,6 +293,37 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           operationId: "getSession",
           summary: "Aktuelle Sitzung lesen",
           responses: { "200": jsonOk("SessionDto", "Aktive Sitzung"), ...problemResponses },
+        },
+      },
+      "/kosten/mitarbeiter": {
+        get: {
+          operationId: "listEmployeesForRates",
+          summary: "Mitarbeiterliste fuer die Satzverwaltung",
+          responses: { "200": jsonOk("EmployeesForRates", "Mitarbeiter"), ...problemResponses },
+        },
+      },
+      "/kosten/stundensaetze/{employeeId}": {
+        get: {
+          operationId: "getRateHistory",
+          summary: "Aktive Satzversion und Historie eines Mitarbeiters",
+          parameters: [
+            {
+              name: "employeeId",
+              in: "path",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+          ],
+          responses: { "200": jsonOk("RateHistory", "Satzhistorie"), ...problemResponses },
+        },
+      },
+      "/kosten/stundensaetze": {
+        post: {
+          operationId: "createRateVersion",
+          summary: "Neue unveraenderliche Satzversion anlegen",
+          parameters: [idempotencyHeader],
+          requestBody: jsonBody("CreateRateVersionCommand"),
+          responses: { "201": jsonOk("RateVersionDto", "Angelegte Version"), ...problemResponses },
         },
       },
     },

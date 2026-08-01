@@ -86,6 +86,18 @@ const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
     "Zeiterfassung. Es gibt keine time_entries-Tabelle — bewusst, siehe Migration 0010 Kopfkommentar (EYT-14).",
   ],
   ["POST /einsatz/zeiten/stopp", "Zeiterfassung. Gleiche Begruendung wie der Start."],
+  [
+    "GET /kosten/mitarbeiter",
+    "Satzverwaltung, Leseseite. Kommt mit Slice-Schritt 3 (EYT-108) nach Migration 0013 — die UI zeigt bis dahin den echten Forbidden-/Leerzustand.",
+  ],
+  [
+    "GET /kosten/stundensaetze/{employeeId}",
+    "Satzhistorie. Gleiche Abhaengigkeit: employee_rate_versions existiert erst mit Migration 0013 (EYT-108).",
+  ],
+  [
+    "POST /kosten/stundensaetze",
+    "Neue Satzversion. Gleiche Abhaengigkeit (EYT-108); der Vertrag steht vorab fest, damit Sprint 6 keine Vertragsaenderung braucht (PO-Weisung 01.08.2026 §9).",
+  ],
 ]);
 
 /** Fachrouten des laufenden Servers, ohne health/ready (unversionierte Betriebsschnittstellen). */
