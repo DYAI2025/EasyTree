@@ -110,6 +110,25 @@ export { API_BASE_PATH, API_PATH_VERSION } from "./api-metadata.js";
 export { HttpPlanningGateway } from "./http/planning-gateway.js";
 export type { FetchLike, HttpPlanningGatewayOptions } from "./http/planning-gateway.js";
 
+// EYT-106: Anmeldung. Tokens reisen in keinem dieser Typen — nur in
+// HttpOnly-Cookies, die der Browser traegt und der Server setzt.
+export {
+  LoginCommandSchema,
+  MEMBERSHIP_ROLES,
+  MembershipRoleSchema,
+  SessionDtoSchema,
+  SessionOrganisationSchema,
+} from "./auth/schemas.js";
+export type {
+  LoginCommand,
+  MembershipRole,
+  SessionDto,
+  SessionOrganisation,
+} from "./auth/schemas.js";
+export type { AuthGateway } from "./auth/gateway.js";
+export { HttpAuthGateway } from "./http/auth-gateway.js";
+export type { HttpAuthGatewayOptions } from "./http/auth-gateway.js";
+
 /**
  * Der Mock ist ABSICHTLICH nicht Teil der oeffentlichen Oberflaeche (EYT-50).
  *

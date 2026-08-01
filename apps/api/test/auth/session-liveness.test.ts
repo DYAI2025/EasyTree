@@ -53,7 +53,7 @@ describe("GotrueSessionLiveness", () => {
     const pruefung = new GotrueSessionLiveness({
       supabaseUrl: SUPABASE_URL,
       anonKey: ANON_KEY,
-      fetchImpl: ((eingabe: RequestInfo | URL, init?: RequestInit) => {
+      fetchImpl: ((eingabe: string | URL | Request, init?: RequestInit) => {
         const headers = new Headers(init?.headers);
         gesehen = {
           url: String(eingabe),

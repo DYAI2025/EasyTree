@@ -101,6 +101,8 @@ export const SCAFFOLDED_MODULES = [
   // Zusage, dass `costs-module-boundaries.test.ts` echte Dateien vorfindet —
   // ohne ihn liefe `it.each([...SCAFFOLDED_MODULES])` am Modul vorbei.
   "costs",
+  // EYT-106: Identitaet, Mitgliedschaft, Anmeldung — der Auth-Slice.
+  "tenancy",
 ] as const satisfies readonly ModuleSlug[];
 
 /** Schichten je Modul. Reihenfolge = erlaubte Importrichtung (aussen darf nach innen). */

@@ -68,6 +68,11 @@ describe("Vertragsform", () => {
     for (const { path, op } of writes) {
       // Validierung ist seiteneffektfrei und braucht daher keinen Schluessel.
       if (path.endsWith("/validierung")) continue;
+      // Sitzungsoperationen (EYT-106): ein wiederholtes Login erzeugt keine
+      // zweite Fachtatsache, sondern dieselbe Sitzung erneut; Logout ist
+      // idempotent per Definition. Der Pflichtschluessel bleibt fachlichen
+      // Kommandos vorbehalten (Begruendung: src/auth/gateway.ts).
+      if (path.startsWith("/auth/")) continue;
       const params = (op["parameters"] ?? []) as Array<{ name: string; required: boolean }>;
       const header = params.find((p) => p.name === "Idempotency-Key");
       expect(header, `${path} ohne Idempotency-Key`).toBeDefined();

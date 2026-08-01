@@ -68,3 +68,6 @@ export class GotrueSessionLiveness implements SessionLiveness {
     throw new SessionRejectedError("AUTH_SERVER_UNAVAILABLE");
   }
 }
+
+/** DI-Token: Produktion verdrahtet GoTrue, Tests ersetzen die Pruefung. */
+export const SESSION_LIVENESS = "AUTH_SESSION_LIVENESS";

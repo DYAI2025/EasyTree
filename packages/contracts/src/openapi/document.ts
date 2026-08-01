@@ -44,6 +44,7 @@ import {
   TimeIntervalDtoSchema,
   ValidatePlanCommandSchema,
 } from "../planning/schemas.js";
+import { LoginCommandSchema, SessionDtoSchema } from "../auth/schemas.js";
 import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, ProblemDocumentSchema } from "../primitives.js";
 
 /** Vertragsversion. Aenderungen hier sind eine bewusste Entscheidung, kein Nebeneffekt. */
@@ -75,6 +76,10 @@ const NAMED_SCHEMAS = {
   ActiveTimeEntry: ActiveTimeEntrySchema,
   StopTimeCommand: StopTimeCommandSchema,
   SubmittedTimeEntry: SubmittedTimeEntrySchema,
+  // EYT-106: Anmeldung. Tokens erscheinen in KEINEM Schema — sie leben
+  // ausschliesslich in HttpOnly-Cookies (PO-Entscheidung 31.07.2026).
+  LoginCommand: LoginCommandSchema,
+  SessionDto: SessionDtoSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type NamedSchema = keyof typeof NAMED_SCHEMAS;
@@ -255,6 +260,28 @@ export function buildOpenApiDocument(): Record<string, unknown> {
             "201": jsonOk("SubmittedTimeEntry", "Eingereichte Buchung"),
             ...problemResponses,
           },
+        },
+      },
+      "/auth/login": {
+        post: {
+          operationId: "login",
+          summary: "Anmelden; Sitzung landet in HttpOnly-Cookies",
+          requestBody: jsonBody("LoginCommand"),
+          responses: { "200": jsonOk("SessionDto", "Aktive Sitzung"), ...problemResponses },
+        },
+      },
+      "/auth/logout": {
+        post: {
+          operationId: "logout",
+          summary: "Abmelden; Server widerruft die Sitzung und loescht die Cookies",
+          responses: { "204": { description: "Abgemeldet" }, ...problemResponses },
+        },
+      },
+      "/auth/session": {
+        get: {
+          operationId: "getSession",
+          summary: "Aktuelle Sitzung lesen",
+          responses: { "200": jsonOk("SessionDto", "Aktive Sitzung"), ...problemResponses },
         },
       },
     },

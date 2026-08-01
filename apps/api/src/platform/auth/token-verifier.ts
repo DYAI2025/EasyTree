@@ -118,3 +118,6 @@ function klassifiziere(fehler: unknown): TokenRejection {
   if (fehler instanceof errors.JWSSignatureVerificationFailed) return "SIGNATURE_INVALID";
   return "MALFORMED";
 }
+
+/** DI-Token: Produktion verdrahtet den Remote-JWKS-Verifier, Tests ersetzen ihn. */
+export const TOKEN_VERIFIER = "AUTH_TOKEN_VERIFIER";
