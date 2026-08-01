@@ -1,6 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { expect, test, type Cookie } from "@playwright/test";
 
@@ -42,7 +41,13 @@ import { expect, test, type Cookie } from "@playwright/test";
  * - Das Logout ohne loeschende Cookies (Schritt 12).
  */
 
-const HIER = dirname(fileURLToPath(import.meta.url));
+// `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
+// Setup und Testdateien als CommonJS — `apps/web/package.json` traegt kein
+// "type": "module". Mit import.meta bricht der Lauf mit
+// "Cannot use 'import.meta' outside a module" ab, bevor irgendein
+// Nachweis laeuft (gemessen in CI 01.08.2026). Die beiden bestehenden
+// Playwright-Konfigurationen benutzen aus demselben Grund keine.
+const HIER = __dirname;
 const ARTEFAKTE = join(HIER, "..", "..", "test-results", "auth-journey");
 
 const ORG_ID = "00000000-0000-4000-8000-00000000e201";

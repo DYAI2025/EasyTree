@@ -456,7 +456,13 @@ jobs:
           # Aus dem LAUFENDEN Stack, nicht hartkodiert: der Issuer wird exakt
           # verglichen (`${SUPABASE_URL}/auth/v1`), und `localhost` statt
           # `127.0.0.1` liefe in ISSUER_MISMATCH statt in eine klare Meldung.
-          eval "$(pnpm exec supabase status -o env)"
+          # Zwei getrennte Aufrufe, jeder direkt in ein `sed` gepipt, statt
+          # `eval` ueber die ganze Ausgabe: die enthaelt auch SERVICE_ROLE_KEY
+          # und JWT_SECRET. So haelt zu keinem Zeitpunkt eine Shell-Variable
+          # den vollstaendigen Satz — dasselbe Prinzip, das der Waechter aus
+          # Arbeitspaket A statisch durchsetzt.
+          API_URL="$(pnpm exec supabase status -o env | sed -n 's/^API_URL="\(.*\)"$/\1/p')"
+          ANON_KEY="$(pnpm exec supabase status -o env | sed -n 's/^ANON_KEY="\(.*\)"$/\1/p')"
           test -n "${API_URL:-}" || { echo "::error::API_URL fehlt aus supabase status"; exit 1; }
           test -n "${ANON_KEY:-}" || { echo "::error::ANON_KEY fehlt aus supabase status"; exit 1; }
           echo "::add-mask::${ANON_KEY}"

@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { REISENDER_EMAIL } from "./global-setup";
 
@@ -13,7 +12,13 @@ import { REISENDER_EMAIL } from "./global-setup";
  * `if: always()` fahren — das faengt den Fall ab, in dem Playwright abstuerzt,
  * bevor `globalTeardown` an die Reihe kommt.
  */
-const HIER = dirname(fileURLToPath(import.meta.url));
+// `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
+// Setup und Testdateien als CommonJS — `apps/web/package.json` traegt kein
+// "type": "module". Mit import.meta bricht der Lauf mit
+// "Cannot use 'import.meta' outside a module" ab, bevor irgendein
+// Nachweis laeuft (gemessen in CI 01.08.2026). Die beiden bestehenden
+// Playwright-Konfigurationen benutzen aus demselben Grund keine.
+const HIER = __dirname;
 
 export default function globalTeardown(): void {
   const datenbankUrl = process.env["EASYTREE_JOURNEY_ADMIN_DB_URL"];

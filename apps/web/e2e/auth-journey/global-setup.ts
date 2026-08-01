@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 /**
  * Testdatengrenze der realen Auth-Kostenreise (EYT-106 AK8, EYT-134).
@@ -34,7 +33,13 @@ import { dirname, join } from "node:path";
  * Abhaengigkeitsgrenze unberuehrt.
  */
 
-const HIER = dirname(fileURLToPath(import.meta.url));
+// `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
+// Setup und Testdateien als CommonJS — `apps/web/package.json` traegt kein
+// "type": "module". Mit import.meta bricht der Lauf mit
+// "Cannot use 'import.meta' outside a module" ab, bevor irgendein
+// Nachweis laeuft (gemessen in CI 01.08.2026). Die beiden bestehenden
+// Playwright-Konfigurationen benutzen aus demselben Grund keine.
+const HIER = __dirname;
 
 /** Feste Adresse in einer reservierten Domain (RFC 2606) — nie eine reale Person. */
 export const REISENDER_EMAIL = "auth-journey@easytree.test";

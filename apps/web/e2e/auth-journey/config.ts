@@ -1,5 +1,4 @@
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 
 import { defineConfig } from "@playwright/test";
 
@@ -45,7 +44,13 @@ import { defineConfig } from "@playwright/test";
  * eine Falle: relativ notiert zeigte `../../../api` je nach Aufrufort auf
  * `apps/api` oder neben das Repository.
  */
-const HIER = dirname(fileURLToPath(import.meta.url));
+// `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
+// Setup und Testdateien als CommonJS — `apps/web/package.json` traegt kein
+// "type": "module". Mit import.meta bricht der Lauf mit
+// "Cannot use 'import.meta' outside a module" ab, bevor irgendein
+// Nachweis laeuft (gemessen in CI 01.08.2026). Die beiden bestehenden
+// Playwright-Konfigurationen benutzen aus demselben Grund keine.
+const HIER = __dirname;
 const WEB_WURZEL = resolve(HIER, "..", "..");
 const API_WURZEL = resolve(WEB_WURZEL, "..", "api");
 // Unterhalb von `test-results/` — dieses Verzeichnis ist bereits in
