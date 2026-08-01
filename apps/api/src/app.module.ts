@@ -46,7 +46,11 @@ import {
       // (`StubDatabasePing` or inline fakes) — never the controller.
       provide: DATABASE_PING,
       inject: [APP_CONFIG],
-      useFactory: (config: AppConfig): DatabasePing => new PgDatabasePing(config.databaseUrl),
+      useFactory: (config: AppConfig): DatabasePing =>
+        new PgDatabasePing({
+          databaseUrl: config.databaseUrl,
+          sslRootCert: config.databaseSslRootCert,
+        }),
     },
     {
       provide: READINESS_INDICATORS,

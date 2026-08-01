@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { normalizeCertificatePem } from "./certificate.js";
+
 /**
  * Shared technical environment schema for web, api and worker (EYT-43).
  *
@@ -29,6 +31,11 @@ export const ENV_VAR_META = {
   SUPABASE_ANON_KEY: { secret: true },
   API_PORT: { secret: false },
   LOG_LEVEL: { secret: false },
+  // Ein oeffentliches Wurzelzertifikat ist kein Geheimnis — hier trotzdem als
+  // solches markiert. Grund ist nicht Vertraulichkeit, sondern Lesbarkeit:
+  // ein mehrzeiliges PEM in einer Fehlermeldung oder Logzeile macht die
+  // eigentliche Aussage unauffindbar. `redact()` ersetzt es deshalb.
+  DATABASE_SSL_ROOT_CERT: { secret: true },
 } as const;
 
 export type EnvVarName = keyof typeof ENV_VAR_META;
@@ -52,6 +59,25 @@ const nonLocalUrlSchema = z.url().refine(
   // Message intentionally contains no value — see redaction contract in load.ts.
   { message: "must not point to a localhost address in production" },
 );
+
+/**
+ * Wurzelzertifikat der Datenbankverbindung.
+ *
+ * `transform` statt blosser Pruefung: der validierte Wert IST das normalisierte
+ * PEM. Damit gibt es keinen zweiten Ort, an dem jemand entscheiden muesste,
+ * ob ein Rohwert noch dekodiert werden muss — die Grenze normalisiert einmal,
+ * alle nachgelagerten Nutzer bekommen PEM.
+ *
+ * Die Meldung nennt keinen Wert (Redaktionsvertrag aus `load.ts`); ein
+ * mehrzeiliges Zertifikat in einer Fehlermeldung waere unlesbar und wuerde
+ * zudem gegen die Zusage verstossen, dass keine Konfigurationswerte austreten.
+ */
+const certificateSchema = z
+  .string()
+  .transform((raw) => normalizeCertificatePem(raw))
+  .refine((pem): pem is string => pem !== null, {
+    message: "must be a PEM certificate (raw, escaped or base64)",
+  });
 
 /**
  * Environment presets, selected via NODE_ENV.
@@ -87,6 +113,7 @@ export const envSchemas = {
     SUPABASE_ANON_KEY: z.string().min(1),
     API_PORT: portSchema.default(3001),
     LOG_LEVEL: z.enum(LOG_LEVELS).default("info"),
+    DATABASE_SSL_ROOT_CERT: certificateSchema.optional(),
   }),
   test: z.strictObject({
     NODE_ENV: z.enum(NODE_ENVS),
@@ -95,6 +122,7 @@ export const envSchemas = {
     SUPABASE_ANON_KEY: z.string().min(1),
     API_PORT: portSchema,
     LOG_LEVEL: z.enum(LOG_LEVELS).default("info"),
+    DATABASE_SSL_ROOT_CERT: certificateSchema.optional(),
   }),
   production: z.strictObject({
     NODE_ENV: z.enum(NODE_ENVS),
@@ -103,6 +131,12 @@ export const envSchemas = {
     SUPABASE_ANON_KEY: z.string().min(1),
     API_PORT: portSchema,
     LOG_LEVEL: z.enum(LOG_LEVELS).default("info"),
+    // In production PFLICHT, und ohne Default. Ohne Wurzelzertifikat kann die
+    // Kette des Datenbankservers nicht geprueft werden; die Alternative waere
+    // eine unverifizierte TLS-Verbindung, und die ist bei Mandantendaten keine
+    // Alternative. Fehlt die Variable, scheitert der Start — fail-closed,
+    // dieselbe Haltung wie beim Rollengate aus EYT-45.
+    DATABASE_SSL_ROOT_CERT: certificateSchema,
   }),
 } satisfies Record<NodeEnv, z.ZodType>;
 
@@ -114,4 +148,15 @@ export interface AppConfig {
   supabaseAnonKey: string;
   apiPort: number;
   logLevel: LogLevel;
+  /**
+   * Normalisiertes PEM des Datenbank-Wurzelzertifikats, oder `undefined`.
+   *
+   * Absichtlich `string | undefined` statt optional: mit
+   * `exactOptionalPropertyTypes` waere ein optionales Feld nicht mit
+   * `undefined` belegbar, und jede Zuweisungsstelle muesste den Fall
+   * verzweigen. So ist das Feld immer vorhanden und sein Fehlen ist ein Wert.
+   *
+   * In production ist es nie `undefined` — das Schema erzwingt es dort.
+   */
+  databaseSslRootCert: string | undefined;
 }

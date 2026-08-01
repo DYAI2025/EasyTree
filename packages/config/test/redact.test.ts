@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/load.js";
-import { redact, SECRET_ENV_VARS } from "../src/redact.js";
+import { redact, SECRET_CONFIG_KEYS, SECRET_ENV_VARS } from "../src/redact.js";
+import { ENV_VAR_META } from "../src/schema.js";
 
 const valid = {
   NODE_ENV: "test",
@@ -77,5 +78,22 @@ describe("secret markers and redact()", () => {
     const config = loadConfig(valid);
     redact(config);
     expect(config.supabaseAnonKey).toBe(valid.SUPABASE_ANON_KEY);
+  });
+
+  it("every secret env var has its camelCase key in SECRET_CONFIG_KEYS", () => {
+    // Koppelt die redact()-Liste an ENV_VAR_META: eine neue Variable mit
+    // `secret: true`, deren AppConfig-Feld hier fehlt, wuerde ungeschwaerzt
+    // durch redact() laufen — und dieser Test wuerde rot, bevor das passiert.
+    // Gegenmutation: `databaseSslRootCert` aus SECRET_CONFIG_KEYS entfernen
+    // -> rot (ausgefuehrt 31.07.2026).
+    const camel = (name: string): string =>
+      name.toLowerCase().replace(/_([a-z])/g, (_, zeichen: string) => zeichen.toUpperCase());
+    for (const [name, meta] of Object.entries(ENV_VAR_META)) {
+      if (!meta.secret) continue;
+      expect(SECRET_CONFIG_KEYS).toContain(camel(name));
+    }
+    // Gegenprobe: die Kopplung ist keine Tautologie — nicht-geheime
+    // Variablen stehen NICHT in der Liste.
+    expect(SECRET_CONFIG_KEYS).not.toContain("logLevel");
   });
 });

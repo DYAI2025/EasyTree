@@ -30,7 +30,12 @@ export class TenantQueryRunnerProvider implements TenantQueryRunner, OnApplicati
    * aufzuloesen — der ganze AppModule scheitert dann beim Bauen.
    */
   constructor(@Inject(APP_CONFIG) config: AppConfig, @Optional() runner?: PgTenantQueryRunner) {
-    this.#runner = runner ?? PgTenantQueryRunner.fromUrl(config.databaseUrl);
+    this.#runner =
+      runner ??
+      PgTenantQueryRunner.fromConnection({
+        databaseUrl: config.databaseUrl,
+        sslRootCert: config.databaseSslRootCert,
+      });
   }
 
   run<T>(context: TenantContext, work: (tx: TenantQuery) => Promise<T>): Promise<T> {

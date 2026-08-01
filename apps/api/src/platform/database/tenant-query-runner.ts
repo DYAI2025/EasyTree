@@ -38,6 +38,8 @@
 import { Pool } from "pg";
 import type { PoolClient } from "pg";
 
+import { pgConnectionConfig, type PgConnectionInput } from "./pg-connection";
+
 /** Ergebniszeilen einer Query. Bewusst schmal — kein Treibertyp nach aussen. */
 export interface QueryResult<TRow> {
   readonly rows: readonly TRow[];
@@ -70,8 +72,8 @@ export interface TenantQueryRunner {
 export class PgTenantQueryRunner implements TenantQueryRunner {
   constructor(private readonly pool: Pool) {}
 
-  static fromUrl(databaseUrl: string): PgTenantQueryRunner {
-    return new PgTenantQueryRunner(new Pool({ connectionString: databaseUrl }));
+  static fromConnection(connection: PgConnectionInput): PgTenantQueryRunner {
+    return new PgTenantQueryRunner(new Pool(pgConnectionConfig(connection)));
   }
 
   async run<T>(context: TenantContext, work: (tx: TenantQuery) => Promise<T>): Promise<T> {

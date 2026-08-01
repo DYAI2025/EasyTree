@@ -10,7 +10,10 @@ import { PgDatabasePing } from "../src/platform/database/pg-database-ping";
  */
 describe("PgDatabasePing", () => {
   it("returns false within 5s and never throws for an unreachable database", async () => {
-    const ping = new PgDatabasePing("postgresql://postgres:postgres@127.0.0.1:59999/postgres");
+    const ping = new PgDatabasePing({
+      databaseUrl: "postgresql://postgres:postgres@127.0.0.1:59999/postgres",
+      sslRootCert: undefined,
+    });
     const startedAt = Date.now();
     await expect(ping.ping()).resolves.toBe(false);
     expect(Date.now() - startedAt).toBeLessThan(5000);
