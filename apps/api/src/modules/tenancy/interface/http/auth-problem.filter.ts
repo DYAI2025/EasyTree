@@ -76,6 +76,13 @@ function problemOf(exception: unknown): AuthProblem | null {
   return null;
 }
 
+/**
+ * Faengt AUSSCHLIESSLICH die drei Fehlerklassen der Identitaetskette.
+ *
+ * Alles andere — auch `HttpException` aus den Controllern — laeuft weiter zum
+ * globalen `HttpExceptionFilter`. Ein `@Catch()` ohne Argumente haette hier
+ * die fachlichen 400/403/409 mitgeschluckt und ihnen den falschen URN gegeben.
+ */
 @Catch(IdentityRejectedError, TokenRejectedError, SessionRejectedError)
 export class AuthProblemFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {

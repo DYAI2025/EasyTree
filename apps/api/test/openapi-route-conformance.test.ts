@@ -86,19 +86,20 @@ const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
     "Zeiterfassung. Es gibt keine time_entries-Tabelle — bewusst, siehe Migration 0010 Kopfkommentar (EYT-14).",
   ],
   ["POST /einsatz/zeiten/stopp", "Zeiterfassung. Gleiche Begruendung wie der Start."],
-  [
-    "GET /kosten/mitarbeiter",
-    "Satzverwaltung, Leseseite. Kommt mit Slice-Schritt 3 (EYT-108) nach Migration 0013 — die UI zeigt bis dahin den echten Forbidden-/Leerzustand.",
-  ],
-  [
-    "GET /kosten/stundensaetze/{employeeId}",
-    "Satzhistorie. Gleiche Abhaengigkeit: employee_rate_versions existiert erst mit Migration 0013 (EYT-108).",
-  ],
-  [
-    "POST /kosten/stundensaetze",
-    "Neue Satzversion. Gleiche Abhaengigkeit (EYT-108); der Vertrag steht vorab fest, damit Sprint 6 keine Vertragsaenderung braucht (PO-Weisung 01.08.2026 §9).",
-  ],
 ]);
+
+/**
+ * Express-Pfadparameter in die OpenAPI-Schreibweise bringen.
+ *
+ * `:employeeId` und `{employeeId}` bezeichnen DIESELBE Route in zwei
+ * Notationen. Ohne diese Umschrift meldete der Test jede parametrisierte
+ * Route als undokumentiert — ein Fehlalarm, der die echte Aussage
+ * ("Route ohne Vertragseintrag") unbrauchbar machte. Die Umschrift ist
+ * bewusst eng: nur der Parametername, keine Musterlockerung.
+ */
+function toContractPath(expressPath: string): string {
+  return expressPath.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
+}
 
 /** Fachrouten des laufenden Servers, ohne health/ready (unversionierte Betriebsschnittstellen). */
 function implementedOperations(app: INestApplication): string[] {
@@ -117,7 +118,7 @@ function implementedOperations(app: INestApplication): string[] {
     if (!path.startsWith(`${prefix}/`)) continue;
     for (const method of HTTP_METHODS) {
       if (methods[method] === true) {
-        found.push(`${method.toUpperCase()} ${path.slice(prefix.length)}`);
+        found.push(`${method.toUpperCase()} ${toContractPath(path.slice(prefix.length))}`);
       }
     }
   }

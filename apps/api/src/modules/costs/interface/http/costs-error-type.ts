@@ -39,3 +39,21 @@ export const COSTS_ERROR_TYPE = {
 } as const satisfies Record<PlanCostFactsProblem, string>;
 
 export type CostsErrorType = (typeof COSTS_ERROR_TYPE)[keyof typeof COSTS_ERROR_TYPE];
+
+/**
+ * Codes der Satzverwaltung (EYT-108).
+ *
+ * Bewusst eine ZWEITE Konstante statt zusaetzlicher Schluessel oben: das
+ * `satisfies Record<PlanCostFactsProblem, string>` dort ist eine
+ * Vollstaendigkeitszusicherung fuer GENAU die Faktenport-Probleme. Faende sich
+ * ein fremder Schluessel darin, waere die Zusicherung keine mehr — sie wuerde
+ * nicht mehr messen, ob jedes Faktenproblem einen Code hat.
+ */
+export const RATE_ERROR_TYPE = {
+  RATE_NOT_FOUND: "urn:easytree:costs:rate-not-found",
+  RATE_INTERVAL_OVERLAP: "urn:easytree:costs:rate-interval-overlap",
+  RATE_AMBIGUOUS: "urn:easytree:costs:rate-ambiguous",
+  STALE_VERSION: "urn:easytree:costs:stale-version",
+} as const;
+
+export type RateErrorType = (typeof RATE_ERROR_TYPE)[keyof typeof RATE_ERROR_TYPE];

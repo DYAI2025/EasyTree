@@ -236,6 +236,14 @@ keine Repository-Globs, kein erneuter Freigabestopp):
 - `.gitleaksignore` — einzelne geprüfte Fingerprints für den `secret-scan`-Pflichtcheck
   (CI-Fix 01.08.2026). Ausschließlich Fingerprint-Einträge; keine Pfad-, RuleID- oder
   Regex-Allowlist, keine Abschwächung der Gitleaks-Konfiguration.
+- `apps/api/src/modules/workforce/**` — **nicht vorsorglich, sondern durch einen
+  Wächterbefund erzwungen** (01.08.2026): `public.employees` gehört laut
+  `TABLE_OWNERSHIP` dem Workforce-Modul, und `costs-touches-only-own-tables` hat den
+  direkten Zugriff des Kostenmoduls zu Recht gemeldet. Die Mitarbeiterliste kommt
+  deshalb über einen schmalen Leseport dieses Moduls (Kennung, Anzeigename,
+  Aktivstatus — nichts darüber hinaus). Umfang: der Port, sein PostgreSQL-Adapter und
+  der Eintrag in der öffentlichen Modul-API. Keine fachliche Erweiterung von
+  Workforce, kein Vorgriff auf EYT-14.
 
 ## Allowed change scope
 
@@ -307,6 +315,7 @@ aus einer Sektion mit genau dieser Überschrift). Der Governance-Block ist gegen
 - packages/ui/src/**
 - packages/ui/test/**
 - .gitleaksignore
+- apps/api/src/modules/workforce/**
 
 ### Nachtraegliche Scopeaufnahme (PO-Weisung 30.07.2026 §4)
 

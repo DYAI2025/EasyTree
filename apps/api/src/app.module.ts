@@ -35,6 +35,19 @@ import {
   PASSWORD_LOGIN,
   SESSION_ORGANISATIONS,
 } from "./modules/tenancy";
+import {
+  COST_ACCESS_POLICY,
+  CostsController,
+  MembershipCostAccessPolicy,
+  PgRateRepository,
+  RATE_REPOSITORY_FACTORY,
+  type RateRepositoryFactory,
+} from "./modules/costs";
+import {
+  EMPLOYEE_DIRECTORY_FACTORY,
+  PgEmployeeDirectory,
+  type EmployeeDirectoryFactory,
+} from "./modules/workforce";
 import { REQUEST_IDENTITY, RequestIdentityService } from "./platform/auth/request-identity";
 import { SESSION_LIVENESS, type SessionLiveness } from "./platform/auth/session-liveness";
 import { TOKEN_VERIFIER, type TokenVerifier } from "./platform/auth/token-verifier";
@@ -52,7 +65,7 @@ import {
 
 @Module({
   imports: [ConfigModule],
-  controllers: [HealthController, PlanningController, AuthController],
+  controllers: [HealthController, PlanningController, AuthController, CostsController],
   providers: [
     {
       // EYT-106: reale Pruefkette aus der validierten Konfiguration. Tests
@@ -88,6 +101,31 @@ import {
       inject: [TenantQueryRunnerProvider],
       useFactory: (runner: TenantQueryRunnerProvider): MembershipRepository =>
         new MembershipRepository(runner),
+    },
+    {
+      // EYT-106: die anwendungsseitige Haelfte der Kostenautorisierung. Die
+      // Datenbank entscheidet unabhaengig noch einmal (Migration 0013).
+      provide: COST_ACCESS_POLICY,
+      useClass: MembershipCostAccessPolicy,
+    },
+    {
+      // Repository je Subjekt, Pool je Prozess — dieselbe Begruendung wie beim
+      // Planungsrepository: ein Singleton truege die Identitaet der ERSTEN
+      // Anfrage in alle folgenden.
+      provide: RATE_REPOSITORY_FACTORY,
+      inject: [TENANT_QUERY_RUNNER],
+      useFactory: (runner: TenantQueryRunnerProvider): RateRepositoryFactory => {
+        return (subjectUserId: string) => new PgRateRepository(runner, subjectUserId);
+      },
+    },
+    {
+      // `public.employees` gehoert dem Workforce-Modul; die Kostenroute
+      // bekommt die Liste ueber dessen oeffentlichen Port.
+      provide: EMPLOYEE_DIRECTORY_FACTORY,
+      inject: [TENANT_QUERY_RUNNER],
+      useFactory: (runner: TenantQueryRunnerProvider): EmployeeDirectoryFactory => {
+        return (subjectUserId: string) => new PgEmployeeDirectory(runner, subjectUserId);
+      },
     },
     {
       // Real database ping (EYT-58): SELECT 1 against the configured

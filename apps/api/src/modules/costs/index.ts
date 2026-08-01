@@ -28,5 +28,44 @@ export { COST_EXPORT_PORT } from "./application/cost-export.port";
 
 export { PlanningFactsAdapter } from "./infrastructure/planning-facts.adapter";
 
-export type { CostsErrorType } from "./interface/http/costs-error-type";
-export { COSTS_ERROR_TYPE } from "./interface/http/costs-error-type";
+export type { CostsErrorType, RateErrorType } from "./interface/http/costs-error-type";
+export { COSTS_ERROR_TYPE, RATE_ERROR_TYPE } from "./interface/http/costs-error-type";
+
+// EYT-106/EYT-108: Autorisierung, Satzverwaltung, Route.
+export {
+  COST_ACCESS_POLICY,
+  COST_ACCESS_PROBLEMS,
+  COST_PERMISSIONS,
+  MembershipCostAccessPolicy,
+} from "./application/cost-access.policy";
+export type {
+  CostAccessPolicy,
+  CostAccessProblem,
+  CostAccessResult,
+  CostPermission,
+  MembershipWithPermissions,
+} from "./application/cost-access.policy";
+
+export { RATE_REPOSITORY_FACTORY, RATE_WRITE_PROBLEMS } from "./application/rate-repository.port";
+export type {
+  NewRateVersion,
+  RateRepository,
+  RateRepositoryFactory,
+  RateVersionRecord,
+  RateWriteProblem,
+  RateWriteResult,
+} from "./application/rate-repository.port";
+
+export {
+  RATE_EFFECTIVITY_PROBLEMS,
+  effectiveRateVersion,
+  rateVersionStatus,
+} from "./domain/rate-effectivity";
+export type { EffectiveRateResult, RateEffectivityProblem } from "./domain/rate-effectivity";
+export type { RateVersionRecord as RateVersion } from "./domain/rate-version";
+
+export { PgRateRepository } from "./infrastructure/rate-repository.pg";
+
+export { CostsController } from "./interface/http/costs.controller";
+export { CostsProblemFilter } from "./interface/http/costs-problem.filter";
+export { ConflictProblem } from "./interface/http/conflict-problem";
