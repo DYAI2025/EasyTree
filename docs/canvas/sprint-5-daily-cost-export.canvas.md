@@ -206,6 +206,45 @@ breiteren Globs:
 - `apps/api/src/worker.ts` — derselbe Einspritzpunkt im Worker-Bootstrap.
 - `apps/api/src/platform/database/tenant-query-runner.provider.ts` — Pool-Konstruktion über die Factory.
 
+### Dritte Scopeaufnahme — kundensichtbarer Slice Login→Tageskosten→Export (PO-Weisung 01.08.2026)
+
+**Freigabe:** Product Owner, 01.08.2026 — Weisung „Starte unmittelbar den nächsten
+kundensichtbaren vertikalen Slice" (echter Login, serverseitige Tokenprüfung,
+Organisations-/Mitgliedschaftsauflösung, Rechte `costs.read`/`costs.calculate`/
+`costs.export`, Tageskostenansicht, Excel-Export, deployter Web-Client).
+**Ticket:** EYT-106 (Slice-Kern), berührt EYT-109/EYT-110 nur im minimal nötigen Umfang.
+
+- `apps/api/src/platform/auth/**` — Tokenverifikation (jose, ES256-Allowlist, JWKS)
+  als Plattformbaustein, dieselbe Bauart wie `platform/database`.
+
+Nach der Repository-Inspektion (01.08.2026, fünf parallele Leser) die weiteren
+tatsächlich benötigten Slice-Pfade, je mit Bauabschnitt (PO-§12: exakte Pfade,
+keine Repository-Globs, kein erneuter Freigabestopp):
+
+- `packages/contracts/src/auth/**` — Login-/Session-Verträge (Schritt 1).
+- `packages/contracts/src/http/**` — HTTP-Gateways nach `planning-gateway`-Muster (Schritte 1, 3).
+- `packages/contracts/src/openapi/**` — Registrierung der neuen Operationen (Schritte 1, 3).
+- `packages/contracts/src/primitives.ts` — nur falls ein geteiltes Primitiv ergänzt werden muss.
+- `apps/api/src/modules/tenancy/**` — Auth-Controller, Mitgliedschafts-/Organisationsauflösung (Schritte 1, 3).
+- `apps/api/src/common/**` — Request-Identität ersetzt den Platzhalter-Subjektresolver (Schritt 1).
+- `apps/web/app/anmelden/**` — Login-Seite (Schritt 4).
+- `apps/web/app/globals.css` — Basisdesign-v2.0-Tokens (Schritt 4).
+- `apps/web/app/layout.tsx` — AppShell-Einbindung, falls nötig (Schritt 4).
+- `apps/web/components/**` — AppShell-Navigation mit Rechtefilter, CostSnapshotTable, Kostenansichten (Schritt 4).
+- `packages/ui/src/**`, `packages/ui/test/**` — PageHeader, StatusBadge, StateBanner, PrimaryAction, EmptyState, ErrorState (Basisdesign §6; Schritt 4).
+- `docs/runbooks/**` — Demoablauf für den Kunden (Schritt 7, bereits gedeckt über docs/runbooks).
+- `.gitleaksignore` — einzelne geprüfte Fingerprints für den `secret-scan`-Pflichtcheck
+  (CI-Fix 01.08.2026). Ausschließlich Fingerprint-Einträge; keine Pfad-, RuleID- oder
+  Regex-Allowlist, keine Abschwächung der Gitleaks-Konfiguration.
+- `apps/api/src/modules/workforce/**` — **nicht vorsorglich, sondern durch einen
+  Wächterbefund erzwungen** (01.08.2026): `public.employees` gehört laut
+  `TABLE_OWNERSHIP` dem Workforce-Modul, und `costs-touches-only-own-tables` hat den
+  direkten Zugriff des Kostenmoduls zu Recht gemeldet. Die Mitarbeiterliste kommt
+  deshalb über einen schmalen Leseport dieses Moduls (Kennung, Anzeigename,
+  Aktivstatus — nichts darüber hinaus). Umfang: der Port, sein PostgreSQL-Adapter und
+  der Eintrag in der öffentlichen Modul-API. Keine fachliche Erweiterung von
+  Workforce, kein Vorgriff auf EYT-14.
+
 ## Allowed change scope
 
 Maschinenlesbar für `plumbline-scope-check`. Inhaltlich identisch mit CAN-004 — **keine
@@ -262,6 +301,21 @@ aus einer Sektion mit genau dieser Überschrift). Der Governance-Block ist gegen
 - apps/api/src/main.ts
 - apps/api/src/worker.ts
 - apps/api/src/platform/database/tenant-query-runner.provider.ts
+- apps/api/src/platform/auth/**
+- packages/contracts/src/auth/**
+- packages/contracts/src/http/**
+- packages/contracts/src/openapi/**
+- packages/contracts/src/primitives.ts
+- apps/api/src/modules/tenancy/**
+- apps/api/src/common/**
+- apps/web/app/anmelden/**
+- apps/web/app/globals.css
+- apps/web/app/layout.tsx
+- apps/web/components/**
+- packages/ui/src/**
+- packages/ui/test/**
+- .gitleaksignore
+- apps/api/src/modules/workforce/**
 
 ### Nachtraegliche Scopeaufnahme (PO-Weisung 30.07.2026 §4)
 

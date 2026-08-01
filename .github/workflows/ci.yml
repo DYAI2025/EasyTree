@@ -241,6 +241,23 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/planning-write.integration.test.ts 2>&1 | tee /tmp/planning-write.log
           bash scripts/assert-tenant-report.sh planning-write /tmp/planning-write.log
+      # EYT-106 AK4: die DATENBANKSEITIGE Haelfte der Kostenautorisierung.
+      # Eigener Schritt im BESTEHENDEN Job db-gates — kein neuer Job und damit
+      # kein neuer Pflichtcheck, den das Ruleset nicht kennt (dieselbe
+      # Begruendung wie beim Planning-Write-Gate).
+      #
+      # Was hier gemessen wird, koennen die Policy-Unit-Tests prinzipiell
+      # nicht: sie sehen PostgreSQL nie und blieben gruen, wenn RLS jedem
+      # alles zeigte. Erst dieser Lauf belegt, dass BEIDE Haelften unabhaengig
+      # ablehnen.
+      - name: Cost access gate (fail-closed, RLS ohne Anwendungsschicht, EYT-106)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/costs/cost-access.integration.test.ts 2>&1 | tee /tmp/cost-access.log
+          bash scripts/assert-tenant-report.sh cost-access /tmp/cost-access.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |

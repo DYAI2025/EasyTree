@@ -28,6 +28,33 @@ import {
   TENANT_QUERY_RUNNER,
   TenantQueryRunnerProvider,
 } from "./platform/database/tenant-query-runner.provider";
+import {
+  AuthController,
+  GotruePasswordLogin,
+  MembershipRepository,
+  PASSWORD_LOGIN,
+  SESSION_ORGANISATIONS,
+} from "./modules/tenancy";
+import {
+  COST_ACCESS_POLICY,
+  CostsController,
+  MembershipCostAccessPolicy,
+  PgRateRepository,
+  RATE_REPOSITORY_FACTORY,
+  type RateRepositoryFactory,
+} from "./modules/costs";
+import {
+  EMPLOYEE_DIRECTORY_FACTORY,
+  PgEmployeeDirectory,
+  type EmployeeDirectoryFactory,
+} from "./modules/workforce";
+import { REQUEST_IDENTITY, RequestIdentityService } from "./platform/auth/request-identity";
+import { SESSION_LIVENESS, type SessionLiveness } from "./platform/auth/session-liveness";
+import { TOKEN_VERIFIER, type TokenVerifier } from "./platform/auth/token-verifier";
+import {
+  createSupabaseSessionLiveness,
+  createSupabaseTokenVerifier,
+} from "./platform/auth/supabase-token-verifier.factory";
 import { PgDatabasePing } from "./platform/database/pg-database-ping";
 import {
   DATABASE_PING,
@@ -38,8 +65,68 @@ import {
 
 @Module({
   imports: [ConfigModule],
-  controllers: [HealthController, PlanningController],
+  controllers: [HealthController, PlanningController, AuthController, CostsController],
   providers: [
+    {
+      // EYT-106: reale Pruefkette aus der validierten Konfiguration. Tests
+      // ersetzen die Tokens einzeln (lokales JWKS, gestellte Liveness) — die
+      // Pruefregeln selbst sind nicht injizierbar.
+      provide: TOKEN_VERIFIER,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig): TokenVerifier => createSupabaseTokenVerifier(config),
+    },
+    {
+      provide: SESSION_LIVENESS,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig): SessionLiveness => createSupabaseSessionLiveness(config),
+    },
+    {
+      provide: REQUEST_IDENTITY,
+      inject: [TOKEN_VERIFIER, SESSION_LIVENESS],
+      useFactory: (verifier: TokenVerifier, liveness: SessionLiveness): RequestIdentityService =>
+        new RequestIdentityService(verifier, liveness),
+    },
+    {
+      provide: PASSWORD_LOGIN,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig): GotruePasswordLogin =>
+        new GotruePasswordLogin({
+          supabaseUrl: config.supabaseUrl,
+          anonKey: config.supabaseAnonKey,
+          fetchImpl: (eingabe, init) => fetch(eingabe, init),
+        }),
+    },
+    {
+      provide: SESSION_ORGANISATIONS,
+      inject: [TenantQueryRunnerProvider],
+      useFactory: (runner: TenantQueryRunnerProvider): MembershipRepository =>
+        new MembershipRepository(runner),
+    },
+    {
+      // EYT-106: die anwendungsseitige Haelfte der Kostenautorisierung. Die
+      // Datenbank entscheidet unabhaengig noch einmal (Migration 0013).
+      provide: COST_ACCESS_POLICY,
+      useClass: MembershipCostAccessPolicy,
+    },
+    {
+      // Repository je Subjekt, Pool je Prozess — dieselbe Begruendung wie beim
+      // Planungsrepository: ein Singleton truege die Identitaet der ERSTEN
+      // Anfrage in alle folgenden.
+      provide: RATE_REPOSITORY_FACTORY,
+      inject: [TENANT_QUERY_RUNNER],
+      useFactory: (runner: TenantQueryRunnerProvider): RateRepositoryFactory => {
+        return (subjectUserId: string) => new PgRateRepository(runner, subjectUserId);
+      },
+    },
+    {
+      // `public.employees` gehoert dem Workforce-Modul; die Kostenroute
+      // bekommt die Liste ueber dessen oeffentlichen Port.
+      provide: EMPLOYEE_DIRECTORY_FACTORY,
+      inject: [TENANT_QUERY_RUNNER],
+      useFactory: (runner: TenantQueryRunnerProvider): EmployeeDirectoryFactory => {
+        return (subjectUserId: string) => new PgEmployeeDirectory(runner, subjectUserId);
+      },
+    },
     {
       // Real database ping (EYT-58): SELECT 1 against the configured
       // DATABASE_URL. Tests substitute this token via DI override

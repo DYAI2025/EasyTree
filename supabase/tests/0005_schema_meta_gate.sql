@@ -55,7 +55,12 @@ insert into expected_tables (table_name, tenant_owned, note) values
   ('assignments',   true,  'Zuweisungen (0007), personenbezogen'),
   ('audit_events',  true,  'Anfuegbare Auditspur (0008)'),
   ('outbox_messages', true,'Transactional Outbox (0008)'),
-  ('idempotency_records', true, 'Ergebnis idempotenter Schreibvorgaenge je Mandant (0012)');
+  ('idempotency_records', true, 'Ergebnis idempotenter Schreibvorgaenge je Mandant (0012)'),
+  -- Produktweite Zuordnung Rolle -> Recht. Bewusst NICHT tenant-owned: sie ist
+  -- Produkteigenschaft, kein Kundendatum, und traegt deshalb kein org_id
+  -- (EYT-106). Aenderungen laufen ausschliesslich ueber Migrationen.
+  ('role_permissions', false, 'Rolle -> atomares Recht, produktweit, nur lesbar (0013)'),
+  ('employee_rate_versions', true, 'Unveraenderliche Stundensatzversionen je Mitarbeiter (0013)');
 
 -- ---------------------------------------------------------------------------
 -- 1. Vollstaendigkeit in beide Richtungen

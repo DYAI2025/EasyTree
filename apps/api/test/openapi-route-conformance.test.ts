@@ -88,6 +88,19 @@ const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
   ["POST /einsatz/zeiten/stopp", "Zeiterfassung. Gleiche Begruendung wie der Start."],
 ]);
 
+/**
+ * Express-Pfadparameter in die OpenAPI-Schreibweise bringen.
+ *
+ * `:employeeId` und `{employeeId}` bezeichnen DIESELBE Route in zwei
+ * Notationen. Ohne diese Umschrift meldete der Test jede parametrisierte
+ * Route als undokumentiert — ein Fehlalarm, der die echte Aussage
+ * ("Route ohne Vertragseintrag") unbrauchbar machte. Die Umschrift ist
+ * bewusst eng: nur der Parametername, keine Musterlockerung.
+ */
+function toContractPath(expressPath: string): string {
+  return expressPath.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
+}
+
 /** Fachrouten des laufenden Servers, ohne health/ready (unversionierte Betriebsschnittstellen). */
 function implementedOperations(app: INestApplication): string[] {
   const server = app.getHttpAdapter().getInstance() as Application;
@@ -105,7 +118,7 @@ function implementedOperations(app: INestApplication): string[] {
     if (!path.startsWith(`${prefix}/`)) continue;
     for (const method of HTTP_METHODS) {
       if (methods[method] === true) {
-        found.push(`${method.toUpperCase()} ${path.slice(prefix.length)}`);
+        found.push(`${method.toUpperCase()} ${toContractPath(path.slice(prefix.length))}`);
       }
     }
   }

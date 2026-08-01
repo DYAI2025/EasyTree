@@ -2,13 +2,24 @@ import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { isValidElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { HttpAuthGateway } from "@easytree/contracts";
 
 import RootLayout from "../app/layout";
 import HomePage from "../app/page";
 import { AppShell } from "../components/app-shell";
 import { createApiClient } from "../lib/api-client";
 import { ApiClientProvider } from "../lib/api-client-provider";
+import { AuthGatewayProvider } from "../lib/auth-gateway-provider";
+import { SessionProvider } from "../lib/session-provider";
+
+// Die Shell ist seit EYT-106 eine Client-Komponente mit Router-Bezug;
+// jsdom hat keinen App-Router, also liefern die Hooks feste Werte.
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/",
+  useRouter: () => ({ push: vi.fn() }),
+}));
 
 afterEach(cleanup);
 
@@ -23,11 +34,25 @@ function renderShell() {
         json: async () => ({ status: "ok" }),
       }) as unknown as Response,
   );
+  // Sitzung: der Server meldet "nicht angemeldet" — die Shell zeigt dann den
+  // Anmelden-Link; genau dieser Zustand wird auf Barrierefreiheit geprueft.
+  const auth = new HttpAuthGateway("http://api.test/api/v1", {
+    fetchImpl: async () =>
+      ({
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+      }) as unknown as Response,
+  });
   return render(
     <ApiClientProvider client={client}>
-      <AppShell>
-        <HomePage />
-      </AppShell>
+      <AuthGatewayProvider gateway={auth}>
+        <SessionProvider>
+          <AppShell>
+            <HomePage />
+          </AppShell>
+        </SessionProvider>
+      </AuthGatewayProvider>
     </ApiClientProvider>,
   );
 }

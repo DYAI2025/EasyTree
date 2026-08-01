@@ -1,0 +1,30 @@
+# Gitleaks-Ausnahmen — ausschliesslich einzelne, geprueffte Fingerprints.
+#
+# Regeln fuer diese Datei (PO-Weisung 01.08.2026):
+#   - KEINE Pfad-Allowlist, KEINE RuleID-Allowlist, KEINE Regex-Allowlist.
+#   - Kein Eintrag ohne vorherige Klassifikation aus einem redigierten
+#     Bericht (`gitleaks git --redact --report-format json`).
+#   - Ein Eintrag deckt GENAU einen Commit, eine Datei, eine Regel und eine
+#     Zeile ab. Wird die Zeile geaendert, greift er nicht mehr — das ist
+#     Absicht: der Eintrag altert von selbst aus.
+#   - Der aktuelle Quelltext wird IMMER bereinigt; ein Fingerprint deckt nur
+#     die unveraenderliche Historie ab, nie den lebenden Code.
+#
+# Warum ueberhaupt: der CI-Scan liest die vollstaendige Git-Historie. Ein
+# Folgecommit entfernt den Treffer aus dem Arbeitsstand, aber der alte Commit
+# bleibt erreichbar. Die Alternative waere ein History-Rewrite mit
+# Force-Push — nicht ohne separate Freigabe.
+
+# Fund 1 — FALSE_POSITIVE_OTHER: deutscher Doc-Kommentar in
+# `request-identity.ts`; die Wortfolge "Token entnehmen -> Signatur" traf das
+# generische Muster (Schluesselwort, Trenner, Wortkette). Kein Geheimnis,
+# nie eines gewesen. Aktueller Quelltext bereinigt (Kommentar umformuliert).
+# synthetic test fixture, current source cleaned
+7f515e9e50474f3752fe6241ad8146e366243c3e:apps/api/src/platform/auth/request-identity.ts:generic-api-key:5
+
+# Fund 2 — SYNTHETIC_TEST_FIXTURE: erfundener Passwortwert in einem
+# HTTP-Nahttest, der beweist, dass gesendete Zugangsdaten NICHT in der
+# Antwort erscheinen. Nie ein echtes Passwort, nirgends gueltig.
+# Aktueller Quelltext bereinigt (Wert aus Teilen zusammengesetzt).
+# synthetic test fixture, current source cleaned
+7f515e9e50474f3752fe6241ad8146e366243c3e:apps/api/test/auth/auth.http.test.ts:generic-api-key:147

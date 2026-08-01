@@ -102,6 +102,9 @@ const API_ALLOWED_PACKAGES: readonly RegExp[] = [
   /^rxjs$/,
   /^reflect-metadata$/,
   /^node:(crypto|http)$/,
+  // EYT-106: die EINE JWT/JWKS-Bibliothek der API (PO-Freigabe 31.07.2026).
+  // Erzwingt die Algorithmus-Allowlist statt einer Auswahl nach Token-Header.
+  /^jose$/,
 ];
 
 export const RULES: readonly Rule[] = [

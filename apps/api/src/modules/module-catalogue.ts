@@ -101,6 +101,8 @@ export const SCAFFOLDED_MODULES = [
   // Zusage, dass `costs-module-boundaries.test.ts` echte Dateien vorfindet —
   // ohne ihn liefe `it.each([...SCAFFOLDED_MODULES])` am Modul vorbei.
   "costs",
+  // EYT-106: Identitaet, Mitgliedschaft, Anmeldung — der Auth-Slice.
+  "tenancy",
 ] as const satisfies readonly ModuleSlug[];
 
 /** Schichten je Modul. Reihenfolge = erlaubte Importrichtung (aussen darf nach innen). */
@@ -203,10 +205,21 @@ export const TABLE_OWNERSHIP: readonly TableOwnership[] = [
     note: "Transactional Outbox (0008). Zustellstrecke fehlt noch und hat kein Ticket (Sprintplan L-12).",
   },
   {
-    table: "public.cost_rate_versions",
+    // Heisst in Migration 0013 `employee_rate_versions`, nicht
+    // `cost_rate_versions` wie ADR-003 §2 vorlaeufig notierte: der Name im ADR
+    // stand fest, bevor es die Tabelle gab, und das Praefix `cost_` waere
+    // doppelt gemoppelt (sie liegt ohnehin im Kostenmodul) sowie ungenauer —
+    // versioniert werden MITARBEITER-Saetze. Der Besitz ist unveraendert.
+    table: "public.employee_rate_versions",
     owner: "costs",
     tenantOwned: true,
-    note: "MIGRATION FEHLT NOCH — Besitz von ADR-003 §2 entschieden, Schema gehoert zu EYT-108. Append-only versionierte Mitarbeiter-Stundensaetze in EUR-Minor-Units mit Effective-Date-Intervall. PERSONENBEZOGEN (Entgeltdaten).",
+    note: "Append-only versionierte Mitarbeiter-Stundensaetze in EUR-Minor-Units mit halboffenem Effective-Date-Intervall (0013, EYT-108). PERSONENBEZOGEN (Entgeltdaten). Ueberlappung per EXCLUDE ausgeschlossen; select verlangt costs.read, insert costs.manage_rates.",
+  },
+  {
+    table: "public.role_permissions",
+    owner: "tenancy",
+    tenantOwned: false,
+    note: "Produktweite Zuordnung Rolle -> atomares Recht (0013, EYT-106). Bewusst OHNE org_id: Produkteigenschaft, kein Kundendatum. Anwendungsrollen haben nur select; Aenderungen ausschliesslich ueber Migrationen.",
   },
   {
     table: "public.cost_snapshots",

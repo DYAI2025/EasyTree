@@ -110,6 +110,50 @@ export { API_BASE_PATH, API_PATH_VERSION } from "./api-metadata.js";
 export { HttpPlanningGateway } from "./http/planning-gateway.js";
 export type { FetchLike, HttpPlanningGatewayOptions } from "./http/planning-gateway.js";
 
+// EYT-106: Anmeldung. Tokens reisen in keinem dieser Typen — nur in
+// HttpOnly-Cookies, die der Browser traegt und der Server setzt.
+export {
+  LoginCommandSchema,
+  MEMBERSHIP_ROLES,
+  MembershipRoleSchema,
+  SessionDtoSchema,
+  SessionOrganisationSchema,
+} from "./auth/schemas.js";
+export type {
+  LoginCommand,
+  MembershipRole,
+  SessionDto,
+  SessionOrganisation,
+} from "./auth/schemas.js";
+export type { AuthGateway } from "./auth/gateway.js";
+export { HttpAuthGateway } from "./http/auth-gateway.js";
+export type { HttpAuthGatewayOptions } from "./http/auth-gateway.js";
+
+// EYT-108 ff.: Kostenbereich. Betraege reisen als Minor-Unit-String, nie Float;
+// Versionen sind unveraenderlich, es gibt kein Update-Kommando.
+export {
+  BusinessDateSchema,
+  CreateRateVersionCommandSchema,
+  EmployeeForRatesDtoSchema,
+  EmployeesForRatesSchema,
+  MinorUnitsSchema,
+  RATE_VERSION_STATUS,
+  RateHistorySchema,
+  RateVersionDtoSchema,
+  RateVersionStatusSchema,
+} from "./costs/schemas.js";
+export type {
+  CreateRateVersionCommand,
+  EmployeeForRatesDto,
+  EmployeesForRates,
+  RateHistory,
+  RateVersionDto,
+  RateVersionStatus,
+} from "./costs/schemas.js";
+export type { CostsGateway } from "./costs/gateway.js";
+export { HttpCostsGateway, ORGANISATION_HEADER } from "./http/costs-gateway.js";
+export type { HttpCostsGatewayOptions } from "./http/costs-gateway.js";
+
 /**
  * Der Mock ist ABSICHTLICH nicht Teil der oeffentlichen Oberflaeche (EYT-50).
  *
