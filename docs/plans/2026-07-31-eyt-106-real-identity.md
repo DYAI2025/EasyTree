@@ -1,7 +1,10 @@
 # EYT-106 — Reale Supabase-Identität und atomare Kostenrechte
 
-**Stand:** 31.07.2026 · Basis `master` = `0f07047` (Post-Merge-CI 10/10) · Branch
-`feat/eyt-106-real-identity`
+**Stand:** Historische Discovery-Baseline vom 31.07.2026 **vor PR #38** · damalige
+Basis `master` = `0f07047` (Post-Merge-CI 10/10) · damaliger Branch
+`feat/eyt-106-real-identity` (inzwischen gemergt, kein Arbeitsbranch mehr).
+**Für den heutigen Zustand gilt der Abschnitt „Aktueller Stand 01.08.2026" direkt
+darunter; die Baseline-Abschnitte bleiben als Nachvollzug erhalten.**
 
 Dieses Dokument ist Schritt 2 der vom Product Owner vorgegebenen Reihenfolge:
 **Akzeptanzkriterien und reale Red Tests festlegen** — vor jedem Testcode und
@@ -12,10 +15,49 @@ ist hier nicht wiederholt, sondern vorausgesetzt.
 
 ---
 
-## 0 — Was heute existiert, gemessen
+## Aktueller Stand 01.08.2026 (nach PR #38, gemessen)
 
-Vollständige Aufklärung am Stand `0f07047`. Diese Befunde sind der Ausgangspunkt;
-jeder ist mit Datei und Zeile belegt.
+**Bereits umgesetzt und nachgewiesen:**
+
+- **PR #38 ist gemergt**; aktueller `master`-Ausgangspunkt ist
+  `e9c7a8d35da663e186626e65a9c9e06b57df0270` (Post-Merge-CI 10/10). Der Branch
+  `feat/eyt-106-real-identity` ist damit historisch.
+- **TLS-Factory und `DATABASE_SSL_ROOT_CERT` sind implementiert**:
+  `ENV_VAR_META` kennt jetzt **sieben** Variablen (nicht mehr sechs wie in AK6
+  unten beschrieben); PostgreSQL-Verbindungen entstehen ausschließlich in
+  `apps/api/src/platform/database/pg-connection.ts`.
+- **Die Railway-API läuft stabil** (Service `EasyTree`, Nachweis 01.08.2026:
+  ein Boot, `/health` und `/ready` HTTP 200 mit `database: true`, 11/11
+  Messpunkte über 5:20 min, null Neustarts).
+- **Die gehostete Kunden-DB trägt die zwölf Basis-Migrationen**
+  (`schema_migrations` zählt 12, direkt gemessen).
+- **`easytree_app` ist provisioniert** (NOSUPERUSER, NOBYPASSRLS, NOINHERIT,
+  LOGIN; echter Login-Test bestanden) und ist die Verbindungsrolle der API.
+- **OQ-005 ist beantwortet, nicht mehr offen** (Messung 31.07.2026, reduzierter
+  lokaler Stack, CLI 2.109.1 / GoTrue v2.192.0):
+  `LOCAL_AUTH_SIGNING_MODE = ASYMMETRIC_JWKS` — Session-Tokens sind lokal
+  standardmäßig ES256-signiert mit `kid`, der JWKS-Endpunkt liefert den
+  passenden Schlüssel, alle sieben Nachweise OK, keine `config.toml`-Änderung
+  nötig. Die Formulierungen in §5 („ohne laufenden Stack nicht messbar") und
+  §4 („diese Maschine kann den Stack nicht starten") beschreiben die Lage vor
+  dieser Messung; der reduzierte Stack startet inzwischen lokal. Migration,
+  pgTAP und E2E laufen weiterhin zuerst in CI.
+
+**Noch NICHT umgesetzt** (der eigentliche Kern dieses Plans, Reihenfolge wie in §3):
+
+- JWT-/JWKS-Verifikation im API-Pfad (AK1, AK1b, AK7)
+- Browser-/Cookie-Login (AK1, AK8)
+- serverseitige Mitgliedschafts- und Organisationsauflösung (AK2, AK5)
+- `role_permissions` und `CostAccessPolicy` (AK3, AK4, §6)
+- reale Browser-, API-, RLS- und Cross-Tenant-Nachweise (AK8)
+
+---
+
+## 0 — Historische Discovery-Baseline vom 31.07.2026 vor PR #38
+
+Vollständige Aufklärung am damaligen Stand `0f07047`. Diese Befunde sind der
+Ausgangspunkt; jeder ist mit Datei und Zeile belegt. Für den heutigen Zustand
+gilt „Aktueller Stand 01.08.2026" oben.
 
 | Gegenstand           | Befund                                                                                                                                                                 |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -165,9 +207,11 @@ Abgedeckt unter AK2. `400 ORG_CONTEXT_REQUIRED`, nie stille Auflösung.
 | **Braucht Stack?** | Nein                                                                                   |
 | **Gegenmutation**  | Eine Datei mit dem Bezeichner unter `apps/api/src/modules/` anlegen → rot              |
 
-Heute ist die Lage gut: `ENV_VAR_META` kennt sechs Namen, und
-`config.module.ts:13-19` verengt `process.env` vorher. Der Wächter hält diesen
-Zustand fest, statt sich auf ihn zu verlassen.
+Zur Baseline war die Lage gut: `ENV_VAR_META` kannte sechs Namen, und
+`config.module.ts:13-19` verengt `process.env` vorher. **Seit PR #38 sind es
+sieben** (`DATABASE_SSL_ROOT_CERT`, siehe „Aktueller Stand 01.08.2026") — an der
+Aussage des Wächters ändert das nichts: er hält den Zustand fest, statt sich auf
+ihn zu verlassen.
 
 ### AK7 — Stabile, minimale Fehlerzustände
 
@@ -225,10 +269,15 @@ Manipulationsformen ablehnt.
 `OQ-005: BLOCKED_LOCAL_JWKS_SUPPORT` melden und den kleinsten realen CI- bzw.
 Hosted-Supabase-Durchstich vorschlagen.
 
-`supabase/config.toml:168-169` hat `signing_keys_path` heute auskommentiert —
-lokal gilt also der HS256-Standard der CLI. Ob die eingesetzte CLI-Version
-asymmetrisches Signing und einen JWKS-Endpunkt anbietet, ist ohne laufenden Stack
-**nicht** messbar und damit die erste zu beantwortende Frage.
+`supabase/config.toml:168-169` hat `signing_keys_path` auskommentiert. Die
+Baseline-Annahme, lokal gelte deshalb ein HS256-Standard und ohne laufenden Stack
+sei das nicht messbar, ist **durch die Messung vom 31.07.2026 überholt**: die
+eingesetzte CLI signiert Session-Tokens lokal standardmäßig ES256 mit `kid` und
+bietet den JWKS-Endpunkt an — `LOCAL_AUTH_SIGNING_MODE = ASYMMETRIC_JWKS`, alle
+sieben Nachweise OK (Details unter „Aktueller Stand 01.08.2026"). Die HS256-Werte
+(`ANON_KEY`, `SERVICE_ROLE_KEY`, `JWT_SECRET`) sind Legacy-API-Keys, keine
+Session-Tokens. Die Blockadebedingung ist damit erfüllt, kein
+`BLOCKED_LOCAL_JWKS_SUPPORT`.
 
 ## 6 — Migration: ein Schritt, kein Zwischenzustand
 

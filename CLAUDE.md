@@ -419,10 +419,11 @@ asserts its own greppable `[…] mode=required executed=… skipped=0` line.
 - The hosted customer DB carries all twelve migrations since 01.08.2026 (`supabase db push
 --db-url`, verified by reading `supabase_migrations.schema_migrations` — count 12) and the
   role `easytree_app` (NOSUPERUSER, NOBYPASSRLS, NOINHERIT, LOGIN; password provisioned out
-  of band, stored nowhere but the Railway variable). On hosted Supabase, `postgres` is not a
-  superuser but carries **BYPASSRLS** — the EYT-45 start gate refuses it by design, so
-  `DATABASE_URL` must connect as `easytree_app`. `seed.sql` is synthetic dev data and was
-  **not** applied to production.
+  of band, stored nowhere but the Railway variable). On the hosted EasyTree customer
+  project, measured on 01.08.2026, `postgres` was not a superuser but carried
+  **BYPASSRLS** — the EYT-45 start gate refuses it by design, so `DATABASE_URL` must
+  connect as `easytree_app`. `seed.sql` is synthetic dev data and was **not** applied
+  to production.
 - Evidence for "it runs" (01.08.2026): single Nest boot, role gate passed, `/health` and
   `/ready` HTTP 200 with `database: true`, 11/11 probes over 5m20s Online, zero restarts,
   zero `self-signed` and zero pg SSL warnings in the deployment log.
