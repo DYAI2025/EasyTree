@@ -69,7 +69,7 @@ export class PgRateRepository implements RateRepository {
                 to_char(valid_from, 'YYYY-MM-DD') as valid_from,
                 to_char(valid_to, 'YYYY-MM-DD') as valid_to,
                 predecessor_id, reason,
-                to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at,
+                to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
                 created_by
            from public.employee_rate_versions
           where employee_id = $1
@@ -106,7 +106,7 @@ export class PgRateRepository implements RateRepository {
                      to_char(valid_from, 'YYYY-MM-DD') as valid_from,
                      to_char(valid_to, 'YYYY-MM-DD') as valid_to,
                      predecessor_id, reason,
-                     to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at,
+                     to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
                      created_by`,
           [
             version.organisationId,

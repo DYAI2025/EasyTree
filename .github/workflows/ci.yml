@@ -258,6 +258,20 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/costs/cost-access.integration.test.ts 2>&1 | tee /tmp/cost-access.log
           bash scripts/assert-tenant-report.sh cost-access /tmp/cost-access.log
+      # EYT-108: die Zeitstempelform der Kostenantworten. Ein Produktionsfehler
+      # kam genau hier durch — die HTTP-Nahttests nutzen Stubs mit
+      # wohlgeformten Zeitstempeln und konnten die SQL-Projektion nie sehen.
+      # Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer Pflichtcheck.
+      - name: Rate timestamp contract gate (fail-closed, echtes PostgreSQL, EYT-108)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/costs/rate-timestamp.integration.test.ts 2>&1 | tee /tmp/rate-timestamp.log
+          bash scripts/assert-tenant-report.sh rate-timestamp /tmp/rate-timestamp.log
+          pnpm --filter @easytree/api exec vitest run test/costs/rate-http-contract.integration.test.ts 2>&1 | tee /tmp/rate-http-contract.log
+          bash scripts/assert-tenant-report.sh rate-http-contract /tmp/rate-http-contract.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |
