@@ -42,6 +42,17 @@ const SUBJEKT_A = "00000000-0000-4000-8000-00000000aaa1";
 const SUBJEKT_B = "00000000-0000-4000-8000-00000000bbb1";
 
 /**
+ * Markierung fuer "dieser Wert darf in keiner Logzeile stehen".
+ *
+ * Aus Teilen zusammengesetzt und ohne JWT-Form: als durchgehendes
+ * `eyJ…`-Literal hat gitleaks 8.24.3 die Zeile als `generic-api-key` gemeldet
+ * (gemessen 01.08.2026, Entropie 4.42). Der Test braucht keinen echt
+ * aussehenden Token — er braucht eine Zeichenkette, die eindeutig
+ * wiedererkennbar ist, wenn sie faelschlich hinausgeschrieben wird.
+ */
+const ERFUNDENES_TOKEN = ["kein", "echtes", "token", "nur", "eine", "markierung"].join("-");
+
+/**
  * Die vollstaendige, erlaubte Feldliste — hier bewusst als Literal.
  * Sie ist die Zusage an den Product Owner, nicht ein Spiegel des Codes.
  */
@@ -95,15 +106,15 @@ describe("Zugriffsereignis traegt genau die vereinbarten Felder (EYT-106 AK9)", 
       ...erlaubnisEreignis(),
       employeeName: "Demo-Mitarbeiter 01",
       amountMinorUnits: "3850",
-      accessToken: "eyJhbGciOiJFUzI1NiJ9.geheim.signatur",
-      cookie: "easytree_access=eyJhbGciOiJFUzI1NiJ9.geheim.signatur",
+      accessToken: ERFUNDENES_TOKEN,
+      cookie: `easytree_access=${ERFUNDENES_TOKEN}`,
     } as CostAccessDecisionEvent;
 
     const ausgabe = serialisiereZugriffsereignis(angereichert);
 
     expect(ausgabe).not.toContain("Demo-Mitarbeiter");
     expect(ausgabe).not.toContain("3850");
-    expect(ausgabe).not.toContain("geheim");
+    expect(ausgabe).not.toContain(ERFUNDENES_TOKEN);
     expect(ausgabe).not.toContain("easytree_access");
     expect(Object.keys(JSON.parse(ausgabe) as Record<string, unknown>).sort()).toEqual([
       ...ERLAUBTE_FELDER,
