@@ -57,6 +57,10 @@ const dateien = [
   ...collectFilesNamed(repoRoot, "scripts", /\.sh$/),
   ...collectFilesNamed(repoRoot, "supabase", /\.(sql|toml)$/),
   ...collectFilesNamed(repoRoot, ".github", /\.(yml|yaml)$/),
+  // SQL liegt nicht nur unter `supabase/`: die E2E-Reise bringt ihre
+  // Testdaten in `apps/web/e2e/auth-journey/` mit. Ein Migrationszugang
+  // koennte sich genauso gut dorthin verirren.
+  ...collectFilesNamed(repoRoot, "apps", /\.sql$/),
 ].filter(istCodeDatei);
 
 const refs = extractImports(repoRoot, dateien);

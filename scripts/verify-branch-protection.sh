@@ -26,7 +26,8 @@ web-smoke
 build-api
 secret-scan
 db-gates
-read-through"
+read-through
+auth-journey"
 
 fail_count=0
 skip_count=0

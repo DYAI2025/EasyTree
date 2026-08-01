@@ -426,3 +426,70 @@ jobs:
             apps/web/test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+  # Reale Auth-Kostenreise (EYT-106 AK8, EYT-134): echte Loginseite -> GoTrue ->
+  # HttpOnly-Cookies -> Next-Rewrite -> ECHTE NestJS-API (dist/main.js, nicht
+  # dist-harness) -> Policy -> RLS -> PostgreSQL.
+  #
+  # Anders als `read-through` startet Playwright hier API und Web selbst
+  # (webServer-Block der Reisekonfiguration) und beendet sie garantiert wieder,
+  # auch wenn ein Nachweis abstuerzt. Der Job besitzt nur Supabase — Docker
+  # lebt laenger als ein Playwright-Lauf und wird unten mit `if: always()`
+  # gestoppt.
+  auth-journey:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pnpm
+      - name: Start local Supabase stack (Docker)
+        run: pnpm exec supabase start -x studio
+      - name: Reset — Migrationen und Seed
+        run: pnpm exec supabase db reset
+      - name: Provision local password for easytree_app (EYT-45)
+        run: |
+          PGPASSWORD=postgres psql "host=127.0.0.1 port=54322 dbname=postgres user=postgres sslmode=disable" \
+            -v ON_ERROR_STOP=1 -c "alter role easytree_app password 'ci-local-app-password';"
+      - name: Supabase-Koordinaten uebernehmen (URL und Anon-Key)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          # Aus dem LAUFENDEN Stack, nicht hartkodiert: der Issuer wird exakt
+          # verglichen (`${SUPABASE_URL}/auth/v1`), und `localhost` statt
+          # `127.0.0.1` liefe in ISSUER_MISMATCH statt in eine klare Meldung.
+          eval "$(pnpm exec supabase status -o env)"
+          test -n "${API_URL:-}" || { echo "::error::API_URL fehlt aus supabase status"; exit 1; }
+          test -n "${ANON_KEY:-}" || { echo "::error::ANON_KEY fehlt aus supabase status"; exit 1; }
+          echo "::add-mask::${ANON_KEY}"
+          {
+            echo "EASYTREE_JOURNEY_SUPABASE_URL=${API_URL}"
+            echo "EASYTREE_JOURNEY_ANON_KEY=${ANON_KEY}"
+            echo "EASYTREE_JOURNEY_DATABASE_URL=postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres"
+            echo "EASYTREE_JOURNEY_ADMIN_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          } >> "$GITHUB_ENV"
+          echo "Supabase-API unter ${API_URL} uebernommen (Anon-Key maskiert)."
+      - name: Bauen — ECHTE API und Web mit Rewrite auf ihren Port
+        run: |
+          pnpm --filter @easytree/api... build
+          EASYTREE_API_PROXY_TARGET="http://127.0.0.1:3101" pnpm --filter @easytree/web... build
+      - name: Chromium installieren
+        run: pnpm --filter @easytree/web exec playwright install --with-deps chromium
+      - name: Reise fahren
+        run: pnpm --filter @easytree/web exec playwright test -c e2e/auth-journey/config.ts
+      - name: Testdaten entfernen (auch nach Fehlschlag)
+        if: always()
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+            -v ON_ERROR_STOP=1 -v reisender=auth-journey@easytree.test \
+            -f apps/web/e2e/auth-journey/teardown.sql
+      - name: Screenshots, Zusammenfassung und Traces sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-journey-nachweise
+          path: |
+            apps/web/playwright-journey/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Supabase stoppen
+        if: always()
+        run: pnpm exec supabase stop --no-backup || true

@@ -37,7 +37,8 @@ web-smoke
 build-api
 secret-scan
 db-gates
-read-through"
+read-through
+auth-journey"
 
 die() {
   printf 'FEHLER: %s\n' "$1" >&2
