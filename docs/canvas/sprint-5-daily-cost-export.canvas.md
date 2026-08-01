@@ -206,6 +206,20 @@ breiteren Globs:
 - `apps/api/src/worker.ts` — derselbe Einspritzpunkt im Worker-Bootstrap.
 - `apps/api/src/platform/database/tenant-query-runner.provider.ts` — Pool-Konstruktion über die Factory.
 
+### Dritte Scopeaufnahme — kundensichtbarer Slice Login→Tageskosten→Export (PO-Weisung 01.08.2026)
+
+**Freigabe:** Product Owner, 01.08.2026 — Weisung „Starte unmittelbar den nächsten
+kundensichtbaren vertikalen Slice" (echter Login, serverseitige Tokenprüfung,
+Organisations-/Mitgliedschaftsauflösung, Rechte `costs.read`/`costs.calculate`/
+`costs.export`, Tageskostenansicht, Excel-Export, deployter Web-Client).
+**Ticket:** EYT-106 (Slice-Kern), berührt EYT-109/EYT-110 nur im minimal nötigen Umfang.
+
+- `apps/api/src/platform/auth/**` — Tokenverifikation (jose, ES256-Allowlist, JWKS)
+  als Plattformbaustein, dieselbe Bauart wie `platform/database`.
+
+Weitere Slice-Pfade werden hier **einzeln nachgetragen**, sobald der jeweilige
+Bauabschnitt beginnt — nicht vorsorglich auf Vorrat.
+
 ## Allowed change scope
 
 Maschinenlesbar für `plumbline-scope-check`. Inhaltlich identisch mit CAN-004 — **keine
@@ -262,6 +276,7 @@ aus einer Sektion mit genau dieser Überschrift). Der Governance-Block ist gegen
 - apps/api/src/main.ts
 - apps/api/src/worker.ts
 - apps/api/src/platform/database/tenant-query-runner.provider.ts
+- apps/api/src/platform/auth/**
 
 ### Nachtraegliche Scopeaufnahme (PO-Weisung 30.07.2026 §4)
 

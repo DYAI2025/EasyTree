@@ -2,7 +2,7 @@
   "name": "@easytree/api",
   "version": "0.0.0",
   "private": true,
-  "description": "easyTree NestJS backend \u2014 one code package, two entrypoints (HTTP API + worker, EYT-42)",
+  "description": "easyTree NestJS backend — one code package, two entrypoints (HTTP API + worker, EYT-42)",
   "main": "./dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -21,6 +21,7 @@
     "@nestjs/common": "^11.1.28",
     "@nestjs/core": "^11.1.28",
     "@nestjs/platform-express": "^11.1.28",
+    "jose": "^6.2.6",
     "pg": "^8.22.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
