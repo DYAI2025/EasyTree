@@ -43,7 +43,7 @@ import { expect, test, type Cookie } from "@playwright/test";
  */
 
 const HIER = dirname(fileURLToPath(import.meta.url));
-const ARTEFAKTE = join(HIER, "..", "..", "playwright-journey");
+const ARTEFAKTE = join(HIER, "..", "..", "test-results", "auth-journey");
 
 const ORG_ID = "00000000-0000-4000-8000-00000000e201";
 const ORG_NAME = "E2E Reiseorganisation";

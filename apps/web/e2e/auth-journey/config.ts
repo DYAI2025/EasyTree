@@ -1,3 +1,6 @@
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "@playwright/test";
 
 /**
@@ -33,7 +36,24 @@ import { defineConfig } from "@playwright/test";
  * Subjektresolver und Access-Policy und wuerde jede Anfrage autorisieren —
  * genau das, was AK8 ausschliesst. Der erste Nachweis der Reise misst das
  * nach, statt es zu behaupten.
+ *
+ * ## Warum jeder Pfad hier absolut ist
+ *
+ * Playwright loest `webServer.cwd` und `reporter.outputFile` gegen das
+ * ARBEITSVERZEICHNIS des Aufrufs auf, `outputDir` und `globalSetup` dagegen
+ * gegen das Konfigurationsverzeichnis. Zwei Bezugspunkte in einer Datei sind
+ * eine Falle: relativ notiert zeigte `../../../api` je nach Aufrufort auf
+ * `apps/api` oder neben das Repository.
  */
+const HIER = dirname(fileURLToPath(import.meta.url));
+const WEB_WURZEL = resolve(HIER, "..", "..");
+const API_WURZEL = resolve(WEB_WURZEL, "..", "api");
+// Unterhalb von `test-results/` — dieses Verzeichnis ist bereits in
+// `.gitignore` (Z. 11) und wird vom Read-Through-Job schon als Artefakt
+// eingesammelt. Ein neuer Ordner daneben waere untracked, nicht ignoriert
+// und faende sich beim naechsten `git add` im Commit wieder.
+const ARTEFAKTE = join(WEB_WURZEL, "test-results", "auth-journey");
+
 const API_PORT = process.env["EASYTREE_JOURNEY_API_PORT"] ?? "3101";
 const WEB_PORT = process.env["EASYTREE_JOURNEY_WEB_PORT"] ?? "3100";
 const API_ORIGIN = `http://127.0.0.1:${API_PORT}`;
@@ -68,11 +88,11 @@ export default defineConfig({
   forbidOnly: true,
   retries: 0,
   timeout: 60_000,
-  outputDir: "../../playwright-journey/artefakte",
+  outputDir: join(ARTEFAKTE, "artefakte"),
   reporter: [
     ["list"],
     // Maschinenlesbare Zusammenfassung (AK8): wird als CI-Artefakt abgelegt.
-    ["json", { outputFile: "../../playwright-journey/ergebnis.json" }],
+    ["json", { outputFile: join(ARTEFAKTE, "ergebnis.json") }],
   ],
   use: {
     baseURL: WEB_ORIGIN,
@@ -85,7 +105,7 @@ export default defineConfig({
   webServer: [
     {
       command: "node dist/main.js",
-      cwd: "../../../api",
+      cwd: API_WURZEL,
       url: `${API_ORIGIN}/health`,
       reuseExistingServer: false,
       timeout: 60_000,
@@ -102,7 +122,7 @@ export default defineConfig({
     },
     {
       command: `pnpm exec next start -p ${WEB_PORT}`,
-      cwd: "../..",
+      cwd: WEB_WURZEL,
       url: WEB_ORIGIN,
       reuseExistingServer: false,
       timeout: 120_000,
