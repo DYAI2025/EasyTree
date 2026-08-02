@@ -100,8 +100,52 @@ export interface SecretRule {
  * Pruefoberflaeche, keine Ausnahme von einer Regel — Testcode ist die
  * "isolierte Test-/Ops-Grenze", von der die PO-Vorgabe spricht.
  */
-export function istLaufzeitpfad(datei: string): boolean {
+/**
+ * Pakete, die AUSDRUECKLICH nicht laufzeitfaehig sind.
+ *
+ * Einzeln benannt, nie ein Muster — `packages/**` als Ausnahme waere genau die
+ * Luecke, die das Review vom 02.08.2026 gefunden hat. Heute ist die Liste
+ * LEER: alle vier Pakete sind produktive Abhaengigkeit von `apps/api` oder
+ * `apps/web` (gemessen — contracts 18 Importe, domain 23, ui 10, config 10).
+ *
+ * Wer hier etwas einträgt, behauptet: dieses Paket wird von keinem Anfrage-
+ * und keinem Browserpfad ausgefuehrt. Der Test verlangt dafuer eine
+ * Begruendung und prueft, dass der Eintrag kein Muster ist.
+ */
+export const NICHT_LAUFZEITFAEHIGE_PAKETE: ReadonlyArray<{ paket: string; grund: string }> = [];
+
+/** Innerhalb eines Pakets ist nur `src/` Laufzeit — nicht Test, Build, Werkzeug. */
+const PAKET_LAUFZEIT_UNTERVERZEICHNIS = "/src/";
+
+/**
+ * Ist diese Datei Teil dessen, was eine echte Anfrage oder ein Browser
+ * ausfuehrt?
+ *
+ * Bewusst grosszuegig: `apps/api/src/**` VOLLSTAENDIG (inklusive `platform/`,
+ * wo `api-dependency-allowlist` aufhoert), produktiver Webcode, und
+ * `packages/*<!---->/src/**` als DEFAULT.
+ *
+ * Der Default fuer Pakete ist der Kern des Reviewbefunds: `packages/contracts`
+ * und `packages/ui` laufen im Browser UND im Nest-Anfragepfad. Wer morgen ein
+ * Paket anlegt, muss diesen Waechter nicht kennen, um von ihm erfasst zu
+ * werden — Schutz ist der Normalfall, Ausschluss die begruendete Ausnahme.
+ */
+export function istLaufzeitpfad(
+  datei: string,
+  ausgeschlossenePakete: readonly string[] = NICHT_LAUFZEITFAEHIGE_PAKETE.map((e) => e.paket),
+): boolean {
   if (datei.startsWith("apps/api/src/")) return true;
+
+  if (datei.startsWith("packages/")) {
+    const teile = datei.split("/");
+    const paket = teile[1];
+    if (paket === undefined || paket === "") return false;
+    if (ausgeschlossenePakete.includes(paket)) return false;
+    // Nur `src/`: `test/`, `dist/`, `openapi/` und Werkzeugkonfiguration am
+    // Paketwurzelverzeichnis laufen in keiner Anfrage.
+    return datei.startsWith(`packages/${paket}${PAKET_LAUFZEIT_UNTERVERZEICHNIS}`);
+  }
+
   if (!datei.startsWith("apps/web/")) return false;
   const ausgenommen = [
     "apps/web/test/",
@@ -313,21 +357,120 @@ export interface Umgebungszugriff {
  * `process.env`). Das ist kein Grund zur Nachsicht, sondern der schlimmste
  * Fall — er wird deshalb wie ein unbekannter Schluessel behandelt.
  */
+const PROZESS_MODULE = new Set(["node:process", "process"]);
+
 export function umgebungszugriffe(quelle: string, datei: string): Umgebungszugriff[] {
   const sourceFile = ts.createSourceFile(datei, quelle, ts.ScriptTarget.ES2022, true);
   const treffer: Umgebungszugriff[] = [];
 
-  const istProcessEnv = (node: ts.Node): boolean =>
-    ts.isPropertyAccessExpression(node) &&
-    node.name.text === "env" &&
-    ts.isIdentifier(node.expression) &&
-    node.expression.text === "process";
+  /**
+   * Namen, die auf `process` bzw. auf `process.env` zeigen.
+   *
+   * Ohne diese Aufloesung erkannte der Waechter genau EINE Schreibweise. Der
+   * Review vom 02.08.2026 hat vier weitere gemessen, die durchfielen — darunter
+   * `import proc from "node:process"`, also ausgerechnet die Form, zu der
+   * ESLint aktiv draengt (`unicorn/prefer-node-protocol`).
+   */
+  const processAliase = new Set<string>(["process"]);
+  const envAliase = new Set<string>();
 
+  const stringWert = (node: ts.Node): string | null =>
+    ts.isStringLiteralLike(node) ? node.text : null;
+
+  /** `process`, ein Alias davon, `globalThis.process`, `globalThis["process"]`. */
+  const istProcessAusdruck = (node: ts.Node): boolean => {
+    if (ts.isIdentifier(node)) return processAliase.has(node.text);
+    if (ts.isPropertyAccessExpression(node)) {
+      return node.name.text === "process" && ts.isIdentifier(node.expression);
+    }
+    if (ts.isElementAccessExpression(node)) {
+      return stringWert(node.argumentExpression) === "process" && ts.isIdentifier(node.expression);
+    }
+    return false;
+  };
+
+  /** `<process>.env`, `<process>["env"]` oder ein Alias auf genau das. */
+  const istEnvAusdruck = (node: ts.Node): boolean => {
+    if (ts.isIdentifier(node)) return envAliase.has(node.text);
+    if (ts.isPropertyAccessExpression(node)) {
+      return node.name.text === "env" && istProcessAusdruck(node.expression);
+    }
+    if (ts.isElementAccessExpression(node)) {
+      return stringWert(node.argumentExpression) === "env" && istProcessAusdruck(node.expression);
+    }
+    return false;
+  };
+
+  // --- Durchgang 1: Aliase sammeln -----------------------------------------
+  // Mehrfach, bis nichts Neues mehr dazukommt: `const p = process;` und
+  // `const e = p.env;` sind eine Kette, und die zweite Zeile laesst sich erst
+  // aufloesen, wenn die erste bekannt ist.
+  const sammleAliase = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      const modul = stringWert(node.moduleSpecifier);
+      const klausel = node.importClause;
+      if (modul !== null && PROZESS_MODULE.has(modul) && klausel !== undefined) {
+        // `import proc from "node:process"` und `import * as proc from …`
+        if (klausel.name !== undefined) processAliase.add(klausel.name.text);
+        const bindungen = klausel.namedBindings;
+        if (bindungen !== undefined) {
+          if (ts.isNamespaceImport(bindungen)) processAliase.add(bindungen.name.text);
+          else {
+            // `import { env } from "node:process"`
+            for (const element of bindungen.elements) {
+              const quellname = element.propertyName?.text ?? element.name.text;
+              if (quellname === "env") envAliase.add(element.name.text);
+            }
+          }
+        }
+      }
+    }
+
+    if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+      const wert = node.initializer;
+      // `const p = require("node:process")`
+      const ausRequire =
+        ts.isCallExpression(wert) &&
+        ts.isIdentifier(wert.expression) &&
+        wert.expression.text === "require" &&
+        wert.arguments.length === 1 &&
+        PROZESS_MODULE.has(stringWert(wert.arguments[0] as ts.Node) ?? "");
+
+      if (ts.isIdentifier(node.name)) {
+        if (istProcessAusdruck(wert) || ausRequire) processAliase.add(node.name.text);
+        else if (istEnvAusdruck(wert)) envAliase.add(node.name.text);
+      } else if (ts.isObjectBindingPattern(node.name)) {
+        // `const { env } = process` — der gebundene Name zeigt auf env.
+        if (istProcessAusdruck(wert) || ausRequire) {
+          for (const element of node.name.elements) {
+            const quellname =
+              element.propertyName !== undefined && ts.isIdentifier(element.propertyName)
+                ? element.propertyName.text
+                : ts.isIdentifier(element.name)
+                  ? element.name.text
+                  : null;
+            if (quellname === "env" && ts.isIdentifier(element.name)) {
+              envAliase.add(element.name.text);
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, sammleAliase);
+  };
+
+  for (let runde = 0; runde < 5; runde += 1) {
+    const vorher = processAliase.size + envAliase.size;
+    sammleAliase(sourceFile);
+    if (processAliase.size + envAliase.size === vorher) break;
+  }
+
+  // --- Durchgang 2: Zugriffe finden ----------------------------------------
   const zeileVon = (node: ts.Node): number =>
     sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
 
   const visit = (node: ts.Node): void => {
-    if (istProcessEnv(node)) {
+    if (istEnvAusdruck(node)) {
       const eltern = node.parent as ts.Node | undefined;
       if (
         eltern !== undefined &&
@@ -340,11 +483,17 @@ export function umgebungszugriffe(quelle: string, datei: string): Umgebungszugri
         ts.isElementAccessExpression(eltern) &&
         eltern.expression === node
       ) {
-        const argument = eltern.argumentExpression;
         treffer.push({
-          schluessel: ts.isStringLiteral(argument) ? argument.text : null,
+          schluessel: stringWert(eltern.argumentExpression),
           line: zeileVon(eltern),
         });
+      } else if (
+        eltern !== undefined &&
+        ts.isVariableDeclaration(eltern) &&
+        eltern.initializer === node
+      ) {
+        // `const e = process.env;` ist die ALIASDEFINITION, kein Lesezugriff.
+        // Der eigentliche Zugriff wird ueber den Alias gefunden.
       } else {
         // `process.env` als Ganzes: weitergereicht, destrukturiert, gespreizt.
         treffer.push({ schluessel: null, line: zeileVon(node) });

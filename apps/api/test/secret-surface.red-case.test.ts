@@ -33,8 +33,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { collectFilesNamed, collectSourceFiles, extractImports } from "./architecture/scan";
 import {
+  NICHT_LAUFZEITFAEHIGE_PAKETE,
   evaluateSecretRules,
   istLaufzeitpfad,
+  umgebungszugriffe,
   type SecretFinding,
 } from "./architecture/secret-surface-rules";
 
@@ -53,6 +55,11 @@ function entferne(relativ: string): void {
 function befunde(): SecretFinding[] {
   const dateien = [
     ...collectSourceFiles(root, "apps"),
+    // `packages` gehoert dazu, seit geteilte Pakete als Laufzeitpfad gelten
+    // (Reviewbefund F1). Ohne diese Zeile schriebe der rote Fall Fixtures in
+    // einen Baum, den er anschliessend nicht liest — und bliebe gruen, ohne
+    // etwas gemessen zu haben.
+    ...collectSourceFiles(root, "packages"),
     ...collectFilesNamed(root, "supabase", /\.(sql|toml)$/),
   ];
   const refs = extractImports(root, dateien);
@@ -194,6 +201,140 @@ describe("Der Wächter erkennt privilegierte Zugaenge im Anfragepfad (EYT-106 AK
     entferne("apps/api/src/common/leak2.ts");
 
     expect(getroffen.has("runtime-reads-no-environment")).toBe(true);
+  });
+});
+
+describe("Geteilte Pakete sind Laufzeitpfad (EYT-133, Reviewbefund F1)", () => {
+  // Der Wächter sah bisher nur `apps/api/src/**` und `apps/web/**`. Gemessen
+  // im Review vom 02.08.2026: `packages/contracts` und `packages/ui` laufen im
+  // BROWSER und im Nest-Anfragepfad — `apps/web/lib/auth-gateway-factory.ts`
+  // importiert Werte aus `@easytree/contracts`, `login-form.tsx` aus
+  // `@easytree/ui` in einer "use client"-Komponente. Ein privilegierter Zugriff
+  // dort ergab 0 Findings, und KEIN anderer Wächter im Repository deckt
+  // `packages/` ab.
+
+  it("privilegierter Umgebungszugriff in packages/contracts/src wird erkannt", () => {
+    schreibe(
+      "packages/contracts/src/leak.ts",
+      ['export const k = process.env["SUPABASE_SERVICE_ROLE_KEY"];'].join("\n"),
+    );
+    const getroffen = regeln();
+    entferne("packages/contracts/src/leak.ts");
+
+    expect(getroffen.has("runtime-reads-no-environment")).toBe(true);
+    expect(getroffen.has("privileged-credential-only-in-named-places")).toBe(true);
+  });
+
+  it("derselbe Fall in packages/ui/src wird erkannt", () => {
+    schreibe(
+      "packages/ui/src/leak.tsx",
+      ['import { createClient } from "@supabase/supabase-js";', "export { createClient };"].join(
+        "\n",
+      ),
+    );
+    const getroffen = regeln();
+    entferne("packages/ui/src/leak.tsx");
+
+    expect(getroffen.has("runtime-imports-no-supabase-sdk")).toBe(true);
+  });
+
+  it("ein kuenftig neu angelegtes Paket ist standardmaessig geschuetzt", () => {
+    // Die Regel ist ein Default, keine Aufzaehlung: wer morgen ein Paket
+    // anlegt, muss den Waechter nicht kennen, um von ihm erfasst zu werden.
+    expect(istLaufzeitpfad("packages/neues-paket/src/index.ts")).toBe(true);
+    schreibe(
+      "packages/neues-paket/src/leak.ts",
+      ["export const k = globalThis.process.env.SUPABASE_SERVICE_ROLE_KEY;"].join("\n"),
+    );
+    const getroffen = regeln();
+    entferne("packages/neues-paket/src/leak.ts");
+
+    expect(getroffen.has("runtime-reads-no-environment")).toBe(true);
+  });
+
+  it("nur `src/` eines Pakets ist Laufzeitpfad — Tests und Bauartefakte nicht", () => {
+    expect(istLaufzeitpfad("packages/contracts/src/gateway.ts")).toBe(true);
+    expect(istLaufzeitpfad("packages/ui/src/button.tsx")).toBe(true);
+    expect(istLaufzeitpfad("packages/domain/src/time-interval.ts")).toBe(true);
+    expect(istLaufzeitpfad("packages/config/src/load.ts")).toBe(true);
+    // Ausserhalb: Tests, generierte Artefakte, Werkzeugkonfiguration.
+    expect(istLaufzeitpfad("packages/contracts/test/openapi-drift.test.ts")).toBe(false);
+    expect(istLaufzeitpfad("packages/domain/test/x.property.test.ts")).toBe(false);
+    expect(istLaufzeitpfad("packages/contracts/openapi/v1.json")).toBe(false);
+    expect(istLaufzeitpfad("packages/contracts/dist/index.js")).toBe(false);
+    expect(istLaufzeitpfad("packages/ui/vitest.config.ts")).toBe(false);
+  });
+
+  it("ein ausdruecklich benanntes Nicht-Laufzeitpaket laesst sich eng ausschliessen", () => {
+    // Die Ausnahmemechanik muss es GEBEN — sonst waere die Regel beim ersten
+    // reinen Werkzeugpaket nicht durchhaltbar und wuerde pauschal aufgeweicht.
+    // Heute ist die Liste leer: alle vier Pakete sind produktive Abhaengigkeit
+    // von apps/api oder apps/web (gemessen 02.08.2026).
+    expect(istLaufzeitpfad("packages/nur-werkzeug/src/x.ts", ["nur-werkzeug"])).toBe(false);
+    // Und der Ausschluss gilt NUR fuer das benannte Paket.
+    expect(istLaufzeitpfad("packages/contracts/src/x.ts", ["nur-werkzeug"])).toBe(true);
+  });
+
+  it("keine Ausnahme darf ein Muster statt eines Paketnamens sein", () => {
+    for (const { paket } of NICHT_LAUFZEITFAEHIGE_PAKETE) {
+      expect(paket).not.toContain("*");
+      expect(paket).not.toContain("/");
+      expect(paket.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("Der Umgebungsdetektor kennt jede gaengige Schreibweise (EYT-133, Befund F2)", () => {
+  // Gemessen im Review: der Detektor erkannte nur den blossen Bezeichner
+  // `process`. Die node:process-Form ist genau die, zu der ESLint aktiv draengt
+  // (`unicorn/prefer-node-protocol`) — sie kommt versehentlich ins Haus, nicht
+  // boeswillig.
+  const erkannt = (quelle: string): number => umgebungszugriffe(quelle, "x.ts").length;
+
+  it.each([
+    ["process.env.KEY", "export const a = process.env.KEY;"],
+    ['process.env["KEY"]', 'export const a = process.env["KEY"];'],
+    ['process["env"].KEY', 'export const a = process["env"].KEY;'],
+    ['process["env"]["KEY"]', 'export const a = process["env"]["KEY"];'],
+    ["globalThis.process.env.KEY", "export const a = globalThis.process.env.KEY;"],
+    [
+      'import proc from "node:process"',
+      'import proc from "node:process";\nexport const a = proc.env.KEY;',
+    ],
+    [
+      'import * as proc from "node:process"',
+      'import * as proc from "node:process";\nexport const a = proc.env.KEY;',
+    ],
+    ["const p = process", "const p = process;\nexport const a = p.env.KEY;"],
+    ["const env = process.env", "const env = process.env;\nexport const a = env.KEY;"],
+  ])("erkennt %s", (_name, quelle) => {
+    expect(erkannt(quelle)).toBeGreaterThan(0);
+  });
+
+  it("erkennt den Schluesselnamen, wo er statisch dasteht", () => {
+    expect(umgebungszugriffe('export const a = process["env"].KEY;', "x.ts")[0]?.schluessel).toBe(
+      "KEY",
+    );
+    expect(
+      umgebungszugriffe(
+        'import proc from "node:process";\nexport const a = proc.env.KEY;',
+        "x.ts",
+      )[0]?.schluessel,
+    ).toBe("KEY");
+  });
+
+  it("NODE_ENV bleibt in JEDER Schreibweise harmlos", () => {
+    schreibe(
+      "packages/contracts/src/umgebung.ts",
+      [
+        'import proc from "node:process";',
+        'export const dev = proc.env.NODE_ENV !== "production";',
+      ].join("\n"),
+    );
+    const gefunden = befunde();
+    entferne("packages/contracts/src/umgebung.ts");
+
+    expect(gefunden).toEqual([]);
   });
 });
 

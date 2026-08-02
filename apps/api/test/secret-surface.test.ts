@@ -29,6 +29,7 @@ import {
 } from "./architecture/scan";
 import {
   ERLAUBTE_UMGEBUNGSLESER,
+  NICHT_LAUFZEITFAEHIGE_PAKETE,
   PRIVILEGIERTE_ORTE,
   SECRET_RULES,
   entferneKommentare,
@@ -131,6 +132,43 @@ describe("Die Ausnahmelisten sind eng und lebendig (EYT-106 AK6)", () => {
       expect(grund.length).toBeGreaterThan(40);
     },
   );
+
+  it("jede Paketausnahme existiert und ist wirklich nicht laufzeitfaehig", () => {
+    // Der teuerste Eintrag in dieser Liste ist der tote: er steht wie eine
+    // bewusste Entscheidung da, nimmt aber nichts (mehr) aus — und deckt beim
+    // naechsten Umbau versehentlich etwas Neues.
+    //
+    // Zwei Bedingungen je Eintrag, beide gemessen statt geglaubt:
+    //   1. das Paket existiert ueberhaupt;
+    //   2. es ist KEINE produktive Abhaengigkeit von apps/api oder apps/web —
+    //      sonst waere die Behauptung "nicht laufzeitfaehig" schlicht falsch.
+    const produktiveAbhaengigkeiten = new Set<string>();
+    for (const app of ["apps/api", "apps/web"]) {
+      const manifest = JSON.parse(readFileSync(`${repoRoot}/${app}/package.json`, "utf8")) as {
+        dependencies?: Record<string, string>;
+      };
+      for (const name of Object.keys(manifest.dependencies ?? {})) {
+        if (name.startsWith("@easytree/")) produktiveAbhaengigkeiten.add(name);
+      }
+    }
+
+    for (const { paket, grund } of NICHT_LAUFZEITFAEHIGE_PAKETE) {
+      const pfad = `${repoRoot}/packages/${paket}/package.json`;
+      expect(existsSync(pfad), `Ausnahme nennt ein Paket, das es nicht gibt: ${paket}`).toBe(true);
+      const name = (JSON.parse(readFileSync(pfad, "utf8")) as { name: string }).name;
+      expect(
+        produktiveAbhaengigkeiten.has(name),
+        `${name} ist produktive Abhaengigkeit von apps/api oder apps/web — ` +
+          `die Ausnahme "nicht laufzeitfaehig" ist damit falsch.`,
+      ).toBe(false);
+      expect(grund.length).toBeGreaterThan(40);
+    }
+
+    // Heute leer, und das ist der gemessene Normalfall: alle vier Pakete sind
+    // produktive Abhaengigkeit. Die Zeile haelt fest, dass die Leere gewollt
+    // ist und nicht daher kommt, dass jemand die Liste vergessen hat.
+    expect(NICHT_LAUFZEITFAEHIGE_PAKETE.length).toBe(0);
+  });
 
   it("keine Ausnahme ist ein Verzeichnismuster", () => {
     // PO-Vorgabe 01.08.2026: "Keine breite Allowlist nach Verzeichnisnamen."
