@@ -30,9 +30,9 @@ import {
 import {
   ERLAUBTE_UMGEBUNGSLESER,
   NICHT_LAUFZEITFAEHIGE_PAKETE,
+  PRIVILEGIERTE_FAMILIEN_IDS,
   PRIVILEGIERTE_ORTE,
   SECRET_RULES,
-  entferneKommentare,
   evaluateSecretRules,
   istCodeDatei,
   istLaufzeitpfad,
@@ -179,30 +179,62 @@ describe("Die Ausnahmelisten sind eng und lebendig (EYT-106 AK6)", () => {
     }
   });
 
-  it("jede Ausnahme nimmt heute wirklich etwas aus", () => {
-    // Der teuerste Fehler an einer Ausnahmeliste ist der tote Eintrag: er
-    // steht wie eine bewusste Entscheidung da, deckt aber nichts mehr ab und
-    // deckt beim naechsten Mal versehentlich etwas Neues.
-    const ohneAusnahmen = evaluateSecretRules({
+  it("die Ausnahmeliste ist strukturell sauber", () => {
+    const gesehen = new Set<string>();
+    for (const { datei, erlaubteFamilien, grund } of PRIVILEGIERTE_ORTE) {
+      expect(existsSync(`${repoRoot}/${datei}`), `Ausnahme zeigt ins Leere: ${datei}`).toBe(true);
+      expect(gesehen.has(datei), `${datei} steht doppelt in der Liste`).toBe(false);
+      gesehen.add(datei);
+
+      // Eine leere Familienliste waere die dateiweite Freistellung durch die
+      // Hintertuer: sie stellt nichts frei, also gehoert der Eintrag weg.
+      expect(erlaubteFamilien.length, `${datei} stellt keine Familie frei`).toBeGreaterThan(0);
+      expect(new Set(erlaubteFamilien).size, `${datei} nennt eine Familie doppelt`).toBe(
+        erlaubteFamilien.length,
+      );
+      for (const familie of erlaubteFamilien) {
+        expect(
+          PRIVILEGIERTE_FAMILIEN_IDS.includes(familie),
+          `${datei} nennt die unbekannte Familie ${familie}`,
+        ).toBe(true);
+      }
+      expect(grund.trim().length, `${datei} ist nicht belastbar begruendet`).toBeGreaterThan(40);
+    }
+  });
+
+  // Die eigentliche Lebendpruefung, und zwar je PAAR aus Datei und Familie.
+  //
+  // Der Vorgaenger prueft die Datei als Ganzes gegen eine Namensliste: er
+  // haette bestaetigt, dass die CI-Datei "irgendeinen" verbotenen Namen
+  // enthaelt, und dabei stillschweigend mitgetragen, dass sie zusaetzlich
+  // fuer Service-Keys freigestellt ist. Genau das war F2.
+  //
+  // Hier wird stattdessen GENAU EIN Paar herausgenommen und gemessen, ob der
+  // Waechter daraufhin genau diese Familie in genau dieser Datei meldet.
+  // Ein totes Paar faellt damit sofort auf, ein zu breites ebenso.
+  const paare = PRIVILEGIERTE_ORTE.flatMap(({ datei, erlaubteFamilien }) =>
+    erlaubteFamilien.map((familie) => [datei, familie] as const),
+  );
+
+  it.each(paare)("Ausnahme %s / %s deckt heute wirklich etwas ab", (datei, familie) => {
+    const ohneDiesesPaar = PRIVILEGIERTE_ORTE.map((ort) =>
+      ort.datei === datei
+        ? { ...ort, erlaubteFamilien: ort.erlaubteFamilien.filter((f) => f !== familie) }
+        : ort,
+    );
+    const bericht = evaluateSecretRules({
       repoRoot,
       files: dateien,
       refs,
+      orte: ohneDiesesPaar,
     });
-    expect(ohneAusnahmen.findings).toEqual([]);
-
-    for (const { datei } of PRIVILEGIERTE_ORTE) {
-      const roh = entferneKommentare(readFileSync(`${repoRoot}/${datei}`, "utf8"), datei);
-      const trifft = [
-        ["SERVICE", "ROLE"].join("_"),
-        ["SECRET", "KEY"].join("_"),
-        ["JWT", "SECRET"].join("_"),
-        ["service", "role"].join("_"),
-        ["PG", "PASS", "WORD"].join(""),
-        ["SERVICE", "KEY"].join("_"),
-        ["SUPABASE", "ACCESS", "TOKEN"].join("_"),
-      ].some((name) => roh.toUpperCase().includes(name.toUpperCase()));
-      expect(trifft, `Ausnahme ${datei} nimmt nichts mehr aus — Eintrag entfernen`).toBe(true);
-    }
+    const treffer = bericht.findings.filter(
+      (f) => f.familie === familie && f.location.startsWith(`${datei}:`),
+    );
+    expect(
+      treffer.length,
+      `Ausnahme ${datei} / ${familie} nimmt nichts mehr aus — Familie aus dem Eintrag entfernen`,
+    ).toBeGreaterThan(0);
   });
 
   it.each(ERLAUBTE_UMGEBUNGSLESER.map((e) => [e.datei, e.grund] as const))(

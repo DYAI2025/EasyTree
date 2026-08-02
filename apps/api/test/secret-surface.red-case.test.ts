@@ -34,9 +34,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { collectFilesNamed, collectSourceFiles, extractImports } from "./architecture/scan";
 import {
   NICHT_LAUFZEITFAEHIGE_PAKETE,
+  PRIVILEGIERTE_FAMILIEN_IDS,
+  PRIVILEGIERTE_ORTE,
   evaluateSecretRules,
   istLaufzeitpfad,
+  pruefeAusnahmeliste,
   umgebungszugriffe,
+  type PrivilegierteFamilienId,
   type SecretFinding,
 } from "./architecture/secret-surface-rules";
 
@@ -52,8 +56,18 @@ function entferne(relativ: string): void {
   rmSync(join(root, relativ), { force: true });
 }
 
-function befunde(): SecretFinding[] {
-  const dateien = [
+/**
+ * Dieselben Bereiche, die der echte Waechter liest.
+ *
+ * `.github` und `scripts` fehlten hier — gemessen 02.08.2026: die F2-Fixturen
+ * schrieben nach `.github/workflows/ci.yml`, und `befunde()` las die Datei nie
+ * ein. Die roten Faelle 2, 3, 3b und 4 waren damit PER KONSTRUKTION rot: nicht,
+ * weil die Luecke offen war, sondern weil ihre Fixtur ausserhalb des
+ * gemessenen Baums lag. Ein solcher Fall wird nach dem Fix nicht gruen und
+ * beweist nichts.
+ */
+function alleDateien(): string[] {
+  return [
     ...collectSourceFiles(root, "apps"),
     // `packages` gehoert dazu, seit geteilte Pakete als Laufzeitpfad gelten
     // (Reviewbefund F1). Ohne diese Zeile schriebe der rote Fall Fixtures in
@@ -61,7 +75,13 @@ function befunde(): SecretFinding[] {
     // etwas gemessen zu haben.
     ...collectSourceFiles(root, "packages"),
     ...collectFilesNamed(root, "supabase", /\.(sql|toml)$/),
+    ...collectFilesNamed(root, ".github", /\.ya?ml$/),
+    ...collectFilesNamed(root, "scripts", /\.sh$/),
   ];
+}
+
+function befunde(): SecretFinding[] {
+  const dateien = alleDateien();
   const refs = extractImports(root, dateien);
   return [...evaluateSecretRules({ repoRoot: root, files: dateien, refs }).findings];
 }
@@ -540,5 +560,200 @@ describe("Der saubere Wegwerfbaum bleibt gruen (EYT-106 AK6)", () => {
     expect(dateien).toContain("apps/web/app/page.tsx");
     expect(dateien).toContain("apps/api/src/modules/costs/interface/http/costs.controller.ts");
     expect(befunde()).toEqual([]);
+  });
+});
+
+describe("F2 — Ausnahmen gelten je Familie, nie fuer eine ganze Datei (EYT-133)", () => {
+  // Gemessen auf master 36384d0: eine dateiweite Freistellung liess in
+  // derselben Datei AUCH einen Service-Role-Schluessel durch — 0 Findings.
+  // Die Ausnahme war fuer ein lokales Wegwerf-Passwort gedacht.
+  const NAMENSREGEL = "privileged-credential-only-in-named-places";
+
+  /** Baut einen syntaktisch echten, inhaltlich erfundenen JWT. */
+  const bauJwt = (rolle: string): string => {
+    const teil = (o: unknown): string =>
+      Buffer.from(JSON.stringify(o), "utf8").toString("base64url");
+    return `${teil({ alg: "HS256" })}.${teil({ role: rolle })}.erfunden`;
+  };
+  const GEHEIM_PRAEFIX = ["sb", "secret", ""].join("_");
+
+  /** Wertet den Wegwerfbaum mit einer bestimmten Ausnahmeliste aus. */
+  const auswerten = (orte: readonly (typeof PRIVILEGIERTE_ORTE)[number][]) => {
+    const dateien = alleDateien();
+    return evaluateSecretRules({
+      repoRoot: root,
+      files: dateien,
+      refs: extractImports(root, dateien),
+      orte,
+    });
+  };
+
+  const inDatei = (pfad: string, inhalt: string): Set<string> => {
+    schreibe(pfad, inhalt);
+    const r = regeln();
+    entferne(pfad);
+    return r;
+  };
+
+  it("1. CI-Datei mit dem erlaubten lokalen Datenbankpasswort bleibt gruen", () => {
+    const treffer = inDatei(
+      ".github/workflows/ci.yml",
+      ["jobs:", "  x:", "    run: PGPASSWORD=postgres psql -c 'select 1'"].join("\n"),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(false);
+  });
+
+  it("2. dieselbe Datei mit einem Service-Schluessel wird rot", () => {
+    const treffer = inDatei(
+      ".github/workflows/ci.yml",
+      ["jobs:", "  x:", "    env:", "      SUPABASE_SERVICE_KEY: abc"].join("\n"),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("3. dieselbe Datei mit einem Geheimpraefix-Wert wird rot", () => {
+    const treffer = inDatei(
+      ".github/workflows/ci.yml",
+      ["jobs:", "  x:", `    env:`, `      K: ${GEHEIM_PRAEFIX}AbCdEfGhIjKl`].join("\n"),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("3b. dieselbe Datei mit einem festverdrahteten JWT wird rot", () => {
+    const treffer = inDatei(
+      ".github/workflows/ci.yml",
+      ["jobs:", "  x:", "    env:", `      K: ${bauJwt("service_role")}`].join("\n"),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("4. Read-through-Harness darf sein Testpasswort haben, aber keinen Service-Schluessel", () => {
+    expect(
+      inDatei("scripts/read-through-harness.sh", "PGPASSWORD=postgres psql -c 'select 1'").has(
+        NAMENSREGEL,
+      ),
+    ).toBe(false);
+    expect(
+      inDatei("scripts/read-through-harness.sh", 'SUPABASE_SERVICE_KEY="abc"').has(NAMENSREGEL),
+    ).toBe(true);
+  });
+
+  it("5. Token-Verifier-Test darf die Rollenbezeichnung fuehren, aber kein Datenbankpasswort", () => {
+    expect(
+      inDatei("apps/api/test/auth/token-verifier.test.ts", 'const aud = "service_role";').has(
+        NAMENSREGEL,
+      ),
+    ).toBe(false);
+    expect(
+      inDatei("apps/api/test/auth/token-verifier.test.ts", 'const p = "POSTGRES_PASSWORD";').has(
+        NAMENSREGEL,
+      ),
+    ).toBe(true);
+  });
+
+  const OK = (familien: PrivilegierteFamilienId[]) => ({
+    datei: ".github/workflows/ci.yml",
+    erlaubteFamilien: familien,
+    grund: "x".repeat(60),
+  });
+  const existiertImmer = () => true;
+
+  it("6. eine unbenutzte Familienausnahme faellt auf", () => {
+    // Strukturell gueltig, aber tot: `supabase-access-token-name` schlaegt in
+    // der CI-Datei nirgends an. Nur die Lebendpruefung sieht das, deshalb wird
+    // sie hier mit demselben Werkzeug nachgestellt, das die echte Liste prueft.
+    const orte = PRIVILEGIERTE_ORTE.map((ort) =>
+      ort.datei === ".github/workflows/ci.yml"
+        ? {
+            ...ort,
+            erlaubteFamilien: [...ort.erlaubteFamilien, "supabase-access-token-name" as const],
+          }
+        : ort,
+    );
+    expect(pruefeAusnahmeliste(orte, existiertImmer)).toEqual([]);
+
+    const ohnePaar = orte.map((ort) =>
+      ort.datei === ".github/workflows/ci.yml"
+        ? {
+            ...ort,
+            erlaubteFamilien: ort.erlaubteFamilien.filter(
+              (f) => f !== "supabase-access-token-name",
+            ),
+          }
+        : ort,
+    );
+    const treffer = auswerten(ohnePaar).findings;
+    expect(
+      treffer.filter(
+        (f) =>
+          f.familie === "supabase-access-token-name" &&
+          f.location.startsWith(".github/workflows/ci.yml:"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("7. eine Ausnahme auf eine nicht existierende Datei wird rot", () => {
+    const maengel = pruefeAusnahmeliste(
+      [
+        {
+          datei: "apps/api/src/gibt-es-nicht.ts",
+          erlaubteFamilien: ["service-role-name"],
+          grund: "x".repeat(60),
+        },
+      ],
+      (datei) => datei !== "apps/api/src/gibt-es-nicht.ts",
+    );
+    expect(maengel).toContain("apps/api/src/gibt-es-nicht.ts: Ausnahme zeigt ins Leere");
+  });
+
+  it("8. eine Ausnahme ohne belastbare Begruendung wird rot", () => {
+    const maengel = pruefeAusnahmeliste(
+      [
+        {
+          datei: ".github/workflows/ci.yml",
+          erlaubteFamilien: ["database-password-name"],
+          grund: "weil",
+        },
+      ],
+      existiertImmer,
+    );
+    expect(maengel).toContain(".github/workflows/ci.yml: nicht belastbar begruendet");
+  });
+
+  it("8b. eine leere Familienliste ist keine gueltige Ausnahme", () => {
+    expect(pruefeAusnahmeliste([OK([])], existiertImmer)).toContain(
+      ".github/workflows/ci.yml: stellt keine Familie frei",
+    );
+  });
+
+  it("9. die Rueckkehr zur dateiweiten Ausnahme laesst die Faelle 2, 3 und 3b durch", () => {
+    // DIE Gegenmutation zu F2, ausgefuehrt statt behauptet: eine Ausnahme, die
+    // ALLE Familien fuer die CI-Datei freistellt, ist genau das Modell von
+    // master 36384d0. Unter ihr melden die drei Verstossfixturen NICHTS mehr —
+    // und das ist der gemessene Beleg, dass das Familienmodell sie faengt.
+    const dateiweit = PRIVILEGIERTE_ORTE.map((ort) =>
+      ort.datei === ".github/workflows/ci.yml"
+        ? { ...ort, erlaubteFamilien: [...PRIVILEGIERTE_FAMILIEN_IDS] }
+        : ort,
+    );
+    const verstoesse = [
+      ["jobs:", "  x:", "    env:", "      SUPABASE_SERVICE_KEY: abc"].join("\n"),
+      ["jobs:", "  x:", "    env:", `      K: ${GEHEIM_PRAEFIX}AbCdEfGhIjKl`].join("\n"),
+      ["jobs:", "  x:", "    env:", `      K: ${bauJwt("service_role")}`].join("\n"),
+    ];
+    for (const inhalt of verstoesse) {
+      schreibe(".github/workflows/ci.yml", inhalt);
+      const mitFamilien = auswerten(PRIVILEGIERTE_ORTE);
+      const mitDateiweit = auswerten(dateiweit);
+      entferne(".github/workflows/ci.yml");
+
+      const zaehle = (b: { findings: readonly { rule: string; location: string }[] }) =>
+        b.findings.filter(
+          (f) => f.rule === NAMENSREGEL && f.location.startsWith(".github/workflows/ci.yml:"),
+        ).length;
+
+      expect(zaehle(mitFamilien), "Familienmodell muss den Verstoss melden").toBeGreaterThan(0);
+      expect(zaehle(mitDateiweit), "dateiweite Ausnahme laesst ihn durch — genau F2").toBe(0);
+    }
   });
 });

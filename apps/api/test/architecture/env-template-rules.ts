@@ -66,21 +66,77 @@ export const ERLAUBTE_PLATZHALTER: ReadonlyArray<{ muster: RegExp; name: string 
 ];
 
 /**
- * Ausdruecklich freigegebene lokale Dummy-Konstanten.
+ * Konkrete Werte, die AUSSCHLIESSLICH fuer ihren eigenen Variablennamen
+ * zulaessig sind.
  *
- * Der lokale Supabase-Stack hat feste, oeffentlich dokumentierte Koordinaten.
- * Sie sind keine Geheimnisse und muessen in der Vorlage stehen duerfen, sonst
- * waere die Vorlage als Anleitung wertlos.
+ * Der Vorgaenger war eine globale Liste ohne Namensbezug. Gemessen auf master
+ * 36384d0 rutschten dadurch alle sechs Bypaesse durch: `production` ist als
+ * NODE_ENV-Wert freigegeben und deckte damit jeden Namen, auch einen
+ * Service-Schluessel. Die Bindung an den Namen ist der ganze Fix.
+ *
+ * Namen, die hier nicht stehen und nicht geheim sind, duerfen einen konkreten
+ * Wert tragen, solange keine Wertformpruefung greift — sonst waere jede neue
+ * harmlose Variable ein Befund und die Regel wuerde aufgeweicht statt befolgt.
  */
-export const ERLAUBTE_DUMMY_WERTE: ReadonlyArray<{ muster: RegExp; grund: string }> = [
+export const ERLAUBTE_KONKRETWERTE: ReadonlyArray<{
+  variable: RegExp;
+  pruefe: (wert: string) => boolean;
+  grund: string;
+}> = [
   {
-    muster: /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/\S*)?$/,
+    variable: /^NODE_ENV$/,
+    pruefe: (w) => /^(development|test|production)$/.test(w),
+    grund: "die drei Presets aus packages/config",
+  },
+  {
+    variable: /^LOG_LEVEL$/,
+    pruefe: (w) => /^(fatal|error|warn|info|debug|trace)$/.test(w),
+    grund: "die sechs Stufen des Loggers",
+  },
+  {
+    variable: /^API_PORT$/,
+    // Ganzzahlig und im gueltigen Bereich. Ein blosses \\d+ liesse 0 und
+    // 65536 durch — beide sind keine Ports.
+    pruefe: (w) => /^\d{1,5}$/.test(w) && Number(w) >= 1 && Number(w) <= 65535,
+    grund: "Portnummer 1..65535",
+  },
+  {
+    variable: /^SUPABASE_URL$/,
+    pruefe: (w) => istLokaleAdresseOhneZugangsdaten(w),
     grund: "lokale Stackadresse ohne Zugangsdaten",
   },
-  { muster: /^(development|test|production)$/, grund: "NODE_ENV-Wert" },
-  { muster: /^(fatal|error|warn|info|debug|trace)$/, grund: "LOG_LEVEL-Wert" },
-  { muster: /^\d{2,5}$/, grund: "Portnummer" },
 ];
+
+/** http/https, Host nur lokal, KEINE Userinfo. */
+function istLokaleAdresseOhneZugangsdaten(wert: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(wert);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  if (url.username !== "" || url.password !== "") return false;
+  return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+}
+
+/**
+ * `DATABASE_URL` bekommt eine eigene Pruefung, weil zwei Bedingungen
+ * gleichzeitig gelten muessen: lokale Adresse UND ein Passwortanteil, der leer
+ * oder ein erkannter Platzhalter ist. Ein konkretes Passwort bleibt verboten,
+ * auch gegen localhost.
+ */
+function istZulaessigeBeispielVerbindung(wert: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(wert);
+  } catch {
+    return false;
+  }
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return false;
+  const passwort = decodeURIComponent(url.password);
+  return passwort === "" || istPlatzhalter(passwort);
+}
 
 export interface Wertform {
   readonly jwtRolle: string | null;
@@ -134,10 +190,6 @@ export function istPlatzhalter(wert: string): boolean {
   return ERLAUBTE_PLATZHALTER.some((p) => p.muster.test(wert));
 }
 
-function istErlaubterDummy(wert: string): boolean {
-  return ERLAUBTE_DUMMY_WERTE.some((d) => d.muster.test(wert));
-}
-
 /**
  * Variablennamen, deren Wert in einer Vorlage zwingend Platzhalter sein muss.
  * Zusammengesetzt, damit diese Datei nicht selbst anschlaegt.
@@ -162,17 +214,69 @@ export function istGeheimerName(variable: string): boolean {
  * Auch auskommentierte Zeilen werden geprueft: ein `#` vor einer echten
  * Zugangsdatenzeile macht sie nicht ungefaehrlich, nur unauffaelliger.
  */
+/**
+ * Zeilenform einer versionierten Environment-Vorlage.
+ *
+ * Optionales `#` (auskommentierte Eintraege werden mitgeprueft — ein konkreter
+ * Secret-Wert bleibt auch auskommentiert ein Befund), optionales `export`
+ * (sonst waere `export NAME=wert` die Umgehung), dann ein permissiv geparster
+ * Bezeichner. Ob der Name kanonisch ist, entscheidet KANONISCHER_NAME danach —
+ * getrennt, damit eine abweichende Schreibweise gemeldet und nicht ignoriert
+ * wird.
+ */
+const ZEILENFORM = /^\s*(#\s*)?(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
+
+/** In diesem Repository sind nur GROSSBUCHSTABEN-Namen gueltig. */
+const KANONISCHER_NAME = /^[A-Z][A-Z0-9_]*$/;
+
 export function pruefeEnvTemplate(datei: string, inhalt: string): TemplateBefund[] {
   const befunde: TemplateBefund[] = [];
   inhalt.split("\n").forEach((zeile, index) => {
-    const treffer = /^\s*#?\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(zeile);
-    if (treffer === null) return;
-    const variable = treffer[1] as string;
-    const wert = (treffer[2] as string).trim().replace(/^["']|["']$/g, "");
     const nummer = index + 1;
+    const istKommentar = /^\s*#/.test(zeile);
+    if (zeile.trim() === "") return;
+
+    // Am Zeilenanfang verankert, nicht irgendwo in der Zeile gesucht.
+    //
+    // Das ist keine Stilfrage: `.env.example` Z. 18 traegt `user=postgres`
+    // mitten in einem psql-Aufruf innerhalb eines Kommentars. Eine Grammatik,
+    // die den Namen irgendwo sucht, meldet dort sofort einen Fehlalarm.
+    const treffer = ZEILENFORM.exec(zeile);
+    if (treffer === null) {
+      // Reine Kommentare und Leerzeilen sind erlaubt — auch Kommentare, die
+      // irgendwo ein `=` tragen. Eine NICHT kommentierte Zeile, die hier
+      // ankommt, ist in dieser Dateiform aber weder Kommentar noch Leerzeile
+      // noch Assignment. Sie still zu ueberspringen war Finding B: die Zeile
+      // verschwand wortlos, samt ihrem Wert.
+      if (!istKommentar) {
+        befunde.push({
+          datei,
+          zeile: nummer,
+          variable: "(unparsbar)",
+          grund: "Zeile ist weder Kommentar, Leerzeile noch gueltiges Assignment",
+        });
+      }
+      return;
+    }
+
+    const variable = treffer[3] as string;
+    const wert = (treffer[4] as string).trim().replace(/^["']|["']$/g, "");
     const melde = (grund: string): void => {
       befunde.push({ datei, zeile: nummer, variable, grund });
     };
+
+    // 0. Schreibweise. Ein kleingeschriebener Geheimnisname wurde vom alten
+    //    Muster gar nicht erst erkannt — die billigste Umgehung ueberhaupt.
+    //    (Ausgeschrieben steht er im roten Fall, nicht hier: diese Zeile liegt
+    //    hinter dem Regex-Literal oben, und `entferneKommentare` entfernt ab
+    //    dort keine Kommentare mehr. Fail-loud, gemessen — genau dieser
+    //    Fehlalarm ist gerade aufgetreten.)
+    //    In diesem Repository sind ausschliesslich kanonische Namen gueltig,
+    //    also ist eine abweichende Schreibweise selbst der Befund.
+    if (!KANONISCHER_NAME.test(variable)) {
+      melde("Variablenname ist nicht kanonisch (nur Grossbuchstaben, Ziffern, Unterstrich)");
+      return;
+    }
 
     const form = klassifiziereWert(wert);
 
@@ -195,11 +299,49 @@ export function pruefeEnvTemplate(datei: string, inhalt: string): TemplateBefund
       return;
     }
 
-    // 2. Geheime Variablennamen brauchen eine erlaubte Platzhalterform.
-    if (istGeheimerName(variable) && wert !== "") {
-      if (!istPlatzhalter(wert) && !istErlaubterDummy(wert)) {
+    // 2. Geheime Namen: NUR leer oder eine erlaubte Platzhalterform.
+    //
+    // Steht bewusst VOR jeder Konkretwert-Freigabe. Genau hier lag F1: der
+    // alte Code liess einen globalen Dummywert auch fuer diese Namen zu, und
+    // damit war ein Service-Schluessel mit dem Wert eines NODE_ENV-Presets
+    // gruen.
+    //
+    // Der Name wird hier NICHT ausgeschrieben: `entferneKommentare` kennt
+    // keine Regex-Literale, und das `/^["']|["']$/g` weiter oben laesst es
+    // ab dort in einem Schein-Stringzustand. Kommentare hinter dieser Zeile
+    // werden deshalb nicht entfernt und ein ausgeschriebener Bezeichner
+    // erzeugt einen Fehlalarm gegen die eigene Datei. Fail-loud, nicht
+    // fail-open — gemessen 02.08.2026, als eigener Befund gemeldet.
+    if (istGeheimerName(variable)) {
+      if (wert !== "" && !istPlatzhalter(wert)) {
         melde("geheimer Variablenname mit konkretem Wert statt Platzhalter");
       }
+      return;
+    }
+
+    // 3. Verbindungszeichenkette: lokale Adresse UND leeres oder
+    //    platzhalterartiges Passwort.
+    if (/^DATABASE_URL$/.test(variable)) {
+      if (wert !== "" && !istPlatzhalter(wert) && !istZulaessigeBeispielVerbindung(wert)) {
+        melde("Verbindungszeichenkette ist weder Platzhalter noch lokales Beispiel ohne Passwort");
+      }
+      return;
+    }
+
+    // 4. Alle uebrigen Namen: ein konkreter Wert braucht eine Freigabe, die
+    //    auf GENAU DIESEN Namen passt.
+    if (wert === "" || istPlatzhalter(wert)) return;
+    const freigabe = ERLAUBTE_KONKRETWERTE.find((e) => e.variable.test(variable));
+    if (freigabe === undefined) {
+      // Finding A: frueher fiel genau dieser Fall durch. Geprueft wurde nur,
+      // wer ohnehin schon eine Freigabe hatte — die unbekannten Namen, um die
+      // es geht, waren damit gerade nicht abgedeckt. Ein Konkretwert ohne
+      // namensgebundene Freigabe ist jetzt der Befund.
+      melde("konkreter Wert besitzt keine variablenspezifische Freigabe");
+      return;
+    }
+    if (!freigabe.pruefe(wert)) {
+      melde(`konkreter Wert ausserhalb der Freigabe fuer ${variable} (${freigabe.grund})`);
     }
   });
   return befunde;
