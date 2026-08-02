@@ -178,3 +178,51 @@ describe("Rote Faelle — jede verbotene Form wird erkannt (EYT-133 F4)", () => 
     expect(istGeheimerName("API_PORT")).toBe(false);
   });
 });
+
+describe("F1 — Dummywerte gelten nur fuer ihren eigenen Namen (EYT-133)", () => {
+  // Gemessen auf master 36384d0: ALLE sechs Faelle rutschten durch. Ursache
+  // war ein globaler Fallback, der den Variablennamen gar nicht kannte —
+  // `production` ist als NODE_ENV-Wert freigegeben und deckte damit jeden
+  // Namen im Repository, auch einen Service-Schluessel.
+  const pruefe = (zeile: string) => pruefeEnvTemplate(".env.example", zeile);
+
+  it.each([
+    ["SUPABASE_SECRET_KEY", "production"],
+    ["SUPABASE_SERVICE_KEY", "http://localhost:54321"],
+    ["POSTGRES_PASSWORD", "3001"],
+    ["SUPABASE_ANON_KEY", "info"],
+    ["SUPABASE_PUBLISHABLE_API_KEY", "test"],
+    ["DATABASEPASSWORD", "development"],
+  ])("%s darf den Dummywert eines anderen Namens nicht erben: %s", (name, wert) => {
+    expect(pruefe(`${name}=${wert}`)).toHaveLength(1);
+  });
+
+  it.each([
+    "NODE_ENV=development",
+    "NODE_ENV=test",
+    "NODE_ENV=production",
+    "LOG_LEVEL=info",
+    "LOG_LEVEL=trace",
+    "API_PORT=3001",
+    "SUPABASE_URL=http://localhost:54321",
+    "SUPABASE_URL=http://127.0.0.1:54321",
+    "DATABASE_URL=postgresql://easytree_app:replace-with-your-local-password@localhost:54322/postgres",
+  ])("%s bleibt zulaessig", (zeile) => {
+    // Gegenprobe gegen eine zu scharfe Regel: waeren diese rot, waere die
+    // Vorlage als Anleitung wertlos und der Waechter wuerde abgeschaltet.
+    expect(pruefe(zeile)).toEqual([]);
+  });
+
+  it.each([
+    ["API_PORT", "0"],
+    ["API_PORT", "65536"],
+    ["API_PORT", "dreitausend"],
+    ["SUPABASE_URL", "https://xyzproject.supabase.co"],
+    ["SUPABASE_URL", "http://benutzer:geheim@localhost:54321"],
+    ["NODE_ENV", "staging"],
+    ["LOG_LEVEL", "verbose"],
+    ["DATABASE_URL", "postgresql://easytree_app:Sommer2026@localhost:54322/postgres"],
+  ])("%s=%s ist kein zulaessiger Konkretwert", (name, wert) => {
+    expect(pruefe(`${name}=${wert}`)).toHaveLength(1);
+  });
+});

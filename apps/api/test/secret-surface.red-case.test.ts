@@ -34,6 +34,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { collectFilesNamed, collectSourceFiles, extractImports } from "./architecture/scan";
 import {
   NICHT_LAUFZEITFAEHIGE_PAKETE,
+  PRIVILEGIERTE_FAMILIEN_IDS,
+  PRIVILEGIERTE_ORTE,
   evaluateSecretRules,
   istLaufzeitpfad,
   umgebungszugriffe,
@@ -540,5 +542,100 @@ describe("Der saubere Wegwerfbaum bleibt gruen (EYT-106 AK6)", () => {
     expect(dateien).toContain("apps/web/app/page.tsx");
     expect(dateien).toContain("apps/api/src/modules/costs/interface/http/costs.controller.ts");
     expect(befunde()).toEqual([]);
+  });
+});
+
+describe("F2 — Ausnahmen gelten je Familie, nie fuer eine ganze Datei (EYT-133)", () => {
+  // Gemessen auf master 36384d0: eine dateiweite Freistellung liess in
+  // derselben Datei AUCH einen Service-Role-Schluessel durch — 0 Findings.
+  // Die Ausnahme war fuer ein lokales Wegwerf-Passwort gedacht.
+  const NAMENSREGEL = "privileged-credential-only-in-named-places";
+
+  /** Baut einen syntaktisch echten, inhaltlich erfundenen JWT. */
+  const bauJwt = (rolle: string): string => {
+    const teil = (o: unknown): string =>
+      Buffer.from(JSON.stringify(o), "utf8").toString("base64url");
+    return `${teil({ alg: "HS256" })}.${teil({ role: rolle })}.erfunden`;
+  };
+  const GEHEIM_PRAEFIX = ["sb", "secret", ""].join("_");
+
+  const inDatei = (pfad: string, inhalt: string): Set<string> => {
+    schreibe(pfad, inhalt);
+    const r = regeln();
+    entferne(pfad);
+    return r;
+  };
+
+  it("1. CI-Datei mit dem erlaubten lokalen Datenbankpasswort bleibt gruen", () => {
+    const treffer = inDatei(
+      ".github/workflows/ci.yml",
+      ["jobs:", "  x:", "    run: PGPASSWORD=postgres psql -c 'select 1'"].join("\n"),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(false);
+  });
+
+  it("2. dieselbe Datei mit einem Service-Schluessel wird rot", () => {
+    const treffer = inDatei(
+      ".github/workflows/ci.yml",
+      ["jobs:", "  x:", "    env:", "      SUPABASE_SERVICE_KEY: abc"].join("\n"),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("3. dieselbe Datei mit einem Geheimpraefix-Wert wird rot", () => {
+    const treffer = inDatei(
+      ".github/workflows/ci.yml",
+      ["jobs:", "  x:", `    env:`, `      K: ${GEHEIM_PRAEFIX}AbCdEfGhIjKl`].join("\n"),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("3b. dieselbe Datei mit einem festverdrahteten JWT wird rot", () => {
+    const treffer = inDatei(
+      ".github/workflows/ci.yml",
+      ["jobs:", "  x:", "    env:", `      K: ${bauJwt("service_role")}`].join("\n"),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("4. Read-through-Harness darf sein Testpasswort haben, aber keinen Service-Schluessel", () => {
+    expect(
+      inDatei("scripts/read-through-harness.sh", "PGPASSWORD=postgres psql -c 'select 1'").has(
+        NAMENSREGEL,
+      ),
+    ).toBe(false);
+    expect(
+      inDatei("scripts/read-through-harness.sh", 'SUPABASE_SERVICE_KEY="abc"').has(NAMENSREGEL),
+    ).toBe(true);
+  });
+
+  it("5. Token-Verifier-Test darf die Rollenbezeichnung fuehren, aber kein Datenbankpasswort", () => {
+    expect(
+      inDatei("apps/api/test/auth/token-verifier.test.ts", 'const aud = "service_role";').has(
+        NAMENSREGEL,
+      ),
+    ).toBe(false);
+    expect(
+      inDatei("apps/api/test/auth/token-verifier.test.ts", 'const p = "POSTGRES_PASSWORD";').has(
+        NAMENSREGEL,
+      ),
+    ).toBe(true);
+  });
+
+  it("6.-9. jede Ausnahme ist gueltig, benoetigt und eindeutig", () => {
+    const gesehen = new Set<string>();
+    for (const ausnahme of PRIVILEGIERTE_ORTE) {
+      expect(ausnahme.erlaubteFamilien.length, `${ausnahme.datei}: leere Familienliste`).toBeGreaterThan(0);
+      expect(ausnahme.grund.length, `${ausnahme.datei}: Begruendung zu duenn`).toBeGreaterThan(40);
+      for (const familie of ausnahme.erlaubteFamilien) {
+        const schluessel = `${ausnahme.datei}::${familie}`;
+        expect(gesehen.has(schluessel), `doppelte Ausnahme: ${schluessel}`).toBe(false);
+        gesehen.add(schluessel);
+        expect(
+          PRIVILEGIERTE_FAMILIEN_IDS.includes(familie),
+          `unbekannte Familien-Id: ${familie}`,
+        ).toBe(true);
+      }
+    }
   });
 });
