@@ -1,54 +1,47 @@
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 /**
  * Testdatengrenze der realen Auth-Kostenreise (EYT-106 AK8, EYT-134).
  *
- * ## Zwei Schritte, zwei Zustaendigkeiten
+ * ## Zwei echte Benutzer
  *
- *  1. GoTrue legt den Benutzer an — ueber den oeffentlichen Signup-Endpunkt
- *     mit dem Anon-Key, also genau den Weg, den auch ein echter Mensch
- *     nimmt. Kein Service-Role-Schluessel, keine Admin-API, kein direktes
- *     `insert into auth.users`.
- *  2. `fixtures.sql` haengt die Anwendungsseite daran: Projektion,
- *     Organisation, Owner-Mitgliedschaft, Mitarbeiter, Satzversion.
+ * A ist Owner der Reiseorganisation. B ist ein ebenso echter, angemeldeter
+ * Benutzer OHNE jede Mitgliedschaft. Erst das Paar unterscheidet: eine
+ * eingeschleuste feste Identitaet machte B zu A, und genau das faellt auf,
+ * weil Bs Sitzungsendpunkt Bs eigene Id nennen und der Kostenpfad ihn
+ * trotzdem ablehnen muss.
  *
- * Das ist die "isolierte Test-/Ops-Grenze" aus der PO-Vorgabe. Sie liegt
- * ausserhalb des Laufzeitpfads: der Waechter aus Arbeitspaket A rechnet
- * `apps/web/e2e/**` ausdruecklich nicht zum Anfrage- oder Browserpfad.
+ * ## Beide entstehen ueber den oeffentlichen GoTrue-Signup
  *
- * ## Das Passwort
+ * Mit dem Anon-Key, also genau dem Weg, den auch ein Mensch nimmt. Kein
+ * Service-Role-Schluessel, keine Admin-API, kein direktes Insert in
+ * `auth.users`. Ein `update auth.users set encrypted_password = crypt(...)`
+ * schied ebenfalls aus: pgcrypto ist im Repository nicht eingerichtet
+ * (gemessen — nur pgtap und btree_gist), und eine Extension anzulegen waere
+ * eine Schemaaenderung ausserhalb einer Migration.
  *
- * Wird hier je Lauf zufaellig erzeugt und ueber `process.env` an die Reise
- * weitergereicht. Es steht nirgends im Repository und wird nirgends
- * ausgegeben — auch nicht bei einem Fehlschlag. Ein festes Testpasswort waere
- * ein committetes Geheimnis, auch wenn es nur lokal gilt.
+ * ## Passwoerter
  *
- * ## Warum `execFileSync` mit psql und nicht `pg`
- *
- * `apps/web` haengt bewusst an genau zwei Workspace-Paketen und keinem
- * Datenbanktreiber. Ein `pg`-Import hier waere eine neue Abhaengigkeit der
- * Web-App fuer Testzwecke — `psql` liegt in CI ohnehin vor und laesst die
- * Abhaengigkeitsgrenze unberuehrt.
+ * Je Lauf und je Benutzer zufaellig, nur ueber `process.env` weitergereicht,
+ * nie als Prozessargument — `argv` ist fuer jeden lokalen Nutzer in `ps`
+ * sichtbar, und `execFileSync` wiederholt die vollstaendige Argumentliste in
+ * seiner Fehlermeldung.
  */
 
-// `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
-// Setup und Testdateien als CommonJS — `apps/web/package.json` traegt kein
-// "type": "module". Mit import.meta bricht der Lauf mit
-// "Cannot use 'import.meta' outside a module" ab, bevor irgendein
-// Nachweis laeuft (gemessen in CI 01.08.2026). Die beiden bestehenden
-// Playwright-Konfigurationen benutzen aus demselben Grund keine.
+// `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration, Setup
+// und Testdateien als CommonJS — `apps/web/package.json` traegt kein
+// "type": "module".
 const HIER = __dirname;
 
-/** Feste Adresse in einer reservierten Domain (RFC 2606) — nie eine reale Person. */
-export const REISENDER_EMAIL = "auth-journey@easytree.test";
+/** Feste Adressen in einer reservierten Domain (RFC 2606). */
+export const REISENDER_A = "auth-journey-a@easytree.test";
+export const REISENDER_B = "auth-journey-b@easytree.test";
 
 function pflicht(name: string): string {
   const wert = process.env[name];
-  if (wert === undefined || wert === "") {
-    throw new Error(`[auth-journey] ${name} fehlt.`);
-  }
+  if (wert === undefined || wert === "") throw new Error(`[auth-journey] ${name} fehlt.`);
   return wert;
 }
 
@@ -57,17 +50,12 @@ interface SignupAntwort {
   readonly id?: string;
 }
 
-/**
- * Meldet den Reisenden an — oder stellt fest, dass es ihn schon gibt.
- *
- * Ein zweiter Lauf auf demselben Stack darf nicht daran scheitern, dass der
- * Benutzer bereits existiert. GoTrue antwortet dann mit 422
- * `user_already_exists`; in dem Fall wird das Passwort NICHT stillschweigend
- * uebernommen — der Lauf bricht ab und verlangt einen sauberen Stack, weil
- * ein unbekanntes Passwort spaeter als "Login fehlgeschlagen" erschiene und
- * niemand den wahren Grund saehe.
- */
-async function legeBenutzerAn(supabaseUrl: string, anonKey: string, passwort: string) {
+async function legeBenutzerAn(
+  supabaseUrl: string,
+  anonKey: string,
+  email: string,
+  passwort: string,
+): Promise<string> {
   const antwort = await fetch(`${supabaseUrl}/auth/v1/signup`, {
     method: "POST",
     headers: {
@@ -75,66 +63,110 @@ async function legeBenutzerAn(supabaseUrl: string, anonKey: string, passwort: st
       apikey: anonKey,
       authorization: `Bearer ${anonKey}`,
     },
-    body: JSON.stringify({ email: REISENDER_EMAIL, password: passwort }),
+    body: JSON.stringify({ email, password: passwort }),
   });
 
   if (!antwort.ok) {
-    // Bewusst ohne Antwortkoerper in der Meldung: der kann den Anon-Key oder
-    // Tokenfragmente enthalten.
+    // Bewusst ohne Antwortkoerper: der kann Tokenfragmente enthalten. Bei 422
+    // (`user_already_exists`) wird NICHT stillschweigend weitergemacht — ein
+    // unbekanntes Passwort erschiene spaeter als "Login fehlgeschlagen", und
+    // niemand saehe den wahren Grund.
     throw new Error(
-      `[auth-journey] Signup fehlgeschlagen (HTTP ${antwort.status}). ` +
-        `Erwartet wird ein frischer lokaler Supabase-Stack ohne bestehenden ` +
-        `Reisenden. Bei 422 zuerst 'supabase db reset' ausfuehren.`,
+      `[auth-journey] Signup fuer ${email} fehlgeschlagen (HTTP ${antwort.status}). ` +
+        `Erwartet wird ein frischer Stack. Bei 422 zuerst teardown.sql fahren ` +
+        `oder 'supabase db reset'.`,
     );
   }
 
   const koerper = (await antwort.json()) as SignupAntwort;
-  const benutzerId = koerper.user?.id ?? koerper.id;
-  if (typeof benutzerId !== "string" || benutzerId === "") {
-    throw new Error("[auth-journey] Signup lieferte keine Benutzer-Id.");
+  const id = koerper.user?.id ?? koerper.id;
+  if (typeof id !== "string" || id === "") {
+    throw new Error(`[auth-journey] Signup fuer ${email} lieferte keine Benutzer-Id.`);
   }
-  return benutzerId;
+  return id;
 }
 
-function spieleFixturesEin(datenbankUrl: string, benutzerId: string): void {
-  const ausgabe = execFileSync(
+/**
+ * Fuehrt psql aus und verlangt die greppbare Markerzeile.
+ *
+ * Zwei Fehler der vorigen Fassung, beide gemessen:
+ *
+ *  1. `RAISE NOTICE` schreibt auf **stderr**, `execFileSync` liefert
+ *     **stdout**. Der Marker wurde nie gefunden.
+ *  2. Fehlte er, druckte die Funktion "(keine Bestaetigungszeile gefunden)"
+ *     und lief weiter. Im CI-Log stand damit das eigene Versagen — und der
+ *     Job endete mit 0.
+ *
+ * Jetzt: beide Stroeme getrennt erfassen, in beiden suchen, bei Fehlen
+ * WERFEN. Ausgegeben wird ausschliesslich die Markerzeile, nie der volle
+ * Strom — der enthaelt die Verbindungszeichenkette.
+ */
+export function psqlMitMarker(
+  datenbankUrl: string,
+  skript: string,
+  variablen: readonly string[],
+  marker: string,
+): string {
+  // `spawnSync` statt `execFileSync`, und das ist der Kern der Korrektur:
+  // `execFileSync` liefert bei Erfolg AUSSCHLIESSLICH stdout. PostgreSQL
+  // schickt `RAISE NOTICE` aber als NoticeResponse, und psql schreibt sie auf
+  // **stderr**. Der Marker war damit per Konstruktion unerreichbar — die alte
+  // Fassung suchte ihn in einem Strom, in dem er nie stand, meldete sein
+  // Fehlen und lief weiter.
+  const ergebnis = spawnSync(
     "psql",
-    [
-      datenbankUrl,
-      "-v",
-      "ON_ERROR_STOP=1",
-      "-v",
-      `benutzer=${benutzerId}`,
-      "-f",
-      join(HIER, "fixtures.sql"),
-    ],
+    [datenbankUrl, "-v", "ON_ERROR_STOP=1", ...variablen, "-f", skript],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );
-  // Die greppbare Zeile aus fixtures.sql sichtbar machen — sie ist der
-  // Nachweis, dass alle vier Zeilen wirklich stehen.
-  const zeile = /\[auth-journey-fixture\][^\n]*/.exec(ausgabe);
-  console.log(zeile?.[0] ?? "[auth-journey-fixture] (keine Bestaetigungszeile gefunden)");
+
+  if (ergebnis.error !== undefined) {
+    throw new Error(`[auth-journey] psql liess sich nicht starten: ${ergebnis.error.message}`);
+  }
+  const zusammen = `${ergebnis.stdout ?? ""}\n${ergebnis.stderr ?? ""}`;
+  if (ergebnis.status !== 0) {
+    // Exit-Code ungleich 0 ist rot. Die Meldung nennt den Code und ob der
+    // Marker da war — nie die Argumentliste, dort steht die Verbindung.
+    throw new Error(
+      `[auth-journey] psql ${skript} endete mit Code ${ergebnis.status ?? "unbekannt"}. ` +
+        `Marker "${marker}" ${zusammen.includes(marker) ? "war vorhanden" : "fehlte"}.`,
+    );
+  }
+  const zeile = zusammen.split("\n").find((z) => z.includes(marker));
+  if (zeile === undefined) {
+    throw new Error(
+      `[auth-journey] Marker "${marker}" fehlt in der Ausgabe von ${skript}. ` +
+        `Ohne ihn ist nicht belegt, dass das Skript seine Nachbedingung geprueft hat.`,
+    );
+  }
+  return zeile.trim();
 }
 
 export default async function globalSetup(): Promise<void> {
   const supabaseUrl = pflicht("EASYTREE_JOURNEY_SUPABASE_URL");
   const anonKey = pflicht("EASYTREE_JOURNEY_ANON_KEY");
-  // Eigene, hoeher privilegierte Verbindung NUR fuer die Testdaten: die
-  // Anwendung selbst laeuft mit easytree_app und RLS.
   const datenbankUrl = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
 
-  // 24 Byte base64url — deutlich ueber minimum_password_length (6) und ohne
-  // Sonderzeichen, die in einer Shell oder URL Aerger machen.
-  const passwort = randomBytes(24).toString("base64url");
+  // 24 Byte base64url — deutlich ueber minimum_password_length (6).
+  const passwortA = randomBytes(24).toString("base64url");
+  const passwortB = randomBytes(24).toString("base64url");
 
-  const benutzerId = await legeBenutzerAn(supabaseUrl, anonKey, passwort);
-  spieleFixturesEin(datenbankUrl, benutzerId);
+  const idA = await legeBenutzerAn(supabaseUrl, anonKey, REISENDER_A, passwortA);
+  const idB = await legeBenutzerAn(supabaseUrl, anonKey, REISENDER_B, passwortB);
 
-  // Weiterreichen an die Reise. Nur der Prozess sieht das; nichts davon
-  // erscheint in einem Report, einem Trace oder einem Screenshot.
-  process.env["EASYTREE_JOURNEY_EMAIL"] = REISENDER_EMAIL;
-  process.env["EASYTREE_JOURNEY_PASSWORT"] = passwort;
-  process.env["EASYTREE_JOURNEY_USER_ID"] = benutzerId;
+  const marker = psqlMitMarker(
+    datenbankUrl,
+    join(HIER, "fixtures.sql"),
+    ["-v", `benutzer_a=${idA}`, "-v", `benutzer_b=${idB}`],
+    "[auth-journey-fixture]",
+  );
+  console.log(`  ${marker}`);
 
-  console.log(`[auth-journey-setup] Reisender angelegt und verdrahtet (${REISENDER_EMAIL}).`);
+  process.env["EASYTREE_JOURNEY_EMAIL_A"] = REISENDER_A;
+  process.env["EASYTREE_JOURNEY_PASSWORT_A"] = passwortA;
+  process.env["EASYTREE_JOURNEY_USER_A"] = idA;
+  process.env["EASYTREE_JOURNEY_EMAIL_B"] = REISENDER_B;
+  process.env["EASYTREE_JOURNEY_PASSWORT_B"] = passwortB;
+  process.env["EASYTREE_JOURNEY_USER_B"] = idB;
+
+  console.log("[auth-journey-setup] zwei echte Benutzer angelegt: A mit Owner-Rolle, B ohne.");
 }

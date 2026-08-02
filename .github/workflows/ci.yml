@@ -481,12 +481,31 @@ jobs:
         run: pnpm --filter @easytree/web exec playwright install --with-deps chromium
       - name: Reise fahren
         run: pnpm --filter @easytree/web exec playwright test -c e2e/auth-journey/config.ts
-      - name: Testdaten entfernen (auch nach Fehlschlag)
+      - name: Testdaten entfernen und Leere ZWEIMAL belegen (auch nach Fehlschlag)
         if: always()
+        shell: bash
         run: |
-          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
-            -v ON_ERROR_STOP=1 -v reisender=auth-journey@easytree.test \
-            -f apps/web/e2e/auth-journey/teardown.sql
+          set -Eeuo pipefail
+          # Zweimal, weil Idempotenz behauptet ist: der erste Lauf raeumt ab
+          # (oder findet dank globalTeardown nichts mehr), der zweite muss
+          # trotzdem restzeilen=0 melden. Der Marker wird ERZWUNGEN — fehlt er,
+          # ist der Schritt rot. Genau das fehlte vorher: das Skript druckte
+          # sein eigenes Versagen und der Job endete mit 0.
+          for lauf in 1 2; do
+            ausgabe="$(psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+              -v ON_ERROR_STOP=1 \
+              -v reisender_a=auth-journey-a@easytree.test \
+              -v reisender_b=auth-journey-b@easytree.test \
+              -f apps/web/e2e/auth-journey/teardown.sql 2>&1)"
+            zeile="$(printf '%s\n' "$ausgabe" | grep -F '[auth-journey-teardown]' || true)"
+            if [ -z "$zeile" ]; then
+              echo "::error::Teardown-Lauf ${lauf}: Marker fehlt — Nachbedingung unbelegt."
+              exit 1
+            fi
+            echo "Lauf ${lauf}: ${zeile}"
+            printf '%s\n' "$zeile" | grep -q 'restzeilen=0' || {
+              echo "::error::Teardown-Lauf ${lauf} meldet Restzeilen."; exit 1; }
+          done
       - name: Screenshots, Zusammenfassung und Traces sichern
         if: always()
         uses: actions/upload-artifact@v4

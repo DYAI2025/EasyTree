@@ -12,15 +12,26 @@ import { expect, test, type Cookie } from "@playwright/test";
  * ## Was diese Datei beweist, was `read-through.spec.ts` nicht kann
  *
  * Der Read-Through-Nachweis startet `dist-harness/test/harness/main.js` und
- * gibt das Subjekt als `process.argv[2]` mit; Subjektresolver und
- * Access-Policy sind dort ersetzt. Er beweist den DATENWEG, nicht die
- * Identitaet. Hier laeuft `dist/main.js` — die echte Kette mit
+ * gibt das Subjekt als `process.argv[2]` mit. Er beweist den DATENWEG, nicht
+ * die Identitaet. Hier laeuft `dist/main.js` — die echte Kette mit
  * Tokenverifikation (ES256 gegen den GoTrue-JWKS), Liveness-Pruefung bei jeder
  * Anfrage und der realen Kostenpolicy.
  *
- * Der erste Schritt misst das nach, statt es zu behaupten: gegen den Harness
- * lieferte eine Anfrage OHNE Cookie eine 200 mit Daten. Liefert sie 401, kann
- * kein Subjekt eingeschleust sein.
+ * ## Warum A/B und nicht "ohne Anmeldung 401"
+ *
+ * Eine fruehere Fassung behauptete, ein Aufruf OHNE Cookie liefere gegen den
+ * Harness 200 und beweise damit, dass kein Subjekt eingeschleust ist. Das ist
+ * FALSCH und am 02.08.2026 widerlegt worden: `apps/api/test/harness/server.ts`
+ * ersetzt nur `TENANT_SUBJECT_RESOLVER` — einziger Verbraucher ist
+ * `planning.controller.ts:149` — und die Planungs-Policy. Der Kostencontroller
+ * haengt an `REQUEST_IDENTITY` (`costs.controller.ts:94,192`), das der Harness
+ * nicht anfasst; er liefert dort ebenfalls 401. Die Zusicherung unterschied
+ * also nichts, und ihre benannte Gegenmutation waere nie rot geworden.
+ *
+ * Zwei echte Benutzer unterscheiden sehr wohl. A ist Owner, B ist ein ebenso
+ * echter angemeldeter Benutzer ohne jede Mitgliedschaft. Waere eine feste
+ * Identitaet eingeschleust, wuerde Bs Sitzung As Id nennen und der Kostenpfad
+ * ihn durchlassen. Beides wird gemessen.
  *
  * ## Herkunft der Testidentitaet
  *
@@ -32,8 +43,8 @@ import { expect, test, type Cookie } from "@playwright/test";
  *
  * ## Gegenmutationen, die diese Datei rot machen
  *
- * - Die API als `dist-harness/...` starten (Schritt 1 wird gruen statt 401 —
- *   und genau deshalb ist Schritt 1 eine Zusicherung auf 401).
+ * - `REQUEST_IDENTITY` fest auf Benutzer A verdrahten: Bs Sitzung nennt dann
+ *   As Id und der Kostenpfad laesst B durch — beide B-Nachweise werden rot.
  * - `serializeAccessCookie` ohne `HttpOnly` (Schritt 4).
  * - `SameSite=Lax` statt `Strict` (Schritt 4).
  * - Die Kosten-Navigation unabhaengig von `costs.read` rendern (Schritt 6
@@ -80,9 +91,9 @@ function cookie(cookies: readonly Cookie[], name: string): Cookie {
 test.describe.configure({ mode: "serial" });
 
 test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ page, context }) => {
-  const email = pflicht("EASYTREE_JOURNEY_EMAIL");
-  const passwort = pflicht("EASYTREE_JOURNEY_PASSWORT");
-  const benutzerId = pflicht("EASYTREE_JOURNEY_USER_ID");
+  const email = pflicht("EASYTREE_JOURNEY_EMAIL_A");
+  const passwort = pflicht("EASYTREE_JOURNEY_PASSWORT_A");
+  const benutzerId = pflicht("EASYTREE_JOURNEY_USER_A");
 
   /** Jede API-Anfrage des Browsers — Beleg dafuer, WELCHEN Weg die Daten nahmen. */
   const apiAufrufe: string[] = [];
@@ -94,14 +105,17 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ pa
   const bericht: Record<string, unknown> = { ticket: "EYT-106", paket: "B", schritte: {} };
   const schritte = bericht["schritte"] as Record<string, unknown>;
 
-  await test.step("1 — ohne Anmeldung lehnt die ECHTE API ab (kein injiziertes Subjekt)", async () => {
-    // Der entscheidende Nachweis. Mit dem Testharness (dist-harness) waere
-    // hier 200 und eine Mitarbeiterliste zu sehen: er ersetzt Subjektresolver
-    // und Access-Policy. Eine 401 ist nur moeglich, wenn die echte
-    // Identitaetskette laeuft.
+  await test.step("1 — ohne Anmeldung lehnt die API ab", async () => {
+    // Notwendig, aber NICHT hinreichend: der Testharness antwortet hier
+    // ebenfalls 401 (gemessen). Der unterscheidende Nachweis ist Benutzer B
+    // weiter unten.
     const ohneSitzung = await page.request.get("/api/v1/kosten/mitarbeiter");
     expect(ohneSitzung.status()).toBe(401);
-    schritte["1_ohne_anmeldung"] = { status: ohneSitzung.status(), erwartet: 401 };
+    schritte["1_ohne_anmeldung"] = {
+      status: ohneSitzung.status(),
+      erwartet: 401,
+      hinweis: "notwendig, nicht hinreichend — unterscheidet nicht vom Harness",
+    };
   });
 
   await test.step("2 — die echte Loginseite ausfuellen und absenden", async () => {
@@ -319,4 +333,102 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ pa
       "utf8",
     );
   });
+});
+
+/**
+ * Der unterscheidende Nachweis (EYT-106 AK8, EYT-134).
+ *
+ * B ist ein ECHTER, ueber GoTrue angemeldeter Benutzer ohne jede
+ * Mitgliedschaft. Waere im Server eine feste Identitaet verdrahtet — die
+ * Sorge, gegen die AK8 antritt —, dann naennte Bs Sitzung die Id von A und der
+ * Kostenpfad liesse B durch. Beides wird hier gemessen.
+ *
+ * Eigener Browserkontext: B darf nichts von As Sitzung erben.
+ */
+test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({ browser }) => {
+  const emailB = pflicht("EASYTREE_JOURNEY_EMAIL_B");
+  const passwortB = pflicht("EASYTREE_JOURNEY_PASSWORT_B");
+  const idB = pflicht("EASYTREE_JOURNEY_USER_B");
+  const idA = pflicht("EASYTREE_JOURNEY_USER_A");
+
+  const kontext = await browser.newContext();
+  const seite = await kontext.newPage();
+  const bericht: Record<string, unknown> = {};
+
+  try {
+    await test.step("B meldet sich ueber dieselbe echte Loginseite an", async () => {
+      await seite.goto("/anmelden");
+      await seite.getByLabel("E-Mail").fill(emailB);
+      await seite.getByLabel("Passwort").fill(passwortB);
+      await seite.getByRole("button", { name: "Anmelden" }).click();
+      // Der Login gelingt — B ist ein gueltiger Benutzer. Nur berechtigt ist
+      // er nicht.
+      const kekse = await kontext.cookies();
+      expect(kekse.find((k) => k.name === "eyt_access")?.httpOnly).toBe(true);
+    });
+
+    await test.step("die Sitzung nennt Bs eigene Id, nicht die von A", async () => {
+      const antwort = await seite.request.get("/api/v1/auth/session");
+      expect(antwort.status()).toBe(200);
+      const sitzung = (await antwort.json()) as {
+        userId: string;
+        organisations: unknown[];
+      };
+      // DER Nachweis gegen eine eingeschleuste Identitaet.
+      expect(sitzung.userId).toBe(idB);
+      expect(sitzung.userId).not.toBe(idA);
+      // Ohne Mitgliedschaft ist die Liste leer — nicht etwa As Organisation.
+      expect(sitzung.organisations).toEqual([]);
+      bericht["session"] = { userId_ist_B: true, organisationen: 0 };
+    });
+
+    await test.step("keine Kosten-Navigation", async () => {
+      await seite.goto("/kosten");
+      await expect(seite.getByRole("link", { name: "Kosten" })).toHaveCount(0);
+      // Angemeldet, aber ohne Organisation: der ehrliche Zustand, nicht der
+      // abgemeldete Banner.
+      await expect(seite.getByTestId("kosten-unauthenticated")).toHaveCount(0);
+    });
+
+    await test.step("der Kostenpfad lehnt B stabil ab", async () => {
+      const mitarbeiter = await seite.request.get("/api/v1/kosten/mitarbeiter");
+      expect(mitarbeiter.status()).toBe(400);
+      const historie = await seite.request.get(`/api/v1/kosten/stundensaetze/${MITARBEITER_ID}`);
+      expect(historie.status()).toBe(400);
+      // Mit dem Organisationsheader von A wird daraus eine Ablehnung ohne
+      // Existenzleck — nie ein Durchlass.
+      const mitFremdemHeader = await seite.request.get("/api/v1/kosten/mitarbeiter", {
+        headers: { "X-EasyTree-Organization-Id": ORG_ID },
+      });
+      expect(mitFremdemHeader.status()).toBe(403);
+      bericht["kostenpfad"] = {
+        mitarbeiter: mitarbeiter.status(),
+        historie: historie.status(),
+        mit_fremdem_header: mitFremdemHeader.status(),
+      };
+    });
+
+    await test.step("nichts von A ist fuer B sichtbar", async () => {
+      const inhalt = await seite.content();
+      expect(inhalt).not.toContain(MITARBEITER_NAME);
+      expect(inhalt).not.toContain(ERWARTETER_BETRAG);
+      expect(inhalt).not.toContain(ORG_NAME);
+      const koerper = await (await seite.request.get("/api/v1/kosten/mitarbeiter")).text();
+      expect(koerper).not.toContain(MITARBEITER_NAME);
+      expect(koerper).not.toContain(MITARBEITER_ID);
+      bericht["kein_datenabfluss"] = true;
+    });
+
+    await test.step("Zusammenfassung von B ablegen", async () => {
+      mkdirSync(ARTEFAKTE, { recursive: true });
+      writeFileSync(
+        join(ARTEFAKTE, "zusammenfassung-b.json"),
+        `${JSON.stringify({ ticket: "EYT-106", benutzer: "B", ...bericht, ergebnis: "PASS" }, null, 2)}\n`,
+        "utf8",
+      );
+      await seite.screenshot({ path: join(ARTEFAKTE, "03-benutzer-b-ohne-zugang.png") });
+    });
+  } finally {
+    await kontext.close();
+  }
 });
