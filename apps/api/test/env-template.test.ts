@@ -226,3 +226,108 @@ describe("F1 — Dummywerte gelten nur fuer ihren eigenen Namen (EYT-133)", () =
     expect(pruefe(`${name}=${wert}`)).toHaveLength(1);
   });
 });
+
+describe("Finding A — ein Konkretwert ohne Freigabe ist ein Befund (EYT-133)", () => {
+  // Gemessen auf Head 5f67e9b: traf ein Variablenname KEINE Freigabe, fiel der
+  // konkrete Wert durch und wurde still akzeptiert. Geprueft wurde nur, wer
+  // ohnehin schon in ERLAUBTE_KONKRETWERTE stand — die Unbekannten, um die es
+  // geht, waren damit gerade nicht abgedeckt.
+  const pruefe = (zeile: string) => pruefeEnvTemplate(".env.example", zeile);
+
+  it.each([
+    ["PRIVATE_KEY", "konkreter-wert"],
+    ["AWS_ACCESS_KEY_ID", "konkreter-wert"],
+    ["UNBEKANNTE_CREDENTIAL", "konkreter-wert"],
+    ["FOO", "bar"],
+  ])("%s=%s besitzt keine variablenspezifische Freigabe", (name, wert) => {
+    const b = pruefe(`${name}=${wert}`);
+    expect(b).toHaveLength(1);
+    expect(b[0]?.grund).toContain("keine variablenspezifische Freigabe");
+  });
+
+  it.each([
+    "NODE_ENV=development",
+    "LOG_LEVEL=info",
+    "API_PORT=3001",
+    "SUPABASE_URL=http://localhost:54321",
+    "DATABASE_URL=postgresql://easytree_app:replace-with-your-local-password@localhost:54322/postgres",
+    "SUPABASE_ANON_KEY=replace-with-your-supabase-anon-key",
+  ])("%s bleibt gruen", (zeile) => {
+    // Die Gegenprobe zur Verschaerfung: waere eine dieser Zeilen rot, waere die
+    // Vorlage als Anleitung unbrauchbar und der Waechter wuerde abgeschaltet.
+    expect(pruefe(zeile)).toEqual([]);
+  });
+});
+
+describe("Finding B — die Assignment-Grammatik laesst sich nicht umgehen (EYT-133)", () => {
+  // Gemessen auf Head 5f67e9b: der Parser erkannte ausschliesslich
+  // `UPPERCASE=wert`. Eine andere Schreibweise oder ein vorangestelltes
+  // `export` liess die Zeile wortlos verschwinden — kein Befund, keine Spur.
+  const pruefe = (zeile: string) => pruefeEnvTemplate(".env.example", zeile);
+
+  it.each([
+    "supabase_secret_key=konkreter-wert",
+    "export SUPABASE_SECRET_KEY=konkreter-wert",
+    "export PRIVATE_KEY=konkreter-wert",
+    "1INVALID=value",
+    "SUPABASE_SECRET_KEY value",
+  ])("%s wird nicht still uebersprungen", (zeile) => {
+    expect(pruefe(zeile).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    "export NODE_ENV=development",
+    "NODE_ENV=development",
+    "# SUPABASE_SECRET_KEY=replace-with-key",
+    "# Lokale Entwicklung",
+    '#   psql "…user=postgres…" -c "alter role easytree_app password \'<local>\';"',
+    "",
+    "   ",
+  ])("%s bleibt gruen", (zeile) => {
+    expect(pruefe(zeile)).toEqual([]);
+  });
+
+  it.each([
+    ["export SUPABASE_SECRET_KEY=konkreter-wert", "geheimer Variablenname"],
+    ["export PRIVATE_KEY=konkreter-wert", "keine variablenspezifische Freigabe"],
+  ])("%s wird wirklich geparst, nicht nur als unparsbar abgetan", (zeile, grund) => {
+    // Ohne diese Zusicherung bewiesen die export-Faelle nichts: faellt die
+    // export-Erkennung weg, landen sie im Parsing-Befund und "length > 0"
+    // bleibt gruen. Gemessen — die Gegenmutation erzeugte so nur EINEN roten
+    // Test. Der Befund muss aus der INHALTLICHEN Regel kommen.
+    const b = pruefe(zeile);
+    expect(b).toHaveLength(1);
+    expect(b[0]?.grund).toContain(grund);
+  });
+
+  it.each([
+    ["node_env", "development"],
+    ["Api_Port", "3001"],
+  ])("%s=%s wird als nichtkanonische Schreibweise gemeldet", (name, wert) => {
+    // Diskriminierend, und das ist der Punkt: `supabase_secret_key` allein
+    // beweist die Schreibweisenregel NICHT — den faengt schon die Regel fuer
+    // geheime Namen. Diese beiden Namen sind weder geheim noch
+    // DATABASE_URL; ohne die Kanonik-Pruefung waeren sie zwar auch ein
+    // Befund, aber mit der falschen Begruendung. Gemessen: die Gegenmutation
+    // "Kanonik entfernen" blieb ohne diese Zusicherung gruen.
+    const b = pruefe(`${name}=${wert}`);
+    expect(b).toHaveLength(1);
+    expect(b[0]?.grund).toContain("nicht kanonisch");
+  });
+
+  it("ein konkreter Secret-Wert bleibt auch auskommentiert ein Befund", () => {
+    expect(pruefe("# SUPABASE_SECRET_KEY=konkreter-wert")).toHaveLength(1);
+  });
+
+  it("die Regex-Blindheit von entferneKommentare unterdrueckt keine Fundstelle", () => {
+    // Kein Reparaturschnitt — nur der Beleg fuer die Richtung. Unentfernter
+    // Kommentartext erzeugt ZUSAETZLICHE Treffer, nie fehlende: derselbe
+    // Verstoss wird auch dann gemeldet, wenn davor ein Regex-Literal mit
+    // Anfuehrungszeichen steht. Fail-loud, kein Secret-Bypass.
+    const mitRegexDavor = [
+      "const r = /^[\"']|[\"']$/g;",
+      "SUPABASE_SECRET_KEY=konkreter-wert",
+    ].join("\n");
+    expect(pruefeEnvTemplate(".env.example", mitRegexDavor).length).toBeGreaterThan(0);
+  });
+});

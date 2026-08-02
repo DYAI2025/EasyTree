@@ -214,17 +214,69 @@ export function istGeheimerName(variable: string): boolean {
  * Auch auskommentierte Zeilen werden geprueft: ein `#` vor einer echten
  * Zugangsdatenzeile macht sie nicht ungefaehrlich, nur unauffaelliger.
  */
+/**
+ * Zeilenform einer versionierten Environment-Vorlage.
+ *
+ * Optionales `#` (auskommentierte Eintraege werden mitgeprueft — ein konkreter
+ * Secret-Wert bleibt auch auskommentiert ein Befund), optionales `export`
+ * (sonst waere `export NAME=wert` die Umgehung), dann ein permissiv geparster
+ * Bezeichner. Ob der Name kanonisch ist, entscheidet KANONISCHER_NAME danach —
+ * getrennt, damit eine abweichende Schreibweise gemeldet und nicht ignoriert
+ * wird.
+ */
+const ZEILENFORM = /^\s*(#\s*)?(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
+
+/** In diesem Repository sind nur GROSSBUCHSTABEN-Namen gueltig. */
+const KANONISCHER_NAME = /^[A-Z][A-Z0-9_]*$/;
+
 export function pruefeEnvTemplate(datei: string, inhalt: string): TemplateBefund[] {
   const befunde: TemplateBefund[] = [];
   inhalt.split("\n").forEach((zeile, index) => {
-    const treffer = /^\s*#?\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(zeile);
-    if (treffer === null) return;
-    const variable = treffer[1] as string;
-    const wert = (treffer[2] as string).trim().replace(/^["']|["']$/g, "");
     const nummer = index + 1;
+    const istKommentar = /^\s*#/.test(zeile);
+    if (zeile.trim() === "") return;
+
+    // Am Zeilenanfang verankert, nicht irgendwo in der Zeile gesucht.
+    //
+    // Das ist keine Stilfrage: `.env.example` Z. 18 traegt `user=postgres`
+    // mitten in einem psql-Aufruf innerhalb eines Kommentars. Eine Grammatik,
+    // die den Namen irgendwo sucht, meldet dort sofort einen Fehlalarm.
+    const treffer = ZEILENFORM.exec(zeile);
+    if (treffer === null) {
+      // Reine Kommentare und Leerzeilen sind erlaubt — auch Kommentare, die
+      // irgendwo ein `=` tragen. Eine NICHT kommentierte Zeile, die hier
+      // ankommt, ist in dieser Dateiform aber weder Kommentar noch Leerzeile
+      // noch Assignment. Sie still zu ueberspringen war Finding B: die Zeile
+      // verschwand wortlos, samt ihrem Wert.
+      if (!istKommentar) {
+        befunde.push({
+          datei,
+          zeile: nummer,
+          variable: "(unparsbar)",
+          grund: "Zeile ist weder Kommentar, Leerzeile noch gueltiges Assignment",
+        });
+      }
+      return;
+    }
+
+    const variable = treffer[3] as string;
+    const wert = (treffer[4] as string).trim().replace(/^["']|["']$/g, "");
     const melde = (grund: string): void => {
       befunde.push({ datei, zeile: nummer, variable, grund });
     };
+
+    // 0. Schreibweise. Ein kleingeschriebener Geheimnisname wurde vom alten
+    //    Muster gar nicht erst erkannt — die billigste Umgehung ueberhaupt.
+    //    (Ausgeschrieben steht er im roten Fall, nicht hier: diese Zeile liegt
+    //    hinter dem Regex-Literal oben, und `entferneKommentare` entfernt ab
+    //    dort keine Kommentare mehr. Fail-loud, gemessen — genau dieser
+    //    Fehlalarm ist gerade aufgetreten.)
+    //    In diesem Repository sind ausschliesslich kanonische Namen gueltig,
+    //    also ist eine abweichende Schreibweise selbst der Befund.
+    if (!KANONISCHER_NAME.test(variable)) {
+      melde("Variablenname ist nicht kanonisch (nur Grossbuchstaben, Ziffern, Unterstrich)");
+      return;
+    }
 
     const form = klassifiziereWert(wert);
 
@@ -280,7 +332,15 @@ export function pruefeEnvTemplate(datei: string, inhalt: string): TemplateBefund
     //    auf GENAU DIESEN Namen passt.
     if (wert === "" || istPlatzhalter(wert)) return;
     const freigabe = ERLAUBTE_KONKRETWERTE.find((e) => e.variable.test(variable));
-    if (freigabe !== undefined && !freigabe.pruefe(wert)) {
+    if (freigabe === undefined) {
+      // Finding A: frueher fiel genau dieser Fall durch. Geprueft wurde nur,
+      // wer ohnehin schon eine Freigabe hatte — die unbekannten Namen, um die
+      // es geht, waren damit gerade nicht abgedeckt. Ein Konkretwert ohne
+      // namensgebundene Freigabe ist jetzt der Befund.
+      melde("konkreter Wert besitzt keine variablenspezifische Freigabe");
+      return;
+    }
+    if (!freigabe.pruefe(wert)) {
       melde(`konkreter Wert ausserhalb der Freigabe fuer ${variable} (${freigabe.grund})`);
     }
   });

@@ -174,6 +174,85 @@ wieder — diese läuft bei jedem CI-Lauf mit.
 
 ---
 
+## Zweite Reviewrunde — zwei fail-open Fälle in `pruefeEnvTemplate`
+
+Ein unabhängiges Review auf Head `5f67e9b` hat zwei weitere Umgehungen derselben Regel
+gefunden. Beide wurden im Quelltext belegt, bevor eine Zeile geändert wurde.
+
+### Finding A — ein Konkretwert ohne Freigabe fiel durch
+
+`env-template-rules.ts:282` prüfte den Wert nur, **wenn** der Variablenname bereits eine
+Freigabe hatte:
+
+```ts
+const freigabe = ERLAUBTE_KONKRETWERTE.find((e) => e.variable.test(variable));
+if (freigabe !== undefined && !freigabe.pruefe(wert)) { melde(...); }
+// freigabe === undefined  ->  still akzeptiert
+```
+
+Geprüft wurde also gerade nicht der Fall, um den es geht: der **unbekannte** Name.
+`PRIVATE_KEY=konkreter-wert`, `AWS_ACCESS_KEY_ID=…`, `FOO=bar` — alle grün.
+
+Jetzt ist die fehlende Freigabe selbst der Befund. Der Vertrag lautet: jeder nichtleere
+Wert ist entweder ein erlaubter Platzhalter oder ein für **genau diesen** Namen
+freigegebener Konkretwert. `DATABASE_URL` bleibt der separat geprüfte Sonderfall.
+
+### Finding B — die Assignment-Grammatik war zu eng
+
+`env-template-rules.ts:220` erkannte ausschließlich `UPPERCASE=wert`:
+
+```ts
+const treffer = /^\s*#?\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(zeile);
+if (treffer === null) return; // wortlos verschwunden
+```
+
+`supabase_secret_key=…` und `export SUPABASE_SECRET_KEY=…` wurden damit **spurlos**
+übersprungen — kein Befund, keine Meldung.
+
+Jetzt: optionales `#`, optionales `export`, Bezeichner permissiv geparst, danach
+Schreibweise geprüft (nichtkanonisch = Befund). Eine nicht kommentierte Zeile, die weder
+Leerzeile noch gültiges Assignment ist, erzeugt einen Parsing-Befund statt zu verschwinden.
+
+**Die Verankerung am Zeilenanfang ist keine Stilfrage.** `.env.example` Z. 18 trägt
+`user=postgres` mitten in einem psql-Aufruf innerhalb eines Kommentars. Eine Grammatik, die
+den Namen irgendwo in der Zeile sucht, meldet dort sofort einen Fehlalarm. Genau diese Zeile
+steht als Gegenprobe in der Suite.
+
+### Zwei Zusicherungen, die erst die Gegenmutation erzwungen hat
+
+Zwei rote Fälle sahen vollständig aus und unterschieden nichts — gefunden, weil die
+Gegenmutation ausgeführt und nicht nur benannt wurde:
+
+1. **`supabase_secret_key` beweist die Schreibweisenregel nicht.** Den fängt schon die Regel
+   für geheime Namen. Die Gegenmutation „Kanonik entfernen" blieb **grün**. Erst
+   `node_env=development` und `Api_Port=3001`, mit Zusicherung auf die _Begründung_
+   „nicht kanonisch", machen sie rot.
+2. **Die `export`-Fälle bewiesen `export` nicht.** Fällt die Erkennung weg, landen sie im
+   Parsing-Befund, und `length > 0` bleibt grün — die Gegenmutation erzeugte nur **einen**
+   roten Test. Erst die Zusicherung auf die inhaltliche Begründung („geheimer
+   Variablenname" bzw. „keine variablenspezifische Freigabe") macht drei rot.
+
+### Gegenmutationen der zweiten Runde
+
+| Mutation                                                 | Ergebnis           |
+| -------------------------------------------------------- | ------------------ |
+| unbekannte Variablen wieder still akzeptieren            | **6 von 64 rot**   |
+| `export`-Erkennung gebrochen (Gruppenanzahl unverändert) | **3 von 64 rot**   |
+| Kanonik-Prüfung deaktiviert                              | **2 von 64 rot**   |
+| alle zurückgenommen                                      | **64 von 64 grün** |
+
+### Die Regex-Blindheit ist erneut aufgetreten — als Fehlalarm
+
+Beim Einbau meldete der Secret-Surface-Wächter **einen** Befund gegen
+`env-template-rules.ts` selbst: ein neuer Kommentar hinter dem Regex-Literal `/^["']|["']$/g`
+wurde nicht entfernt und enthielt einen ausgeschriebenen Geheimnisnamen. Das ist der zweite
+gemessene Beleg für dieselbe Eigenschaft — und für ihre Richtung: **ein zusätzlicher Befund,
+kein fehlender.** Behandelt wie beim ersten Mal, durch Umformulieren des Kommentars; **keine**
+Ausnahme, **keine** Reparatur des Strippers. Eine Zusicherung in der Suite hält fest, dass ein
+Verstoß auch dann gemeldet wird, wenn ein Regex-Literal davor steht.
+
+---
+
 ## Verbleibende Restrisiken
 
 1. **`entferneKommentare` bleibt regex-blind.** Der nächste Regex mit einem
@@ -191,5 +270,11 @@ wieder — diese läuft bei jedem CI-Lauf mit.
    (`sb_secret_`, `sb_publishable_`, Klartextpasswörter und
    Verbindungszeichenketten mit Passwort werden nicht erkannt).
 
-4. **Modul-Tabellenbesitz bleibt Dokumentation.** Unverändert durch diesen
+4. **Die Assignment-Grammatik deckt die Form von `.env.example` ab, nicht jede denkbare
+   Shell-Syntax.** Mehrzeilige Werte, `set -a`-Blöcke oder Heredocs kommen in einer
+   `.env`-Vorlage nicht vor und werden nicht modelliert. Eine nicht kommentierte Zeile, die
+   nicht passt, erzeugt einen Parsing-Befund statt still zu verschwinden — das ist die
+   Absicherung gegen diese Grenze, keine Behauptung von Vollständigkeit.
+
+5. **Modul-Tabellenbesitz bleibt Dokumentation.** Unverändert durch diesen
    Hotfix, hier nur erwähnt, damit die Liste vollständig ist.
