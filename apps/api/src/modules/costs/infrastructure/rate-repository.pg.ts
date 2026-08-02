@@ -22,6 +22,7 @@ import type {
   RateRepository,
   RateWriteResult,
 } from "../application/rate-repository.port";
+import { pruefeAbloesung } from "../domain/rate-succession";
 import type { RateVersionRecord } from "../domain/rate-version";
 
 /** PostgreSQL-Fehlercodes, die hier eine fachliche Bedeutung tragen. */
@@ -86,14 +87,70 @@ export class PgRateRepository implements RateRepository {
       const row = await this.run(async (tx) => {
         // Der erwartete aktive Stand wird IN DERSELBEN Transaktion geprueft.
         // Ausserhalb waere zwischen Lesen und Schreiben Platz fuer eine
-        // fremde Aenderung — genau der Fall, den STALE_VERSION meldet.
+        // fremde Aenderung — genau der Fall, den STALE_ACTIVE_VERSION meldet.
         if (version.expectedActiveVersionId !== null) {
-          const vorhanden = await tx.query<{ id: string }>(
-            `select id from public.employee_rate_versions
-              where id = $1 and employee_id = $2`,
+          // `for update` sperrt die Vorgaengerzeile bis zum Commit. Ohne die
+          // Sperre koennten zwei gleichzeitige Bearbeiter beide dieselbe
+          // offene Version lesen, beide sie schliessen wollen und beide einen
+          // Nachfolger anlegen — der EXCLUDE faenge das zwar, aber als
+          // 23P01 "Ueberlappung" statt als STALE_ACTIVE_VERSION, und der
+          // Verlierer bekaeme die falsche fachliche Auskunft.
+          const vorhanden = await tx.query<{
+            id: string;
+            employee_id: string;
+            valid_from: string;
+            valid_to: string | null;
+          }>(
+            `select id, employee_id,
+                    to_char(valid_from, 'YYYY-MM-DD') as valid_from,
+                    to_char(valid_to, 'YYYY-MM-DD') as valid_to
+               from public.employee_rate_versions
+              where id = $1 and employee_id = $2
+                for update`,
             [version.expectedActiveVersionId, version.employeeId],
           );
-          if (vorhanden.rowCount === 0) return null;
+          const vorgaenger = vorhanden.rows[0];
+          if (vorgaenger === undefined) return null;
+
+          // EYT-108 Option A+: der Vorgaenger wird geschlossen, bevor der
+          // Nachfolger entsteht. Umgekehrte Reihenfolge lehnte der
+          // EXCLUDE-Constraint ab, weil beide Intervalle offen waeren.
+          const abloesung = pruefeAbloesung({
+            vorgaenger: {
+              id: vorgaenger.id,
+              employeeId: vorgaenger.employee_id,
+              // Die Regel liest nur Id, Mitarbeiter und die beiden Daten.
+              // Betrag und Grund werden bewusst NICHT geladen: sie sind
+              // unveraenderlich und gehen die Abloesung nichts an.
+              amountMinorUnits: "0",
+              currency: "EUR",
+              validFrom: vorgaenger.valid_from,
+              validTo: vorgaenger.valid_to,
+              predecessorId: null,
+              reason: "",
+              createdAt: "",
+              createdBy: "",
+            },
+            nachfolger: { employeeId: version.employeeId, validFrom: version.validFrom },
+            expectedActiveVersionId: version.expectedActiveVersionId,
+          });
+          if (!abloesung.ok) return abloesung.problem;
+
+          const geschlossen = await tx.query(
+            `update public.employee_rate_versions
+                set valid_to = $2::date
+              where id = $1 and valid_to is null`,
+            [vorgaenger.id, abloesung.validToDesVorgaengers],
+          );
+          if (geschlossen.rowCount !== 1) {
+            // Nach der Sperre darf das nicht passieren. Wenn doch, ist etwas
+            // grundlegend anders als angenommen — WERFEN, damit die
+            // Transaktion zurueckrollt. Ein sentinel-Rueckgabewert wuerde hier
+            // committen und einen halb abgeloesten Stand hinterlassen.
+            throw new Error(
+              `[costs] Vorgaengerversion liess sich nicht schliessen (betroffene Zeilen: ${String(geschlossen.rowCount)}).`,
+            );
+          }
         }
 
         const eingefuegt = await tx.query<RateRow>(
@@ -127,6 +184,8 @@ export class PgRateRepository implements RateRepository {
 
       if (row === null) return { ok: false, problem: "STALE_ACTIVE_VERSION" };
       if (row === undefined) return { ok: false, problem: "EMPLOYEE_UNKNOWN" };
+      // Die Abloeseregel hat abgelehnt, BEVOR irgendetwas geschrieben wurde.
+      if (typeof row === "string") return { ok: false, problem: row };
       return { ok: true, version: toRecord(row) };
     } catch (fehler) {
       const code = fehlerCode(fehler);

@@ -78,6 +78,7 @@ import {
   type RateRepository,
   type RateRepositoryFactory,
   type RateVersionRecord,
+  type RateWriteProblem,
 } from "../../application/rate-repository.port";
 import { effectiveRateVersion, rateVersionStatus } from "../../domain/rate-effectivity";
 import { COSTS_ERROR_TYPE, RATE_ERROR_TYPE } from "./costs-error-type";
@@ -318,9 +319,7 @@ function toDto(version: RateVersionRecord, businessDate: string): RateVersionDto
   };
 }
 
-function problemFor(
-  problem: "RATE_INTERVAL_OVERLAP" | "STALE_ACTIVE_VERSION" | "EMPLOYEE_UNKNOWN",
-): Error {
+function problemFor(problem: RateWriteProblem): Error {
   if (problem === "RATE_INTERVAL_OVERLAP") {
     return new ConflictProblem(
       RATE_ERROR_TYPE.RATE_INTERVAL_OVERLAP,
@@ -331,6 +330,30 @@ function problemFor(
     return new ConflictProblem(
       RATE_ERROR_TYPE.STALE_VERSION,
       "Der aktive Satz hat sich zwischenzeitlich geaendert. Die Historie wurde neu geladen — bitte pruefen und erneut entscheiden.",
+    );
+  }
+  // Die drei Abloesungsablehnungen (EYT-108). Alle als 409: der Aufrufer hat
+  // nichts falsch FORMULIERT, sein Stand passt nur nicht mehr zum Server.
+  // Deshalb ConflictProblem und nicht BadRequestException — nur der
+  // 409-Pfad traegt seinen URN bis in die Antwort, weil ausschliesslich
+  // `CostsProblemFilter` (@Catch(ConflictProblem)) ihn setzt; eine
+  // HttpException faellt in den globalen Filter und wird zu "about:blank".
+  if (problem === "VORGAENGER_BEREITS_GESCHLOSSEN") {
+    return new ConflictProblem(
+      RATE_ERROR_TYPE.RATE_PREDECESSOR_CLOSED,
+      "Die angegebene Vorgaengerversion ist bereits abgeloest. Die Historie wurde neu geladen — bitte die aktive Version waehlen.",
+    );
+  }
+  if (problem === "NACHFOLGER_NICHT_SPAETER") {
+    return new ConflictProblem(
+      RATE_ERROR_TYPE.RATE_SUCCESSOR_NOT_LATER,
+      "Die neue Version muss spaeter beginnen als die abzuloesende. Bitte ein spaeteres Datum waehlen.",
+    );
+  }
+  if (problem === "FREMDER_MITARBEITER") {
+    return new ConflictProblem(
+      RATE_ERROR_TYPE.RATE_EMPLOYEE_MISMATCH,
+      "Die angegebene Vorgaengerversion gehoert zu einer anderen Person. Die neue Version wurde NICHT gespeichert.",
     );
   }
   return new BadRequestException({

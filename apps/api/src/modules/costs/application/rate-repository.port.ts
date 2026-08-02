@@ -15,6 +15,13 @@ export const RATE_WRITE_PROBLEMS = [
   "RATE_INTERVAL_OVERLAP",
   "STALE_ACTIVE_VERSION",
   "EMPLOYEE_UNKNOWN",
+  // EYT-108 Option A+: die Abloesung eines offenen Vorgaengers. Jeder dieser
+  // Gruende braucht eine eigene HTTP-Abbildung in `problemFor` und einen
+  // eigenen URN in RATE_ERROR_TYPE — sonst wird daraus ein 500er statt eines
+  // RFC-7807-Dokuments.
+  "VORGAENGER_BEREITS_GESCHLOSSEN",
+  "NACHFOLGER_NICHT_SPAETER",
+  "FREMDER_MITARBEITER",
 ] as const;
 export type RateWriteProblem = (typeof RATE_WRITE_PROBLEMS)[number];
 

@@ -54,6 +54,12 @@ export const RATE_ERROR_TYPE = {
   RATE_INTERVAL_OVERLAP: "urn:easytree:costs:rate-interval-overlap",
   RATE_AMBIGUOUS: "urn:easytree:costs:rate-ambiguous",
   STALE_VERSION: "urn:easytree:costs:stale-version",
+  // EYT-108 Option A+: Ablehnungen der Abloesung. Eigene URNs, weil der
+  // Aufrufer je Fall etwas ANDERES tun muss — neu laden, ein anderes Datum
+  // waehlen, oder die Person korrigieren.
+  RATE_PREDECESSOR_CLOSED: "urn:easytree:costs:rate-predecessor-closed",
+  RATE_SUCCESSOR_NOT_LATER: "urn:easytree:costs:rate-successor-not-later",
+  RATE_EMPLOYEE_MISMATCH: "urn:easytree:costs:rate-employee-mismatch",
 } as const;
 
 export type RateErrorType = (typeof RATE_ERROR_TYPE)[keyof typeof RATE_ERROR_TYPE];

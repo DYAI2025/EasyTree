@@ -91,10 +91,20 @@ select is(
 );
 
 -- Dasselbe fuer die Satzversionen: unveraenderlich heisst unveraenderlich.
+--
+-- Seit Migration 0014 ist die Aussage SPALTENWEISE zu treffen und nicht mehr
+-- tabellenweit: `valid_to` traegt ein update-Recht, damit eine offene Version
+-- genau einmal geschlossen werden kann. Die frueher hier stehende Zeile
+-- `has_table_privilege(..., 'update') = false` waere nach 0014 eine Aussage
+-- ueber das Tabellenrecht, waehrend die eigentliche Zusicherung — dass Betrag,
+-- Beginn und Grund unveraenderlich bleiben — ungeprueft bliebe. Die
+-- vollstaendige Spaltenmatrix samt Gegenprobe steht in
+-- supabase/tests/0010_rate_succession.sql.
 select is(
-  has_table_privilege('authenticated', 'public.employee_rate_versions', 'update'),
+  has_column_privilege('authenticated', 'public.employee_rate_versions',
+                       'amount_minor_units', 'update'),
   false,
-  'eine Satzversion kann nicht geaendert werden'
+  'der Betrag einer Satzversion kann nicht geaendert werden'
 );
 
 select is(
