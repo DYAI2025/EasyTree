@@ -361,8 +361,29 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
       await seite.getByLabel("E-Mail").fill(emailB);
       await seite.getByLabel("Passwort").fill(passwortB);
       await seite.getByRole("button", { name: "Anmelden" }).click();
-      // Der Login gelingt — B ist ein gueltiger Benutzer. Nur berechtigt ist
-      // er nicht.
+
+      // Auf den ABSCHLUSS warten, nicht auf den Klick. Der Klick kehrt sofort
+      // zurueck; Cookie und Weiterleitung entstehen erst mit der Antwort.
+      // Ohne dieses Warten las der Test die Cookies nach 369 ms und fand
+      // keine — gemessen im ersten CI-Lauf. Fuer Reise A stand dieses Warten
+      // von Anfang an da; hier fehlte es.
+      //
+      // Schlaegt der Login wirklich fehl, zeigt das Formular einen Banner mit
+      // role="alert". Auf beides zu warten macht aus einem stillen Timeout
+      // eine benannte Ursache.
+      const angemeldet = seite.waitForURL("**/kosten");
+      const abgelehnt = seite
+        .getByRole("alert")
+        .filter({ hasText: "Anmeldung fehlgeschlagen" })
+        .waitFor({ state: "visible" });
+      await Promise.race([angemeldet, abgelehnt]);
+      await expect(
+        seite.getByRole("alert").filter({ hasText: "Anmeldung fehlgeschlagen" }),
+      ).toHaveCount(0);
+      await angemeldet;
+
+      // B ist ein gueltiger Benutzer und bekommt eine echte Sitzung. Nur
+      // berechtigt ist er nicht — das ist der Unterschied, um den es geht.
       const kekse = await kontext.cookies();
       expect(kekse.find((k) => k.name === "eyt_access")?.httpOnly).toBe(true);
     });
