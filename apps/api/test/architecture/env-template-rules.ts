@@ -66,21 +66,77 @@ export const ERLAUBTE_PLATZHALTER: ReadonlyArray<{ muster: RegExp; name: string 
 ];
 
 /**
- * Ausdruecklich freigegebene lokale Dummy-Konstanten.
+ * Konkrete Werte, die AUSSCHLIESSLICH fuer ihren eigenen Variablennamen
+ * zulaessig sind.
  *
- * Der lokale Supabase-Stack hat feste, oeffentlich dokumentierte Koordinaten.
- * Sie sind keine Geheimnisse und muessen in der Vorlage stehen duerfen, sonst
- * waere die Vorlage als Anleitung wertlos.
+ * Der Vorgaenger war eine globale Liste ohne Namensbezug. Gemessen auf master
+ * 36384d0 rutschten dadurch alle sechs Bypaesse durch: `production` ist als
+ * NODE_ENV-Wert freigegeben und deckte damit jeden Namen, auch einen
+ * Service-Schluessel. Die Bindung an den Namen ist der ganze Fix.
+ *
+ * Namen, die hier nicht stehen und nicht geheim sind, duerfen einen konkreten
+ * Wert tragen, solange keine Wertformpruefung greift — sonst waere jede neue
+ * harmlose Variable ein Befund und die Regel wuerde aufgeweicht statt befolgt.
  */
-export const ERLAUBTE_DUMMY_WERTE: ReadonlyArray<{ muster: RegExp; grund: string }> = [
+export const ERLAUBTE_KONKRETWERTE: ReadonlyArray<{
+  variable: RegExp;
+  pruefe: (wert: string) => boolean;
+  grund: string;
+}> = [
   {
-    muster: /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/\S*)?$/,
+    variable: /^NODE_ENV$/,
+    pruefe: (w) => /^(development|test|production)$/.test(w),
+    grund: "die drei Presets aus packages/config",
+  },
+  {
+    variable: /^LOG_LEVEL$/,
+    pruefe: (w) => /^(fatal|error|warn|info|debug|trace)$/.test(w),
+    grund: "die sechs Stufen des Loggers",
+  },
+  {
+    variable: /^API_PORT$/,
+    // Ganzzahlig und im gueltigen Bereich. Ein blosses \\d+ liesse 0 und
+    // 65536 durch — beide sind keine Ports.
+    pruefe: (w) => /^\d{1,5}$/.test(w) && Number(w) >= 1 && Number(w) <= 65535,
+    grund: "Portnummer 1..65535",
+  },
+  {
+    variable: /^SUPABASE_URL$/,
+    pruefe: (w) => istLokaleAdresseOhneZugangsdaten(w),
     grund: "lokale Stackadresse ohne Zugangsdaten",
   },
-  { muster: /^(development|test|production)$/, grund: "NODE_ENV-Wert" },
-  { muster: /^(fatal|error|warn|info|debug|trace)$/, grund: "LOG_LEVEL-Wert" },
-  { muster: /^\d{2,5}$/, grund: "Portnummer" },
 ];
+
+/** http/https, Host nur lokal, KEINE Userinfo. */
+function istLokaleAdresseOhneZugangsdaten(wert: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(wert);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  if (url.username !== "" || url.password !== "") return false;
+  return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+}
+
+/**
+ * `DATABASE_URL` bekommt eine eigene Pruefung, weil zwei Bedingungen
+ * gleichzeitig gelten muessen: lokale Adresse UND ein Passwortanteil, der leer
+ * oder ein erkannter Platzhalter ist. Ein konkretes Passwort bleibt verboten,
+ * auch gegen localhost.
+ */
+function istZulaessigeBeispielVerbindung(wert: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(wert);
+  } catch {
+    return false;
+  }
+  if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return false;
+  const passwort = decodeURIComponent(url.password);
+  return passwort === "" || istPlatzhalter(passwort);
+}
 
 export interface Wertform {
   readonly jwtRolle: string | null;
@@ -132,10 +188,6 @@ export function klassifiziereWert(wert: string): Wertform {
 
 export function istPlatzhalter(wert: string): boolean {
   return ERLAUBTE_PLATZHALTER.some((p) => p.muster.test(wert));
-}
-
-function istErlaubterDummy(wert: string): boolean {
-  return ERLAUBTE_DUMMY_WERTE.some((d) => d.muster.test(wert));
 }
 
 /**
@@ -195,11 +247,41 @@ export function pruefeEnvTemplate(datei: string, inhalt: string): TemplateBefund
       return;
     }
 
-    // 2. Geheime Variablennamen brauchen eine erlaubte Platzhalterform.
-    if (istGeheimerName(variable) && wert !== "") {
-      if (!istPlatzhalter(wert) && !istErlaubterDummy(wert)) {
+    // 2. Geheime Namen: NUR leer oder eine erlaubte Platzhalterform.
+    //
+    // Steht bewusst VOR jeder Konkretwert-Freigabe. Genau hier lag F1: der
+    // alte Code liess einen globalen Dummywert auch fuer diese Namen zu, und
+    // damit war ein Service-Schluessel mit dem Wert eines NODE_ENV-Presets
+    // gruen.
+    //
+    // Der Name wird hier NICHT ausgeschrieben: `entferneKommentare` kennt
+    // keine Regex-Literale, und das `/^["']|["']$/g` weiter oben laesst es
+    // ab dort in einem Schein-Stringzustand. Kommentare hinter dieser Zeile
+    // werden deshalb nicht entfernt und ein ausgeschriebener Bezeichner
+    // erzeugt einen Fehlalarm gegen die eigene Datei. Fail-loud, nicht
+    // fail-open — gemessen 02.08.2026, als eigener Befund gemeldet.
+    if (istGeheimerName(variable)) {
+      if (wert !== "" && !istPlatzhalter(wert)) {
         melde("geheimer Variablenname mit konkretem Wert statt Platzhalter");
       }
+      return;
+    }
+
+    // 3. Verbindungszeichenkette: lokale Adresse UND leeres oder
+    //    platzhalterartiges Passwort.
+    if (/^DATABASE_URL$/.test(variable)) {
+      if (wert !== "" && !istPlatzhalter(wert) && !istZulaessigeBeispielVerbindung(wert)) {
+        melde("Verbindungszeichenkette ist weder Platzhalter noch lokales Beispiel ohne Passwort");
+      }
+      return;
+    }
+
+    // 4. Alle uebrigen Namen: ein konkreter Wert braucht eine Freigabe, die
+    //    auf GENAU DIESEN Namen passt.
+    if (wert === "" || istPlatzhalter(wert)) return;
+    const freigabe = ERLAUBTE_KONKRETWERTE.find((e) => e.variable.test(variable));
+    if (freigabe !== undefined && !freigabe.pruefe(wert)) {
+      melde(`konkreter Wert ausserhalb der Freigabe fuer ${variable} (${freigabe.grund})`);
     }
   });
   return befunde;

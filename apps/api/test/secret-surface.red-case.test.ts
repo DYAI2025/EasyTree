@@ -38,7 +38,9 @@ import {
   PRIVILEGIERTE_ORTE,
   evaluateSecretRules,
   istLaufzeitpfad,
+  pruefeAusnahmeliste,
   umgebungszugriffe,
+  type PrivilegierteFamilienId,
   type SecretFinding,
 } from "./architecture/secret-surface-rules";
 
@@ -54,8 +56,18 @@ function entferne(relativ: string): void {
   rmSync(join(root, relativ), { force: true });
 }
 
-function befunde(): SecretFinding[] {
-  const dateien = [
+/**
+ * Dieselben Bereiche, die der echte Waechter liest.
+ *
+ * `.github` und `scripts` fehlten hier — gemessen 02.08.2026: die F2-Fixturen
+ * schrieben nach `.github/workflows/ci.yml`, und `befunde()` las die Datei nie
+ * ein. Die roten Faelle 2, 3, 3b und 4 waren damit PER KONSTRUKTION rot: nicht,
+ * weil die Luecke offen war, sondern weil ihre Fixtur ausserhalb des
+ * gemessenen Baums lag. Ein solcher Fall wird nach dem Fix nicht gruen und
+ * beweist nichts.
+ */
+function alleDateien(): string[] {
+  return [
     ...collectSourceFiles(root, "apps"),
     // `packages` gehoert dazu, seit geteilte Pakete als Laufzeitpfad gelten
     // (Reviewbefund F1). Ohne diese Zeile schriebe der rote Fall Fixtures in
@@ -63,7 +75,13 @@ function befunde(): SecretFinding[] {
     // etwas gemessen zu haben.
     ...collectSourceFiles(root, "packages"),
     ...collectFilesNamed(root, "supabase", /\.(sql|toml)$/),
+    ...collectFilesNamed(root, ".github", /\.ya?ml$/),
+    ...collectFilesNamed(root, "scripts", /\.sh$/),
   ];
+}
+
+function befunde(): SecretFinding[] {
+  const dateien = alleDateien();
   const refs = extractImports(root, dateien);
   return [...evaluateSecretRules({ repoRoot: root, files: dateien, refs }).findings];
 }
@@ -559,6 +577,17 @@ describe("F2 — Ausnahmen gelten je Familie, nie fuer eine ganze Datei (EYT-133
   };
   const GEHEIM_PRAEFIX = ["sb", "secret", ""].join("_");
 
+  /** Wertet den Wegwerfbaum mit einer bestimmten Ausnahmeliste aus. */
+  const auswerten = (orte: readonly (typeof PRIVILEGIERTE_ORTE)[number][]) => {
+    const dateien = alleDateien();
+    return evaluateSecretRules({
+      repoRoot: root,
+      files: dateien,
+      refs: extractImports(root, dateien),
+      orte,
+    });
+  };
+
   const inDatei = (pfad: string, inhalt: string): Set<string> => {
     schreibe(pfad, inhalt);
     const r = regeln();
@@ -622,20 +651,109 @@ describe("F2 — Ausnahmen gelten je Familie, nie fuer eine ganze Datei (EYT-133
     ).toBe(true);
   });
 
-  it("6.-9. jede Ausnahme ist gueltig, benoetigt und eindeutig", () => {
-    const gesehen = new Set<string>();
-    for (const ausnahme of PRIVILEGIERTE_ORTE) {
-      expect(ausnahme.erlaubteFamilien.length, `${ausnahme.datei}: leere Familienliste`).toBeGreaterThan(0);
-      expect(ausnahme.grund.length, `${ausnahme.datei}: Begruendung zu duenn`).toBeGreaterThan(40);
-      for (const familie of ausnahme.erlaubteFamilien) {
-        const schluessel = `${ausnahme.datei}::${familie}`;
-        expect(gesehen.has(schluessel), `doppelte Ausnahme: ${schluessel}`).toBe(false);
-        gesehen.add(schluessel);
-        expect(
-          PRIVILEGIERTE_FAMILIEN_IDS.includes(familie),
-          `unbekannte Familien-Id: ${familie}`,
-        ).toBe(true);
-      }
+  const OK = (familien: PrivilegierteFamilienId[]) => ({
+    datei: ".github/workflows/ci.yml",
+    erlaubteFamilien: familien,
+    grund: "x".repeat(60),
+  });
+  const existiertImmer = () => true;
+
+  it("6. eine unbenutzte Familienausnahme faellt auf", () => {
+    // Strukturell gueltig, aber tot: `supabase-access-token-name` schlaegt in
+    // der CI-Datei nirgends an. Nur die Lebendpruefung sieht das, deshalb wird
+    // sie hier mit demselben Werkzeug nachgestellt, das die echte Liste prueft.
+    const orte = PRIVILEGIERTE_ORTE.map((ort) =>
+      ort.datei === ".github/workflows/ci.yml"
+        ? {
+            ...ort,
+            erlaubteFamilien: [...ort.erlaubteFamilien, "supabase-access-token-name" as const],
+          }
+        : ort,
+    );
+    expect(pruefeAusnahmeliste(orte, existiertImmer)).toEqual([]);
+
+    const ohnePaar = orte.map((ort) =>
+      ort.datei === ".github/workflows/ci.yml"
+        ? {
+            ...ort,
+            erlaubteFamilien: ort.erlaubteFamilien.filter(
+              (f) => f !== "supabase-access-token-name",
+            ),
+          }
+        : ort,
+    );
+    const treffer = auswerten(ohnePaar).findings;
+    expect(
+      treffer.filter(
+        (f) =>
+          f.familie === "supabase-access-token-name" &&
+          f.location.startsWith(".github/workflows/ci.yml:"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("7. eine Ausnahme auf eine nicht existierende Datei wird rot", () => {
+    const maengel = pruefeAusnahmeliste(
+      [
+        {
+          datei: "apps/api/src/gibt-es-nicht.ts",
+          erlaubteFamilien: ["service-role-name"],
+          grund: "x".repeat(60),
+        },
+      ],
+      (datei) => datei !== "apps/api/src/gibt-es-nicht.ts",
+    );
+    expect(maengel).toContain("apps/api/src/gibt-es-nicht.ts: Ausnahme zeigt ins Leere");
+  });
+
+  it("8. eine Ausnahme ohne belastbare Begruendung wird rot", () => {
+    const maengel = pruefeAusnahmeliste(
+      [
+        {
+          datei: ".github/workflows/ci.yml",
+          erlaubteFamilien: ["database-password-name"],
+          grund: "weil",
+        },
+      ],
+      existiertImmer,
+    );
+    expect(maengel).toContain(".github/workflows/ci.yml: nicht belastbar begruendet");
+  });
+
+  it("8b. eine leere Familienliste ist keine gueltige Ausnahme", () => {
+    expect(pruefeAusnahmeliste([OK([])], existiertImmer)).toContain(
+      ".github/workflows/ci.yml: stellt keine Familie frei",
+    );
+  });
+
+  it("9. die Rueckkehr zur dateiweiten Ausnahme laesst die Faelle 2, 3 und 3b durch", () => {
+    // DIE Gegenmutation zu F2, ausgefuehrt statt behauptet: eine Ausnahme, die
+    // ALLE Familien fuer die CI-Datei freistellt, ist genau das Modell von
+    // master 36384d0. Unter ihr melden die drei Verstossfixturen NICHTS mehr —
+    // und das ist der gemessene Beleg, dass das Familienmodell sie faengt.
+    const dateiweit = PRIVILEGIERTE_ORTE.map((ort) =>
+      ort.datei === ".github/workflows/ci.yml"
+        ? { ...ort, erlaubteFamilien: [...PRIVILEGIERTE_FAMILIEN_IDS] }
+        : ort,
+    );
+    const verstoesse = [
+      ["jobs:", "  x:", "    env:", "      SUPABASE_SERVICE_KEY: abc"].join("\n"),
+      ["jobs:", "  x:", "    env:", `      K: ${GEHEIM_PRAEFIX}AbCdEfGhIjKl`].join("\n"),
+      ["jobs:", "  x:", "    env:", `      K: ${bauJwt("service_role")}`].join("\n"),
+    ];
+    for (const inhalt of verstoesse) {
+      schreibe(".github/workflows/ci.yml", inhalt);
+      const mitFamilien = auswerten(PRIVILEGIERTE_ORTE);
+      const mitDateiweit = auswerten(dateiweit);
+      entferne(".github/workflows/ci.yml");
+
+      const zaehle = (b: { findings: readonly { rule: string; location: string }[] }) =>
+        b.findings.filter(
+          (f) => f.rule === NAMENSREGEL && f.location.startsWith(".github/workflows/ci.yml:"),
+        ).length;
+
+      expect(zaehle(mitFamilien), "Familienmodell muss den Verstoss melden").toBeGreaterThan(0);
+      expect(zaehle(mitDateiweit), "dateiweite Ausnahme laesst ihn durch — genau F2").toBe(0);
     }
   });
 });

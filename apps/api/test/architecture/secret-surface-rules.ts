@@ -66,6 +66,14 @@ export interface SecretFinding {
   /** `pfad:zeile` */
   readonly location: string;
   readonly rule: string;
+  /**
+   * Angeschlagene Familie — nur die Familienregel setzt sie.
+   *
+   * Die Lebendpruefung braucht sie: sie entfernt EIN Paar (Datei, Familie)
+   * und muss belegen, dass genau diese Familie daraufhin anschlaegt. Ueber
+   * den Meldungstext ginge das nicht, der nennt nur den Klartextnamen.
+   */
+  readonly familie?: PrivilegierteFamilienId;
   readonly message: string;
 }
 
@@ -80,6 +88,15 @@ export interface SecretSurfaceInput {
   /** Repository-relative Pfade, "/"-normalisiert. */
   readonly files: readonly string[];
   readonly refs: readonly ImportRef[];
+  /**
+   * Ersetzt `PRIVILEGIERTE_ORTE` fuer genau einen Lauf.
+   *
+   * Existiert ausschliesslich fuer die Lebendpruefung: sie nimmt EIN Paar
+   * (Datei, Familie) heraus und misst, ob dieses Paar heute wirklich etwas
+   * abdeckt. Ohne den Haken liesse sich nur die Datei als Ganzes pruefen —
+   * und genau diese Grobheit war F2.
+   */
+  readonly orte?: readonly PrivilegierterOrt[];
 }
 
 export interface SecretRule {
@@ -289,7 +306,27 @@ export function entferneKommentare(quelle: string, datei: string): string {
  * 02.08.2026 in einer lokal veraenderten Environment-Vorlage auftauchten und
  * durch die damalige Liste fielen.
  */
+/**
+ * Stabile Familien-Ids. Eine Ausnahme benennt kuenftig GENAU die Familien,
+ * die sie braucht — nie mehr eine ganze Datei.
+ */
+export const PRIVILEGIERTE_FAMILIEN_IDS = [
+  "service-role-name",
+  "service-key-name",
+  "secret-key-name",
+  "jwt-secret-name",
+  "postgres-service-role",
+  "database-password-name",
+  "supabase-access-token-name",
+  "supabase-admin-api",
+  "hardcoded-jwt",
+  "supabase-secret-prefix",
+  "database-url-name",
+] as const;
+export type PrivilegierteFamilienId = (typeof PRIVILEGIERTE_FAMILIEN_IDS)[number];
+
 interface PrivilegierteFamilie {
+  readonly id: PrivilegierteFamilienId;
   readonly muster: RegExp;
   readonly wofuer: string;
   /** Dateien, in denen GENAU DIESE Familie zulaessig ist. */
@@ -314,23 +351,28 @@ const KONFIGURATIONSGRENZE = [
 const PRIVILEGIERTE_FAMILIEN: readonly PrivilegierteFamilie[] = [
   {
     muster: new RegExp(["SERVICE", "ROLE"].join("_"), "i"),
+    id: "service-role-name",
     wofuer: "Service-Role-Zugang (umgeht RLS vollstaendig)",
   },
   {
     // Faengt auch SUPABASE_SERVICE_KEY — die Schreibweise ohne "ROLE".
     muster: new RegExp(["SERVICE", "KEY"].join("_"), "i"),
+    id: "service-key-name",
     wofuer: "Service-Schluessel (umgeht RLS vollstaendig)",
   },
   {
     muster: new RegExp(["SECRET", "KEY"].join("_"), "i"),
+    id: "secret-key-name",
     wofuer: "Supabase-Secret-Key (privilegierter API-Zugang)",
   },
   {
     muster: new RegExp(["JWT", "SECRET"].join("_"), "i"),
+    id: "jwt-secret-name",
     wofuer: "JWT-Signaturgeheimnis (erlaubt Tokenfaelschung)",
   },
   {
     muster: new RegExp(["service", "role"].join("_")),
+    id: "postgres-service-role",
     wofuer: "PostgreSQL-Rolle mit RLS-Umgehung",
   },
   {
@@ -340,25 +382,30 @@ const PRIVILEGIERTE_FAMILIEN: readonly PrivilegierteFamilie[] = [
     // ausdruecklich unberuehrt — es steht voellig legitim im Loginformular,
     // im Auth-Controller und im Anmeldevertrag (gemessen: neun Dateien).
     muster: new RegExp(`\\b[A-Z0-9]*_?${["PASS", "WORD"].join("")}\\b`),
+    id: "database-password-name",
     wofuer: "Passwort einer Datenbank- oder Plattformrolle",
   },
   {
     muster: new RegExp(["SUPABASE", "ACCESS", "TOKEN"].join("_"), "i"),
+    id: "supabase-access-token-name",
     wofuer: "Supabase-Plattformtoken (Projektverwaltung)",
   },
-  { muster: /\bauth\s*\.\s*admin\b/, wofuer: "Supabase-Admin-API" },
+  { muster: /\bauth\s*\.\s*admin\b/, id: "supabase-admin-api", wofuer: "Supabase-Admin-API" },
   {
     // Ein festverdrahteter JWT hat im Laufzeitpfad nichts zu suchen, egal
     // welche Rolle er traegt.
     muster: new RegExp(["ey", "J[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\."].join("")),
+    id: "hardcoded-jwt",
     wofuer: "festverdrahteter JWT",
   },
   {
     muster: new RegExp(["sb", "secret", ""].join("_")),
+    id: "supabase-secret-prefix",
     wofuer: "Supabase-Geheimschluessel im neuen Schluesselformat",
   },
   {
     muster: new RegExp(["DATABASE", "URL"].join("_")),
+    id: "database-url-name",
     wofuer: "Verbindungszeichenkette ausserhalb der Konfigurationsgrenze",
     erlaubtIn: KONFIGURATIONSGRENZE,
     nurLaufzeitpfad: true,
@@ -374,45 +421,73 @@ const PRIVILEGIERTE_FAMILIEN: readonly PrivilegierteFamilie[] = [
  * zusaetzlich, dass jeder Eintrag noch existiert UND noch trifft; eine
  * Ausnahme, die nichts mehr ausnimmt, ist ein toter Freibrief und faellt auf.
  */
-export const PRIVILEGIERTE_ORTE: ReadonlyArray<{ datei: string; grund: string }> = [
+export interface PrivilegierterOrt {
+  readonly datei: string;
+  /** NUR diese Familien sind hier zulaessig. Nie die ganze Datei. */
+  readonly erlaubteFamilien: readonly PrivilegierteFamilienId[];
+  readonly grund: string;
+}
+
+export const PRIVILEGIERTE_ORTE: readonly PrivilegierterOrt[] = [
   {
     datei: "supabase/tests/0002_rls_isolation.sql",
+    erlaubteFamilien: ["service-role-name", "postgres-service-role"],
     grund:
       "pgTAP-Zusicherung, dass es in public/storage KEINE Policies fuer die " +
       "RLS-umgehende Rolle gibt — der Name steht hier, um sein Fehlen zu beweisen.",
   },
   {
     datei: "supabase/config.toml",
+    erlaubteFamilien: ["secret-key-name"],
     grund:
       "Vorlage der Supabase-CLI; die S3-Schluesselfelder sind leer bzw. env-substituiert " +
       "und werden von dieser Anwendung nicht gelesen.",
   },
   {
     datei: "scripts/read-through-harness.sh",
+    erlaubteFamilien: ["database-password-name"],
     grund:
       "Ops-/Testharness ausserhalb des Laufzeitpfads: setzt das Passwort der lokalen " +
       "Rolle easytree_app im Wegwerf-Stack. Erreicht keinen Anfragepfad.",
   },
   {
     datei: ".github/workflows/ci.yml",
+    erlaubteFamilien: ["database-password-name"],
     grund:
       "CI provisioniert denselben lokalen Wegwerf-Stack. Werte sind CI-lokal und " +
       "synthetisch; kein produktiver Zugang liegt hier.",
   },
   {
     datei: "apps/api/test/auth/token-verifier.test.ts",
+    erlaubteFamilien: ["service-role-name", "postgres-service-role"],
     grund:
       "Negativtest: ein Token, dessen audience die privilegierte Rolle nennt, MUSS " +
       "abgelehnt werden (AUDIENCE_MISMATCH). Ohne den Namen gaebe es den Nachweis nicht.",
   },
   {
     datei: "apps/api/test/secret-surface.red-case.test.ts",
+    erlaubteFamilien: [
+      "service-role-name",
+      "service-key-name",
+      "secret-key-name",
+      "jwt-secret-name",
+      "database-password-name",
+      "supabase-admin-api",
+      "postgres-service-role",
+    ],
     grund:
       "Gegenmutation DIESES Wächters: die Verstossfixtures muessen die verbotenen " +
       "Namen enthalten, sonst pruefte der rote Fall nichts.",
   },
   {
     datei: "apps/api/test/env-template.test.ts",
+    erlaubteFamilien: [
+      "service-role-name",
+      "service-key-name",
+      "secret-key-name",
+      "database-password-name",
+      "postgres-service-role",
+    ],
     grund:
       "Rote Faelle des Vorlagenwächters: die Fixtures muessen die verbotenen " +
       "Namen ausschreiben, sonst pruefte kein einziger Fall etwas. Die Werte " +
@@ -420,7 +495,58 @@ export const PRIVILEGIERTE_ORTE: ReadonlyArray<{ datei: string; grund: string }>
   },
 ];
 
-const ERLAUBTE_DATEIEN = new Set(PRIVILEGIERTE_ORTE.map((ort) => ort.datei));
+/**
+ * Strukturpruefung der Ausnahmeliste — gibt die Maengel zurueck, statt zu werfen.
+ *
+ * Als Funktion und nicht als Testkoerper, damit die roten Faelle sie mit
+ * synthetischen Listen fuettern koennen: eine Ausnahme auf eine nicht
+ * existierende Datei, eine ohne Begruendung, eine mit leerer Familienliste.
+ * Im Testkoerper eingebettet liesse sich keiner dieser Faelle ausloesen, ohne
+ * die echte Liste kaputtzumachen.
+ *
+ * `existiert` wird hereingereicht, damit die Funktion selbst kein Dateisystem
+ * braucht — `apps/api/test/architecture/` bleibt so frei von I/O.
+ */
+export function pruefeAusnahmeliste(
+  orte: readonly PrivilegierterOrt[],
+  existiert: (datei: string) => boolean,
+): string[] {
+  const maengel: string[] = [];
+  const gesehen = new Set<string>();
+  for (const { datei, erlaubteFamilien, grund } of orte) {
+    if (!existiert(datei)) maengel.push(`${datei}: Ausnahme zeigt ins Leere`);
+    if (gesehen.has(datei)) maengel.push(`${datei}: steht doppelt in der Liste`);
+    gesehen.add(datei);
+    // Leere Familienliste = dateiweite Freistellung durch die Hintertuer.
+    if (erlaubteFamilien.length === 0) maengel.push(`${datei}: stellt keine Familie frei`);
+    if (new Set(erlaubteFamilien).size !== erlaubteFamilien.length) {
+      maengel.push(`${datei}: nennt eine Familie doppelt`);
+    }
+    for (const familie of erlaubteFamilien) {
+      if (!PRIVILEGIERTE_FAMILIEN_IDS.includes(familie)) {
+        maengel.push(`${datei}: unbekannte Familie ${familie}`);
+      }
+    }
+    if (grund.trim().length <= 40) maengel.push(`${datei}: nicht belastbar begruendet`);
+  }
+  return maengel;
+}
+
+/**
+ * Ist GENAU DIESE Familie in GENAU DIESER Datei freigestellt?
+ *
+ * Der Vorgaenger war ein Set von Dateipfaden und stellte die Datei vor ALLEN
+ * Familien frei. Gemessen auf master 36384d0: ein Service-Role-Schluessel in
+ * der CI-Datei — dort nur wegen eines lokalen Wegwerf-Passworts ausgenommen —
+ * ergab 0 Findings. Das war F2.
+ */
+function istFamilieHierErlaubt(
+  orte: readonly PrivilegierterOrt[],
+  datei: string,
+  familie: PrivilegierteFamilienId,
+): boolean {
+  return orte.some((ort) => ort.datei === datei && ort.erlaubteFamilien.includes(familie));
+}
 
 /* ----------------------------------------------- Umgebungszugriffe (AST) */
 
@@ -689,19 +815,21 @@ export const SECRET_RULES: readonly SecretRule[] = [
     evaluate: (input) => {
       const findings: SecretFinding[] = [];
       const seen = new Set<string>();
+      const orte = input.orte ?? PRIVILEGIERTE_ORTE;
       for (const datei of input.files) {
         if (!istCodeDatei(datei)) continue;
         seen.add(datei);
-        if (ERLAUBTE_DATEIEN.has(datei)) continue;
         const zeilen = entferneKommentare(lies(input, datei), datei).split("\n");
         zeilen.forEach((zeile, index) => {
-          for (const { muster, wofuer, erlaubtIn, nurLaufzeitpfad } of PRIVILEGIERTE_FAMILIEN) {
+          for (const { id, muster, wofuer, erlaubtIn, nurLaufzeitpfad } of PRIVILEGIERTE_FAMILIEN) {
             if (erlaubtIn?.includes(datei) === true) continue;
+            if (istFamilieHierErlaubt(orte, datei, id)) continue;
             if (nurLaufzeitpfad === true && !istLaufzeitpfad(datei)) continue;
             if (!muster.test(zeile)) continue;
             findings.push({
               location: `${datei}:${index + 1}`,
               rule: "privileged-credential-only-in-named-places",
+              familie: id,
               message:
                 `${wofuer} an einer nicht benannten Stelle. Zulaessige Orte werden ` +
                 "einzeln in PRIVILEGIERTE_ORTE eingetragen — mit Begruendung, warum " +
