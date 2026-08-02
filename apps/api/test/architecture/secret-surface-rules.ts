@@ -277,19 +277,92 @@ export function entferneKommentare(quelle: string, datei: string): string {
  * Familien privilegierter Zugaenge, zusammengesetzt statt ausgeschrieben
  * (siehe Kopfkommentar). Jede Familie nennt, WOFUER sie steht — die Meldung
  * soll erklaeren, nicht nur anklagen.
+ *
+ * `erlaubtIn` ist eine familienspezifische Ausnahme fuer die Faelle, in denen
+ * ein Name an genau einer Stelle legitim ist. Das ist enger als
+ * `PRIVILEGIERTE_ORTE`, das eine Datei von ALLEN Familien freistellt —
+ * `DATABASE_URL` darf in der Konfigurationsgrenze stehen, ein
+ * Service-Role-Schluessel dort trotzdem nicht.
+ *
+ * Die Namen stammen nicht aus der Fantasie: `SERVICE_KEY`, die
+ * PASSWORD-Familie und der `sb`-Geheimpraefix sind genau die, die am
+ * 02.08.2026 in einer lokal veraenderten Environment-Vorlage auftauchten und
+ * durch die damalige Liste fielen.
  */
-const PRIVILEGIERTE_FAMILIEN: ReadonlyArray<readonly [RegExp, string]> = [
-  [new RegExp(["SERVICE", "ROLE"].join("_"), "i"), "Service-Role-Zugang (umgeht RLS vollstaendig)"],
-  [new RegExp(["SECRET", "KEY"].join("_"), "i"), "Supabase-Secret-Key (privilegierter API-Zugang)"],
-  [new RegExp(["JWT", "SECRET"].join("_"), "i"), "JWT-Signaturgeheimnis (erlaubt Tokenfaelschung)"],
-  [new RegExp(["service", "role"].join("_")), "PostgreSQL-Rolle mit RLS-Umgehung"],
-  [new RegExp(`\\b${["PG", "PASSWORD"].join("")}\\b`), "Datenbankpasswort fuer Migrationen"],
-  [new RegExp(["DB", "PASSWORD"].join("_"), "i"), "Datenbankpasswort"],
-  [
-    new RegExp(["SUPABASE", "ACCESS", "TOKEN"].join("_"), "i"),
-    "Supabase-Plattformtoken (Projektverwaltung)",
-  ],
-  [/\bauth\s*\.\s*admin\b/, "Supabase-Admin-API"],
+interface PrivilegierteFamilie {
+  readonly muster: RegExp;
+  readonly wofuer: string;
+  /** Dateien, in denen GENAU DIESE Familie zulaessig ist. */
+  readonly erlaubtIn?: readonly string[];
+  /**
+   * Nur im Laufzeitpfad pruefen.
+   *
+   * Fuer Namen, die ausserhalb voellig legitim sind: eine Testdatei DARF
+   * `DATABASE_URL` setzen, ein Controller nicht. Ohne diese Einschraenkung
+   * meldete die Familie 8 Testdateien und waere binnen einer Woche
+   * abgeschaltet.
+   */
+  readonly nurLaufzeitpfad?: boolean;
+}
+
+/** Die eine Stelle, an der Konfigurationsnamen aufgeschrieben werden duerfen. */
+const KONFIGURATIONSGRENZE = [
+  "packages/config/src/schema.ts",
+  "packages/config/src/load.ts",
+] as const;
+
+const PRIVILEGIERTE_FAMILIEN: readonly PrivilegierteFamilie[] = [
+  {
+    muster: new RegExp(["SERVICE", "ROLE"].join("_"), "i"),
+    wofuer: "Service-Role-Zugang (umgeht RLS vollstaendig)",
+  },
+  {
+    // Faengt auch SUPABASE_SERVICE_KEY — die Schreibweise ohne "ROLE".
+    muster: new RegExp(["SERVICE", "KEY"].join("_"), "i"),
+    wofuer: "Service-Schluessel (umgeht RLS vollstaendig)",
+  },
+  {
+    muster: new RegExp(["SECRET", "KEY"].join("_"), "i"),
+    wofuer: "Supabase-Secret-Key (privilegierter API-Zugang)",
+  },
+  {
+    muster: new RegExp(["JWT", "SECRET"].join("_"), "i"),
+    wofuer: "JWT-Signaturgeheimnis (erlaubt Tokenfaelschung)",
+  },
+  {
+    muster: new RegExp(["service", "role"].join("_")),
+    wofuer: "PostgreSQL-Rolle mit RLS-Umgehung",
+  },
+  {
+    // GROSSGESCHRIEBEN und nur als ganzes Wort: faengt PGPASSWORD,
+    // POSTGRES_PASSWORD, DATABASE_PASSWORD, SUPABASE_PASSWORD und die
+    // Schreibweise ohne Unterstrich. Kleingeschriebenes `password` bleibt
+    // ausdruecklich unberuehrt — es steht voellig legitim im Loginformular,
+    // im Auth-Controller und im Anmeldevertrag (gemessen: neun Dateien).
+    muster: new RegExp(`\\b[A-Z0-9]*_?${["PASS", "WORD"].join("")}\\b`),
+    wofuer: "Passwort einer Datenbank- oder Plattformrolle",
+  },
+  {
+    muster: new RegExp(["SUPABASE", "ACCESS", "TOKEN"].join("_"), "i"),
+    wofuer: "Supabase-Plattformtoken (Projektverwaltung)",
+  },
+  { muster: /\bauth\s*\.\s*admin\b/, wofuer: "Supabase-Admin-API" },
+  {
+    // Ein festverdrahteter JWT hat im Laufzeitpfad nichts zu suchen, egal
+    // welche Rolle er traegt.
+    muster: new RegExp(["ey", "J[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\."].join("")),
+    wofuer: "festverdrahteter JWT",
+  },
+  {
+    muster: new RegExp(["sb", "secret", ""].join("_")),
+    wofuer: "Supabase-Geheimschluessel im neuen Schluesselformat",
+  },
+  {
+    muster: new RegExp(["DATABASE", "URL"].join("_")),
+    wofuer: "Verbindungszeichenkette ausserhalb der Konfigurationsgrenze",
+    erlaubtIn: KONFIGURATIONSGRENZE,
+    nurLaufzeitpfad: true,
+  },
 ];
 
 /**
@@ -337,6 +410,13 @@ export const PRIVILEGIERTE_ORTE: ReadonlyArray<{ datei: string; grund: string }>
     grund:
       "Gegenmutation DIESES Wächters: die Verstossfixtures muessen die verbotenen " +
       "Namen enthalten, sonst pruefte der rote Fall nichts.",
+  },
+  {
+    datei: "apps/api/test/env-template.test.ts",
+    grund:
+      "Rote Faelle des Vorlagenwächters: die Fixtures muessen die verbotenen " +
+      "Namen ausschreiben, sonst pruefte kein einziger Fall etwas. Die Werte " +
+      "darin sind erfunden und werden zur Laufzeit erzeugt.",
   },
 ];
 
@@ -615,7 +695,9 @@ export const SECRET_RULES: readonly SecretRule[] = [
         if (ERLAUBTE_DATEIEN.has(datei)) continue;
         const zeilen = entferneKommentare(lies(input, datei), datei).split("\n");
         zeilen.forEach((zeile, index) => {
-          for (const [muster, wofuer] of PRIVILEGIERTE_FAMILIEN) {
+          for (const { muster, wofuer, erlaubtIn, nurLaufzeitpfad } of PRIVILEGIERTE_FAMILIEN) {
+            if (erlaubtIn?.includes(datei) === true) continue;
+            if (nurLaufzeitpfad === true && !istLaufzeitpfad(datei)) continue;
             if (!muster.test(zeile)) continue;
             findings.push({
               location: `${datei}:${index + 1}`,

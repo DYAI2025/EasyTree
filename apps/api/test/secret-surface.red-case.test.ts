@@ -284,6 +284,83 @@ describe("Geteilte Pakete sind Laufzeitpfad (EYT-133, Reviewbefund F1)", () => {
   });
 });
 
+describe("Die Namensfamilien decken den real aufgetretenen Fall (EYT-133, F3)", () => {
+  // Jeder dieser Namen stand am 02.08.2026 in einer lokal veraenderten
+  // versionierten Environment-Vorlage und fiel durch die damalige Liste.
+  const imController = (inhalt: string): Set<string> => {
+    schreibe("apps/api/src/modules/costs/interface/http/probe.ts", inhalt);
+    const r = regeln();
+    entferne("apps/api/src/modules/costs/interface/http/probe.ts");
+    return r;
+  };
+  const NAMENSREGEL = "privileged-credential-only-in-named-places";
+
+  it.each([
+    ["SUPABASE_SERVICE_KEY", 'export const a = "SUPABASE_SERVICE_KEY";'],
+    ["SUPABASE_SERVICE_ROLE_KEY", 'export const a = "SUPABASE_SERVICE_ROLE_KEY";'],
+    ["SUPABASE_SECRET_KEY", 'export const a = "SUPABASE_SECRET_KEY";'],
+    ["SUPABASE_PASSWORD", 'export const a = "SUPABASE_PASSWORD";'],
+    ["POSTGRES_PASSWORD", 'export const a = "POSTGRES_PASSWORD";'],
+    ["PGPASSWORD", 'export const a = "PGPASSWORD";'],
+    ["DATABASEPASSWORD", 'export const a = "DATABASEPASSWORD";'],
+    ["DATABASE_PASSWORD", 'export const a = "DATABASE_PASSWORD";'],
+    ["JWT_SECRET", 'export const a = "JWT_SECRET";'],
+    ["DATABASE_URL", 'export const a = "DATABASE_URL";'],
+    ["auth.admin", "export const a = (c: any) => c.auth.admin.deleteUser();"],
+  ])("erkennt %s im Anfragepfad", (_name, inhalt) => {
+    expect(imController(inhalt).has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("erkennt einen Wert mit Supabase-Geheimpraefix", () => {
+    const praefix = ["sb", "secret", ""].join("_");
+    expect(imController(`export const a = "${praefix}AbCdEfGhIjKlMnOp";`).has(NAMENSREGEL)).toBe(
+      true,
+    );
+  });
+
+  it("erkennt einen festverdrahteten JWT", () => {
+    // Zur Laufzeit gebaut: ein `eyJ…`-Literal im Quelltext waere fuer gitleaks
+    // ein echtes Token und machte secret-scan rot.
+    const teil = (o: unknown): string =>
+      Buffer.from(JSON.stringify(o), "utf8").toString("base64url");
+    const jwt = `${teil({ alg: "HS256" })}.${teil({ role: "service_role" })}.erfunden`;
+    expect(imController(`export const a = "${jwt}";`).has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("kleingeschriebenes password bleibt unberuehrt", () => {
+    // Sonst meldete der Wächter das Loginformular, den Auth-Controller und den
+    // Anmeldevertrag — gemessen neun Dateien — und waere binnen einer Woche
+    // abgeschaltet.
+    const treffer = imController(
+      ["export interface Anmeldung { password: string }", 'export const feld = "password";'].join(
+        "\n",
+      ),
+    );
+    expect(treffer.has(NAMENSREGEL)).toBe(false);
+  });
+
+  it("DATABASE_URL ist in der Konfigurationsgrenze zulaessig, sonst nicht", () => {
+    schreibe("packages/config/src/schema.ts", "export const k = { DATABASE_URL: 1 };");
+    const inGrenze = regeln();
+    entferne("packages/config/src/schema.ts");
+    expect(inGrenze.has(NAMENSREGEL)).toBe(false);
+
+    schreibe("packages/contracts/src/probe.ts", 'export const k = "DATABASE_URL";');
+    const ausserhalb = regeln();
+    entferne("packages/contracts/src/probe.ts");
+    expect(ausserhalb.has(NAMENSREGEL)).toBe(true);
+  });
+
+  it("eine Testdatei darf DATABASE_URL setzen", () => {
+    // Die Familie gilt nur im Laufzeitpfad. Ohne diese Einschraenkung meldete
+    // sie acht bestehende Testdateien (gemessen).
+    schreibe("apps/api/test/probe.test.ts", 'process.env["DATABASE_URL"] = "x";');
+    const treffer = regeln();
+    entferne("apps/api/test/probe.test.ts");
+    expect(treffer.has(NAMENSREGEL)).toBe(false);
+  });
+});
+
 describe("Der Umgebungsdetektor kennt jede gaengige Schreibweise (EYT-133, Befund F2)", () => {
   // Gemessen im Review: der Detektor erkannte nur den blossen Bezeichner
   // `process`. Die node:process-Form ist genau die, zu der ESLint aktiv draengt

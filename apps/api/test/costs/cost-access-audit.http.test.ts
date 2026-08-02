@@ -55,7 +55,10 @@ const EMPLOYEE = "00000000-0000-4000-8000-0000004010a1";
 /** Werte, die in KEINER Auditzeile auftauchen duerfen. */
 const MITARBEITERNAME = "Demo-Mitarbeiter 01";
 const STUNDENSATZ = "3850";
-const TOKEN = "eyJhbGciOiJFUzI1NiJ9.streng-geheimes-token.signatur";
+// Bewusst NICHT JWT-foermig: ein `eyJ…`-Literal ist fuer den Waechter (und
+// fuer gitleaks) ein festverdrahteter Token. Der Test braucht nur eine
+// eindeutig wiedererkennbare Markierung, kein echt aussehendes Token.
+const TOKEN = ["kein", "echtes", "token", "nur", "markierung"].join("-");
 const COOKIE = `easytree_access=${TOKEN}`;
 
 class Sammler implements CostAccessAuditLog {

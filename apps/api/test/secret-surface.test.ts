@@ -197,8 +197,8 @@ describe("Die Ausnahmelisten sind eng und lebendig (EYT-106 AK6)", () => {
         ["SECRET", "KEY"].join("_"),
         ["JWT", "SECRET"].join("_"),
         ["service", "role"].join("_"),
-        ["PG", "PASSWORD"].join(""),
-        ["DB", "PASSWORD"].join("_"),
+        ["PG", "PASS", "WORD"].join(""),
+        ["SERVICE", "KEY"].join("_"),
         ["SUPABASE", "ACCESS", "TOKEN"].join("_"),
       ].some((name) => roh.toUpperCase().includes(name.toUpperCase()));
       expect(trifft, `Ausnahme ${datei} nimmt nichts mehr aus — Eintrag entfernen`).toBe(true);
