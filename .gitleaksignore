@@ -28,3 +28,15 @@
 # Aktueller Quelltext bereinigt (Wert aus Teilen zusammengesetzt).
 # synthetic test fixture, current source cleaned
 7f515e9e50474f3752fe6241ad8146e366243c3e:apps/api/test/auth/auth.http.test.ts:generic-api-key:147
+
+# Fund 3 und 4 — SYNTHETIC_TEST_FIXTURE: zwei erfundene, JWT-foermige Werte im
+# Datenschutztest des Auditereignisses (EYT-106 AK9). Ihre einzige Aufgabe ist,
+# in der Logzeile NICHT aufzutauchen — der Test heftet sie absichtlich an ein
+# Ereignis und prueft, dass die Serialisierung sie fallen laesst. Nie ein
+# gueltiges Token, nirgends akzeptiert; gemeldet allein wegen der Entropie
+# der `eyJ…`-Form (4.42).
+# Aktueller Quelltext bereinigt: die Markierung ist jetzt eine lesbare
+# Wortkette ohne JWT-Form, aus Teilen zusammengesetzt.
+# synthetic test fixture, current source cleaned
+2ce4fa543819e863019846a773b99d6a97692541:apps/api/test/costs/cost-access-audit.test.ts:generic-api-key:98
+2ce4fa543819e863019846a773b99d6a97692541:apps/api/test/costs/cost-access-audit.test.ts:generic-api-key:99

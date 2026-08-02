@@ -36,9 +36,11 @@ import {
   SESSION_ORGANISATIONS,
 } from "./modules/tenancy";
 import {
+  COST_ACCESS_AUDIT,
   COST_ACCESS_POLICY,
   CostsController,
   MembershipCostAccessPolicy,
+  NestCostAccessAuditLog,
   PgRateRepository,
   RATE_REPOSITORY_FACTORY,
   type RateRepositoryFactory,
@@ -107,6 +109,14 @@ import {
       // Datenbank entscheidet unabhaengig noch einmal (Migration 0013).
       provide: COST_ACCESS_POLICY,
       useClass: MembershipCostAccessPolicy,
+    },
+    {
+      // EYT-106 AK9: jede Kosten-Zugriffsentscheidung wird mit Korrelations-Id
+      // fortgeschrieben. Der Logger beobachtet nur — er entscheidet nichts,
+      // und ein Fehler in ihm veraendert keine Entscheidung (Controller
+      // faengt ab).
+      provide: COST_ACCESS_AUDIT,
+      useClass: NestCostAccessAuditLog,
     },
     {
       // Repository je Subjekt, Pool je Prozess — dieselbe Begruendung wie beim

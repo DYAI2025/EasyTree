@@ -46,6 +46,22 @@ export type {
   MembershipWithPermissions,
 } from "./application/cost-access.policy";
 
+// EYT-106 AK9: Zugriffsentscheidungen mit Korrelations-Id, ohne Nutzlast.
+export {
+  COST_ACCESS_AUDIT,
+  COST_ACCESS_DECISION_EVENT,
+  COST_ACCESS_DENY_REASONS,
+  COST_ACCESS_EVENT_FIELDS,
+  pseudonymSubjekt,
+  serialisiereZugriffsereignis,
+} from "./application/cost-access-audit.port";
+export type {
+  CostAccessAuditLog,
+  CostAccessDecisionEvent,
+  CostAccessDenyReason,
+} from "./application/cost-access-audit.port";
+export { NestCostAccessAuditLog } from "./infrastructure/cost-access-audit.logger";
+
 export { RATE_REPOSITORY_FACTORY, RATE_WRITE_PROBLEMS } from "./application/rate-repository.port";
 export type {
   NewRateVersion,
