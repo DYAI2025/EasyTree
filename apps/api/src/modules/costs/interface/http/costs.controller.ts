@@ -40,6 +40,8 @@ import type { Request } from "express";
 
 import {
   CreateRateVersionCommandSchema,
+  IDEMPOTENCY_HEADER,
+  IdempotencyKeySchema,
   type EmployeesForRates,
   type RateHistory,
   type RateVersionDto,
@@ -149,6 +151,7 @@ export class CostsController {
     @Req() req: Request,
     @Body() body: unknown,
     @Headers(ORGANISATION_HEADER) organisationHeader?: string,
+    @Headers(IDEMPOTENCY_HEADER) idempotencyKey?: string,
   ): Promise<RateVersionDto> {
     // Anlegen braucht ein ANDERES Recht als Lesen — atomar, nicht "wer lesen
     // darf, darf auch schreiben".
@@ -158,6 +161,18 @@ export class CostsController {
       "costs.manage_rates",
       "POST /kosten/stundensaetze",
     );
+
+    // Der Vertrag deklariert den Schluessel als required. Er wird HIER
+    // geprueft und nicht erst im Repository: ohne ihn gibt es keinen
+    // Wiederholungsschutz, und eine Anfrage ohne Schutz darf gar nicht erst
+    // in die Transaktion.
+    const schluessel = IdempotencyKeySchema.safeParse(idempotencyKey);
+    if (!schluessel.success) {
+      throw new ConflictProblem(
+        RATE_ERROR_TYPE.MISSING_IDEMPOTENCY_KEY,
+        "Diese Anfrage braucht einen gueltigen Idempotency-Key. Ohne ihn koennte eine Wiederholung eine zweite Satzversion anlegen.",
+      );
+    }
 
     const geprueft = CreateRateVersionCommandSchema.safeParse(body);
     if (!geprueft.success) {
@@ -175,6 +190,7 @@ export class CostsController {
       reason: geprueft.data.reason,
       expectedActiveVersionId: geprueft.data.expectedActiveVersionId,
       correlationId: (req as Partial<RequestWithCorrelationId>).correlationId ?? "unbekannt",
+      idempotencyKey: schluessel.data,
     });
 
     if (!ergebnis.ok) throw problemFor(ergebnis.problem);
@@ -348,6 +364,12 @@ function problemFor(problem: RateWriteProblem): Error {
     return new ConflictProblem(
       RATE_ERROR_TYPE.RATE_SUCCESSOR_NOT_LATER,
       "Die neue Version muss spaeter beginnen als die abzuloesende. Bitte ein spaeteres Datum waehlen.",
+    );
+  }
+  if (problem === "IDEMPOTENCY_KEY_REUSED") {
+    return new ConflictProblem(
+      RATE_ERROR_TYPE.IDEMPOTENCY_KEY_REUSED,
+      "Dieser Idempotency-Key wurde bereits fuer eine andere Satzversion verwendet. Bitte einen neuen Schluessel senden.",
     );
   }
   if (problem === "FREMDER_MITARBEITER") {

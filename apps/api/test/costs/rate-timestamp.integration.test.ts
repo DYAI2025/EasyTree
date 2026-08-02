@@ -31,6 +31,7 @@ import { InstantSchema } from "@easytree/contracts";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { PgIdempotencyStore } from "../../src/platform/idempotency/pg-idempotency-store";
 import { PgRateRepository } from "../../src/modules/costs";
 import { PgTenantQueryRunner } from "../../src/platform/database/tenant-query-runner";
 import { FailClosedGate, ORG_ALPHA, probeDatabase, USER_A } from "../tenant-context.helper";
@@ -113,7 +114,7 @@ describe("PgRateRepository liefert kanonische Zeitstempel (EYT-108)", () => {
   });
 
   dbIt("append() liefert ein createdAt, das InstantSchema akzeptiert", async () => {
-    const repository = new PgRateRepository(runner, USER_A);
+    const repository = new PgRateRepository(runner, USER_A, new PgIdempotencyStore());
     const ergebnis = await repository.append({
       organisationId: ORG_ALPHA,
       employeeId: EMPLOYEE_ALPHA,
@@ -123,6 +124,7 @@ describe("PgRateRepository liefert kanonische Zeitstempel (EYT-108)", () => {
       reason: MARKE,
       expectedActiveVersionId: null,
       correlationId: "test-korrelation-zeitstempel",
+      idempotencyKey: "eyt108-zeitstempel-fixtur",
     });
 
     expect(ergebnis.ok).toBe(true);
@@ -143,7 +145,7 @@ describe("PgRateRepository liefert kanonische Zeitstempel (EYT-108)", () => {
   });
 
   dbIt("versionsFor() liefert dasselbe kanonische Format beim Lesen", async () => {
-    const repository = new PgRateRepository(runner, USER_A);
+    const repository = new PgRateRepository(runner, USER_A, new PgIdempotencyStore());
     const versionen = await repository.versionsFor(EMPLOYEE_ALPHA);
     expect(angelegteId, "der append()-Fall muss zuerst gelaufen sein").not.toBeNull();
     const gelesen = versionen.find((version) => version.id === angelegteId);

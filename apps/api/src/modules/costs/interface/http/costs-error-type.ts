@@ -60,6 +60,8 @@ export const RATE_ERROR_TYPE = {
   RATE_PREDECESSOR_CLOSED: "urn:easytree:costs:rate-predecessor-closed",
   RATE_SUCCESSOR_NOT_LATER: "urn:easytree:costs:rate-successor-not-later",
   RATE_EMPLOYEE_MISMATCH: "urn:easytree:costs:rate-employee-mismatch",
+  IDEMPOTENCY_KEY_REUSED: "urn:easytree:costs:idempotency-key-reused",
+  MISSING_IDEMPOTENCY_KEY: "urn:easytree:costs:missing-idempotency-key",
 } as const;
 
 export type RateErrorType = (typeof RATE_ERROR_TYPE)[keyof typeof RATE_ERROR_TYPE];
