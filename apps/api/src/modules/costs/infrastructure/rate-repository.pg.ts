@@ -233,7 +233,7 @@ export class PgRateRepository implements RateRepository {
           const geschlossen = await tx.query(
             `update public.employee_rate_versions
                 set valid_to = $2::date
-              where id = $1 and valid_to is null`,
+              where id = $1`,
             [vorgaenger.id, abloesung.validToDesVorgaengers],
           );
           if (geschlossen.rowCount !== 1) {
