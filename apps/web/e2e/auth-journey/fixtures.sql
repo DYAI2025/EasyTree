@@ -66,6 +66,43 @@ values ('00000000-0000-4000-8000-00000000e231',
         'e2e-auth-journey')
 on conflict (id) do nothing;
 
+-- ---------------------------------------------------------------------------
+-- Planungsdaten fuer die Publish-Reise (EYT-107)
+-- ---------------------------------------------------------------------------
+-- Ohne sie zeigte `/planung` eine leere Woche, und der Publish-Nachweis haette
+-- nichts zu veroeffentlichen.
+--
+-- Die Zeiten liegen bewusst IN der Woche 2026-W32: `06:00Z` ist in
+-- `Europe/Berlin` (Vorgabe der Organisation, Migration 0004) der Montag
+-- 03.08.2026, 08:00. Der Publish-Pfad prueft seit EYT-107 genau das — das
+-- Schema tut es nicht, denn `plan_versions.week_key` ist mit keinem
+-- Zeitstempel verknuepft (offene Luecke aus EYT-49).
+--
+-- Die Planversion entsteht als ENTWURF (`published_at` bleibt NULL). Sie hier
+-- schon veroeffentlicht anzulegen wuerde den Nachweis vorwegnehmen: die Reise
+-- soll den Uebergang selbst ausloesen.
+insert into public.worksites (id, org_id, name, active)
+values ('00000000-0000-4000-8000-00000000e241',
+        '00000000-0000-4000-8000-00000000e201',
+        'E2E-Baustelle Reise', true)
+on conflict (id) do nothing;
+
+insert into public.plan_versions (id, org_id, week_key)
+values ('00000000-0000-4000-8000-00000000e251',
+        '00000000-0000-4000-8000-00000000e201',
+        '2026-W32')
+on conflict (id) do nothing;
+
+insert into public.assignments
+  (id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+values ('00000000-0000-4000-8000-00000000e261',
+        '00000000-0000-4000-8000-00000000e201',
+        '00000000-0000-4000-8000-00000000e251',
+        '00000000-0000-4000-8000-00000000e211',
+        '00000000-0000-4000-8000-00000000e241',
+        '2026-08-03T06:00:00Z', '2026-08-03T14:00:00Z')
+on conflict (id) do nothing;
+
 commit;
 
 -- Nachrechnen statt behaupten. Bewusst OHNE psql-Variable im Block: innerhalb
@@ -77,6 +114,10 @@ declare
   n_mitarbeiter int;
   n_satz int;
   n_projektion int;
+  n_baustelle int;
+  n_version int;
+  n_entwurf int;
+  n_zuweisung int;
 begin
   select count(*) into n_mitglied from public.memberships
     where org_id = '00000000-0000-4000-8000-00000000e201' and role = 'owner' and active;
@@ -87,14 +128,26 @@ begin
   select count(*) into n_projektion from public.users u
     where exists (select 1 from auth.users a where a.id = u.id
                   and a.email like 'auth-journey-%@easytree.test');
+  select count(*) into n_baustelle from public.worksites
+    where org_id = '00000000-0000-4000-8000-00000000e201';
+  select count(*) into n_version from public.plan_versions
+    where org_id = '00000000-0000-4000-8000-00000000e201';
+  -- Ausdruecklich als ENTWURF: ein bereits veroeffentlichter Stand haette den
+  -- Publish-Nachweis vorweggenommen und die Reise waere vakuos gewesen.
+  select count(*) into n_entwurf from public.plan_versions
+    where org_id = '00000000-0000-4000-8000-00000000e201' and published_at is null;
+  select count(*) into n_zuweisung from public.assignments
+    where org_id = '00000000-0000-4000-8000-00000000e201';
 
   -- Genau EINE Mitgliedschaft: haette B eine, waere der Negativnachweis wertlos.
-  if n_mitglied <> 1 or n_mitarbeiter <> 1 or n_satz <> 1 or n_projektion <> 2 then
+  if n_mitglied <> 1 or n_mitarbeiter <> 1 or n_satz <> 1 or n_projektion <> 2
+     or n_baustelle <> 1 or n_version <> 1 or n_entwurf <> 1 or n_zuweisung <> 1 then
     raise exception
-      'E2E-Fixture unvollstaendig: membership=% mitarbeiter=% satz=% projektionen=% (erwartet 1/1/1/2)',
-      n_mitglied, n_mitarbeiter, n_satz, n_projektion;
+      'E2E-Fixture unvollstaendig: membership=% mitarbeiter=% satz=% projektionen=% baustelle=% version=% entwurf=% zuweisung=% (erwartet 1/1/1/2/1/1/1/1)',
+      n_mitglied, n_mitarbeiter, n_satz, n_projektion,
+      n_baustelle, n_version, n_entwurf, n_zuweisung;
   end if;
-  raise notice '[auth-journey-fixture] projektionen=% membership=% mitarbeiter=% satz=%',
-    n_projektion, n_mitglied, n_mitarbeiter, n_satz;
+  raise notice '[auth-journey-fixture] projektionen=% membership=% mitarbeiter=% satz=% baustelle=% entwurf=% zuweisung=%',
+    n_projektion, n_mitglied, n_mitarbeiter, n_satz, n_baustelle, n_entwurf, n_zuweisung;
 end
 $$;

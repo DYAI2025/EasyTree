@@ -146,3 +146,57 @@ test("axe im echten Browser: 0 Violations inkl. color-contrast", async ({ page }
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
   expect(results.violations).toEqual([]);
 });
+
+/**
+ * Jede Route rendert serverseitig ueberhaupt (EYT-107).
+ *
+ * ## Der Fehler, der diesen Nachweis erzwungen hat
+ *
+ * `app/planung/page.tsx` ist eine SERVER-Komponente. Eine Fassung gab dem
+ * Client-Waechter die Rechte als Kindfunktion mit — und Funktionen koennen die
+ * Server/Client-Grenze nicht ueberqueren. Next brach zur Laufzeit ab mit
+ * „Functions cannot be passed directly to Client Components".
+ *
+ * Bemerkt hat es WEDER `pnpm typecheck` NOCH `build-web` noch der
+ * jsdom-Test der Seite: jsdom rendert alles clientseitig, die Grenze existiert
+ * dort gar nicht. Rot wurde erst `auth-journey` — der teuerste Job, der
+ * Supabase, GoTrue und zwei Browserkontexte hochfaehrt (gemessen 03.08.2026,
+ * Lauf 30840726709).
+ *
+ * Diese Faelle holen die Fehlerklasse in den billigsten Job. Sie pruefen
+ * ausdruecklich NICHT den Inhalt: hier laeuft keine API, jede Seite landet in
+ * ihrem Lade- oder Fehlerzustand. Geprueft wird nur, dass sie ueberhaupt
+ * gerendert wird und der Server dabei nicht abbricht.
+ */
+const ROUTEN = [
+  { pfad: "/", name: "Start" },
+  { pfad: "/anmelden", name: "Anmelden" },
+  { pfad: "/planung?weekKey=2026-W32", name: "Planung" },
+  { pfad: "/kosten", name: "Kosten" },
+] as const;
+
+for (const route of ROUTEN) {
+  test(`${route.name} rendert serverseitig ohne Abbruch`, async ({ page }) => {
+    const antwort = await page.goto(route.pfad);
+    expect(antwort?.status(), `${route.pfad} antwortet nicht mit 2xx`).toBeLessThan(400);
+
+    // Der Statuscode ist bei diesem Fehler die schaerfste Aussage: die
+    // Gegenmutation (Kindfunktion ueber die Server/Client-Grenze, danach neu
+    // gebaut) liefert gemessen 500, nicht 200 mit Fehlertext. Die
+    // Rumpfpruefung darunter bleibt trotzdem stehen — sie deckt die
+    // Fehlerklasse ab, die Next als gerenderte Seite ausliefert statt als
+    // Statuscode.
+    const rumpf = (await page.locator("body").innerText()).toLowerCase();
+    for (const muster of [
+      "functions cannot be passed",
+      "application error",
+      "unhandled runtime error",
+      "internal server error",
+    ]) {
+      expect(rumpf, `${route.pfad} zeigt "${muster}"`).not.toContain(muster);
+    }
+
+    // Und die Shell steht: ohne diese Zeile waere eine leere Seite gruen.
+    await expect(page.getByRole("banner")).toBeVisible();
+  });
+}

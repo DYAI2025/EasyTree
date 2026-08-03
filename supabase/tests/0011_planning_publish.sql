@@ -21,14 +21,13 @@
 --   5. Ein fremdes `published_by` wird abgelehnt (Urheberzusage).
 --
 -- ---------------------------------------------------------------------------
--- Warum hier Mitgliedschaften angelegt werden
+-- Woher die Testidentitaet kommt
 -- ---------------------------------------------------------------------------
--- `seed.sql` kennt genau drei Mitgliedschaften: zwei owner und einen
--- INAKTIVEN member. Fuer Aussage 1-3 braucht es einen AKTIVEN member und einen
--- manager; beide entstehen hier, vor dem Rollenwechsel, und verschwinden mit
--- dem `rollback` am Dateiende. `seed.sql` bleibt unangetastet — es ist
--- gemeinsame Grundlage aller Suiten und kein Ablageplatz fuer Testfaelle
--- einzelner Tickets.
+-- Aus `seed.sql`, nicht aus dieser Datei. Warum, steht unten beim `update` auf
+-- `memberships` — kurz: `public.users` haengt am Fremdschluessel auf
+-- `auth.users`, und eigene Benutzer anzulegen hiesse, GoTrue nachzuahmen.
+-- `seed.sql` bleibt unangetastet; es ist gemeinsame Grundlage aller Suiten und
+-- kein Ablageplatz fuer Testfaelle einzelner Tickets.
 --
 -- Zur Form von throws_ok: ZWEIstellig (sql, errcode). Die dreistellige Form
 -- erwartet ERRMSG, nicht eine Beschreibung.
@@ -37,20 +36,26 @@ begin;
 select plan(17);
 
 -- ===========================================================================
--- Zusaetzliche Mitgliedschaften, nur fuer diese Transaktion
+-- Die Testidentitaet: User C aus dem Seed, nur die Rolle aendert sich
 -- ===========================================================================
--- Projektionen zuerst: `memberships.user_id` zeigt auf `public.users`.
-insert into public.users (id, display_name) values
-  ('00000000-0000-4000-8000-00000000ddd4', 'Testmanagerin Alpha'),
-  ('00000000-0000-4000-8000-00000000eee5', 'Testmitarbeiter Alpha')
-on conflict (id) do nothing;
-
-insert into public.memberships (id, org_id, user_id, role, active) values
-  ('00000000-0000-4000-8000-0000000e0dd4', '00000000-0000-4000-8000-0000000000a1',
-   '00000000-0000-4000-8000-00000000ddd4', 'manager', true),
-  ('00000000-0000-4000-8000-0000000e0ee5', '00000000-0000-4000-8000-0000000000a1',
-   '00000000-0000-4000-8000-00000000eee5', 'member', true)
-on conflict (id) do nothing;
+-- `public.users.id` traegt einen Fremdschluessel auf `auth.users` (Migration
+-- 0002). Eigene Testbenutzer anzulegen hiesse also, `auth.users` zu
+-- beschreiben — das tut in echten Umgebungen ausschliesslich GoTrue, und eine
+-- erste Fassung dieser Datei ist genau daran gescheitert (23503, gemessen in
+-- CI 03.08.2026).
+--
+-- `supabase/seed.sql` hat aber bereits, was gebraucht wird: User C ist
+-- Mitglied in Organisation Alpha, allerdings INAKTIV und mit der Rolle
+-- `member`. Beides laesst sich hier aendern und faellt mit dem `rollback`
+-- wieder weg.
+--
+-- Das ist sogar die staerkere Versuchsanordnung: derselbe Benutzer, dieselbe
+-- Organisation, dieselbe Mitgliedschaftszeile — es aendert sich AUSSCHLIESSLICH
+-- die Rolle. Zwei verschiedene Benutzer haetten zwei Variablen zugleich
+-- verstellt.
+update public.memberships
+   set active = true, role = 'member'
+ where user_id = '00000000-0000-4000-8000-00000000ccc3';
 
 -- ===========================================================================
 -- 1. Die Rollenmatrix (PO-Entscheidung 03.08.2026)
@@ -91,7 +96,7 @@ select is(
 -- ===========================================================================
 select set_config(
   'request.jwt.claims',
-  json_build_object('sub', '00000000-0000-4000-8000-00000000eee5', 'role', 'authenticated')::text,
+  json_build_object('sub', '00000000-0000-4000-8000-00000000ccc3', 'role', 'authenticated')::text,
   true
 );
 set local role authenticated;
@@ -113,7 +118,7 @@ select is(
 -- ein Test, der nur auf eine Exception prueft, waere hier gruen und falsch.
 update public.plan_versions
    set published_at = now(),
-       published_by = '00000000-0000-4000-8000-00000000eee5'
+       published_by = '00000000-0000-4000-8000-00000000ccc3'
  where id = '00000000-0000-4000-8000-0000006010a1';
 
 select is(
@@ -124,14 +129,14 @@ select is(
 );
 
 -- ===========================================================================
--- 3. Kontext: manager in Org Alpha — darf lesen, schreiben UND publizieren
+-- 3. DIESELBE Person, nur mit der Rolle `manager`
 -- ===========================================================================
+-- Einzige Aenderung gegenueber Abschnitt 2. Was jetzt anders ausgeht, geht
+-- wegen der ROLLE anders aus — nichts sonst wurde angefasst.
 reset role;
-select set_config(
-  'request.jwt.claims',
-  json_build_object('sub', '00000000-0000-4000-8000-00000000ddd4', 'role', 'authenticated')::text,
-  true
-);
+update public.memberships
+   set role = 'manager'
+ where user_id = '00000000-0000-4000-8000-00000000ccc3';
 set local role authenticated;
 
 select is(
