@@ -55,6 +55,38 @@ Voraussetzung dafür, dass die grünen Läufe darunter etwas bedeuten.
 
 ---
 
+## 0b. Der Fix hatte selbst eine Nebenwirkung — gemessen, nicht vermutet
+
+Der erste Korrekturcommit war in zehn von elf Jobs grün. `db-gates` fiel, und
+zwar an einer Stelle, die niemand vorhergesehen hatte:
+
+```
+# Failed test 18: "Eine veroeffentlichte Planversion nimmt keine weitere Zuweisung auf"
+#       caught: no exception
+        (0006_planning_invariants.sql, Lauf 30862744360)
+```
+
+**PostgreSQL prüft bei einer Sperrklausel zusätzlich die `using`-Klausel der
+UPDATE-Policy.** Ein `select ... for share` gilt als Vorbereitung einer
+Änderung. `app.reject_assignment_in_published_plan()` aus Migration 0010 liest
+die Elternzeile genau so — invoker, mit `for share`, aus gutem Grund. Sobald
+`using` den Laufzeitkanal verlangt, findet dieses Select aus jeder anderen
+Sitzung nichts mehr, und der Zweig „nicht gefunden heißt fremder Mandant" lässt
+die Zuweisung durch.
+
+Das wäre eine **neue** Lücke gewesen, entstanden beim Schließen einer alten:
+über die Data-API hätte jedes Mitglied Zuweisungen in eine bereits
+veröffentlichte Planversion einfügen können. Die Korrektur macht die Funktion
+`security definer` und schreibt die Mandantenbedingung der SELECT-Policy
+(`org_id in (select app.user_org_ids())`) ausdrücklich in den Rumpf — dieselbe
+Sichtbarkeit, ohne die Nebenwirkung der Sperrklausel.
+
+Bemerkenswert ist nicht der Fehler, sondern wer ihn gefunden hat: ein
+bestehender Test aus EYT-49, der nichts mit dieser Änderung zu tun hat. Ohne
+ihn wäre die Lücke mit einem grünen Lauf gemergt worden.
+
+---
+
 ## 1. Ausgeführte Gegenmutationen
 
 Vier vom Prüfbericht geforderte Mutationen. Jede ist eingespielt, gemessen und

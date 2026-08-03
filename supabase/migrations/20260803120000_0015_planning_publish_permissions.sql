@@ -249,5 +249,84 @@ create policy plan_versions_update_in_org on public.plan_versions
 comment on table public.plan_versions is
   'Planversion je Organisation und ISO-Woche (EYT-86). published_at ist die autoritative Veroeffentlichungsmarke; assignments.published_at wird davon abgeleitet und atomar mitgesetzt (EYT-49). Ein UPDATE verlangt seit EYT-107 das Recht planning.publish, laeuft ausschliesslich ueber den Laufzeitkanal (app.is_runtime_channel), erreicht nur die Spalten published_at und published_by und darf published_by nur auf die aufrufende Identitaet setzen.';
 
+-- ---------------------------------------------------------------------------
+-- 4. Folgewirkung der neuen using-Klausel auf einen Trigger aus 0010
+-- ---------------------------------------------------------------------------
+-- Gemessen in CI-Lauf 30862744360 (db-gates), NICHT vorhergesehen:
+-- `0006_planning_invariants.sql` Test 18 („Eine veroeffentlichte Planversion
+-- nimmt keine weitere Zuweisung auf") wurde gruen-falsch — „caught: no
+-- exception".
+--
+-- Die Ursache ist eine PostgreSQL-Regel, die man kennen muss: ein
+-- `select ... for share` prueft NICHT nur die SELECT-Policies, sondern
+-- zusaetzlich die `using`-Klausel der UPDATE-Policy. Eine Sperrklausel gilt
+-- als Vorbereitung einer Aenderung.
+--
+-- `app.reject_assignment_in_published_plan()` aus 0010 liest die Elternzeile
+-- genau so — invoker, mit `for share`, und mit gutem Grund (ohne Sperre
+-- entschiede sie auf einem veralteten Snapshot; die Begruendung steht dort
+-- ausfuehrlich). Sobald `using` den Laufzeitkanal verlangt, findet dieses
+-- select aus JEDER anderen Sitzung nichts mehr — und der Zweig „nicht
+-- gefunden heisst fremder Mandant" laesst die Zuweisung durch.
+--
+-- Das waere eine NEUE Luecke gewesen, entstanden beim Schliessen einer alten:
+-- ueber die Data-API haette jedes Mitglied Zuweisungen in eine bereits
+-- veroeffentlichte Planversion einfuegen koennen.
+--
+-- Die Korrektur laesst die Sichtbarkeitsregel unveraendert und nimmt ihr nur
+-- die Nebenwirkung der Sperrklausel: `security definer` umgeht die Policies,
+-- und die Bedingung, die die SELECT-Policy formuliert hat
+-- (`org_id in (select app.user_org_ids())`), steht jetzt ausgeschrieben im
+-- Rumpf. `app.user_org_ids()` liest `request.jwt.claims` — eine
+-- Transaktionsvariable, kein Rollenrecht —, also gilt weiterhin der Mandant
+-- des AUFRUFERS und nicht der des Eigentuemers.
+--
+-- Dasselbe Definer-Muster wie `app.publish_plan_version_assignments()` aus
+-- 0010: parameterlos, Mandant aus NEW, kein vom Aufrufer benannter Mandant.
+--
+-- Regressionswaechter: `0006_planning_invariants.sql` Test 18 laeuft ueber
+-- `authenticated` und wird ohne diese Korrektur wieder gruen-falsch — er ist
+-- rot, wenn man `security definer` hier entfernt.
+create or replace function app.reject_assignment_in_published_plan()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_published_at timestamptz;
+begin
+  select pv.published_at
+    into v_published_at
+    from public.plan_versions pv
+   where pv.id = new.plan_version_id
+     and pv.org_id = new.org_id
+     -- Genau die Bedingung der SELECT-Policy aus 0007, hier ausgeschrieben,
+     -- weil `security definer` die Policy nicht mehr anwendet. Ohne sie
+     -- verriete die Fehlermeldung einem Fremden, dass eine Planversion
+     -- existiert und veroeffentlicht ist.
+     and pv.org_id in (select app.user_org_ids())
+     for share;
+
+  -- Nicht gefunden heisst: fremder Mandant oder Tippfehler. Diese Entscheidung
+  -- gehoert dem Fremdschluessel (23503), nicht dieser Regel.
+  if not found then
+    return new;
+  end if;
+
+  if v_published_at is not null then
+    raise exception 'Planversion % ist veroeffentlicht und nimmt keine Zuweisung mehr auf', new.plan_version_id
+      using errcode = '23514';
+  end if;
+  return new;
+end
+$$;
+
+comment on function app.reject_assignment_in_published_plan() is
+  'Verhindert Zuweisungen in eine bereits veroeffentlichte Planversion (EYT-49 AK4). Seit EYT-107 P1 security definer: `for share` wuerde sonst die using-Klausel der UPDATE-Policy mitpruefen und die Elternzeile ausserhalb des Laufzeitkanals unsichtbar machen. Die Mandantenbedingung der SELECT-Policy steht dafuer ausgeschrieben im Rumpf.';
+
+revoke all on function app.reject_assignment_in_published_plan() from public;
+grant execute on function app.reject_assignment_in_published_plan() to authenticated;
+
 comment on column public.plan_versions.published_at is
   'Autoritative Veroeffentlichungsmarke. Nur ueber den EasyTree-Publish-Command setzbar: die Update-Policy verlangt planning.publish UND app.is_runtime_channel(), das Spaltenrecht endet bei published_at/published_by. Ein direkter Data-API-Zugriff bewirkt nichts (P1 zu EYT-107, 04.08.2026).';

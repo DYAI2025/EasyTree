@@ -196,6 +196,14 @@ select throws_ok(
   'Eine veroeffentlichte Zuweisung laesst sich nicht nachtraeglich verschieben'
 );
 
+-- Dieser Fall traegt seit EYT-107 P1 eine zweite Last, und die ist nicht
+-- offensichtlich: er laeuft ueber `authenticated` in einer Sitzung, die NICHT
+-- der Laufzeitkanal ist. `app.reject_assignment_in_published_plan()` liest die
+-- Elternzeile mit `for share`, und PostgreSQL prueft bei einer Sperrklausel
+-- zusaetzlich die `using`-Klausel der UPDATE-Policy. Ohne `security definer`
+-- (0015) faende das select nichts, der Zweig „nicht gefunden" liesse die
+-- Zuweisung durch — und dieser Test waere gruen-falsch. Genau so ist er am
+-- 04.08.2026 in Lauf 30862744360 aufgefallen.
 select throws_ok(
   $$insert into public.assignments
       (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
