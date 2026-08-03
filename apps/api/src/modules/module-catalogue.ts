@@ -205,6 +205,16 @@ export const TABLE_OWNERSHIP: readonly TableOwnership[] = [
     note: "Transactional Outbox (0008). Zustellstrecke fehlt noch und hat kein Ticket (Sprintplan L-12).",
   },
   {
+    table: "public.idempotency_records",
+    owner: null,
+    tenantOwned: true,
+    note:
+      "Ergebnis idempotenter Schreibvorgaenge je Mandant, Vorgang und Schluessel (0012, EYT-92). " +
+      "Bewusst OHNE besitzendes Modul: die Spalte `operation` trennt die Schluesselraeume, und die Migration " +
+      "nennt 'planning.create_assignment' ausdruecklich nur als Beispiel. Plattformtabelle, kein Modulbestand — " +
+      "Module sprechen sie ueber den Adapter unter platform/idempotency an, nicht direkt (EYT-108).",
+  },
+  {
     // Heisst in Migration 0013 `employee_rate_versions`, nicht
     // `cost_rate_versions` wie ADR-003 §2 vorlaeufig notierte: der Name im ADR
     // stand fest, bevor es die Tabelle gab, und das Praefix `cost_` waere

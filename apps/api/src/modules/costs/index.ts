@@ -72,6 +72,14 @@ export type {
   RateWriteResult,
 } from "./application/rate-repository.port";
 
+export { RATE_SUCCESSION_PROBLEMS, pruefeAbloesung } from "./domain/rate-succession";
+export type {
+  RateSuccessionCommand,
+  RateSuccessionProblem,
+  RateSuccessionResult,
+  RateSuccessorRequest,
+} from "./domain/rate-succession";
+
 export {
   RATE_EFFECTIVITY_PROBLEMS,
   effectiveRateVersion,

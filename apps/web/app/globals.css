@@ -527,3 +527,27 @@ body {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+/*
+ * Sieben Spalten passen auf keinem Telefon nebeneinander. `.eyt-table` traegt
+ * selbst kein overflow, und ein waagerecht scrollender BODY ist auf einer
+ * mobile-first PWA ein Fehler — also scrollt die Tabelle in ihrem eigenen
+ * Container (EYT-108).
+ */
+.eyt-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/*
+ * Sichtbar, nicht versteckt: die Bildunterschrift erklaert die
+ * Unveraenderlichkeit auch denen, die die Tabelle sehen koennen. Ein
+ * `visually-hidden`-Caption haette nur Screenreader erreicht.
+ */
+.eyt-table__caption {
+  caption-side: top;
+  text-align: left;
+  padding-block-end: var(--eyt-space-2, 0.5rem);
+  color: var(--eyt-color-text-muted, #555);
+  font-size: 0.875rem;
+}

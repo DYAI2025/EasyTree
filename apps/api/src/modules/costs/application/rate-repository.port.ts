@@ -15,6 +15,17 @@ export const RATE_WRITE_PROBLEMS = [
   "RATE_INTERVAL_OVERLAP",
   "STALE_ACTIVE_VERSION",
   "EMPLOYEE_UNKNOWN",
+  // EYT-108 Option A+: die Abloesung eines offenen Vorgaengers. Jeder dieser
+  // Gruende braucht eine eigene HTTP-Abbildung in `problemFor` und einen
+  // eigenen URN in RATE_ERROR_TYPE — sonst wird daraus ein 500er statt eines
+  // RFC-7807-Dokuments.
+  "VORGAENGER_BEREITS_GESCHLOSSEN",
+  "NACHFOLGER_NICHT_SPAETER",
+  "FREMDER_MITARBEITER",
+  // EYT-108: derselbe Idempotenzschluessel fuer eine ANDERE Nutzlast. Kein
+  // Wiederholungsfall, sondern ein Aufruferfehler — und deshalb ein eigener
+  // Grund, nicht stillschweigend die alte Antwort.
+  "IDEMPOTENCY_KEY_REUSED",
 ] as const;
 export type RateWriteProblem = (typeof RATE_WRITE_PROBLEMS)[number];
 
@@ -40,6 +51,15 @@ export interface NewRateVersion {
   readonly reason: string;
   readonly expectedActiveVersionId: string | null;
   readonly correlationId: string;
+  /**
+   * Der vom Aufrufer gelieferte Wiederholungsschluessel.
+   *
+   * Der Vertrag deklariert `Idempotency-Key` fuer POST /kosten/stundensaetze
+   * als `required: true` — gemessen in `openapi/v1.json`. Bis EYT-108 las der
+   * Controller ihn nicht, und ein Retry nach abgerissener Verbindung legte
+   * eine ZWEITE Satzversion an.
+   */
+  readonly idempotencyKey: string;
 }
 
 export interface RateRepository {

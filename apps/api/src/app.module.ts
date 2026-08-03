@@ -50,6 +50,8 @@ import {
   PgEmployeeDirectory,
   type EmployeeDirectoryFactory,
 } from "./modules/workforce";
+import { IDEMPOTENCY_STORE, type IdempotencyStore } from "./platform/idempotency/idempotency-store";
+import { PgIdempotencyStore } from "./platform/idempotency/pg-idempotency-store";
 import { REQUEST_IDENTITY, RequestIdentityService } from "./platform/auth/request-identity";
 import { SESSION_LIVENESS, type SessionLiveness } from "./platform/auth/session-liveness";
 import { TOKEN_VERIFIER, type TokenVerifier } from "./platform/auth/token-verifier";
@@ -123,10 +125,22 @@ import {
       // Planungsrepository: ein Singleton truege die Identitaet der ERSTEN
       // Anfrage in alle folgenden.
       provide: RATE_REPOSITORY_FACTORY,
-      inject: [TENANT_QUERY_RUNNER],
-      useFactory: (runner: TenantQueryRunnerProvider): RateRepositoryFactory => {
-        return (subjectUserId: string) => new PgRateRepository(runner, subjectUserId);
+      inject: [TENANT_QUERY_RUNNER, IDEMPOTENCY_STORE],
+      useFactory: (
+        runner: TenantQueryRunnerProvider,
+        idempotenz: IdempotencyStore,
+      ): RateRepositoryFactory => {
+        return (subjectUserId: string) => new PgRateRepository(runner, subjectUserId, idempotenz);
       },
+    },
+    {
+      // Plattformdienst, kein Modulbestand: `public.idempotency_records`
+      // (0012) ist generisch entworfen und traegt im Besitzregister
+      // `owner: null`. Der Adapter ist zustandslos und darf deshalb ein
+      // Singleton sein — er haelt keine Verbindung, sondern bekommt die
+      // laufende Transaktion je Aufruf hereingereicht.
+      provide: IDEMPOTENCY_STORE,
+      useClass: PgIdempotencyStore,
     },
     {
       // `public.employees` gehoert dem Workforce-Modul; die Kostenroute
