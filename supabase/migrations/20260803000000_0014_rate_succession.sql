@@ -64,8 +64,7 @@ grant update (valid_to) on table public.employee_rate_versions to authenticated;
 create policy employee_rate_versions_close on public.employee_rate_versions
   for update to authenticated
   using (
-    valid_to is null
-    and org_id in (select app.user_org_ids())
+    org_id in (select app.user_org_ids())
     and app.has_cost_permission(org_id, 'costs.manage_rates')
   )
   with check (
