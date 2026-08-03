@@ -199,7 +199,7 @@ export class PgRateRepository implements RateRepository {
                     to_char(valid_to, 'YYYY-MM-DD') as valid_to
                from public.employee_rate_versions
               where id = $1 and employee_id = $2
-                for update`,
+`,
             [version.expectedActiveVersionId, version.employeeId],
           );
           const vorgaenger = vorhanden.rows[0];
