@@ -65,6 +65,55 @@ type SpeicherZustand =
   | { art: "eingabefehler"; text: string }
   | { art: "fehler"; grund: GatewayFailure };
 
+/**
+ * Der Status kommt vom SERVER, nicht aus einem zweiten Vergleich im Browser.
+ *
+ * Vorher entschied die Zeile `version.id === activeVersionId`. Der Controller
+ * setzt `activeVersionId` aber auch dann auf `null`, wenn kein Satz wirksam ODER
+ * die Lage mehrdeutig ist — eine Version, die der Server "aktiv" nennt, wurde
+ * dann als "abgelaufen" angezeigt. Zwei Wahrheiten ueber denselben Zustand, und
+ * die falsche stand in der Oberflaeche.
+ */
+const STATUS_TON = {
+  aktiv: "published",
+  kommend: "draft",
+  abgelaufen: "neutral",
+} as const;
+
+/**
+ * "ersetzt Version vom …" — der sichtbare Beleg der Vorgaengerkette.
+ *
+ * Zeigt das `validFrom` des Vorgaengers, nicht seine Id: eine UUID sagt einem
+ * Menschen nichts, das Startdatum benennt die abgeloeste Version eindeutig.
+ * Ist der Vorgaenger nicht in der geladenen Historie (Filter, Paginierung),
+ * wird das ehrlich gesagt statt eine Zeile leer zu lassen.
+ */
+function vorgaengerText(
+  predecessorId: string | null,
+  versionen: readonly { id: string; validFrom: string }[],
+): string {
+  if (predecessorId === null) return "—";
+  const vorgaenger = versionen.find((v) => v.id === predecessorId);
+  if (vorgaenger === undefined) return "ersetzt eine frühere Version";
+  return `ersetzt Version vom ${vorgaenger.validFrom}`;
+}
+
+/**
+ * Anzeige eines UTC-Instants in der Zone Europe/Berlin.
+ *
+ * Explizite `timeZone`, nie die des Browsers: der Rohwert ist ein Instant, und
+ * `no-local-time-construction` haelt fest, dass Zeit nur zur ANZEIGE in eine
+ * Zone gewandelt wird. Ohne Angabe saehe dieselbe Zeile je nach Geraet anders
+ * aus, und zwei Menschen stritten ueber denselben Datensatz.
+ */
+function alsZeitpunkt(instant: string): string {
+  return new Intl.DateTimeFormat("de-DE", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "Europe/Berlin",
+  }).format(new Date(instant));
+}
+
 export function RateManagement() {
   const gateway = useCostsGateway();
   const [mitarbeiter, setMitarbeiter] = useState<MitarbeiterZustand>({ art: "laedt" });
@@ -307,40 +356,46 @@ export function RateManagement() {
                 description="Für diese Person existiert noch keine Satzversion. Ohne Satz kann keine Kostenberechnung laufen — sie wird blockiert, nicht mit 0,00 € geraten."
               />
             ) : (
-              <table className="eyt-table" data-testid="satzhistorie">
-                <thead>
-                  <tr>
-                    <th scope="col">Status</th>
-                    <th scope="col">Betrag</th>
-                    <th scope="col">Gültig ab</th>
-                    <th scope="col">Gültig bis</th>
-                    <th scope="col">Grund</th>
-                    <th scope="col">Angelegt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {historie.historie.versions.map((version) => (
-                    <tr key={version.id}>
-                      <td>
-                        {version.id === historie.historie.activeVersionId ? (
-                          <StatusBadge tone="published">aktiv</StatusBadge>
-                        ) : version.status === "kommend" ? (
-                          <StatusBadge tone="draft">kommend</StatusBadge>
-                        ) : (
-                          <StatusBadge tone="neutral">abgelaufen</StatusBadge>
-                        )}
-                      </td>
-                      <td className="eyt-table__amount">
-                        {minorUnitsToEuro(version.amountMinorUnits)} €
-                      </td>
-                      <td>{version.validFrom}</td>
-                      <td>{version.validTo ?? "—"}</td>
-                      <td>{version.reason}</td>
-                      <td>{version.createdAt}</td>
+              <div className="eyt-table-scroll">
+                <table className="eyt-table" data-testid="satzhistorie">
+                  <caption className="eyt-table__caption">
+                    Satzversionen dieser Person, neueste zuerst. Versionen werden nie überschrieben
+                    — eine Änderung legt eine neue Version an und schließt die vorherige.
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Status</th>
+                      <th scope="col">Betrag</th>
+                      <th scope="col">Gültig ab</th>
+                      <th scope="col">Gültig bis</th>
+                      <th scope="col">Grund</th>
+                      <th scope="col">Ersetzt</th>
+                      <th scope="col">Angelegt</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {historie.historie.versions.map((version) => (
+                      <tr key={version.id} data-testid="satzversion" data-version-id={version.id}>
+                        <td>
+                          <StatusBadge tone={STATUS_TON[version.status]}>
+                            {version.status}
+                          </StatusBadge>
+                        </td>
+                        <td className="eyt-table__amount">
+                          {minorUnitsToEuro(version.amountMinorUnits)} €
+                        </td>
+                        <td>{version.validFrom}</td>
+                        <td data-testid="gueltig-bis">{version.validTo ?? "—"}</td>
+                        <td>{version.reason}</td>
+                        <td data-testid="ersetzt">
+                          {vorgaengerText(version.predecessorId, historie.historie.versions)}
+                        </td>
+                        <td>{alsZeitpunkt(version.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
         </>

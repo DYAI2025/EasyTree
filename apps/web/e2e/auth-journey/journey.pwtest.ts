@@ -70,6 +70,16 @@ const ERWARTETER_BETRAG = "42,50 €";
 /** Eine Organisation, in der der Reisende NICHT Mitglied ist. */
 const FREMDE_ORG = "00000000-0000-4000-8000-0000000000b2";
 
+/**
+ * Die Abloesung (EYT-108).
+ *
+ * Das Datum liegt bewusst NACH dem `valid_from` der Fixtur (2026-01-01) und
+ * ist fest, nicht relativ zu heute: ein relatives Datum liesse den Test je
+ * nach Laufzeitpunkt eine andere Aussage treffen.
+ */
+const ABLOESE_DATUM = "2026-09-01";
+const ABLOESE_GRUND = "Tariferhoehung der E2E-Reise";
+
 function pflicht(name: string): string {
   const wert = process.env[name];
   if (wert === undefined || wert === "") {
@@ -255,6 +265,66 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ pa
       fullPage: true,
     });
     schritte["9_historie"] = { betrag: ERWARTETER_BETRAG, zeilen: 1 };
+  });
+
+  await test.step("9a — eine neue Satzversion loest die offene ab (EYT-108)", async () => {
+    // Der Kern von EYT-108, ueber die ECHTE Oberflaeche: kein direkter
+    // Datenbankschreibzugriff, keine Fixtur, kein Repository-Stub. Was hier
+    // passiert, passiert genau so auch fuer einen Menschen.
+    const angelegt = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/kosten/stundensaetze" &&
+        r.request().method() === "POST",
+    );
+    await page.getByLabel("Betrag (EUR pro Stunde)").fill("48,00");
+    await page.getByLabel("Gültig ab").fill(ABLOESE_DATUM);
+    await page.getByLabel("Änderungsgrund").fill(ABLOESE_GRUND);
+    await page.getByRole("button", { name: "Neue Satzversion anlegen" }).click();
+    const antwort = await angelegt;
+    expect(antwort.status()).toBe(201);
+
+    const tabelle = page.getByTestId("satzhistorie");
+    // Jetzt ZWEI Versionen: der Vorgaenger ist geschlossen, der Nachfolger
+    // verweist sichtbar auf ihn.
+    await expect(tabelle.locator("tbody tr")).toHaveCount(2);
+    await expect(tabelle.getByText(`ersetzt Version vom 2026-01-01`)).toBeVisible();
+    await expect(tabelle.getByText("2026-01-01").first()).toBeVisible();
+    await expect(tabelle.getByText(ABLOESE_GRUND)).toBeVisible();
+
+    await page.screenshot({
+      path: join(ARTEFAKTE, "03-satzabloesung.png"),
+      fullPage: true,
+    });
+    schritte["9a_abloesung"] = { zeilen: 2, status: antwort.status() };
+  });
+
+  await test.step("9b — Reload und ein ZWEITER Browserkontext zeigen denselben Stand", async () => {
+    // Reload beweist Persistenz gegen den lokalen Komponentenzustand.
+    await page.reload();
+    await page.getByLabel("Mitarbeiter auswählen").selectOption({ label: MITARBEITER_NAME });
+    await expect(page.getByTestId("satzhistorie").locator("tbody tr")).toHaveCount(2);
+
+    // Der zweite Kontext hat eigene Cookies und einen eigenen Speicher. Er
+    // beweist, dass der Zustand im Server liegt und nicht im Browser des
+    // Bearbeiters — ein Reload allein koennte aus einem Cache kommen.
+    const zweiter = await page.context().browser()?.newContext();
+    if (zweiter === undefined) throw new Error("[auth-journey] kein zweiter Browserkontext.");
+    try {
+      const seite2 = await zweiter.newPage();
+      await seite2.goto("/anmelden");
+      await seite2.getByLabel("E-Mail").fill(email);
+      await seite2.getByLabel("Passwort").fill(passwort);
+      await seite2.getByRole("button", { name: "Anmelden" }).click();
+      await seite2.waitForURL((u) => !u.pathname.startsWith("/anmelden"));
+      await seite2.goto("/kosten/stundensaetze");
+      await seite2.getByLabel("Mitarbeiter auswählen").selectOption({ label: MITARBEITER_NAME });
+      const tabelle2 = seite2.getByTestId("satzhistorie");
+      await expect(tabelle2.locator("tbody tr")).toHaveCount(2);
+      await expect(tabelle2.getByText(ABLOESE_GRUND)).toBeVisible();
+      schritte["9b_zweiter_kontext"] = { zeilen: 2 };
+    } finally {
+      await zweiter.close();
+    }
   });
 
   await test.step("10 — ein fremder Organisationskontext wird abgelehnt", async () => {
