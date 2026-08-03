@@ -1,8 +1,27 @@
 # Provenance des Scope-Manifests `sprint-5-daily-cost-export`
 
 Stand: 03.08.2026 · gilt für `docs/scope/sprint-5-daily-cost-export.scope.json`
-mit dem Digest `82b442659f09…` (gebunden in
+mit dem Digest `41995f2cc2c5…` (gebunden in
 `.plumbline/scope-authority/sprint-5-daily-cost-export.json`).
+
+**Revision 2, Product-Owner-Bestätigung 03.08.2026.** Revision 1 (`82b4426`)
+wurde gebunden, bevor `pnpm format:fix` die Datei normalisierte — die gebundene
+Fassung war eine, die Prettier ablehnt, und damit unvereinbar mit dem
+Pflichtcheck `format`. Der Product Owner hat den Scope daraufhin ausdrücklich
+bestätigt, das Entwaffnen freigegeben und die hier beschriebene Endfassung
+autorisiert. Sie ist Prettier-sauber; derselbe Konflikt kann nicht wiederkehren.
+
+Zwei inhaltliche Änderungen gegenüber Revision 1:
+
+- `.gitignore` kommt in den erlaubten Scope, damit `.plumbline/` — der
+  Laufzustand des Guards selbst — ignoriert werden kann. Ohne das erschien er
+  als ungetrackte Datei in der Prüfoberfläche und erzeugte einen
+  Hygiene-Befund.
+- `generated_artifacts` **entfällt ersatzlos.** Die Deklaration nannte
+  `producer: packages/contracts/src/**`, was nicht im erlaubten Scope liegt —
+  der `provenance`-Gate meldete zu Recht `PRODUCER_OUT_OF_SCOPE`. EYT-107
+  ändert weder `openapi/v1.json` noch dessen Produzenten; die Deklaration war
+  eine unnötige Zutat und keine Zusicherung, die jemand braucht.
 
 ## Warum diese Begründungen NICHT im Manifest stehen
 
@@ -34,7 +53,7 @@ ich nur die EYT-107-Pfade aufgeführt, wäre die bereits gemergte Sprint-5-Arbei
 — Kostenmodul, Auth-Slice, Stundensätze — schlagartig zur Scope-Verletzung
 geworden.
 
-**7 Einträge sind neu.** Jeder einzeln begründet:
+**8 Einträge sind neu.** Jeder einzeln begründet:
 
 | Pfad                                              | Quelle                                                                                                      | Warum EYT-107 ihn braucht                                                                                                                                               |
 | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -45,6 +64,7 @@ geworden.
 | `apps/web/app/planung/**`                         | Jira EYT-107 AK7; Confluence 8814623 (Publish-Aktion im Kopfbereich, Zustandsliste §4)                      | Planungsroute und ihr Zugangswächter.                                                                                                                                   |
 | `docs/reviews/**`                                 | Product-Owner-Entscheidung 03.08.2026 („ausgeführte und nicht ausgeführte Gegenmutationen getrennt halten") | Gegenmutationsprotokoll zu EYT-107. Enthält zusätzlich einen bereits auf `origin/master` liegenden EYT-133-Bericht.                                                     |
 | `apps/api/src/platform/idempotency/**`            | PR #45 / EYT-108, bereits auf `origin/master`                                                               | **Nur als benutzte Abhängigkeit.** Der Publish-Pfad verwendet den vorhandenen Plattformport, statt eine zweite Idempotenz zu bauen. EYT-107 ändert diese Dateien nicht. |
+| `.gitignore`                                      | Product-Owner-Bestätigung 03.08.2026; PRIL-Hygiene-Befund `class=unignored pattern=.plumbline/`             | Ausschließlich, um `.plumbline/` zu ignorieren — den Laufzustand des Guards. Keine weitere Nutzung vorgesehen.                                                          |
 
 ## Klassifikation der ursprünglichen zehn PRIL-Befunde
 

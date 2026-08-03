@@ -73,15 +73,8 @@
     "apps/api/src/modules/planning/index.ts",
     "apps/web/app/planung/**",
     "docs/reviews/**",
-    "apps/api/src/platform/idempotency/**"
+    "apps/api/src/platform/idempotency/**",
+    ".gitignore"
   ],
-  "governance_paths": ["docs/scope/**"],
-  "generated_artifacts": [
-    {
-      "path": "packages/contracts/openapi/v1.json",
-      "producer": "packages/contracts/src/**",
-      "command": "pnpm --filter @easytree/contracts run openapi:write",
-      "deterministic": true
-    }
-  ]
+  "governance_paths": ["docs/scope/**"]
 }
