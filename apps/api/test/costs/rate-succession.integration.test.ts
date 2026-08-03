@@ -68,6 +68,7 @@ const EMPLOYEE_BETA = "00000000-0000-4000-8000-0000004020b2";
  */
 const EMPLOYEE_KONFLIKT = "00000000-0000-4000-8000-00000040e801";
 const EMPLOYEE_MANDANT = "00000000-0000-4000-8000-00000040e802";
+const EMPLOYEE_ROLLBACK = "00000000-0000-4000-8000-00000040e803";
 
 /**
  * Aufraeummarke.
@@ -153,7 +154,7 @@ beforeAll(async () => {
   await aufraeumen();
   // Eigene Personen fuer die Faelle 3 und 4, damit keine offene Version des
   // vorigen Falls in ihr Intervall ragt.
-  for (const id of [EMPLOYEE_KONFLIKT, EMPLOYEE_MANDANT]) {
+  for (const id of [EMPLOYEE_KONFLIKT, EMPLOYEE_MANDANT, EMPLOYEE_ROLLBACK]) {
     await admin.query(
       `insert into public.employees (id, org_id, user_id, display_name, active)
        values ($1::uuid, $2::uuid, null, $3, true)
@@ -243,6 +244,55 @@ describe("Abloesung unter echter Nebenlaeufigkeit (EYT-108)", () => {
     expect(zustand.rows[0]?.valid_to).toBe("2030-07-01");
     expect(zustand.rows[1]?.valid_to).toBeNull();
     expect(zustand.rows[1]?.predecessor_id).toBe(vorgaengerId);
+  });
+});
+
+describe("Ein Fehler nach dem Schliessen rollt alles zurueck (EYT-108)", () => {
+  dbIt("scheitert der Nachfolger, bleibt der Vorgaenger offen", async () => {
+    const vorgaengerId = await offenerVorgaenger(
+      ORG_ALPHA,
+      EMPLOYEE_ROLLBACK,
+      USER_A,
+      "2034-01-01",
+    );
+
+    // Der Nachfolger verletzt `check (amount_minor_units >= 0)` — also ERST
+    // NACHDEM der Vorgaenger geschlossen wurde. Genau hier entstuende eine
+    // halb abgeloeste Kette, wenn die Transaktion nicht zurueckrollte: ein
+    // geschlossener Satz ohne Nachfolger, und ab dem Endtag gaebe es fuer
+    // diese Person gar keinen wirksamen Stundensatz mehr.
+    const ergebnis = repositoryFuer(runnerA, USER_A).append({
+      organisationId: ORG_ALPHA,
+      employeeId: EMPLOYEE_ROLLBACK,
+      amountMinorUnits: "-1",
+      validFrom: "2034-07-01",
+      validTo: null,
+      reason: `${MARKE}-rollback`,
+      expectedActiveVersionId: vorgaengerId,
+      correlationId: "korr-rollback",
+      idempotencyKey: `${MARKE}-rollback-key`,
+    });
+    await expect(ergebnis).rejects.toThrow();
+
+    const nachher = await admin.query<{ valid_to: string | null; n: string }>(
+      `select to_char(valid_to,'YYYY-MM-DD') as valid_to,
+              (select count(*)::text from public.employee_rate_versions
+                where employee_id = $1) as n
+         from public.employee_rate_versions where id = $2`,
+      [EMPLOYEE_ROLLBACK, vorgaengerId],
+    );
+    // Der Vorgaenger ist WEITERHIN offen und steht allein da.
+    expect(nachher.rows[0]?.valid_to).toBeNull();
+    expect(nachher.rows[0]?.n).toBe("1");
+
+    // Und die Idempotenzauskunft wurde NICHT geschrieben: der Schluessel ist
+    // wieder frei. Waere sie da, meldete ein Retry "schon erledigt" fuer
+    // etwas, das nie passiert ist.
+    const auskunft = await admin.query<{ n: string }>(
+      `select count(*)::text as n from public.idempotency_records where idempotency_key = $1`,
+      [`${MARKE}-rollback-key`],
+    );
+    expect(auskunft.rows[0]?.n).toBe("0");
   });
 });
 
