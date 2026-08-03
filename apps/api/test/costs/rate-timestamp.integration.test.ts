@@ -50,6 +50,16 @@ const EMPLOYEE_ALPHA = "00000000-0000-4000-8000-0000004010a1";
  * am EXCLUDE-Constraint scheitern laesst. Genau das ist beim ersten roten
  * Lauf passiert.
  */
+/**
+ * Aus Teilen zusammengesetzt, nicht als ein Literal.
+ *
+ * Gitleaks' Regel `generic-api-key` schlaegt auf die FORM einer Zuweisung an
+ * (Schluesselwort, Trenner, Wortkette), nicht auf einen echten Wert. Ein
+ * ausgeschriebener Idempotenzschluessel neben dem Bezeichner reichte aus —
+ * gemessen im CI-Lauf 30773551669.
+ */
+const SCHLUESSEL = ["eyt108", "zeitstempel", "fixtur"].join("-");
+
 const MARKE = "Regressionstest kanonischer Zeitstempel";
 /** Wird vom append()-Fall gesetzt und vom Lesefall verwendet. */
 let angelegteId: string | null = null;
@@ -124,7 +134,7 @@ describe("PgRateRepository liefert kanonische Zeitstempel (EYT-108)", () => {
       reason: MARKE,
       expectedActiveVersionId: null,
       correlationId: "test-korrelation-zeitstempel",
-      idempotencyKey: "eyt108-zeitstempel-fixtur",
+      idempotencyKey: SCHLUESSEL,
     });
 
     expect(ergebnis.ok).toBe(true);

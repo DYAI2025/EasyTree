@@ -59,6 +59,17 @@ const USER_B = "00000000-0000-4000-8000-00000000bbb2";
 const EMPLOYEE_BETA = "00000000-0000-4000-8000-0000004020b2";
 
 /**
+ * Eigene Mitarbeiter je Fall — der Seed hat in Alpha nur zwei.
+ *
+ * Gemessen im CI-Lauf 30773551669: die Faelle teilten sich eine Person, und
+ * die OFFENE Version des vorigen Falls ueberlappte mit der naechsten. Beide
+ * scheiterten am EXCLUDE — also am Aufraeumen, nicht an der Aussage, die sie
+ * treffen sollten. Ein Test, der aus dem falschen Grund rot ist, misst nichts.
+ */
+const EMPLOYEE_KONFLIKT = "00000000-0000-4000-8000-00000040e801";
+const EMPLOYEE_MANDANT = "00000000-0000-4000-8000-00000040e802";
+
+/**
  * Aufraeummarke.
  *
  * Alles, was diese Suite committet, traegt sie im Feld `reason`. Ein
@@ -84,9 +95,12 @@ function dbIt(name: string, fn: () => Promise<void>): void {
 }
 
 async function aufraeumen(): Promise<void> {
+  // Reihenfolge nach Fremdschluesseln: employee_rate_versions verweist mit
+  // `on delete restrict` auf employees. Andersherum bliebe die Person stehen.
   await admin.query("delete from public.employee_rate_versions where reason like $1", [
     `${MARKE}%`,
   ]);
+  await admin.query("delete from public.employees where display_name like $1", [`${MARKE}%`]);
   await admin.query("delete from public.idempotency_records where idempotency_key like $1", [
     `${MARKE}%`,
   ]);
@@ -137,6 +151,16 @@ beforeAll(async () => {
     USER_B,
   ]);
   await aufraeumen();
+  // Eigene Personen fuer die Faelle 3 und 4, damit keine offene Version des
+  // vorigen Falls in ihr Intervall ragt.
+  for (const id of [EMPLOYEE_KONFLIKT, EMPLOYEE_MANDANT]) {
+    await admin.query(
+      `insert into public.employees (id, org_id, user_id, display_name, active)
+       values ($1::uuid, $2::uuid, null, $3, true)
+       on conflict (id) do nothing`,
+      [id, ORG_ALPHA, `${MARKE}-person`],
+    );
+  }
 
   runnerA = PgTenantQueryRunner.fromConnection({ databaseUrl: DB_URL, sslRootCert: undefined });
   runnerB = PgTenantQueryRunner.fromConnection({ databaseUrl: DB_URL, sslRootCert: undefined });
@@ -260,7 +284,7 @@ describe("Wiederholung liefert dasselbe Ergebnis (EYT-108)", () => {
     const repository = repositoryFuer(runnerA, USER_A);
     const basis = {
       organisationId: ORG_ALPHA,
-      employeeId: EMPLOYEE_ALPHA_2,
+      employeeId: EMPLOYEE_KONFLIKT,
       amountMinorUnits: "5000",
       validFrom: "2032-01-01",
       validTo: null,
@@ -289,7 +313,7 @@ describe("Wiederholung liefert dasselbe Ergebnis (EYT-108)", () => {
     const gemeinsamerSchluessel = `${MARKE}-mandant-key`;
     const alpha = await repositoryFuer(runnerA, USER_A).append({
       organisationId: ORG_ALPHA,
-      employeeId: EMPLOYEE_ALPHA_2,
+      employeeId: EMPLOYEE_MANDANT,
       amountMinorUnits: "6000",
       validFrom: "2033-01-01",
       validTo: null,

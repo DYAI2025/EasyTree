@@ -40,3 +40,10 @@
 # synthetic test fixture, current source cleaned
 2ce4fa543819e863019846a773b99d6a97692541:apps/api/test/costs/cost-access-audit.test.ts:generic-api-key:98
 2ce4fa543819e863019846a773b99d6a97692541:apps/api/test/costs/cost-access-audit.test.ts:generic-api-key:99
+
+# Fund 3 — SYNTHETIC_TEST_FIXTURE: erfundener Idempotenzschluessel in einer
+# Testfixtur (EYT-108). Nie ein Geheimnis; die Regel `generic-api-key` traf
+# die FORM der Zuweisung, nicht den Wert. Aktueller Quelltext bereinigt
+# (Wert aus Teilen zusammengesetzt).
+# synthetic test fixture, current source cleaned
+554b57754aee29aa93ee7d51615747195d7b4767:apps/api/test/costs/rate-timestamp.integration.test.ts:generic-api-key:127
