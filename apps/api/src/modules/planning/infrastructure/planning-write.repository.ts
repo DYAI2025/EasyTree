@@ -819,12 +819,23 @@ export class PlanningWriteRepository implements PlanningWrites {
         if (veroeffentlicht === undefined) {
           // Null betroffene Zeilen heisst hier NICHT „schon veroeffentlicht" —
           // das haette Schritt 4 gesehen. Es heisst: die RLS-Policy hat die
-          // Zeile aus dem Update herausgefiltert, weil die Datenbank das Recht
-          // `planning.publish` nicht sieht. Genau dieser Fall tritt ein, wenn
-          // die Anwendungs-Policy und die Datenbank auseinanderlaufen — er
-          // gehoert laut gemeldet und nicht als Erfolg beantwortet.
+          // Zeile aus dem Update herausgefiltert. Zwei Ursachen kommen in
+          // Frage, und beide gehoeren laut gemeldet statt als Erfolg
+          // beantwortet:
+          //
+          //   * die Datenbank sieht das Recht `planning.publish` nicht — dann
+          //     laufen Anwendungs-Policy und Datenbank auseinander;
+          //   * die Verbindung ist nicht der Laufzeitkanal, also
+          //     `session_user <> 'easytree_app'` (P1 zu EYT-107). Das tritt
+          //     ein, wenn die Anwendung ueber eine andere Loginrolle verbunden
+          //     ist — etwa ueber den Supavisor-Transaktionspooler, wo
+          //     `session_user` `postgres.<tenant>` lautet.
+          //
+          // Beide sind Betriebsfehler, keine fachlichen Ablehnungen. Deshalb
+          // eine Ausnahme und kein `GatewayResult`: ein FORBIDDEN waere hier
+          // eine Luege gegenueber einer Person, die das Recht sehr wohl hat.
           throw new Error(
-            "EYT-107: Veroeffentlichen betraf keine Zeile. Die Datenbank verweigert das Recht planning.publish (Migration 0015).",
+            "EYT-107: Veroeffentlichen betraf keine Zeile. Die Datenbank verweigert entweder das Recht planning.publish oder den Laufzeitkanal (Migration 0015: app.is_runtime_channel).",
           );
         }
 

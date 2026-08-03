@@ -134,6 +134,35 @@ Schaltet man die Anwendungs-Policy auf „immer erlaubt", lehnt PostgreSQL
 weiterhin ab; das `update` betrifft dann null Zeilen, und das Repository meldet
 das laut, statt einen Erfolg zu erfinden.
 
+### Das Recht allein genügt nicht — der Kanal auch (P1, 04.08.2026)
+
+Die unabhängige Finalprüfung von PR #52 fand eine Lücke: das Recht zu prüfen
+reicht nicht, solange `authenticated` die Tabelle direkt beschreiben darf.
+`supabase/config.toml` stellt das Schema `public` als **Data-API** bereit, also
+ist `plan_versions` über `PATCH /rest/v1/plan_versions` erreichbar. Eine
+Managerin konnte damit `published_at` setzen — am Command vorbei, und damit
+ohne Wochenzuordnungsprüfung, ohne benannte Konflikte, ohne Idempotenz, ohne
+Audit und ohne Outbox. Der Sync-Trigger aus 0010 hätte die Zuweisungen
+mitgestempelt.
+
+Migration 0015 zieht deshalb zwei zusätzliche Grenzen:
+
+- **Kanal.** `app.is_runtime_channel()` vergleicht `session_user` mit
+  `easytree_app`. API und Worker melden sich als diese Rolle an und setzen
+  danach `set local role authenticated`; `session_user` bleibt dabei
+  `easytree_app`. PostgREST meldet sich als `authenticator` an und ist **kein**
+  Mitglied von `easytree_app` (gemessen 04.08.2026). Die Bedingung steht in
+  `using` **und** in `with check`.
+- **Spalten.** `revoke update on plan_versions from authenticated`, danach
+  `grant update (published_at, published_by)`. `org_id`, `week_key` und
+  `created_at` sind über das Publish-Recht nicht mehr erreichbar — dieselbe
+  Bauart, die `assignments` seit 0010 schützt.
+
+Was diese Grenze **nicht** deckt: `service_role` und `postgres` tragen
+`BYPASSRLS` und umgehen jede Policy, auf jeder Tabelle. Das ist eine
+Plattformeigenschaft, keine Regression — und der Grund, warum CLAUDE.md
+Service-Role-Pfade in der Anwendung verbietet.
+
 ---
 
 ## 5. Betrieb
@@ -154,6 +183,32 @@ Planversion schlägt ein Löschen der Organisation fehl — das ist gewollt.
 
 **Kein Zustellprozess.** Die Outbox wird gefüllt, nicht gelesen. Das ist
 bestehender Stand und keine Regression von EYT-107.
+
+### ⚠️ Die Login-Rolle ist Teil der Sicherheitsgrenze
+
+Seit dem P1-Fix veröffentlicht **nur** eine Verbindung, deren `session_user`
+`easytree_app` lautet. Das betrifft den Betrieb an drei Stellen:
+
+| Situation                                                           | `session_user`             | Publish                                               |
+| ------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------- |
+| Railway → direkter Supabase-Host, `DATABASE_URL` als `easytree_app` | `easytree_app`             | ja                                                    |
+| Supavisor-Transaktionspooler                                        | `postgres.<pooler-tenant>` | **nein**                                              |
+| Notfallzugriff als `postgres`                                       | `postgres`                 | nein (RLS wird aber ohnehin per `BYPASSRLS` umgangen) |
+
+Ein Wechsel auf den Pooler bricht das Veröffentlichen also — **laut**, nicht
+still: `planning-write.repository.ts` wirft bei null betroffenen Zeilen eine
+benannte Ausnahme statt Erfolg zu melden. Die Fehlermeldung nennt beide
+möglichen Ursachen (fehlendes Recht oder falscher Kanal).
+
+Wer den Kanal ändern muss, ändert `app.is_runtime_channel()` in einer neuen
+Vorwärtsmigration — nicht die Policy, und schon gar nicht durch Entfernen der
+Bedingung.
+
+Zum Nachmessen, mit der Verbindungszeichenkette der Laufzeit:
+
+```sql
+select session_user, current_user, app.is_runtime_channel();
+```
 
 ---
 
@@ -203,4 +258,21 @@ der Command dort erstmals entsteht.
 ersetzt `REQUEST_IDENTITY`. Der Identitätsnachweis ist allein `auth-journey`
 gegen `dist/main.js`.
 
-Ausgeführte Gegenmutationen: `docs/reviews/2026-08-03-eyt-107-gegenmutationen.md`.
+### Die drei Ebenen des P1-Nachweises
+
+Keine ersetzt eine andere, und jede sagt genau eine Sache:
+
+| Datei                                                | Sitzung                          | Aussage                                                                                                                        |
+| ---------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `supabase/tests/0011_planning_publish.sql`           | `postgres` + `authenticated`     | Eine Sitzung, deren Loginrolle nicht `easytree_app` ist, bewirkt nichts — auch mit `planning.publish`. Dazu die Spaltengrenze. |
+| `apps/api/test/planning-publish.integration.test.ts` | `easytree_app` + `authenticated` | Der echte Serverpfad funktioniert weiterhin, und `with check` lehnt eine fremde Urheberangabe ab.                              |
+| `apps/web/e2e/auth-journey/journey.pwtest.ts`        | `authenticator` (PostgREST)      | Der ECHTE Angriffskanal: echtes GoTrue-Token, echte Data-API, `PATCH /rest/v1/plan_versions` — null geänderte Zeilen.          |
+
+pgTAP kann die dritte Aussage nicht treffen: `SET SESSION AUTHORIZATION`
+verlangt einen Superuser, und `postgres` ist in Supabase keiner. Deshalb misst
+dort nur `auth-journey`.
+
+Ausgeführte Gegenmutationen:
+`docs/reviews/2026-08-03-eyt-107-gegenmutationen.md` (Command-Pfad) und
+`docs/reviews/2026-08-04-eyt-107-p1-gegenmutationen.md` (Kanal- und
+Spaltengrenze).
