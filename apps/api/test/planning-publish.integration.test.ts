@@ -755,19 +755,36 @@ describe("publishPlan gegen echtes PostgreSQL", () => {
 
   dbIt("laeuft ueber die echte Laufzeit-Loginrolle, nicht ueber postgres", async () => {
     const client = await neueVerbindung();
-    // Gemessen statt angenommen. Ohne diese Zeile koennte die Suite eines
-    // Tages still wieder als `postgres` laufen, und JEDER folgende Nachweis
-    // ueber die Kanalgrenze waere wertlos, ohne rot zu werden.
-    const wer = await client.query<{ session_user: string; runtime: boolean }>(
-      "select session_user, app.is_runtime_channel() as runtime",
+
+    // Die Sonde laeuft INNERHALB des Runners, nicht daneben — und das ist
+    // keine Formalie: `easytree_app` ist NOINHERIT (Migration 0003) und hat
+    // vor `set local role authenticated` nicht einmal Zugriff auf das Schema
+    // `app`. Eine erste Fassung fragte direkt auf der Verbindung und scheiterte
+    // mit „permission denied for schema app" (gemessen in db-gates 04.08.2026,
+    // Lauf 30863219624). Der Fehlschlag war korrekt: er hat das Fail-closed
+    // von 0003 vorgefuehrt.
+    //
+    // Innerhalb des Runners ist die Aussage ausserdem staerker. Genau hier
+    // gilt `current_user = authenticated` UND `session_user = easytree_app` —
+    // der Rollenwechsel aendert die Loginrolle nicht, und darauf beruht die
+    // ganze Kanalgrenze.
+    const wer = await runnerAuf(client).run({ userId: USER_A }, (tx) =>
+      tx.query<{ session_user: string; current_user: string; runtime: boolean }>(
+        "select session_user, current_user, app.is_runtime_channel() as runtime",
+      ),
     );
+    const zeile = wer.rows[0];
     process.stdout.write(
-      `[planning-publish] session_user=${wer.rows[0]?.session_user ?? "?"} runtime_channel=${String(
-        wer.rows[0]?.runtime ?? false,
+      `[planning-publish] session_user=${zeile?.session_user ?? "?"} runtime_channel=${String(
+        zeile?.runtime ?? false,
       )}\n`,
     );
-    expect(wer.rows[0]?.session_user).toBe(LAUFZEITROLLE);
-    expect(wer.rows[0]?.runtime).toBe(true);
+    // Ohne diese drei Zeilen koennte die Suite eines Tages still wieder als
+    // `postgres` laufen, und JEDER Nachweis ueber die Kanalgrenze waere
+    // wertlos, ohne rot zu werden.
+    expect(zeile?.session_user).toBe(LAUFZEITROLLE);
+    expect(zeile?.current_user).toBe("authenticated");
+    expect(zeile?.runtime).toBe(true);
   });
 
   dbIt("lehnt eine fremde Urheberangabe ab — with check auf dem neuen Stand", async () => {
