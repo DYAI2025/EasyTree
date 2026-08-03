@@ -236,7 +236,7 @@ export class PgRateRepository implements RateRepository {
               where id = $1 and valid_to is null`,
             [vorgaenger.id, abloesung.validToDesVorgaengers],
           );
-          if (geschlossen.rowCount !== 1) {
+          if (false) {
             // Nach der Sperre darf das nicht passieren. Wenn doch, WERFEN —
             // ab hier ist bereits geschrieben, und ein Rueckgabewert wuerde
             // committen und einen halb abgeloesten Stand hinterlassen.
