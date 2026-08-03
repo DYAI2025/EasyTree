@@ -37,14 +37,21 @@ const UNIQUE_VIOLATION = "23505";
 /** Stabiler Vorgangsname im Schluesselraum der Kosten-Idempotenz. */
 const VORGANG = "costs.create_rate_version";
 
-const SATZ_SPALTEN = `select id, employee_id, amount_minor_units::text as amount_minor_units, currency,
+/**
+ * Die Projektion einer Satzversion — EINMAL, ohne fuehrendes Schluesselwort.
+ *
+ * `select` und `returning` setzen es selbst davor. Eine frueher hier stehende
+ * Ableitung `SATZ_SPALTEN.replace(/^select /, "")` war bruechig: sie setzte
+ * exakte Schreibweise und kein fuehrendes Leerzeichen voraus, und eine
+ * spaetere Umformatierung haette den Praefix stehen lassen — `returning select
+ * id, …` waere ein Syntaxfehler, den erst die Datenbank findet.
+ */
+const SATZ_SPALTEN = `id, employee_id, amount_minor_units::text as amount_minor_units, currency,
                 to_char(valid_from, 'YYYY-MM-DD') as valid_from,
                 to_char(valid_to, 'YYYY-MM-DD') as valid_to,
                 predecessor_id, reason,
                 to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
                 created_by`;
-
-const SATZ_SPALTEN_RETURNING = SATZ_SPALTEN.replace(/^select /, "");
 
 type Ausgang =
   | { readonly art: "ok"; readonly zeile: RateRow }
@@ -164,7 +171,7 @@ export class PgRateRepository implements RateRepository {
             return { art: "problem", problem: "IDEMPOTENCY_KEY_REUSED" };
           }
           const wieder = await tx.query<RateRow>(
-            `${SATZ_SPALTEN} from public.employee_rate_versions where id = $1`,
+            `select ${SATZ_SPALTEN} from public.employee_rate_versions where id = $1`,
             [bekannt.subjectId],
           );
           const zeile = wieder.rows[0];
@@ -252,7 +259,7 @@ export class PgRateRepository implements RateRepository {
               valid_from, valid_to, predecessor_id, reason, created_by, correlation_id)
            values ($1::uuid, $2::uuid, $3::bigint, 'EUR',
                    $4::date, $5::date, $6::uuid, $7, app.current_user_id(), $8)
-           returning ${SATZ_SPALTEN_RETURNING}`,
+           returning ${SATZ_SPALTEN}`,
           [
             version.organisationId,
             version.employeeId,

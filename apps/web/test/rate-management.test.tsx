@@ -137,6 +137,20 @@ describe("Satzhistorie macht die Abloesung sichtbar (EYT-108)", () => {
     expect(screen.getByText("42,00 €")).toBeTruthy();
   });
 
+  it("sagt es ehrlich, wenn der Vorgaenger nicht in der geladenen Historie liegt", async () => {
+    // V_AKTIV verweist auf V_ALT — das aber NICHT mitgeladen wird. Ohne diesen
+    // Fall waere der Fallbackzweig ungetestet, und eine leere Zelle saehe aus
+    // wie "ersetzt nichts". Genau diese Verwechslung soll die Spalte
+    // verhindern.
+    await zeigeHistorie({
+      employeeId: MITARBEITER,
+      activeVersionId: V_AKTIV.id,
+      versions: [V_AKTIV],
+    });
+    const ersetzt = screen.getAllByTestId("ersetzt").map((z) => z.textContent);
+    expect(ersetzt).toEqual(["ersetzt eine frühere Version"]);
+  });
+
   it("nimmt den Status vom Server, nicht aus einem eigenen Vergleich", async () => {
     // `activeVersionId: null` bei einer Version, die der Server "aktiv" nennt:
     // genau der Fall, in dem der Controller wegen Mehrdeutigkeit keine aktive
