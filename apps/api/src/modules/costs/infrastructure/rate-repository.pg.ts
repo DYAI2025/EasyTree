@@ -224,7 +224,7 @@ export class PgRateRepository implements RateRepository {
               createdBy: "",
             },
             nachfolger: { employeeId: version.employeeId, validFrom: version.validFrom },
-            expectedActiveVersionId: version.expectedActiveVersionId,
+            expectedActiveVersionId: vorgaenger.id,
           });
           if (!abloesung.ok) return { art: "problem", problem: abloesung.problem };
 
