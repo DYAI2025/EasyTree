@@ -1,4 +1,4 @@
--- pgTAP: Veroeffentlichungsrecht und die DB-Haelfte des Publish-Pfads (EYT-107).
+-- pgTAP: Veroeffentlichungsrecht, Kanalgrenze und Spaltengrenze (EYT-107).
 --
 -- ---------------------------------------------------------------------------
 -- Was hier bewiesen wird, und warum ausgerechnet auf DB-Ebene
@@ -6,53 +6,64 @@
 -- Die Unabhaengigkeitszusage: Anwendung UND Datenbank lehnen getrennt ab.
 -- Diese Datei prueft ausschliesslich die Datenbankhaelfte. Selbst wenn
 -- `MembershipPlanningAccessPolicy` eines Tages jede Anfrage durchwinkt, darf
--- hier niemand ohne `planning.publish` eine Planversion veroeffentlichen.
+-- hier niemand ohne `planning.publish` eine Planversion veroeffentlichen — und
+-- niemand ausserhalb des Laufzeitkanals ueberhaupt.
 --
--- Fuenf Aussagen, die ohne echtes PostgreSQL nicht pruefbar sind:
---   1. Die Rollenmatrix aus der PO-Entscheidung steht so in der Datenbank,
---      und `member` traegt NICHTS.
---   2. `planning.write` impliziert `planning.publish` NICHT — das ist der
---      ganze Zweck des dritten Rechts, und ohne Test waere es eine Behauptung.
---   3. Ohne `planning.publish` setzt kein UPDATE `published_at` (0 Zeilen
---      betroffen — RLS liefert hier keinen Fehler, sondern Wirkungslosigkeit;
---      genau deshalb wird die WIRKUNG geprueft und nicht nur der Rueckgabewert).
---   4. Mit dem Recht funktioniert es, und der Trigger aus 0010 stempelt die
---      Zuweisungen in derselben Transaktion mit.
---   5. Ein fremdes `published_by` wird abgelehnt (Urheberzusage).
+-- ---------------------------------------------------------------------------
+-- Der P1-Befund vom 04.08.2026 — warum der Positivfall hier verschwunden ist
+-- ---------------------------------------------------------------------------
+-- Eine fruehere Fassung dieser Datei enthielt an genau dieser Stelle einen
+-- `lives_ok` auf
+--
+--     update public.plan_versions set published_at = now(), published_by = ...
+--
+-- und nannte ihn „die Managerin veroeffentlicht die Planversion ihrer
+-- Organisation". Der Test war gruen und beschrieb einen BYPASS: PostgREST
+-- stellt `public` als Data-API bereit (supabase/config.toml), und `authenticated`
+-- besass aus Migration 0007 ein Tabellen-UPDATE ohne Spaltenbegrenzung. Jede
+-- Managerin konnte damit ueber `PATCH /rest/v1/plan_versions` veroeffentlichen,
+-- ohne Wochenzuordnungspruefung, ohne benannte Konfliktpruefung, ohne
+-- Idempotenzdatensatz, ohne Audit und ohne Outbox.
+--
+-- Der Fall ist deshalb nicht geloescht, sondern UMGEDREHT: dieselbe Anweisung
+-- steht weiterhin da, ihre Erwartung ist jetzt Wirkungslosigkeit.
+--
+-- ---------------------------------------------------------------------------
+-- Was diese Datei NICHT beweisen kann (und wo es bewiesen wird)
+-- ---------------------------------------------------------------------------
+-- `session_user` laesst sich hier nicht wechseln: `SET SESSION AUTHORIZATION`
+-- verlangt, dass der urspruengliche Sitzungsbenutzer Superuser war, und
+-- `postgres` ist das in Supabase nicht (gemessen 04.08.2026: rolsuper=false,
+-- rolbypassrls=true). Die Sitzung dieser Datei ist also `postgres`, nicht
+-- `authenticator`.
+--
+-- Bewiesen wird hier folglich: „eine Sitzung, deren Loginrolle nicht
+-- easytree_app ist, bewirkt nichts". Dass die PostgREST-Sitzung genau so eine
+-- ist, misst `apps/web/e2e/auth-journey/journey.pwtest.ts` gegen die echte
+-- Data-API — und dass der Serverpfad weiterhin funktioniert, misst
+-- `apps/api/test/planning-publish.integration.test.ts` gegen eine echte
+-- `easytree_app`-Verbindung. Drei Ebenen, drei Aussagen; keine ersetzt eine
+-- andere.
 --
 -- ---------------------------------------------------------------------------
 -- Woher die Testidentitaet kommt
 -- ---------------------------------------------------------------------------
--- Aus `seed.sql`, nicht aus dieser Datei. Warum, steht unten beim `update` auf
--- `memberships` — kurz: `public.users` haengt am Fremdschluessel auf
--- `auth.users`, und eigene Benutzer anzulegen hiesse, GoTrue nachzuahmen.
--- `seed.sql` bleibt unangetastet; es ist gemeinsame Grundlage aller Suiten und
--- kein Ablageplatz fuer Testfaelle einzelner Tickets.
+-- Aus `seed.sql`, nicht aus dieser Datei. `public.users` haengt am
+-- Fremdschluessel auf `auth.users`; eigene Benutzer anzulegen hiesse, GoTrue
+-- nachzuahmen (eine erste Fassung ist daran mit 23503 gescheitert).
 --
 -- Zur Form von throws_ok: ZWEIstellig (sql, errcode). Die dreistellige Form
 -- erwartet ERRMSG, nicht eine Beschreibung.
 
 begin;
-select plan(17);
+select plan(25);
 
 -- ===========================================================================
 -- Die Testidentitaet: User C aus dem Seed, nur die Rolle aendert sich
 -- ===========================================================================
--- `public.users.id` traegt einen Fremdschluessel auf `auth.users` (Migration
--- 0002). Eigene Testbenutzer anzulegen hiesse also, `auth.users` zu
--- beschreiben — das tut in echten Umgebungen ausschliesslich GoTrue, und eine
--- erste Fassung dieser Datei ist genau daran gescheitert (23503, gemessen in
--- CI 03.08.2026).
---
--- `supabase/seed.sql` hat aber bereits, was gebraucht wird: User C ist
--- Mitglied in Organisation Alpha, allerdings INAKTIV und mit der Rolle
--- `member`. Beides laesst sich hier aendern und faellt mit dem `rollback`
--- wieder weg.
---
--- Das ist sogar die staerkere Versuchsanordnung: derselbe Benutzer, dieselbe
--- Organisation, dieselbe Mitgliedschaftszeile — es aendert sich AUSSCHLIESSLICH
--- die Rolle. Zwei verschiedene Benutzer haetten zwei Variablen zugleich
--- verstellt.
+-- Derselbe Benutzer, dieselbe Organisation, dieselbe Mitgliedschaftszeile — es
+-- aendert sich AUSSCHLIESSLICH die Rolle. Zwei verschiedene Benutzer haetten
+-- zwei Variablen zugleich verstellt.
 update public.memberships
    set active = true, role = 'member'
  where user_id = '00000000-0000-4000-8000-00000000ccc3';
@@ -113,9 +124,10 @@ select is(
   'ein aktiver member darf die Planung nicht einmal lesen'
 );
 
--- Der eigentliche Nachweis: nicht „wirft einen Fehler", sondern „bewirkt
--- nichts". RLS filtert die Zeile aus dem UPDATE heraus, statt abzubrechen —
--- ein Test, der nur auf eine Exception prueft, waere hier gruen und falsch.
+-- Nicht „wirft einen Fehler", sondern „bewirkt nichts": RLS filtert die Zeile
+-- aus dem UPDATE heraus, statt abzubrechen. Seit dem P1-Fix scheitert dieser
+-- Versuch doppelt — am fehlenden Recht UND am Kanal. Beides ist beabsichtigt;
+-- die trennscharfe Aussage zum Recht steht zwei Zeilen darueber.
 update public.plan_versions
    set published_at = now(),
        published_by = '00000000-0000-4000-8000-00000000ccc3'
@@ -129,52 +141,154 @@ select is(
 );
 
 -- ===========================================================================
--- 3. DIESELBE Person, nur mit der Rolle `manager`
+-- 3. DIESELBE Person als `manager` — das Recht reicht NICHT
 -- ===========================================================================
--- Einzige Aenderung gegenueber Abschnitt 2. Was jetzt anders ausgeht, geht
--- wegen der ROLLE anders aus — nichts sonst wurde angefasst.
+-- Einzige Aenderung gegenueber Abschnitt 2: die Rolle. Was jetzt anders
+-- ausgeht, geht wegen der ROLLE anders aus — nichts sonst wurde angefasst.
 reset role;
 update public.memberships
    set role = 'manager'
  where user_id = '00000000-0000-4000-8000-00000000ccc3';
 set local role authenticated;
 
+-- Die Kanalaussage direkt an der Funktion. `session_user` ist hier `postgres`
+-- (siehe Kopf), also nicht der Laufzeitkanal.
+select is(
+  app.is_runtime_channel(),
+  false,
+  'diese Sitzung ist NICHT der EasyTree-Laufzeitkanal'
+);
+
 select is(
   app.has_permission('00000000-0000-4000-8000-0000000000a1', 'planning.publish'),
   true,
-  'die Managerin darf veroeffentlichen'
+  'die Managerin traegt das Recht planning.publish'
 );
 
 select is(
   app.has_permission('00000000-0000-4000-8000-0000000000b2', 'planning.publish'),
   false,
-  'dieselbe Person darf in einer FREMDEN Organisation nicht veroeffentlichen'
+  'dieselbe Person traegt es in einer FREMDEN Organisation nicht'
 );
 
--- Urheberzusage: ein fremdes published_by verstoesst gegen den with-check.
-select throws_ok(
-  $$update public.plan_versions
-       set published_at = now(),
-           published_by = '00000000-0000-4000-8000-00000000aaa1'
-     where id = '00000000-0000-4000-8000-0000006010a1'$$,
-  '42501'
-);
+-- --------------------------------------------------------------------------
+-- Der umgedrehte Fall: das Recht genuegt nicht, der Kanal entscheidet mit
+-- --------------------------------------------------------------------------
+-- Genau diese Anweisung stand hier frueher als `lives_ok`. Sie laeuft weiterhin
+-- fehlerfrei durch — RLS wirft nicht, sie filtert. Deshalb wird wieder die
+-- WIRKUNG geprueft und nicht der Rueckgabewert.
+update public.plan_versions
+   set published_at = now(),
+       published_by = '00000000-0000-4000-8000-00000000ccc3'
+ where id = '00000000-0000-4000-8000-0000006010a1';
 
 select is(
   (select published_at from public.plan_versions
     where id = '00000000-0000-4000-8000-0000006010a1'),
   null,
-  'nach dem abgelehnten Versuch ist die Version weiterhin Entwurf'
+  'trotz planning.publish bleibt die Planversion Entwurf — falscher Kanal'
 );
 
--- Der Positivfall. Ohne ihn saehe man nicht, ob die Ablehnungen oben echt sind
--- oder ob generell nichts geht.
+-- Keine Teilwirkung: der Sync-Trigger aus 0010 haette bei Erfolg JEDE Zuweisung
+-- der Version mitgestempelt. Diese Zeile ist der Waechter ueber die
+-- Gegenmutation „Kanalpruefung aus der Policy entfernen" — sie wird dann rot.
+select is(
+  (select count(*)::int from public.assignments
+    where plan_version_id = '00000000-0000-4000-8000-0000006010a1'
+      and published_at is not null),
+  0,
+  'keine einzige Zuweisung wurde mitgestempelt'
+);
+
+-- Die drei folgenden Zaehlungen sind AUSDRUECKLICH nicht falsifizierend: sie
+-- bleiben auch dann 0, wenn die Kanalpruefung faellt. Genau das ist der
+-- Befund — der direkte Tabellenweg erzeugt niemals Audit, Outbox oder
+-- Idempotenz, egal ob er gelingt. Sie stehen hier als benannte Beschreibung
+-- des Schadens, nicht als bestandener Nachweis; falsifizierend ist die
+-- Zuweisungszeile darueber.
+select is(
+  (select count(*)::int from public.audit_events
+    where subject_id = '00000000-0000-4000-8000-0000006010a1'
+      and event_type = 'planning.plan_published'),
+  0,
+  'der direkte Weg hat keine Auditspur erzeugt (und koennte es nie)'
+);
+
+select is(
+  (select count(*)::int from public.outbox_messages
+    where message_type = 'planning.plan_published'
+      and payload ->> 'planVersionId' = '00000000-0000-4000-8000-0000006010a1'),
+  0,
+  'der direkte Weg hat keine Outbox-Nachricht erzeugt'
+);
+
+select is(
+  (select count(*)::int from public.idempotency_records
+    where operation = 'planning.publish_plan'
+      and subject_id = '00000000-0000-4000-8000-0000006010a1'),
+  0,
+  'der direkte Weg hat keinen Idempotenzdatensatz erzeugt'
+);
+
+-- --------------------------------------------------------------------------
+-- Die Spaltengrenze: das Publish-Recht oeffnet nur zwei Spalten
+-- --------------------------------------------------------------------------
+-- 42501, nicht 23514: das Spaltenrecht wird vor der Zeilenauswahl und vor
+-- jedem Trigger geprueft. Frueher standen hier 23514 — dieselbe Anweisung kam
+-- damals bis zum Unveraenderlichkeits-Trigger aus 0010 durch, weil
+-- `authenticated` das volle Tabellen-UPDATE besass.
+select throws_ok(
+  $$update public.plan_versions
+       set week_key = '2026-W33'
+     where id = '00000000-0000-4000-8000-0000006010a1'$$,
+  '42501'
+);
+
+select throws_ok(
+  $$update public.plan_versions
+       set org_id = '00000000-0000-4000-8000-0000000000b2'
+     where id = '00000000-0000-4000-8000-0000006010a1'$$,
+  '42501'
+);
+
+-- Dieselbe Aussage noch einmal am Katalog statt am Verhalten — dieselbe
+-- Bauart, mit der 0006 die Spaltengrenze von `assignments` festhaelt. Die
+-- Gegenprobe darunter ist kein Beiwerk: ohne sie waere die Zeile auch dann
+-- gruen, wenn `authenticated` GAR KEIN Update-Recht mehr auf der Tabelle
+-- haette — und das waere eine andere, unbeabsichtigte Welt.
+select is(
+  has_column_privilege('authenticated', 'public.plan_versions', 'week_key', 'update'),
+  false,
+  'authenticated darf plan_versions.week_key NICHT aendern'
+);
+
+select is(
+  has_column_privilege('authenticated', 'public.plan_versions', 'published_at', 'update'),
+  true,
+  'das Update-Recht existiert — es endet nur bei published_at und published_by'
+);
+
+-- ===========================================================================
+-- 4. Der Eigentuemerpfad — Trigger und Unveraenderlichkeit
+-- ===========================================================================
+-- Ab hier wieder `postgres`. Das ist kein Umgehen der eben bewiesenen Grenze,
+-- sondern der einzige Weg, die 0010-Mechanik in dieser Datei noch zu messen:
+-- der authenticated-Pfad ist jetzt (richtigerweise) tot, und `session_user`
+-- laesst sich nicht faelschen. `postgres` traegt BYPASSRLS und umgeht damit
+-- auch FORCE RLS; Trigger und Constraints gelten weiterhin, denn die sind
+-- keine Policies.
+--
+-- Dass die Managerin auf dem ECHTEN Laufzeitkanal veroeffentlichen kann, misst
+-- `planning-publish.integration.test.ts` gegen eine echte
+-- `easytree_app`-Verbindung — nicht diese Datei.
+reset role;
+
 select lives_ok(
   $$update public.plan_versions
        set published_at = now(),
-           published_by = app.current_user_id()
+           published_by = '00000000-0000-4000-8000-00000000ccc3'
      where id = '00000000-0000-4000-8000-0000006010a1'$$,
-  'die Managerin veroeffentlicht die Planversion ihrer Organisation'
+  'ueber den Eigentuemerpfad laesst sich die Version veroeffentlichen'
 );
 
 select isnt(
@@ -185,7 +299,7 @@ select isnt(
 );
 
 -- Der Trigger aus 0010 in derselben Transaktion: die Zuweisungen tragen den
--- Marker, ohne dass die Anwendung ihn geschrieben haette.
+-- Marker, ohne dass jemand ihn geschrieben haette.
 select is(
   (select count(*)::int from public.assignments
     where plan_version_id = '00000000-0000-4000-8000-0000006010a1'
@@ -201,7 +315,8 @@ select is(
   'und es gab ueberhaupt eine Zuweisung — sonst waere die Zeile darueber vakuos'
 );
 
--- Unveraenderlichkeit greift ab jetzt (0010), auch fuer die Berechtigte.
+-- Unveraenderlichkeit greift ab jetzt (0010). Hier 23514 statt 42501: der
+-- Eigentuemer hat volle Spaltenrechte, also entscheidet der Trigger.
 select throws_ok(
   $$update public.plan_versions
        set week_key = '2026-W33'
@@ -210,7 +325,7 @@ select throws_ok(
 );
 
 -- ===========================================================================
--- 4. Cross-Tenant: fremde Organisation bleibt unberuehrt
+-- 5. Cross-Tenant: fremde Organisation bleibt unberuehrt
 -- ===========================================================================
 select is(
   (select published_at from public.plan_versions

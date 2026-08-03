@@ -127,6 +127,21 @@ select lives_ok(
   'Schicht durch die doppelte Winterzeitstunde laesst sich anlegen'
 );
 
+-- ---------------------------------------------------------------------------
+-- Veroeffentlichen laeuft ab hier ueber den EIGENTUEMERPFAD (EYT-107 P1)
+-- ---------------------------------------------------------------------------
+-- `plan_versions_update_in_org` verlangt seit dem P1-Fix zusaetzlich den
+-- Laufzeitkanal (`session_user = 'easytree_app'`). Die Sitzung dieser Datei ist
+-- `postgres` und laesst sich nicht umbenennen — `SET SESSION AUTHORIZATION`
+-- verlangt einen Superuser, und `postgres` ist in Supabase keiner.
+--
+-- Ueber `authenticated` waere jedes Veroeffentlichen hier wirkungslos, und die
+-- drei folgenden Aussagen ueber den EXCLUDE waeren still vakuos: ein `lives_ok`
+-- bliebe gruen (RLS wirft nicht, sie filtert), das `throws_ok('23P01')` dagegen
+-- wuerde rot. Gemessen wird in dieser Datei der Constraint an der
+-- Zeitumstellung, nicht der Kanal — also kurz zurueck auf den Eigentuemer.
+reset role;
+
 select lives_ok(
   $$update public.plan_versions
        set published_at = '2026-10-20T09:00:00Z',
@@ -134,6 +149,8 @@ select lives_ok(
      where id = '00000000-0000-4000-8000-0000006143a1'$$,
   'Die Umstellungswoche laesst sich veroeffentlichen'
 );
+
+set local role authenticated;
 
 -- Zweite Version: zuerst UEBERLAPPEND. Reihenfolge ist Absicht — waere der
 -- beruehrende Fall zuerst erfolgreich, waere die Zuweisung danach
@@ -158,6 +175,8 @@ select lives_ok(
   'Die ueberlappende Schicht ist als Entwurf erlaubt — Entwuerfe duerfen kollidieren'
 );
 
+reset role;
+
 select throws_ok(
   $$update public.plan_versions
        set published_at = '2026-10-20T10:00:00Z',
@@ -165,6 +184,8 @@ select throws_ok(
      where id = '00000000-0000-4000-8000-0000006144a1'$$,
   '23P01'
 );
+
+set local role authenticated;
 
 select is(
   (select published_at from public.plan_versions
@@ -183,6 +204,8 @@ select lives_ok(
   'Die noch unveroeffentlichte Schicht laesst sich verschieben'
 );
 
+reset role;
+
 select lives_ok(
   $$update public.plan_versions
        set published_at = '2026-10-20T11:00:00Z',
@@ -190,6 +213,8 @@ select lives_ok(
      where id = '00000000-0000-4000-8000-0000006144a1'$$,
   'Beruehrung am Umstellungstag ist kein Konflikt — halboffen gilt auch dort'
 );
+
+set local role authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Idempotenz: derselbe Schluessel erzeugt keine zweite Nachricht (AK4)

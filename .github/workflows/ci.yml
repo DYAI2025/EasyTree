@@ -195,6 +195,20 @@ jobs:
         run: |
           pnpm exec supabase stop
           pnpm exec supabase start -x studio
+      # EYT-107 P1: der Publish-Pfad braucht den LAUFZEITKANAL, nicht irgendeine
+      # Verbindung. `plan_versions_update_in_org` verlangt seit Migration 0015
+      # zusaetzlich `app.is_runtime_channel()`, also `session_user =
+      # 'easytree_app'`. Ueber `postgres` filtert die Policy jede Zeile heraus.
+      #
+      # Der Schritt steht hier und nicht weiter unten, weil die Rollen-Probe
+      # darueber `easytree_app` loescht und der Reset sie ohne Passwort neu
+      # anlegt. Der gleichlautende Schritt vor den Prozess-Smokes bleibt
+      # bestehen: `alter role ... password` ist idempotent, und dort belegt er
+      # die Voraussetzung der Smokes an Ort und Stelle.
+      - name: Provision local password for easytree_app (EYT-45, EYT-107)
+        run: |
+          PGPASSWORD=postgres psql "host=127.0.0.1 port=54322 dbname=postgres user=postgres sslmode=disable" \
+            -v ON_ERROR_STOP=1 -c "alter role easytree_app password 'ci-local-app-password';"
       # ALLE Workspace-Abhaengigkeiten von @easytree/api, nicht eine namentlich
       # genannte. Die frueher hier hartkodierte Liste (@easytree/config) waere in
       # dem Moment still veraltet, in dem apps/api eine zweite Workspace-Abhaengigkeit
@@ -218,10 +232,15 @@ jobs:
       # veroeffentlichte Zeilen sind laut 0010 unveraenderlich UND unloeschbar,
       # ein commit hier liesse jeden folgenden Schritt auf einer veraenderten
       # Datenbank laufen.
+      # EYT-107 P1: diese Suite VEROEFFENTLICHT (EXCLUDE, Unveraenderlichkeit,
+      # Race gegen `for share`). Sie arbeitet ausschliesslich innerhalb von
+      # `set local role authenticated` und laeuft deshalb vollstaendig ueber
+      # `easytree_app` — ueber `postgres` waere jedes ihrer UPDATEs seit
+      # Migration 0015 wirkungslos und die Suite still vakuos.
       - name: Planning invariants gate (fail-closed, zwei Verbindungen, EYT-49)
         env:
           EASYTREE_TENANT_TESTS: required
-          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
         shell: bash
         run: |
           pnpm --filter @easytree/api exec vitest run test/planning-invariants.integration.test.ts 2>&1 | tee /tmp/planning-invariants.log
@@ -250,14 +269,24 @@ jobs:
       # Verbindungen und der Rollback nach einem erzwungenen Fehler an drei
       # Punkten. Eine Sitzung kann eine Sperre nicht beobachten — sie wartet
       # nie auf sich selbst.
+      #
+      # EYT-107 P1: ZWEI Verbindungszeichenketten. `EASYTREE_TEST_DB_URL` legt
+      # als `postgres` die Fixtures an und zaehlt Audit-, Outbox- und
+      # Idempotenzzeilen; `EASYTREE_TEST_APP_DB_URL` ist der Laufzeitkanal, ueber
+      # den der Publish-Command selbst laeuft. Fehlt die zweite, ist die Suite
+      # rot statt still uebersprungen — der Nachweis der Kanalgrenze soll nicht
+      # an einer vergessenen Variablen vorbeigruenen.
       - name: Planning publish gate (fail-closed, zwei Verbindungen, EYT-107)
         env:
           EASYTREE_TENANT_TESTS: required
           EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
         shell: bash
         run: |
           pnpm --filter @easytree/api exec vitest run test/planning-publish.integration.test.ts 2>&1 | tee /tmp/planning-publish.log
           bash scripts/assert-tenant-report.sh planning-publish /tmp/planning-publish.log
+          # Der Kanal gehoert ins Protokoll, nicht in eine Behauptung.
+          grep -F '[planning-publish] session_user=easytree_app runtime_channel=true' /tmp/planning-publish.log
       # EYT-106 AK4: die DATENBANKSEITIGE Haelfte der Kostenautorisierung.
       # Eigener Schritt im BESTEHENDEN Job db-gates — kein neuer Job und damit
       # kein neuer Pflichtcheck, den das Ruleset nicht kennt (dieselbe

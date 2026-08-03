@@ -29,6 +29,20 @@
  *     rot im erwarteten Fehlertyp. Das ist ehrlich so gemeint: die
  *     Anwendungspruefung liefert die benannte Konfliktliste, die Constraint
  *     liefert die Garantie.
+ *
+ * ## Nachtrag P1 (04.08.2026)
+ *
+ * Diese Datei ist seit dem P1-Befund die einzige Stelle, an der der ECHTE
+ * Laufzeitkanal gemessen wird: sie verbindet als `easytree_app`, nicht als
+ * `postgres`. pgTAP kann das nicht — `session_user` laesst sich dort nicht
+ * wechseln. Zwei Gegenmutationen kommen hinzu:
+ *
+ *  7. `published_by = auth.uid()` aus dem `with check` von 0015 entfernen
+ *     -> „lehnt eine fremde Urheberangabe ab" rot.
+ *  8. `revoke update` / Spalten-Grant aus 0015 entfernen
+ *     -> „laesst die Organisation einer Planversion nicht umschreiben" rot.
+ *
+ * Protokoll: `docs/reviews/2026-08-04-eyt-107-p1-gegenmutationen.md`.
  */
 import {
   createTimeZone,
@@ -37,7 +51,7 @@ import {
   planningWeekKey,
 } from "@easytree/domain";
 import { Client } from "pg";
-import type { QueryResultRow } from "pg";
+import type { DatabaseError, QueryResultRow } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { FailClosedGate, ORG_ALPHA, probeDatabase, USER_A } from "./tenant-context.helper";
@@ -45,8 +59,30 @@ import { PlanningWriteRepository } from "../src/modules/planning";
 import { PgIdempotencyStore } from "../src/platform/idempotency/pg-idempotency-store";
 import type { TenantQuery, TenantQueryRunner } from "../src/platform/database/tenant-query-runner";
 
+/**
+ * ZWEI Verbindungszeichenketten, seit dem P1-Befund vom 04.08.2026.
+ *
+ * `DB_URL` ist die Verwaltungsverbindung (`postgres`): sie legt Fixtures an,
+ * zaehlt Audit-, Outbox- und Idempotenzzeilen und raeumt auf. Sie arbeitet
+ * OHNE `set local role authenticated`, braucht also volle Tabellenrechte.
+ *
+ * `APP_DB_URL` ist der LAUFZEITKANAL (`easytree_app`). Genau ueber sie laeuft
+ * der Publish-Command, denn `plan_versions_update_in_org` verlangt seit
+ * Migration 0015 zusaetzlich `app.is_runtime_channel()` — also
+ * `session_user = 'easytree_app'`. Eine `postgres`-Sitzung erfuellt das nicht;
+ * der Publish-Pfad meldete dort „betraf keine Zeile" statt zu veroeffentlichen.
+ *
+ * Kein Rueckfall auf `DB_URL`: eine stille Vertretung waere genau die Art
+ * Bequemlichkeit, die einen Sicherheitsnachweis in eine Behauptung verwandelt.
+ * Fehlt die Variable im Pflichtmodus, ist der Lauf rot.
+ */
 const DB_URL =
   process.env["EASYTREE_TEST_DB_URL"] ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+
+const APP_DB_URL = process.env["EASYTREE_TEST_APP_DB_URL"];
+
+/** Die Loginrolle, die `app.is_runtime_channel()` in Migration 0015 verlangt. */
+const LAUFZEITROLLE = "easytree_app";
 
 const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local";
 const gate = new FailClosedGate("planning-publish", TENANT_TESTS_MODE, "EYT-107");
@@ -100,6 +136,9 @@ const W_TEILWIRKUNG_B = "2026-W28";
 const W_TEILWIRKUNG_C = "2026-W29";
 const W_FREMDER_MANDANT = "2026-W30";
 const W_SCHLUESSEL = "2026-W31";
+// Beide Wochen enden als ENTWURF — ihre Faelle sollen ja gerade scheitern.
+const W_URHEBER = "2026-W33";
+const W_SPALTE = "2026-W34";
 
 const ALLE_WOCHEN = [
   W_ERFOLG,
@@ -114,6 +153,8 @@ const ALLE_WOCHEN = [
   W_TEILWIRKUNG_C,
   W_FREMDER_MANDANT,
   W_SCHLUESSEL,
+  W_URHEBER,
+  W_SPALTE,
 ];
 
 /**
@@ -163,6 +204,26 @@ function runnerAuf(client: Client): TenantQueryRunner {
   };
 }
 
+/**
+ * Fuehrt `arbeit` auf dem Laufzeitkanal aus und gibt den erwarteten Fehler
+ * zurueck — oder `null`, wenn KEINER kam.
+ *
+ * Bewusst try/catch statt `.catch()` auf eine ausserhalb deklarierte Variable:
+ * TypeScript verfolgt Zuweisungen aus einer Closure nicht, `abgelehnt` bliebe
+ * dort `unknown` und jede Aussage ueber `.code` waere ein Cast.
+ */
+async function erwarteAblehnung(
+  client: Client,
+  arbeit: (tx: TenantQuery) => Promise<void>,
+): Promise<DatabaseError | null> {
+  try {
+    await runnerAuf(client).run({ userId: USER_A }, arbeit);
+    return null;
+  } catch (fehler) {
+    return fehler as DatabaseError;
+  }
+}
+
 /** Die ECHTE Wochenregel, dieselbe Funktion wie in `AppModule`. */
 const wochenschluessel = (instant: Date, zone: string): string => {
   const geprueft = createTimeZone(zone);
@@ -170,8 +231,29 @@ const wochenschluessel = (instant: Date, zone: string): string => {
   return planningWeekKey(isoWeekOfLocalDate(localBusinessDate(instant, geprueft.timeZone)));
 };
 
-async function neueVerbindung(): Promise<Client> {
+/** Verwaltungsverbindung — Fixtures, Zaehlungen, Aufraeumen. */
+async function neueAdminVerbindung(): Promise<Client> {
   const client = new Client({ connectionString: DB_URL });
+  await client.connect();
+  clients.push(client);
+  return client;
+}
+
+/**
+ * Verbindung auf dem LAUFZEITKANAL — dieselbe Loginrolle wie API und Worker.
+ *
+ * `easytree_app` ist NOINHERIT (Migration 0003): vor `set local role
+ * authenticated` hat sie keinerlei Tabellenrechte. Genau deshalb laeuft hier
+ * jede Anweisung durch `runnerAuf`, das den Rollenwechsel setzt — und genau
+ * deshalb kann diese Verbindung keine Fixtures anlegen.
+ */
+async function neueVerbindung(): Promise<Client> {
+  if (APP_DB_URL === undefined) {
+    throw new Error(
+      "[planning-publish] EASYTREE_TEST_APP_DB_URL fehlt — der Laufzeitkanal ist nicht konfiguriert (EYT-107 P1).",
+    );
+  }
+  const client = new Client({ connectionString: APP_DB_URL });
   await client.connect();
   clients.push(client);
   return client;
@@ -293,9 +375,20 @@ function dbIt(name: string, fn: () => Promise<void>): void {
 let admin: Client;
 
 beforeAll(async () => {
-  dbAvailable = await probeDatabase(DB_URL);
+  if (APP_DB_URL === undefined) {
+    if (TENANT_TESTS_MODE === "required") {
+      throw new Error(
+        "[planning-publish] fail-closed: EASYTREE_TEST_APP_DB_URL ist nicht gesetzt. " +
+          "Der Publish-Pfad braucht den Laufzeitkanal (Loginrolle easytree_app), " +
+          "sonst filtert die RLS-Policy aus Migration 0015 jede Zeile heraus (EYT-107 P1).",
+      );
+    }
+    console.warn("[planning-publish.integration] SKIPPED: EASYTREE_TEST_APP_DB_URL nicht gesetzt.");
+    return;
+  }
+  dbAvailable = (await probeDatabase(DB_URL)) && (await probeDatabase(APP_DB_URL));
   if (!dbAvailable) return;
-  admin = await neueVerbindung();
+  admin = await neueAdminVerbindung();
   await raeumeEntwuerfe(admin);
 });
 
@@ -650,5 +743,84 @@ describe("publishPlan gegen echtes PostgreSQL", () => {
       idempotencyKey: `pub-beta-${W_FREMDER_MANDANT}`,
     });
     expect(erlaubt.ok).toBe(true);
+  });
+
+  // =========================================================================
+  // Die Kanal- und Spaltengrenze aus dem P1-Befund (04.08.2026)
+  // =========================================================================
+  // Diese drei Faelle koennen NUR hier stehen. pgTAP laeuft als `postgres` und
+  // erreicht den `with check`-Zweig gar nicht — die `using`-Klausel filtert
+  // dort schon vorher. Erst auf dem echten Laufzeitkanal kommt eine Anweisung
+  // so weit, dass der neue Zeilenzustand geprueft wird.
+
+  dbIt("laeuft ueber die echte Laufzeit-Loginrolle, nicht ueber postgres", async () => {
+    const client = await neueVerbindung();
+    // Gemessen statt angenommen. Ohne diese Zeile koennte die Suite eines
+    // Tages still wieder als `postgres` laufen, und JEDER folgende Nachweis
+    // ueber die Kanalgrenze waere wertlos, ohne rot zu werden.
+    const wer = await client.query<{ session_user: string; runtime: boolean }>(
+      "select session_user, app.is_runtime_channel() as runtime",
+    );
+    process.stdout.write(
+      `[planning-publish] session_user=${wer.rows[0]?.session_user ?? "?"} runtime_channel=${String(
+        wer.rows[0]?.runtime ?? false,
+      )}\n`,
+    );
+    expect(wer.rows[0]?.session_user).toBe(LAUFZEITROLLE);
+    expect(wer.rows[0]?.runtime).toBe(true);
+  });
+
+  dbIt("lehnt eine fremde Urheberangabe ab — with check auf dem neuen Stand", async () => {
+    const zeit = montagDerWoche(W_URHEBER);
+    const versionId = await entwurfMit(admin, W_URHEBER, [zeit]);
+    const client = await neueVerbindung();
+
+    const abgelehnt = await erwarteAblehnung(client, async (tx) => {
+      // published_by zeigt bewusst auf eine ANDERE Person als das
+      // JWT-Subjekt. Der Publish-Command tut das nie — er setzt
+      // `app.current_user_id()`. Genau deshalb steht hier eine rohe
+      // Anweisung: die Zusicherung soll auch dann halten, wenn jemand am
+      // Repository vorbeischreibt.
+      await tx.query(
+        `update public.plan_versions
+            set published_at = now(), published_by = $2
+          where id = $1`,
+        [versionId, USER_B],
+      );
+    });
+
+    expect(abgelehnt, "eine fremde Urheberangabe wurde angenommen").not.toBeNull();
+    expect(abgelehnt?.code).toBe("42501");
+
+    const stand = await admin.query<{ published_at: Date | null }>(
+      "select published_at from public.plan_versions where id = $1",
+      [versionId],
+    );
+    expect(stand.rows[0]?.published_at).toBeNull();
+  });
+
+  dbIt("laesst die Organisation einer Planversion nicht umschreiben", async () => {
+    const zeit = montagDerWoche(W_SPALTE);
+    const versionId = await entwurfMit(admin, W_SPALTE, [zeit]);
+    const client = await neueVerbindung();
+
+    const abgelehnt = await erwarteAblehnung(client, async (tx) => {
+      await tx.query("update public.plan_versions set org_id = $2 where id = $1", [
+        versionId,
+        ORG_BETA,
+      ]);
+    });
+
+    // 42501 und nicht „0 Zeilen": das Spaltenrecht wird geprueft, bevor
+    // ueberhaupt eine Zeile ausgewaehlt wird. Das Publish-Recht oeffnet
+    // ausschliesslich published_at und published_by.
+    expect(abgelehnt, "org_id liess sich ueber das Publish-Recht aendern").not.toBeNull();
+    expect(abgelehnt?.code).toBe("42501");
+
+    const stand = await admin.query<{ org_id: string }>(
+      "select org_id from public.plan_versions where id = $1",
+      [versionId],
+    );
+    expect(stand.rows[0]?.org_id).toBe(ORG_ALPHA);
   });
 });

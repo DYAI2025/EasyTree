@@ -55,6 +55,11 @@ import { expect, test, type Cookie } from "@playwright/test";
  * - Die Kosten-Navigation unabhaengig von `costs.read` rendern (Schritt 6
  *   bliebe gruen, aber Schritt 11 nach dem Abmelden wuerde rot).
  * - Das Logout ohne loeschende Cookies (Schritt 12).
+ * - `app.is_runtime_channel()` aus der Update-Policy von `plan_versions`
+ *   entfernen (Migration 0015): Schritt 9c2 wird rot, weil PostgREST die
+ *   Planversion dann tatsaechlich veroeffentlicht. Das ist der P1-Nachweis
+ *   vom 04.08.2026 und der einzige Ort, an dem der ECHTE Angriffskanal
+ *   gefahren wird.
  */
 
 // `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
@@ -128,7 +133,11 @@ function cookie(cookies: readonly Cookie[], name: string): Cookie {
 
 test.describe.configure({ mode: "serial" });
 
-test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ page, context }) => {
+test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
+  page,
+  context,
+  request,
+}) => {
   const email = pflicht("EASYTREE_JOURNEY_EMAIL_A");
   const passwort = pflicht("EASYTREE_JOURNEY_PASSWORT_A");
   const benutzerId = pflicht("EASYTREE_JOURNEY_USER_A");
@@ -392,6 +401,91 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ pa
       fullPage: true,
     });
     schritte["9c_entwurf"] = { versionId: entwurfsVersionId };
+  });
+
+  // ---------------------------------------------------------------------
+  // 9c2 — Der P1-Nachweis: die Data-API veroeffentlicht NICHT (EYT-107)
+  // ---------------------------------------------------------------------
+  // Der Befund vom 04.08.2026: `authenticated` besass aus Migration 0007 ein
+  // Tabellen-UPDATE auf `plan_versions` ohne Spaltenbegrenzung, und PostgREST
+  // stellt `public` als Data-API bereit. Eine Owner-Rolle konnte damit
+  // `published_at` unmittelbar setzen — am Command vorbei, also ohne
+  // Wochenzuordnungspruefung, ohne benannte Konflikte, ohne Idempotenz, ohne
+  // Audit und ohne Outbox.
+  //
+  // Dies ist die EINZIGE Stelle im Repository, die den echten Angriffskanal
+  // faehrt: ein per GoTrue angemeldeter Mensch, sein echtes Bearer-Token, die
+  // echte PostgREST-Instanz. pgTAP kann das nicht — dort ist `session_user`
+  // `postgres` und laesst sich ohne Superuser nicht wechseln.
+  await test.step("9c2 — ein direkter PostgREST-Schreibzugriff bewirkt nichts", async () => {
+    const supabaseUrl = pflicht("EASYTREE_JOURNEY_SUPABASE_URL");
+    const anonKey = pflicht("EASYTREE_JOURNEY_ANON_KEY");
+
+    // Ein ECHTES Zugriffstoken, ueber denselben oeffentlichen Weg wie ein
+    // Mensch. Nicht das HttpOnly-Cookie: das gehoert der API und ist fuer den
+    // Browser unlesbar — genau deshalb holt sich ein Angreifer sein Token so.
+    const anmeldung = await request.post(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+      headers: { apikey: anonKey, "content-type": "application/json" },
+      data: { email, password: passwort },
+    });
+    expect(anmeldung.status(), "GoTrue hat kein Token ausgegeben").toBe(200);
+    const token = ((await anmeldung.json()) as { access_token?: string }).access_token ?? "";
+    expect(token).not.toBe("");
+
+    const restKopf = {
+      apikey: anonKey,
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    };
+
+    // ZUERST die Nichtvakuositaet: dasselbe Token SIEHT die Zeile ueber
+    // PostgREST. Ohne diesen Schritt bewiese ein fehlgeschlagenes PATCH nur,
+    // dass irgendetwas an der Anfrage nicht stimmt — ein abgelaufenes Token,
+    // ein falscher Pfad, eine nicht exponierte Tabelle. So ist belegt: der
+    // Kanal traegt, nur das Schreiben nicht.
+    const lesen = await request.get(
+      `${supabaseUrl}/rest/v1/plan_versions?id=eq.${entwurfsVersionId}&select=id,published_at`,
+      { headers: restKopf },
+    );
+    expect(lesen.status(), "das Token kann die Planversion nicht einmal lesen").toBe(200);
+    const gelesen = (await lesen.json()) as { id: string; published_at: string | null }[];
+    expect(gelesen).toHaveLength(1);
+    expect(gelesen[0]?.published_at, "die Version ist vor dem Versuch kein Entwurf").toBeNull();
+
+    // Der Angriff.
+    const angriff = await request.patch(
+      `${supabaseUrl}/rest/v1/plan_versions?id=eq.${entwurfsVersionId}`,
+      {
+        headers: { ...restKopf, prefer: "return=representation" },
+        data: { published_at: "2026-08-03T09:00:00Z", published_by: benutzerId },
+      },
+    );
+    const geaendert = angriff.ok() ? ((await angriff.json()) as unknown[]) : [];
+    expect(
+      geaendert,
+      "PostgREST hat eine Planversion veroeffentlicht — der Command ist umgehbar",
+    ).toHaveLength(0);
+
+    // Und die Wahrheit noch einmal aus der Anwendung, nicht aus der Antwort
+    // des Angreifers: die Woche ist weiterhin Entwurf. Waere `published_at`
+    // gesetzt worden, haette der Sync-Trigger aus 0010 in derselben
+    // Transaktion auch die Zuweisungen gestempelt — und Schritt 9d wuerde
+    // gleich „bereits veroeffentlicht" melden statt zu veroeffentlichen.
+    await page.reload();
+    const standDanach = page.getByTestId("planungsfenster-stand");
+    await expect(standDanach).toHaveAttribute("data-stand", "entwurf");
+    await expect(page.getByTestId("planungsfenster-version")).toHaveAttribute(
+      "data-published-version-id",
+      "",
+    );
+
+    schritte["9c2_postgrest_bypass"] = {
+      lesen: lesen.status(),
+      schreiben: angriff.status(),
+      geaenderteZeilen: geaendert.length,
+      erwartet: 0,
+      hinweis: "P1 04.08.2026 — app.is_runtime_channel() in Migration 0015",
+    };
   });
 
   await test.step("9d — veroeffentlichen, neu laden, zweiter Kontext", async () => {
