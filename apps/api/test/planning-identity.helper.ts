@@ -31,12 +31,19 @@ export const TEST_ORG = "00000000-0000-4000-8000-0000000000a1";
 export const TEST_ORG_B = "00000000-0000-4000-8000-0000000000b2";
 
 export interface IdentitaetsVorgabe {
-  /** `null` bedeutet: keine gueltige Identitaet, `identify` wirft. */
-  readonly subject?: string | null;
+  /**
+   * `null` bedeutet: keine gueltige Identitaet, `identify` wirft.
+   *
+   * `| undefined` ist unter `exactOptionalPropertyTypes` NICHT dasselbe wie
+   * das Fragezeichen: ein Aufrufer, der ein moeglicherweise undefiniertes
+   * Feld durchreicht, waere sonst nicht typkonform.
+   */
+  readonly subject?: string | null | undefined;
   /** Rechte der EINEN Mitgliedschaft. Vorgabe: alle drei Planungsrechte. */
-  readonly permissions?: readonly string[];
+  readonly permissions?: readonly string[] | undefined;
   /** Mehr als eine Mitgliedschaft erzwingt `ORG_CONTEXT_REQUIRED`. */
-  readonly organisationen?: readonly { organisationId: string; permissions: readonly string[] }[];
+  readonly organisationen?:
+    readonly { organisationId: string; permissions: readonly string[] }[] | undefined;
 }
 
 /** Haengt die beiden Identitaetstokens an einen Testing-Module-Builder. */

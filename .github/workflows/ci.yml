@@ -241,6 +241,23 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/planning-write.integration.test.ts 2>&1 | tee /tmp/planning-write.log
           bash scripts/assert-tenant-report.sh planning-write /tmp/planning-write.log
+      # EYT-107: das Veroeffentlichen. Wieder ein Schritt im BESTEHENDEN Job,
+      # kein neuer Pflichtcheck.
+      #
+      # Was hier gemessen wird, kann kein Unittest: der Sync-Trigger aus
+      # Migration 0010, die Exclusion-Constraint, die erst beim
+      # Veroeffentlichen greift, die Serialisierung ueber ZWEI echte
+      # Verbindungen und der Rollback nach einem erzwungenen Fehler an drei
+      # Punkten. Eine Sitzung kann eine Sperre nicht beobachten — sie wartet
+      # nie auf sich selbst.
+      - name: Planning publish gate (fail-closed, zwei Verbindungen, EYT-107)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/planning-publish.integration.test.ts 2>&1 | tee /tmp/planning-publish.log
+          bash scripts/assert-tenant-report.sh planning-publish /tmp/planning-publish.log
       # EYT-106 AK4: die DATENBANKSEITIGE Haelfte der Kostenautorisierung.
       # Eigener Schritt im BESTEHENDEN Job db-gates — kein neuer Job und damit
       # kein neuer Pflichtcheck, den das Ruleset nicht kennt (dieselbe

@@ -1,6 +1,7 @@
 import { PlanningWindowQuerySchema } from "@easytree/contracts";
 
 import { PlanningWindowView } from "../../components/planning-window-view";
+import { PlanungZugang } from "../../components/planung-zugang";
 
 /**
  * Referenzansicht des Planungsfensters (EYT-50).
@@ -34,7 +35,16 @@ export default async function PlanungPage({
     <main>
       <h1>Planung</h1>
       {query.success ? (
-        <PlanningWindowView weekKey={query.data.weekKey} />
+        // Der Waechter rendert Loading / Unauthenticated / Fehler /
+        // Organisationswahl / Forbidden und gibt erst danach frei (EYT-107).
+        <PlanungZugang>
+          {({ darfVeroeffentlichen }) => (
+            <PlanningWindowView
+              weekKey={query.data.weekKey}
+              darfVeroeffentlichen={darfVeroeffentlichen}
+            />
+          )}
+        </PlanungZugang>
       ) : (
         <p data-testid="planungsfenster-parameterfehler" role="alert">
           Kein gültiger Wochenschlüssel. Erwartet wird `?weekKey=2026-W32` mit einer Woche zwischen
