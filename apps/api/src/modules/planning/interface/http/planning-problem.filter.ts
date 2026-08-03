@@ -45,6 +45,20 @@ export const PLANNING_ERROR_TYPE = {
   AMBIGUOUS_ORGANISATION: "urn:easytree:planning:ambiguous-organisation",
   MISSING_IDEMPOTENCY_KEY: "urn:easytree:planning:missing-idempotency-key",
   IDEMPOTENCY_KEY_REUSED: "urn:easytree:planning:idempotency-key-reused",
+  // ---------------------------------------------------------------------
+  // Veroeffentlichen (EYT-107)
+  // ---------------------------------------------------------------------
+  // Alle vier sind HTTP 409 — und genau deshalb brauchen sie eigene Codes.
+  // `HttpPlanningGateway` bildet 409 fuer `publishPlan` pauschal auf
+  // `STALE_VERSION` ab (conflictAs). Ohne diese Typen koennte die Oberflaeche
+  // „veraltet", „schon veroeffentlicht", „blockierender Konflikt" und
+  // „Zuweisung in der falschen Woche" nicht auseinanderhalten und muesste
+  // dem deutschen Meldungstext glauben — der ist Darstellung, keine
+  // Schnittstelle.
+  STALE_VERSION: "urn:easytree:planning:stale-version",
+  ALREADY_PUBLISHED: "urn:easytree:planning:already-published",
+  BLOCKING_CONFLICT: "urn:easytree:planning:blocking-conflict",
+  ASSIGNMENT_OUTSIDE_WEEK: "urn:easytree:planning:assignment-outside-week",
 } as const;
 
 export type PlanningErrorType = (typeof PLANNING_ERROR_TYPE)[keyof typeof PLANNING_ERROR_TYPE];

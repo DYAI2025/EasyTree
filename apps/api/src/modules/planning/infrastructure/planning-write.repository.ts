@@ -49,12 +49,21 @@ import type {
   CreateAssignmentResult,
   CreatedAssignmentRow,
   PlanningWrites,
+  PublishPlanInput,
+  PublishPlanResult,
+  PublishedPlanVersionRow,
   ValidateDraftInput,
   ValidateDraftResult,
+  ValidatedConflict,
 } from "../application/planning-writes.port";
 import type { AssignmentDraft, ConflictCode } from "../domain/assignment-draft";
 import { validateDraft } from "../domain/draft-validation";
-import type { TenantQueryRunner } from "../../../platform/database/tenant-query-runner";
+import { zuweisungenAusserhalbDerWoche } from "../domain/week-membership";
+import type { IdempotencyStore } from "../../../platform/idempotency/idempotency-store";
+import type {
+  TenantQuery,
+  TenantQueryRunner,
+} from "../../../platform/database/tenant-query-runner";
 
 interface RawExistingRow {
   readonly id: string;
@@ -89,6 +98,13 @@ interface VersionRow {
   readonly published_at: Date | null;
 }
 
+/** Eine Planversion mit ihrem Wochenschluessel — die Form der Publish-Antwort. */
+interface PublishedVersionRow {
+  readonly id: string;
+  readonly week_key: string;
+  readonly published_at: Date | null;
+}
+
 interface IdRow {
   readonly id: string;
 }
@@ -112,9 +128,14 @@ interface OverlapQueryRow {
   readonly ends_at_utc: Date;
 }
 
-interface IdempotencyRow {
-  readonly subject_id: string;
-  readonly request_fingerprint: string;
+/** PostgreSQL-Fehlercodes, die hier eine fachliche Bedeutung tragen. */
+const EXCLUSION_VIOLATION = "23P01";
+const UNIQUE_VIOLATION = "23505";
+
+function fehlerCode(fehler: unknown): string | null {
+  if (typeof fehler !== "object" || fehler === null || !("code" in fehler)) return null;
+  const code = (fehler as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
 }
 
 /**
@@ -142,6 +163,30 @@ function fingerprintOf(input: CreateAssignmentInput): string {
 /** Vorgangsname im Idempotenzspeicher. Siehe Migration 0012. */
 const OPERATION = "planning.create_assignment";
 
+/**
+ * Vorgangsname des Veroeffentlichens (EYT-107).
+ *
+ * Eigener Schluesselraum, und das ist der Zweck der Spalte `operation`: derselbe
+ * Schluessel darf fuer „Einsatz anlegen" und „Woche veroeffentlichen" nicht
+ * kollidieren, sonst bekaeme der zweite Vorgang die Antwort des ersten.
+ * Namenskonvention wie `planning.create_assignment` und
+ * `costs.create_rate_version`.
+ */
+const PUBLISH_OPERATION = "planning.publish_plan";
+
+/**
+ * Fingerabdruck der Veroeffentlichungsanfrage.
+ *
+ * Nur die fachlich wirksamen Felder, in fester Reihenfolge. Der
+ * Idempotenzschluessel selbst geht NICHT ein, sonst waere der Vergleich
+ * tautologisch. Klartext statt Hash — dieselbe Form wie
+ * {@link fingerprintOf}, und der Wert ist im Fehlerfall lesbar. Personenbezug
+ * entsteht nicht: eine Woche und eine Uuid.
+ */
+function publishFingerprintOf(input: PublishPlanInput): string {
+  return [input.weekKey, input.expectedVersionId ?? "null"].join("|");
+}
+
 function zuAssignment(zeile: AssignmentInsertRow): CreatedAssignmentRow {
   return {
     id: zeile.id,
@@ -159,8 +204,17 @@ export class PlanningWriteRepository implements PlanningWrites {
     private readonly subjectUserId: string,
     /** Bildet einen Instant auf seine ISO-Woche in der Zone der Organisation ab. */
     private readonly wochenschluessel: (instant: Date, timeZone: string) => string,
+    /**
+     * Wiederholungserkennung als Plattformdienst (EYT-107).
+     *
+     * Bis hierher baute diese Datei dasselbe Protokoll als rohes SQL nach,
+     * obwohl `platform/idempotency` es seit EYT-108 kapselt — zwei
+     * Implementierungen derselben Zusicherung, und die zweite waere beim
+     * Hinzufuegen des Publish-Pfads zur dritten geworden.
+     */
+    private readonly idempotenz: IdempotencyStore,
     /** Testhaken fuer den Teilwirkungsnachweis. `null` im Normalbetrieb. */
-    private readonly fehlerNach: "assignment" | "audit" | "outbox" | null = null,
+    private readonly fehlerNach: "assignment" | "audit" | "outbox" | "published" | null = null,
   ) {}
 
   /**
@@ -337,17 +391,12 @@ export class PlanningWriteRepository implements PlanningWrites {
       //    scheiterte ein spaeterer Retry an einer Bedingung, die beim
       //    urspruenglichen Vorgang erfuellt war. Eine Wiederholung darf nicht
       //    davon abhaengen, was sich seither geaendert hat.
-      await tx.query("select app.lock_idempotency_key($1, $2)", [OPERATION, input.idempotencyKey]);
+      await this.idempotenz.lock(tx, OPERATION, input.idempotencyKey);
 
       const fingerabdruck = fingerprintOf(input);
-      const frueher = await tx.query<IdempotencyRow>(
-        `select subject_id, request_fingerprint from public.idempotency_records
-          where operation = $1 and idempotency_key = $2`,
-        [OPERATION, input.idempotencyKey],
-      );
-      const bekannt = frueher.rows[0];
-      if (bekannt !== undefined) {
-        if (bekannt.request_fingerprint !== fingerabdruck) {
+      const bekannt = await this.idempotenz.find(tx, OPERATION, input.idempotencyKey);
+      if (bekannt !== null) {
+        if (bekannt.requestFingerprint !== fingerabdruck) {
           // Derselbe Schluessel, andere Anfrage. Das ist keine Wiederholung,
           // sondern ein Aufruferfehler — und die alte Antwort zurueckzugeben
           // waere die schlechteste Reaktion: der Aufrufer bekaeme ein
@@ -360,7 +409,7 @@ export class PlanningWriteRepository implements PlanningWrites {
         const wieder = await tx.query<AssignmentInsertRow>(
           `select id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc
              from public.assignments where id = $1`,
-          [bekannt.subject_id],
+          [bekannt.subjectId],
         );
         const zeile = wieder.rows[0];
         if (zeile === undefined) {
@@ -368,7 +417,7 @@ export class PlanningWriteRepository implements PlanningWrites {
           // NEUEN Einsatz anzulegen waere die schlechteste Antwort: der
           // Aufrufer bekaeme fuer denselben Vorgang zwei verschiedene Ids.
           throw new Error(
-            `EYT-92: Idempotenzschluessel verweist auf Einsatz ${bekannt.subject_id}, den es nicht mehr gibt.`,
+            `EYT-92: Idempotenzschluessel verweist auf Einsatz ${bekannt.subjectId}, den es nicht mehr gibt.`,
           );
         }
         return { ok: true as const, assignment: zuAssignment(zeile), replayed: true };
@@ -569,17 +618,400 @@ export class PlanningWriteRepository implements PlanningWrites {
       // solange alles in einer Transaktion liegt — aber sie steht am Ende,
       // damit beim Lesen klar ist, dass sie den ABGESCHLOSSENEN Vorgang
       // festhaelt.
-      await tx.query(
-        `insert into public.idempotency_records
-           (org_id, operation, idempotency_key, subject_id, request_fingerprint)
-         values ($1, $2, $3, $4, $5)`,
-        [org.id, OPERATION, input.idempotencyKey, zeile.id, fingerprintOf(input)],
+      await this.idempotenz.remember(
+        tx,
+        org.id,
+        OPERATION,
+        input.idempotencyKey,
+        zeile.id,
+        fingerabdruck,
       );
 
       this.vielleichtScheitern("outbox");
 
       return { ok: true as const, assignment: zuAssignment(zeile), replayed: false };
     });
+  }
+
+  /**
+   * Den Entwurf einer Woche veroeffentlichen (EYT-107).
+   *
+   * ## Was diese Methode selbst tut — und was die Datenbank tut
+   *
+   * Sie setzt `plan_versions.published_at` GENAU EINMAL. Alles Weitere gehoert
+   * dem Schema und bleibt dort:
+   *
+   *   - Der Trigger `plan_versions_publish_assignments` (0010, security
+   *     definer) spiegelt den Marker nach `assignments.published_at`. Diese
+   *     Methode fasst die Spalte nicht an; das Spalten-Grant aus 0010 liesse es
+   *     ohnehin nicht zu.
+   *   - Dabei greift `assignments_no_published_overlap`: ueberlappende
+   *     Zuweisungen derselben Person werden erst in dem Moment unzulaessig, in
+   *     dem sie veroeffentlicht werden. Das kommt als `23P01` zurueck und wird
+   *     unten in `BLOCKING_CONFLICT` uebersetzt.
+   *   - `plan_versions_published_immutable` macht die Zeile danach
+   *     unveraenderlich.
+   *
+   * ## Warum die Konfliktpruefung trotzdem hier steht
+   *
+   * Sie ist REDUNDANT zur Exclusion-Constraint, und das ist bewusst so: die
+   * Datenbank verhindert den falschen Zustand, aber sie kann nicht sagen,
+   * WELCHE Regel verletzt wurde. `23P01` ist fuer eine Planerin keine
+   * Auskunft. Die Anwendungspruefung erzeugt die benannte Konfliktliste; die
+   * Constraint erzeugt die Garantie unter Nebenlaeufigkeit. Wer die Pruefung
+   * entfernt, bekommt weiterhin keinen falschen Zustand — aber eine
+   * unbrauchbare Fehlermeldung.
+   *
+   * ## Reihenfolge, und warum sie so ist
+   *
+   * 1. Idempotenzsperre VOR jeder Abfrage — sonst sehen zwei gleichzeitige
+   *    Anfragen mit demselben Schluessel beide „nicht vorhanden".
+   * 2. Replay beantworten, bevor irgendetwas Veraenderliches gelesen wird.
+   * 3. Entwurf mit `for update` sperren, BEVOR `expectedVersionId` verglichen
+   *    wird. Ohne die Sperre laesen zwei Veroeffentlicher denselben Stand und
+   *    beide faenden ihn aktuell.
+   * 4. Fachpruefungen.
+   * 5. Ein `update`.
+   * 6. Audit, Outbox, Idempotenzergebnis — dieselbe Transaktion.
+   */
+  async publishPlan(input: PublishPlanInput): Promise<PublishPlanResult> {
+    const fingerabdruck = publishFingerprintOf(input);
+    try {
+      return await this.runner.run({ userId: this.subjectUserId }, async (tx) => {
+        // --- 1. Sperre je Organisation, Vorgang und Schluessel ---------------
+        await this.idempotenz.lock(tx, PUBLISH_OPERATION, input.idempotencyKey);
+
+        // --- 2. Wiederholung? ------------------------------------------------
+        const bekannt = await this.idempotenz.find(tx, PUBLISH_OPERATION, input.idempotencyKey);
+        if (bekannt !== null) {
+          if (bekannt.requestFingerprint !== fingerabdruck) {
+            return { ok: false as const, problem: { kind: "IDEMPOTENCY_KEY_REUSED" as const } };
+          }
+          const wieder = await this.leseVeroeffentlichteVersion(tx, bekannt.subjectId);
+          if (wieder === null) {
+            // Der Schluessel ist bekannt, die Version nicht mehr sichtbar.
+            // Erneut zu veroeffentlichen waere die schlechteste Antwort: derselbe
+            // Vorgang bekaeme zwei verschiedene Versions-Ids.
+            throw new Error(
+              `EYT-107: Idempotenzschluessel verweist auf Planversion ${bekannt.subjectId}, die nicht mehr sichtbar ist.`,
+            );
+          }
+          return { ok: true as const, version: wieder, replayed: true };
+        }
+
+        // --- 3. Organisation und Zeitzone ------------------------------------
+        const orgs = await tx.query<OrgRow>("select id, time_zone from public.organizations");
+        if (orgs.rows.length === 0)
+          return { ok: false as const, problem: { kind: "NO_ORGANISATION" as const } };
+        if (orgs.rows.length > 1)
+          return { ok: false as const, problem: { kind: "AMBIGUOUS_ORGANISATION" as const } };
+        const org = orgs.rows[0];
+        if (org === undefined)
+          return { ok: false as const, problem: { kind: "NO_ORGANISATION" as const } };
+
+        // --- 4. Den Stand der Woche sperren und lesen ------------------------
+        // `for update` sperrt jede Version dieser Woche bis zum Commit. Ohne
+        // die Sperre entscheiden zwei gleichzeitige Veroeffentlicher unter
+        // `read committed` beide auf ihrem eigenen Snapshot, finden beide den
+        // Entwurf unveroeffentlicht und schreiben beide Nebenwirkungen.
+        const versionen = await tx.query<VersionRow>(
+          `select id, published_at from public.plan_versions
+            where week_key = $1
+            order by published_at asc nulls last, created_at asc, id asc
+              for update`,
+          [input.weekKey],
+        );
+        const entwurf = versionen.rows.find((zeile) => zeile.published_at === null) ?? null;
+        const veroeffentlichte = versionen.rows.filter((zeile) => zeile.published_at !== null);
+
+        if (entwurf === null) {
+          const letzte = veroeffentlichte[veroeffentlichte.length - 1];
+          if (letzte !== undefined) {
+            // Die Woche ist fertig. Das ist etwas anderes als „veralteter
+            // Stand": die Planerin muss nichts erneut entscheiden, sie muss
+            // nur neu laden.
+            return {
+              ok: false as const,
+              problem: { kind: "ALREADY_PUBLISHED" as const, versionId: letzte.id },
+            };
+          }
+          return {
+            ok: false as const,
+            problem: { kind: "STALE_VERSION" as const, aktuelleVersionId: null },
+          };
+        }
+
+        // --- 5. Arbeitet der Client auf DIESEM Stand? -------------------------
+        if (input.expectedVersionId !== entwurf.id) {
+          return {
+            ok: false as const,
+            problem: { kind: "STALE_VERSION" as const, aktuelleVersionId: entwurf.id },
+          };
+        }
+
+        // --- 6. Die Zuweisungen des Entwurfs ---------------------------------
+        const bestand = await tx.query<RawExistingRow>(
+          `select id, employee_id, worksite_id, starts_at_utc, ends_at_utc
+             from public.assignments
+            where plan_version_id = $1
+            order by starts_at_utc asc, id asc`,
+          [entwurf.id],
+        );
+
+        // --- 7. Gehoert jede Zuweisung in diese Woche? -----------------------
+        // Das Schema verknuepft `week_key` mit keinem Zeitstempel (Luecke aus
+        // EYT-49). Ohne diese Pruefung koennte eine Woche mit fachlich fremden
+        // Zeiten verbindlich werden.
+        const fremde = zuweisungenAusserhalbDerWoche(
+          bestand.rows.map((zeile) => ({ id: zeile.id, startsAtUtc: zeile.starts_at_utc })),
+          input.weekKey,
+          this.wochenschluessel,
+          org.time_zone,
+        );
+        const ersteFremde = fremde[0];
+        if (ersteFremde !== undefined) {
+          return {
+            ok: false as const,
+            problem: {
+              kind: "ASSIGNMENT_OUTSIDE_WEEK" as const,
+              tatsaechlicheWoche: ersteFremde.tatsaechlicheWoche,
+            },
+          };
+        }
+
+        // --- 8. Blockierende Konflikte, benannt ------------------------------
+        const blockierend = this.blockierendeKonflikte(bestand.rows, org);
+        if (blockierend.length > 0) {
+          return {
+            ok: false as const,
+            problem: { kind: "BLOCKING_CONFLICT" as const, conflicts: blockierend },
+          };
+        }
+
+        // --- 9. Die EINE Schreibstelle ---------------------------------------
+        // `published_by` kommt aus `app.current_user_id()`, nicht aus dem
+        // Aufruf: die RLS-Policy aus 0015 verlangt genau das und wuerde eine
+        // frei gewaehlte Urheberangabe ablehnen.
+        //
+        // `and published_at is null` ist der Guertel zum Hosentraeger der
+        // Sperre: selbst wenn die Sperre eines Tages faellt, veroeffentlicht
+        // dieses Statement keine bereits veroeffentlichte Version erneut.
+        let veroeffentlichtAm: Date | null = null;
+        const gesetzt = await tx.query<PublishedVersionRow>(
+          `update public.plan_versions
+              set published_at = now(),
+                  published_by = app.current_user_id()
+            where id = $1 and published_at is null
+            returning id, week_key, published_at`,
+          [entwurf.id],
+        );
+        const veroeffentlicht = gesetzt.rows[0];
+        if (veroeffentlicht !== undefined) {
+          if (veroeffentlicht.published_at === null) {
+            // `returning` liefert den Stand NACH dem Update; `published_at`
+            // kann dort nicht null sein, weil dieses Statement es gerade
+            // gesetzt hat. Trifft es doch zu, stimmt eine Annahme nicht —
+            // laut melden statt einen Zeitpunkt zu erfinden.
+            throw new Error("EYT-107: published_at ist nach dem Veroeffentlichen leer.");
+          }
+          veroeffentlichtAm = veroeffentlicht.published_at;
+        }
+        if (veroeffentlicht === undefined) {
+          // Null betroffene Zeilen heisst hier NICHT „schon veroeffentlicht" —
+          // das haette Schritt 4 gesehen. Es heisst: die RLS-Policy hat die
+          // Zeile aus dem Update herausgefiltert, weil die Datenbank das Recht
+          // `planning.publish` nicht sieht. Genau dieser Fall tritt ein, wenn
+          // die Anwendungs-Policy und die Datenbank auseinanderlaufen — er
+          // gehoert laut gemeldet und nicht als Erfolg beantwortet.
+          throw new Error(
+            "EYT-107: Veroeffentlichen betraf keine Zeile. Die Datenbank verweigert das Recht planning.publish (Migration 0015).",
+          );
+        }
+
+        // Fehlerinjektion GENAU hier: die Version steht, Auditspur und Outbox
+        // nicht. Ohne diesen Punkt liesse sich die Transaktionsklammer nicht
+        // belegen — ein gruener Normalfall zeigt nur, dass nichts schiefging.
+        this.vielleichtScheitern("published");
+
+        // --- 10. Audit, Outbox, Idempotenz — SELBE Transaktion ---------------
+        const assignmentIds = bestand.rows.map((zeile) => zeile.id);
+
+        await tx.query(
+          `insert into public.audit_events
+             (org_id, actor_user_id, event_type, subject_type, subject_id, context)
+           values ($1, app.current_user_id(), 'planning.plan_published', 'plan_version', $2, $3::jsonb)`,
+          [
+            org.id,
+            veroeffentlicht.id,
+            // Nur Ids und Zahlen. Die Liste der Zuweisungen bleibt draussen:
+            // sie waechst unbegrenzt, und der Auditkontext ist keine Kopie des
+            // Plans. Die Anzahl genuegt, um eine Veroeffentlichung
+            // wiederzuerkennen.
+            JSON.stringify({
+              weekKey: veroeffentlicht.week_key,
+              assignmentCount: assignmentIds.length,
+            }),
+          ],
+        );
+
+        this.vielleichtScheitern("audit");
+
+        await tx.query(
+          `insert into public.outbox_messages
+             (org_id, message_type, payload, idempotency_key)
+           values ($1, 'planning.plan_published', $2::jsonb, $3)`,
+          [
+            org.id,
+            JSON.stringify({
+              planVersionId: veroeffentlicht.id,
+              weekKey: veroeffentlicht.week_key,
+            }),
+            input.idempotencyKey,
+          ],
+        );
+
+        await this.idempotenz.remember(
+          tx,
+          org.id,
+          PUBLISH_OPERATION,
+          input.idempotencyKey,
+          veroeffentlicht.id,
+          fingerabdruck,
+        );
+
+        this.vielleichtScheitern("outbox");
+
+        return {
+          ok: true as const,
+          version: {
+            versionId: veroeffentlicht.id,
+            weekKey: veroeffentlicht.week_key,
+            publishedAtUtc: veroeffentlichtAm as Date,
+            assignmentIds,
+          },
+          replayed: false,
+        };
+      });
+    } catch (fehler) {
+      const code = fehlerCode(fehler);
+      if (code === EXCLUSION_VIOLATION) {
+        // Der Sync-Trigger hat die Zuweisungen gestempelt und
+        // `assignments_no_published_overlap` hat abgelehnt. Die Anwendung
+        // haette es in Schritt 8 sehen muessen; kommt es trotzdem hier an,
+        // gewinnt die Datenbank — und der Aufrufer bekommt denselben
+        // Fachcode, nicht einen Serverfehler.
+        return {
+          ok: false,
+          problem: {
+            kind: "BLOCKING_CONFLICT",
+            conflicts: [
+              {
+                code: "EMPLOYEE_INTERVAL_OVERLAP",
+                blocking: true,
+                message: KONFLIKT_TEXT.EMPLOYEE_INTERVAL_OVERLAP,
+              },
+            ],
+          },
+        };
+      }
+      if (code === UNIQUE_VIOLATION) {
+        // Zwei gleichzeitige Anfragen mit demselben Schluessel, bei denen die
+        // Sperre nicht griff: der unique-Index ist die letzte Autoritaet.
+        return { ok: false, problem: { kind: "IDEMPOTENCY_KEY_REUSED" } };
+      }
+      throw fehler;
+    }
+  }
+
+  /** Eine bereits veroeffentlichte Version samt ihrer Zuweisungen, oder `null`. */
+  private async leseVeroeffentlichteVersion(
+    tx: TenantQuery,
+    versionId: string,
+  ): Promise<PublishedPlanVersionRow | null> {
+    const version = await tx.query<PublishedVersionRow>(
+      `select id, week_key, published_at from public.plan_versions where id = $1`,
+      [versionId],
+    );
+    const zeile = version.rows[0];
+    if (zeile === undefined || zeile.published_at === null) return null;
+
+    const zuweisungen = await tx.query<IdRow>(
+      `select id from public.assignments
+        where plan_version_id = $1
+        order by starts_at_utc asc, id asc`,
+      [versionId],
+    );
+    return {
+      versionId: zeile.id,
+      weekKey: zeile.week_key,
+      publishedAtUtc: zeile.published_at,
+      assignmentIds: zuweisungen.rows.map((eintrag) => eintrag.id),
+    };
+  }
+
+  /**
+   * Jede blockierende Regel, die es HEUTE gibt, auf den ganzen Entwurf.
+   *
+   * Verwendet dieselbe Domainfunktion wie die Validierungsroute: jede
+   * Zuweisung wird einmal als „Entwurf" gegen alle uebrigen geprueft, mit
+   * sich selbst ausgeschlossen. Eine eigene Ueberlappungsschleife hier waere
+   * eine zweite Regel neben derselben Aussage.
+   *
+   * `NO_CAPACITY_LIMIT`: es gibt im Fachschema keine Wochenstundengrenze. Eine
+   * geratene Zahl waere eine erfundene Regel. Die Kapazitaetspruefung ist
+   * damit heute wirkungslos — das steht so im Runbook und wird nicht als
+   * geprueft behauptet.
+   *
+   * NICHT geprueft, weil es dafuer keinen Produzenten gibt: `EMPLOYEE_INACTIVE`
+   * und `WORKSITE_NOT_PUBLISHABLE`. Beide Codes stehen im Vertrag, aber keine
+   * Regel im Repository erzeugt sie.
+   */
+  private blockierendeKonflikte(
+    zeilen: readonly RawExistingRow[],
+    org: OrgRow,
+  ): ValidatedConflict[] {
+    const zone = createTimeZone(org.time_zone);
+    if (!zone.ok) {
+      throw new Error(`EYT-107: unbekannte Zeitzone "${org.time_zone}" in organizations.`);
+    }
+
+    const alle: AssignmentDraft[] = [];
+    for (const zeile of zeilen) {
+      const intervall = TimeInterval.create(zeile.starts_at_utc, zeile.ends_at_utc);
+      if (!intervall.ok) {
+        // `assignments_interval_ordered` (0007) laesst das nicht zu. Kommt es
+        // trotzdem an, ist eine Annahme falsch — laut melden, nicht ueberspringen.
+        throw new Error(`EYT-107: Zuweisung ${zeile.id} traegt ein ungueltiges Intervall.`);
+      }
+      alle.push({
+        id: unsafeIdentifier<AssignmentId>(zeile.id),
+        orgId: unsafeIdentifier<OrgId>(org.id),
+        employeeId: unsafeIdentifier<EmployeeId>(zeile.employee_id),
+        worksiteId: unsafeIdentifier<WorksiteId>(zeile.worksite_id),
+        interval: intervall.interval,
+      });
+    }
+
+    const gesehen = new Set<ConflictCode>();
+    const konflikte: ValidatedConflict[] = [];
+    for (const kandidat of alle) {
+      for (const konflikt of validateDraft({
+        draft: kandidat,
+        existing: alle,
+        excludeId: kandidat.id,
+        timeZone: zone.timeZone,
+        capacityLimit: NO_CAPACITY_LIMIT,
+      })) {
+        if (!konflikt.blocking || gesehen.has(konflikt.code)) continue;
+        gesehen.add(konflikt.code);
+        konflikte.push({
+          code: konflikt.code,
+          blocking: true,
+          message: KONFLIKT_TEXT[konflikt.code],
+        });
+      }
+    }
+    return konflikte;
   }
 
   /**
@@ -599,7 +1031,7 @@ export class PlanningWriteRepository implements PlanningWrites {
    * Der Schalter kann nur SCHEITERN lassen, nie etwas gruen faerben. Er ist
    * damit das Gegenteil eines Skip-Schalters.
    */
-  private vielleichtScheitern(punkt: "assignment" | "audit" | "outbox"): void {
+  private vielleichtScheitern(punkt: "assignment" | "audit" | "outbox" | "published"): void {
     if (this.fehlerNach === punkt) {
       throw new Error(`EYT-92: erzwungener Fehler nach "${punkt}" (Testhaken).`);
     }

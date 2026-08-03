@@ -5,10 +5,9 @@ import { APP_FILTER } from "@nestjs/core";
 import { CorrelationIdMiddleware } from "./common/correlation-id.middleware";
 import { HttpExceptionFilter } from "./common/http-exception.filter";
 import { APP_CONFIG, ConfigModule } from "./config/config.module";
-import { TENANT_SUBJECT_RESOLVER, UnauthenticatedSubjectResolver } from "./common/tenant-subject";
 import { HealthController } from "./health/health.controller";
 import {
-  DenyAllPlanningAccess,
+  MembershipPlanningAccessPolicy,
   PLANNING_ACCESS_POLICY,
   PLANNING_QUERIES_FACTORY,
   PLANNING_WRITES_FACTORY,
@@ -173,19 +172,6 @@ import {
       ],
     },
     {
-      // Mandantensubjekt (EYT-50). Absichtlich registriert, BEVOR die erste
-      // Fachroute existiert: sonst brauchte die erste Route eine Quelle und
-      // wuerde sich eine schwaechere ausdenken — einen Header, den niemand
-      // prueft, oder eine Organisations-Id aus dem Anfragekoerper.
-      //
-      // Der Default liefert immer null. Fachrouten antworten damit 401, bis
-      // EYT-14 die Tokenpruefung liefert. Tests ersetzen den Token per DI,
-      // genau wie DATABASE_PING — deshalb braucht es keinen
-      // "nur-in-test"-Umgehungsschalter im Produktionscode.
-      provide: TENANT_SUBJECT_RESOLVER,
-      useClass: UnauthenticatedSubjectResolver,
-    },
-    {
       // Verbindungspool je Prozess, Repository je Subjekt. Ein Repository mit
       // fest eingebautem Subjekt waere ein Singleton, das die Identitaet der
       // ERSTEN Anfrage an alle folgenden weiterreicht.
@@ -201,8 +187,11 @@ import {
       // damit das Repository sie nicht selbst nachbaut — eine zweite
       // Wochenrechnung waere genau der Fehler aus EYT-74.
       provide: PLANNING_WRITES_FACTORY,
-      inject: [TENANT_QUERY_RUNNER],
-      useFactory: (runner: TenantQueryRunnerProvider): PlanningWritesFactory => {
+      inject: [TENANT_QUERY_RUNNER, IDEMPOTENCY_STORE],
+      useFactory: (
+        runner: TenantQueryRunnerProvider,
+        idempotenz: IdempotencyStore,
+      ): PlanningWritesFactory => {
         return (subjectUserId: string) =>
           new PlanningWriteRepository(
             runner,
@@ -218,7 +207,8 @@ import {
                 isoWeekOfLocalDate(localBusinessDate(instant, geprueft.timeZone)),
               );
             },
-            // KEIN vierter Parameter. Der Fehlerpunkt fuer den
+            idempotenz,
+            // KEIN weiterer Parameter. Der Fehlerpunkt fuer den
             // Teilwirkungsnachweis bleibt `null`, weil die Produktionswurzel
             // keine Umgebungsvariable dafuer liest — ein Testhaken in
             // `AppModule` waere ein Produktionsschalter, egal wie er heisst.
@@ -228,9 +218,13 @@ import {
       },
     },
     {
-      // Produktionsstand: niemand darf lesen. EYT-14 ersetzt das.
+      // EYT-107: die anwendungsseitige Haelfte der Planungsautorisierung.
+      // Bis hierher stand hier `DenyAllPlanningAccess` — der ehrliche
+      // Produktionsstand, solange es kein Rollenmodell gab. Seit Migration
+      // 0015 gibt es eines, und die Datenbank entscheidet unabhaengig noch
+      // einmal (`app.has_permission` in der Update-Policy von plan_versions).
       provide: PLANNING_ACCESS_POLICY,
-      useClass: DenyAllPlanningAccess,
+      useClass: MembershipPlanningAccessPolicy,
     },
     TenantQueryRunnerProvider,
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

@@ -28,8 +28,22 @@ export type { PlanningQueriesFactory } from "./application/planning-queries.fact
 export { PLANNING_QUERIES_FACTORY } from "./application/planning-queries.factory";
 export { PlanningWindowRepository } from "./infrastructure/planning-window.repository";
 export { PlanningController } from "./interface/http/planning.controller";
-export type { PlanningAccessPolicy } from "./application/planning-access.port";
-export { DenyAllPlanningAccess, PLANNING_ACCESS_POLICY } from "./application/planning-access.port";
+// EYT-107: die reale Autorisierung. `DenyAllPlanningAccess` ist ersatzlos
+// entfallen — es war der Produktionsstand, solange es kein Rollenmodell gab.
+// Seit Migration 0015 gibt es eines.
+export type {
+  PlanningAccessPolicy,
+  PlanningAccessProblem,
+  PlanningAccessResult,
+  PlanningMembership,
+  PlanningPermission,
+} from "./application/planning-access.port";
+export {
+  PLANNING_ACCESS_POLICY,
+  PLANNING_ACCESS_PROBLEMS,
+  PLANNING_PERMISSIONS,
+} from "./application/planning-access.port";
+export { MembershipPlanningAccessPolicy } from "./application/membership-planning-access.policy";
 export type {
   CreateAssignmentInput,
   CreateAssignmentResult,
@@ -37,6 +51,9 @@ export type {
   PlanningWriteProblem,
   PlanningWrites,
   PlanningWritesFactory,
+  PublishPlanInput,
+  PublishPlanResult,
+  PublishedPlanVersionRow,
 } from "./application/planning-writes.port";
 export { PLANNING_WRITES_FACTORY } from "./application/planning-writes.port";
 export { PlanningWriteRepository } from "./infrastructure/planning-write.repository";

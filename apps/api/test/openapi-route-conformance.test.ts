@@ -66,10 +66,6 @@ function contractOperations(): string[] {
  */
 const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
   [
-    "POST /planung/versionen",
-    "Veroeffentlichen. Die Datenbankseite ist fertig (Migration 0010), die Anwendungsnaht fehlt: Outbox-Eintrag und Auditzeile in derselben Transaktion (EYT-50 AK6/AK7).",
-  ],
-  [
     "GET /einsatz/plan",
     "Mitarbeiter-Lesesicht. Ohne sie kann AK9 (gleiche Assignment- und Planversions-IDs in beiden Ansichten) nicht belegt werden.",
   ],
