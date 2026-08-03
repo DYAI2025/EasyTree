@@ -656,9 +656,21 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
     // BERECHTIGTER es kann.
     await test.step("B sieht keine Planung und darf nicht veroeffentlichen", async () => {
       await seite.goto(`/planung?weekKey=${PLANWOCHE}`);
-      // Der Waechter blockt vor jedem Gateway-Aufruf: B hat kein
-      // `planning.read`. Kein Wochenplan, keine Publish-Aktion.
-      await expect(seite.getByTestId("planung-forbidden")).toBeVisible();
+      // Der Waechter blockt VOR jedem Gateway-Aufruf.
+      //
+      // Welcher Zustand? B ist angemeldet, hat aber KEINE aktive
+      // Mitgliedschaft. Damit gibt es keine bestaetigte Organisation, in der
+      // ein Recht ueberhaupt gelten koennte — der Zustand ist „keine
+      // eindeutige Organisation", nicht „Forbidden". `Forbidden` gilt fuer
+      // eine bestaetigte Organisation OHNE `planning.read`; dieser Fall wird
+      // in `planung-zugang.test.tsx` geprueft.
+      //
+      // Eine erste Fassung erwartete hier `planung-forbidden` und war rot.
+      // Nicht die Zusicherung wurde angepasst, sondern der Produktzustand:
+      // der Banner behauptete „Du gehörst mehreren Organisationen an" — fuer
+      // B falsch. Serverseitig entspricht dem `ORG_CONTEXT_REQUIRED`.
+      await expect(seite.getByTestId("planung-org-erforderlich")).toBeVisible();
+      await expect(seite.getByTestId("planung-forbidden")).toHaveCount(0);
       await expect(seite.getByTestId("planung-veroeffentlichen")).toHaveCount(0);
       await expect(seite.getByTestId("planungsfenster-stand")).toHaveCount(0);
 

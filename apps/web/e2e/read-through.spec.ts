@@ -192,16 +192,42 @@ test.describe("Read-Through: Browser bis PostgreSQL", () => {
  * mit `--grep-invert "Nachweis 7"` davor gelaufen ist.
  */
 test.describe("Read-Through: API gestoppt", () => {
-  test("Nachweis 7: ohne API zeigt die UI UNAVAILABLE, keine Fixture, keine leere Woche", async ({
+  test("Nachweis 7: ohne API zeigt die UI den Ausfall, keine Fixture, keine leere Woche", async ({
     page,
   }) => {
     // Frischer Kontext durch den eigenen Lauf: was hier sichtbar ist, kann
     // kein Rest der vorherigen, erfolgreichen Anzeige sein.
     await page.goto(SEITE);
 
-    const fehler = page.getByTestId("planungsfenster-fehler");
-    await expect(fehler).toBeVisible();
-    await expect(fehler).toHaveAttribute("data-failure", "UNAVAILABLE");
+    // ## Was sich mit EYT-107 geaendert hat — und was ausdruecklich nicht
+    //
+    // Bis EYT-107 rief die Seite das Planungsgateway unmittelbar, und der
+    // Ausfall erschien als `planungsfenster-fehler` mit
+    // `data-failure="UNAVAILABLE"`. Seither steht `PlanungZugang` davor: die
+    // Planung haengt an derselben Sitzungskette wie die Kosten. Ist die API
+    // KOMPLETT gestoppt — und genau das stellt dieses Skript her —, scheitert
+    // `GET /auth/session` ZUERST. Der ehrliche Zustand ist dann „der
+    // Anmeldezustand ist unbekannt", nicht „der Wochenplan ist nicht
+    // ladbar": wir wissen ja nicht einmal, wer fragt.
+    //
+    // Die Zusicherung wurde deshalb NICHT auf irgendeinen vorhandenen Banner
+    // umgebogen. Der eigentliche Inhalt dieses Nachweises sind die NEGATIVEN
+    // Zeilen darunter — kein Leerzustand, keine Fixture, keine Zuweisung aus
+    // dem gesunden Lauf. Die stehen unveraendert und gelten weiterhin; sie
+    // gelten sogar strenger, weil jetzt gar keine Planungsoberflaeche mehr
+    // gerendert wird.
+    //
+    // Der planungsseitige `UNAVAILABLE`-Pfad ist dadurch nicht verwaist: er
+    // greift, wenn die SITZUNG steht und nur die Planungsroute ausfaellt.
+    // Geprueft in `apps/web/test/planning-window-view.test.tsx`
+    // („zeigt einen Ausfall als Fehler, nicht als leere Woche").
+    const sitzungUnbekannt = page.getByTestId("planung-sitzung-unbekannt");
+    await expect(sitzungUnbekannt).toBeVisible();
+
+    // Und ausdruecklich NICHT „abgemeldet": ein nicht erreichbarer Server ist
+    // Nichtwissen. Wer beides gleich behandelt, schickt bei jedem Ausfall
+    // alle zur Anmeldung.
+    await expect(page.getByTestId("planung-unauthenticated")).toHaveCount(0);
 
     // Kein Leerzustand: "nichts geplant" waere die Verwechslung, gegen die
     // dieser ganze Slice gebaut ist.

@@ -118,8 +118,34 @@ describe("PlanungZugang", () => {
 
   it("verlangt bei mehreren Organisationen eine sichtbare Auswahl", async () => {
     zeichneWaechter(sitzungMit([orgMit(["planning.read"]), orgMit(["planning.read"], ORG_B)]));
-    await waitFor(() => expect(screen.queryByTestId("planung-org-wahl")).not.toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("planung-org-erforderlich")).not.toBeNull());
     expect(screen.queryByTestId("planung-inhalt")).toBeNull();
+  });
+
+  it("zeigt denselben Zustand bei GAR KEINER Mitgliedschaft", async () => {
+    // Der Fall des Reisenden B: angemeldet, aber nirgends Mitglied. Bis
+    // EYT-107 behauptete der Banner hier „Du gehörst mehreren Organisationen
+    // an" — fuer B nachweislich falsch, aufgedeckt von der Browserreise.
+    zeichneWaechter(sitzungMit([]));
+    await waitFor(() => expect(screen.queryByTestId("planung-org-erforderlich")).not.toBeNull());
+    expect(screen.queryByTestId("planung-inhalt")).toBeNull();
+    expect(screen.queryByTestId("planung-forbidden")).toBeNull();
+  });
+
+  it("verraet nicht, OB die Person irgendwo Mitglied ist", async () => {
+    // Ein Existenzleck waere, „du gehoerst keiner an" von „waehle aus" zu
+    // unterscheiden. Beide Lagen zeigen denselben Text — dieselbe Regel, aus
+    // der die API ORG_NOT_A_MEMBER und PERMISSION_MISSING gleich beantwortet.
+    zeichneWaechter(sitzungMit([]));
+    await waitFor(() => expect(screen.queryByTestId("planung-org-erforderlich")).not.toBeNull());
+    const ohne = screen.getByTestId("planung-org-erforderlich").textContent ?? "";
+    cleanup();
+
+    zeichneWaechter(sitzungMit([orgMit(["planning.read"]), orgMit(["planning.read"], ORG_B)]));
+    await waitFor(() => expect(screen.queryByTestId("planung-org-erforderlich")).not.toBeNull());
+    const mehrere = screen.getByTestId("planung-org-erforderlich").textContent ?? "";
+
+    expect(ohne).toBe(mehrere);
   });
 
   it("reicht planning.publish als false durch, wenn die Rolle es nicht traegt", async () => {

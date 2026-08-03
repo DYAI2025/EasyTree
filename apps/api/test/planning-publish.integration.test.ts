@@ -60,7 +60,24 @@ const clients: Client[] = [];
 const EMPLOYEE_ALPHA = "00000000-0000-4000-8000-0000004010a1";
 const WORKSITE_ALPHA = "00000000-0000-4000-8000-0000005010a1";
 const ORG_BETA = "00000000-0000-4000-8000-0000000000b2";
+const EMPLOYEE_BETA = "00000000-0000-4000-8000-0000004020b2";
+const WORKSITE_BETA = "00000000-0000-4000-8000-0000005020b2";
 const USER_B = "00000000-0000-4000-8000-00000000bbb2";
+
+/**
+ * Stammdaten je Mandant — nicht je Aufruf zusammengesucht.
+ *
+ * Eine erste Fassung nahm fuer BEIDE Organisationen die Beschaeftigte von
+ * Alpha und nur die Baustelle mandantenabhaengig. Der tenantgebundene
+ * Fremdschluessel `(employee_id, org_id)` hat das korrekt abgelehnt
+ * (`assignments_employee_id_org_id_fkey`, gemessen in db-gates 03.08.2026) —
+ * die Constraint tat genau das, wofuer sie da ist, und der Fixture war falsch.
+ * Beide Bezuege kommen deshalb aus derselben Quelle.
+ */
+const STAMMDATEN: Record<string, { employeeId: string; worksiteId: string }> = {
+  [ORG_ALPHA]: { employeeId: EMPLOYEE_ALPHA, worksiteId: WORKSITE_ALPHA },
+  [ORG_BETA]: { employeeId: EMPLOYEE_BETA, worksiteId: WORKSITE_BETA },
+};
 
 /**
  * Jeder Fall bekommt seine EIGENE Woche.
@@ -194,6 +211,9 @@ async function entwurfMit(
   const id = version.rows[0]?.id;
   if (id === undefined) throw new Error(`Entwurf fuer ${woche} liess sich nicht anlegen.`);
 
+  const stamm = STAMMDATEN[orgId];
+  if (stamm === undefined) throw new Error(`Keine Stammdaten fuer Organisation ${orgId}.`);
+
   for (const zuweisung of zuweisungen) {
     await admin.query(
       `insert into public.assignments
@@ -202,8 +222,8 @@ async function entwurfMit(
       [
         orgId,
         id,
-        zuweisung.employeeId ?? EMPLOYEE_ALPHA,
-        orgId === ORG_ALPHA ? WORKSITE_ALPHA : "00000000-0000-4000-8000-0000005020b2",
+        zuweisung.employeeId ?? stamm.employeeId,
+        stamm.worksiteId,
         zuweisung.von,
         zuweisung.bis,
       ],

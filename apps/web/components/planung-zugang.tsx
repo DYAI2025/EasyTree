@@ -67,11 +67,36 @@ export function PlanungZugang({
     );
   }
 
+  // Keine EINDEUTIGE aktive Organisation. Das deckt zwei Lagen ab, und der
+  // Text muss fuer beide stimmen:
+  //
+  //   * gar keine aktive Mitgliedschaft (ein angemeldeter Benutzer ohne
+  //     Zugehoerigkeit — der Fall von Reisendem B);
+  //   * mehrere, ohne getroffene Auswahl.
+  //
+  // Eine fruehere Fassung sagte hier „Du gehörst mehreren Organisationen an".
+  // Fuer B war das schlicht FALSCH — er gehoert keiner an — und die
+  // Browserreise hat es aufgedeckt (auth-journey, 03.08.2026): sie erwartete
+  // `Forbidden` und fand diesen Banner.
+  //
+  // Zusammengefasst statt aufgeteilt, weil die Unterscheidung ein
+  // Existenzleck waere: „du gehoerst keiner an" gegenueber „waehle aus"
+  // verraet einem Fremden, ob er irgendwo Mitglied ist. Derselbe Grund, aus
+  // dem die API `ORG_NOT_A_MEMBER` und `PERMISSION_MISSING` gleich
+  // beantwortet.
+  //
+  // Serverseitig entspricht dem `ORG_CONTEXT_REQUIRED`; die Publish-Route
+  // beantwortet das mit 403, und daran aendert dieser Zweig nichts — er
+  // ersetzt keine Autorisierung, er erklaert sie nur.
   if (organisation === null) {
     return (
-      <StateBanner tone="info" title="Organisation wählen" data-testid="planung-org-wahl">
-        Du gehörst mehreren Organisationen an. Bitte wähle oben in der Kopfleiste eine aus — ohne
-        Auswahl zeigt easyTree keinen Wochenplan.
+      <StateBanner
+        tone="info"
+        title="Keine eindeutige Organisation"
+        data-testid="planung-org-erforderlich"
+      >
+        Die Planung braucht eine aktive Mitgliedschaft in genau einer Organisation. Gehörst du
+        mehreren an, wähle oben in der Kopfleiste eine aus.
       </StateBanner>
     );
   }
