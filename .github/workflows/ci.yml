@@ -272,6 +272,21 @@ jobs:
           bash scripts/assert-tenant-report.sh rate-timestamp /tmp/rate-timestamp.log
           pnpm --filter @easytree/api exec vitest run test/costs/rate-http-contract.integration.test.ts 2>&1 | tee /tmp/rate-http-contract.log
           bash scripts/assert-tenant-report.sh rate-http-contract /tmp/rate-http-contract.log
+      # EYT-108: Abloesung eines offenen Satzes unter echter Nebenlaeufigkeit
+      # und Wiederholung. Braucht ZWEI unabhaengige Verbindungen — eine
+      # Verbindung sieht ihre eigene Zeilensperre nie als Wartezeit und koennte
+      # deshalb nicht zeigen, dass `for update` den kritischen Abschnitt
+      # serialisiert. Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer
+      # Pflichtcheck: ein neuer Job waere ein Status-Check, den das Ruleset
+      # nicht kennt.
+      - name: Rate succession gate (fail-closed, zwei Verbindungen, EYT-108)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/costs/rate-succession.integration.test.ts 2>&1 | tee /tmp/rate-succession.log
+          bash scripts/assert-tenant-report.sh rate-succession /tmp/rate-succession.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |
