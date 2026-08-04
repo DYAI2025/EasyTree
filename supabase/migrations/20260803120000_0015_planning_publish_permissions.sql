@@ -207,7 +207,6 @@ insert into public.role_permissions (role, permission) values
 -- diese beiden Spalten.
 revoke update on table public.plan_versions from authenticated;
 grant update (published_at, published_by) on table public.plan_versions to authenticated;
-grant update on table public.plan_versions to authenticated; -- GM-P2/P3
 
 drop policy plan_versions_update_in_org on public.plan_versions;
 
