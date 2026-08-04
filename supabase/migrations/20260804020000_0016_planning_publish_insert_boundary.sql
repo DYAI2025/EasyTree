@@ -69,6 +69,7 @@
 -- mitgegeben.
 revoke insert on table public.plan_versions from authenticated;
 grant insert (id, org_id, week_key) on table public.plan_versions to authenticated;
+grant insert on table public.plan_versions to authenticated; -- GM-F1a
 
 drop policy plan_versions_insert_in_org on public.plan_versions;
 
