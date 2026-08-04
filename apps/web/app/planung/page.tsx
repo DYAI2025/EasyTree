@@ -1,6 +1,6 @@
 import { PlanningWindowQuerySchema } from "@easytree/contracts";
 
-import { PlanningWindowView } from "../../components/planning-window-view";
+import { PlanungAnsicht } from "../../components/planung-ansicht";
 
 /**
  * Referenzansicht des Planungsfensters (EYT-50).
@@ -34,7 +34,10 @@ export default async function PlanungPage({
     <main>
       <h1>Planung</h1>
       {query.success ? (
-        <PlanningWindowView weekKey={query.data.weekKey} />
+        // Diese Seite ist eine SERVER-Komponente und reicht deshalb nur eine
+        // Zeichenkette weiter. Waechter und Ansicht liegen zusammen in einer
+        // Client-Komponente — warum, steht in `planung-ansicht.tsx`.
+        <PlanungAnsicht weekKey={query.data.weekKey} />
       ) : (
         <p data-testid="planungsfenster-parameterfehler" role="alert">
           Kein gültiger Wochenschlüssel. Erwartet wird `?weekKey=2026-W32` mit einer Woche zwischen

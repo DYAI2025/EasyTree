@@ -60,7 +60,36 @@ export type PlanningWriteProblem =
    * zurueckzugeben waere die schlechteste Reaktion: der Aufrufer bekaeme ein
    * "angelegt" fuer etwas, das er nie geschickt hat.
    */
-  | { readonly kind: "IDEMPOTENCY_KEY_REUSED" };
+  | { readonly kind: "IDEMPOTENCY_KEY_REUSED" }
+  /**
+   * Der Client arbeitete auf einem anderen Stand als dem, der jetzt gilt
+   * (EYT-107). `aktuelleVersionId` ist `null`, wenn es fuer die Woche
+   * ueberhaupt keinen Entwurf mehr gibt.
+   *
+   * Getrennt von {@link PlanningWriteProblem} `ALREADY_PUBLISHED`, obwohl beide
+   * 409 sind: „jemand hat den Entwurf veraendert" und „die Woche ist fertig"
+   * verlangen von der Planerin verschiedene Reaktionen.
+   */
+  | { readonly kind: "STALE_VERSION"; readonly aktuelleVersionId: string | null }
+  /** Fuer diese Woche gibt es keinen unveroeffentlichten Entwurf mehr. */
+  | { readonly kind: "ALREADY_PUBLISHED"; readonly versionId: string }
+  /**
+   * Der Entwurf traegt mindestens einen blockierenden Konflikt.
+   *
+   * Traegt die Liste mit, damit die Meldung sagen kann, WAS blockiert —
+   * „Konflikt" allein ist fuer eine Planerin nicht handhabbar.
+   */
+  | { readonly kind: "BLOCKING_CONFLICT"; readonly conflicts: readonly ValidatedConflict[] }
+  /**
+   * Mindestens eine Zuweisung des Entwurfs liegt nach der Zeitzone der
+   * Organisation nicht in der Woche der Planversion.
+   *
+   * Diese Pruefung existiert, weil das SCHEMA sie nicht kennt: `week_key` ist
+   * mit keinem Zeitstempel verknuepft (bekannte Luecke aus EYT-49). Ohne sie
+   * koennte eine Woche mit fachlich fremden Zeiten veroeffentlicht werden, und
+   * ein spaeterer Kosten-Snapshot rechnete auf ihnen.
+   */
+  | { readonly kind: "ASSIGNMENT_OUTSIDE_WEEK"; readonly tatsaechlicheWoche: string };
 
 export type CreateAssignmentResult =
   | {
@@ -115,7 +144,51 @@ export interface PlanningWrites {
    * niemand angefordert hat.
    */
   createAssignment(input: CreateAssignmentInput): Promise<CreateAssignmentResult>;
+
+  /**
+   * Veroeffentlicht den Entwurf einer Woche — atomar oder gar nicht (EYT-107).
+   *
+   * Setzt `plan_versions.published_at` genau einmal; den Rest erledigt die
+   * Datenbank: der Trigger aus Migration 0010 spiegelt den Marker nach
+   * `assignments.published_at`, und der partielle EXCLUDE lehnt dabei einen
+   * ueberlappenden Entwurf ab. Auditzeile, Outbox-Nachricht und
+   * Idempotenzergebnis liegen in derselben Transaktion.
+   */
+  publishPlan(input: PublishPlanInput): Promise<PublishPlanResult>;
 }
+
+export interface PublishPlanInput {
+  readonly weekKey: string;
+  /**
+   * Der Stand, auf dem der Client arbeitet — die Id des Entwurfs, den er
+   * gesehen hat. `null` heisst „ich erwarte, dass es fuer diese Woche noch
+   * keine Version gibt".
+   *
+   * Pflichtfeld, auch wenn `null` erlaubt ist: ein fehlendes Feld waere von
+   * „ich habe keinen Stand gesehen" nicht zu unterscheiden, und der Server
+   * wuerde blind veroeffentlichen, was gerade dasteht.
+   */
+  readonly expectedVersionId: string | null;
+  readonly idempotencyKey: string;
+}
+
+/** Die veroeffentlichte Planversion, so wie sie in der Datenbank steht. */
+export interface PublishedPlanVersionRow {
+  readonly versionId: string;
+  readonly weekKey: string;
+  readonly publishedAtUtc: Date;
+  /** Die Zuweisungen, die mit dieser Version verbindlich geworden sind. */
+  readonly assignmentIds: readonly string[];
+}
+
+export type PublishPlanResult =
+  | {
+      readonly ok: true;
+      readonly version: PublishedPlanVersionRow;
+      /** `true`, wenn dieser Aufruf die Wiederholung eines frueheren war. */
+      readonly replayed: boolean;
+    }
+  | { readonly ok: false; readonly problem: PlanningWriteProblem };
 
 /** Baut den Schreibport fuer ein verifiziertes Subjekt. Siehe planning-queries.factory. */
 export type PlanningWritesFactory = (subjectUserId: string) => PlanningWrites;

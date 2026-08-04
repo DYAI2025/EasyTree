@@ -31,11 +31,7 @@ import { Test } from "@nestjs/testing";
 
 import { AppModule } from "../../src/app.module";
 import { API_BASE_PATH } from "../../src/common/api-base-path";
-import {
-  TENANT_SUBJECT_RESOLVER,
-  type TenantSubjectResolver,
-} from "../../src/common/tenant-subject";
-import { PLANNING_ACCESS_POLICY, type PlanningAccessPolicy } from "../../src/modules/planning";
+import { REQUEST_IDENTITY } from "../../src/platform/auth/request-identity";
 
 export interface HarnessOptions {
   /** Die EINE Identitaet, unter der dieser Server arbeitet. */
@@ -49,20 +45,37 @@ export interface HarnessOptions {
  * Das Subjekt ist an den Serverstart gebunden, nicht an die Anfrage: kein
  * Header, kein Cookie, keine Query und keine Umgebungsvariable waehlen es aus.
  * Wer eine zweite Identitaet braucht, startet einen zweiten Server.
+ *
+ * ## Was genau ersetzt wird — und was NICHT (EYT-107)
+ *
+ * Ersetzt wird ausschliesslich `REQUEST_IDENTITY`: die Kette aus Token
+ * entnehmen, Signatur pruefen und Session-Liveness abfragen. Alles andere
+ * laeuft echt — insbesondere `SESSION_ORGANISATIONS`, also die
+ * MembershipRepository mit ihrer Abfrage auf `memberships` x
+ * `role_permissions` unter RLS, und `PLANNING_ACCESS_POLICY`, also die reale
+ * Rechtepruefung.
+ *
+ * Das ist eine bewusste Verkleinerung gegenueber der Fassung bis EYT-107: die
+ * ersetzte damals `TENANT_SUBJECT_RESOLVER` UND die Zugriffspolicy, gab also
+ * auch die Berechtigung vor. Jetzt muss das Subjekt seine Rechte wirklich in
+ * der Datenbank haben — `SUBJEKT_A` aus `scripts/read-through-harness.sh` ist
+ * owner in Organisation Alpha (`supabase/seed.sql`), und owner traegt seit
+ * Migration 0015 `planning.read`, `planning.write` und `planning.publish`.
+ *
+ * Ein gruener Lauf sagt deshalb weiterhin NICHTS darueber, ob Anmeldung,
+ * Tokenpruefung und Session-Liveness funktionieren. Dieser Nachweis ist
+ * `apps/web/e2e/auth-journey/` gegen `dist/main.js` — dort wird nichts
+ * ersetzt.
  */
 export async function startHarnessApi(options: HarnessOptions): Promise<INestApplication> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(TENANT_SUBJECT_RESOLVER)
+    .overrideProvider(REQUEST_IDENTITY)
     .useValue({
       // Die Anfrage wird bewusst nicht angesehen — sonst waere das Subjekt
       // doch wieder aus ihr waehlbar.
-      resolve: (): string => options.subjectUserId,
-    } satisfies TenantSubjectResolver)
-    .overrideProvider(PLANNING_ACCESS_POLICY)
-    .useValue({
-      mayReadPlanning: (): Promise<boolean> => Promise.resolve(true),
-      mayWritePlanning: (): Promise<boolean> => Promise.resolve(true),
-    } satisfies PlanningAccessPolicy)
+      identify: (): Promise<{ userId: string; sessionId: string }> =>
+        Promise.resolve({ userId: options.subjectUserId, sessionId: "harness-session" }),
+    })
     .compile();
 
   const app = moduleRef.createNestApplication();

@@ -39,6 +39,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { usePlanningGateway } from "../lib/planning-gateway-provider";
 import { AssignmentForm } from "./planning-assignment-form";
+import { PlanningPublishAction } from "./planning-publish-action";
 
 type ViewState =
   | { readonly kind: "laedt" }
@@ -93,7 +94,23 @@ function anzeigename(eintraege: readonly PlanningResource[], id: string): string
   return treffer.active ? treffer.label : `${treffer.label} (inaktiv)`;
 }
 
-export function PlanningWindowView({ weekKey }: { weekKey: string }) {
+export function PlanningWindowView({
+  weekKey,
+  darfVeroeffentlichen = false,
+}: {
+  weekKey: string;
+  /**
+   * Steuert nur die ANZEIGE der Publish-Aktion; autorisiert wird
+   * serverseitig. Kommt als Prop von `PlanungZugang` statt aus dem
+   * Sitzungskontext: diese Ansicht soll ohne Sitzungsinfrastruktur pruefbar
+   * bleiben, und ein zweiter `useSession`-Aufruf waere eine zweite Stelle,
+   * an der dieselbe Frage anders beantwortet werden koennte.
+   *
+   * Vorgabe `false` — fail-closed: wer die Prop vergisst, bekommt keine
+   * Aktion, nicht eine unbeaufsichtigte.
+   */
+  darfVeroeffentlichen?: boolean;
+}) {
   const gateway = usePlanningGateway();
   const [state, setState] = useState<ViewState>({ kind: "laedt" });
   // Zaehler statt Bool: nach zwei Speichervorgaengen hintereinander muss die
@@ -228,6 +245,20 @@ export function PlanningWindowView({ weekKey }: { weekKey: string }) {
           ? "Noch nichts veroeffentlicht"
           : `Zuletzt veroeffentlicht: ${fenster.publishedVersionId}`}
       </p>
+
+      {/*
+        Die Publish-Aktion (EYT-107). Sie bekommt den SERVERstand herein und
+        meldet die Serverantwort zurueck; die Woche wird danach neu gelesen.
+        Sie setzt selbst nichts — siehe Dateikopf von
+        `planning-publish-action.tsx`.
+      */}
+      <PlanningPublishAction
+        weekKey={fenster.weekKey}
+        sourceVersion={fenster.sourceVersion}
+        darfVeroeffentlichen={darfVeroeffentlichen}
+        publishPlan={(befehl, optionen) => gateway.publishPlan(befehl, optionen)}
+        onVeroeffentlicht={() => setNachladen((n) => n + 1)}
+      />
 
       {fenster.assignments.length === 0 ? (
         <p data-testid="planungsfenster-leer">Für diese Woche ist nichts geplant.</p>

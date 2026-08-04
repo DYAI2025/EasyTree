@@ -17,10 +17,55 @@
 -- reservierten Domain `.test` (RFC 2606) und koennen keiner realen Person
 -- gehoeren.
 
+-- ## Warum hier zwei Trigger ausgesetzt werden — und warum das kein Schlupfloch ist
+--
+-- Die Reise VEROEFFENTLICHT seit EYT-107 eine Planversion. Migration 0010
+-- macht veroeffentlichte Zeilen daraufhin unveraenderlich UND unloeschbar:
+-- `app.reject_published_row_change()` wirft bei jedem DELETE. Die Migration
+-- benennt die Folge sogar ausdruecklich — „sobald eine Organisation eine
+-- veroeffentlichte Planversion hat, laeuft ein Loeschen der Organisation in
+-- diesen Trigger und scheitert".
+--
+-- Damit gaebe es genau zwei Moeglichkeiten: die Reise veroeffentlicht nicht
+-- (dann beweist sie das Ticket nicht), oder der Teardown hinterlaesst Zeilen
+-- (dann ist `restzeilen=0` gelogen). Beides ist schlechter als die dritte:
+-- die Invariante fuer die Dauer des Loeschens sichtbar auszusetzen.
+--
+-- Die Ausnahme ist eng gefasst und pruefbar:
+--   * Sie steht in einer TESTdatei, nicht in einer Migration. Die Regel selbst
+--     bleibt unveraendert; `supabase/tests/0011_planning_publish.sql` belegt
+--     weiterhin, dass sie fuer Anwendungscode gilt.
+--   * `alter table` ist in PostgreSQL transaktional. Die beiden Anweisungen
+--     stehen deshalb INNERHALB der Transaktion: schlaegt irgendein DELETE
+--     fehl, rollt der Abbruch auch die Abschaltung zurueck.
+--   * Sie laeuft ausschliesslich ueber `EASYTREE_JOURNEY_ADMIN_DB_URL` gegen
+--     die lokale CI-Datenbank, die im selben Job frisch zurueckgesetzt wurde.
+--
+-- Wer diese Datei gegen eine Datenbank mit echten Plandaten laufen laesst,
+-- loescht echte Historie. Deshalb ist sie an die feste Reise-Organisation
+-- `…e201` gebunden und nennt keine Variable dafuer.
+
 \set ON_ERROR_STOP on
 
 begin;
 
+alter table public.plan_versions disable trigger plan_versions_published_immutable;
+alter table public.assignments disable trigger assignments_published_immutable;
+
+-- Zuweisungen VOR den Mitarbeitern: `assignments.employee_id` zeigt mit
+-- `on delete restrict` auf `employees`.
+delete from public.assignments
+  where org_id = '00000000-0000-4000-8000-00000000e201';
+delete from public.plan_versions
+  where org_id = '00000000-0000-4000-8000-00000000e201';
+delete from public.worksites
+  where org_id = '00000000-0000-4000-8000-00000000e201';
+delete from public.outbox_messages
+  where org_id = '00000000-0000-4000-8000-00000000e201';
+delete from public.audit_events
+  where org_id = '00000000-0000-4000-8000-00000000e201';
+delete from public.idempotency_records
+  where org_id = '00000000-0000-4000-8000-00000000e201';
 delete from public.employee_rate_versions
   where org_id = '00000000-0000-4000-8000-00000000e201';
 delete from public.employees
@@ -33,6 +78,9 @@ delete from public.users
   where id in (select id from auth.users where email in (:'reisender_a', :'reisender_b'));
 delete from auth.users
   where email in (:'reisender_a', :'reisender_b');
+
+alter table public.assignments enable trigger assignments_published_immutable;
+alter table public.plan_versions enable trigger plan_versions_published_immutable;
 
 commit;
 
@@ -56,6 +104,9 @@ declare
   n_mitglied int;
   n_mitarbeiter int;
   n_satz int;
+  n_planung int;
+  n_wirkung int;
+  n_trigger int;
   rest int;
 begin
   select count(*) into n_auth from auth.users
@@ -72,13 +123,41 @@ begin
   select count(*) into n_satz from public.employee_rate_versions
     where org_id = '00000000-0000-4000-8000-00000000e201';
 
-  rest := n_auth + n_projektion + n_org + n_mitglied + n_mitarbeiter + n_satz;
-  if rest <> 0 then
+  -- Seit EYT-107 gehoeren Planungszeilen dazu — gerade die veroeffentlichten,
+  -- denn genau die waeren ohne die ausgesetzten Trigger liegengeblieben.
+  select count(*) into n_planung from (
+    select 1 from public.plan_versions where org_id = '00000000-0000-4000-8000-00000000e201'
+    union all
+    select 1 from public.assignments where org_id = '00000000-0000-4000-8000-00000000e201'
+    union all
+    select 1 from public.worksites where org_id = '00000000-0000-4000-8000-00000000e201'
+  ) as planung;
+
+  -- Und die Nebenwirkungen des Veroeffentlichens.
+  select count(*) into n_wirkung from (
+    select 1 from public.audit_events where org_id = '00000000-0000-4000-8000-00000000e201'
+    union all
+    select 1 from public.outbox_messages where org_id = '00000000-0000-4000-8000-00000000e201'
+    union all
+    select 1 from public.idempotency_records where org_id = '00000000-0000-4000-8000-00000000e201'
+  ) as wirkung;
+
+  -- Die Trigger MUESSEN wieder scharf sein. Ohne diese Zaehlung koennte ein
+  -- abgebrochener Lauf sie stillschweigend abgeschaltet zuruecklassen, und
+  -- jede spaetere Suite haette eine Invariante weniger — gruen, aber blind.
+  select count(*) into n_trigger from pg_trigger
+    where tgname in ('plan_versions_published_immutable', 'assignments_published_immutable')
+      and tgenabled = 'O';
+
+  rest := n_auth + n_projektion + n_org + n_mitglied + n_mitarbeiter + n_satz
+        + n_planung + n_wirkung;
+  if rest <> 0 or n_trigger <> 2 then
     raise exception
-      'E2E-Teardown unvollstaendig: auth=% projektion=% org=% membership=% mitarbeiter=% satz=%',
-      n_auth, n_projektion, n_org, n_mitglied, n_mitarbeiter, n_satz;
+      'E2E-Teardown unvollstaendig: auth=% projektion=% org=% membership=% mitarbeiter=% satz=% planung=% wirkung=% aktive_trigger=% (erwartet 2)',
+      n_auth, n_projektion, n_org, n_mitglied, n_mitarbeiter, n_satz,
+      n_planung, n_wirkung, n_trigger;
   end if;
   raise notice
-    '[auth-journey-teardown] restzeilen=0 auth=0 projektion=0 org=0 membership=0 mitarbeiter=0 satz=0';
+    '[auth-journey-teardown] restzeilen=0 auth=0 projektion=0 org=0 membership=0 mitarbeiter=0 satz=0 planung=0 wirkung=0 trigger=2';
 end
 $$;

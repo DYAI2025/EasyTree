@@ -26,14 +26,22 @@ select plan(21);
 -- ===========================================================================
 -- Rechtematrix: produktweit, nicht mandantenabhaengig
 -- ===========================================================================
+-- Seit EYT-107 (Migration 0015) traegt `role_permissions` auch `planning.*`.
+-- Die Zaehlungen sind deshalb auf das Praefix `costs.` eingeschraenkt. Ohne
+-- diese Einschraenkung waere die Aussage nicht mehr „owner hat alle
+-- Kostenrechte", sondern „owner hat genau N Rechte insgesamt" — und die haette
+-- bei jedem neuen Modul erneut korrigiert werden muessen, ohne dass sich an
+-- den KOSTENrechten etwas geaendert haette.
 select is(
-  (select count(*)::int from public.role_permissions where role = 'owner'),
+  (select count(*)::int from public.role_permissions
+    where role = 'owner' and permission like 'costs.%'),
   4,
   'owner traegt alle vier Kostenrechte'
 );
 
 select is(
-  (select count(*)::int from public.role_permissions where role = 'manager'),
+  (select count(*)::int from public.role_permissions
+    where role = 'manager' and permission like 'costs.%'),
   3,
   'manager traegt drei Kostenrechte'
 );
@@ -46,19 +54,25 @@ select is(
 );
 
 select is(
-  (select count(*)::int from public.role_permissions where role = 'member'),
+  (select count(*)::int from public.role_permissions
+    where role = 'member' and permission like 'costs.%'),
   0,
   'member traegt kein einziges Kostenrecht — Mitarbeitende sehen keine Wirtschaftsdaten'
 );
 
--- Vollstaendigkeit in die andere Richtung: kein unbekanntes Recht schleicht
--- sich ein. Ohne diese Zeile waere ein Tippfehler wie "costs.exports" gruen.
+-- Vollstaendigkeit in die andere Richtung: kein unbekanntes KOSTENrecht
+-- schleicht sich ein. Ohne diese Zeile waere ein Tippfehler wie
+-- "costs.exports" gruen. Die Gegenrichtung fuer `planning.*` steht in
+-- 0011_planning_publish.sql — jede Suite prueft die Vollstaendigkeit ihres
+-- eigenen Praefixes, sonst muessten beide bei jedem neuen Modul angefasst
+-- werden.
 select is(
   (select count(*)::int from public.role_permissions
-    where permission not in
-      ('costs.read', 'costs.calculate', 'costs.export', 'costs.manage_rates')),
+    where permission like 'costs.%'
+      and permission not in
+        ('costs.read', 'costs.calculate', 'costs.export', 'costs.manage_rates')),
   0,
-  'es existiert kein Recht ausserhalb der vier vereinbarten'
+  'es existiert kein Kostenrecht ausserhalb der vier vereinbarten'
 );
 
 -- ===========================================================================

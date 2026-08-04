@@ -8,8 +8,16 @@ import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import PlanungPage from "../app/planung/page";
+import { AuthGatewayProvider } from "../lib/auth-gateway-provider";
 import { PlanningGatewayProvider } from "../lib/planning-gateway-provider";
-import type { GatewayResult, PlanningGateway, PlanningWindow } from "@easytree/contracts";
+import { SessionProvider } from "../lib/session-provider";
+import type {
+  AuthGateway,
+  GatewayResult,
+  PlanningGateway,
+  PlanningWindow,
+  SessionDto,
+} from "@easytree/contracts";
 
 afterEach(cleanup);
 
@@ -34,12 +42,46 @@ function gateway(seen: string[]): PlanningGateway {
   } as unknown as PlanningGateway;
 }
 
+/**
+ * Eine angemeldete Sitzung mit Planungsrechten.
+ *
+ * Seit EYT-107 haengt `/planung` an `PlanungZugang`: die Seite rendert erst,
+ * wenn die Sitzung `planning.read` traegt. Das ist keine Testhuerde, sondern
+ * die Aussage — bis dahin zeigte die Seite jedem einen Wochenplan an, den die
+ * API danach mit 401 beantwortete.
+ */
+const SITZUNG: SessionDto = {
+  userId: "00000000-0000-4000-8000-00000000aaa1",
+  organisations: [
+    {
+      id: "00000000-0000-4000-8000-0000000000a1",
+      name: "Alpha",
+      role: "owner",
+      permissions: ["planning.read", "planning.write", "planning.publish"],
+    },
+  ],
+};
+
+const authGateway = (): AuthGateway =>
+  ({
+    session: (): Promise<GatewayResult<SessionDto>> =>
+      Promise.resolve({ ok: true, value: SITZUNG }),
+    login: vi.fn(),
+    logout: vi.fn(),
+  }) as unknown as AuthGateway;
+
 async function renderPage(
   params: Record<string, string | string[] | undefined>,
   seen: string[],
 ): Promise<void> {
   const element = await PlanungPage({ searchParams: Promise.resolve(params) });
-  render(<PlanningGatewayProvider gateway={gateway(seen)}>{element}</PlanningGatewayProvider>);
+  render(
+    <AuthGatewayProvider gateway={authGateway()}>
+      <SessionProvider>
+        <PlanningGatewayProvider gateway={gateway(seen)}>{element}</PlanningGatewayProvider>
+      </SessionProvider>
+    </AuthGatewayProvider>,
+  );
 }
 
 describe("/planung", () => {

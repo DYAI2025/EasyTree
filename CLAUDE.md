@@ -96,8 +96,12 @@ before acting on it. Do **not** use local `master` as the reference — compare 
   conflict check), EYT-62 _In Arbeit_ (E2E proof), EYT-79 _In Arbeit_ (PlanningGateway),
   EYT-88 _Zu erledigen_ (Bug), EYT-91 _Zu erledigen_ (Bug), EYT-92 _Zu erledigen_ (Story,
   clickable week view). EYT-75/87/72/81/11 are **not** in the open sprint.
-- Eight of the nine contract operations are still unimplemented; only the planning-window read
-  (`GET /planung/woche`) is wired. The list is not documentation — it is the
+- **Correction (03.08.2026, measured on `origin/master` + EYT-107):** an earlier revision said
+  "eight of the nine contract operations are still unimplemented". That count is stale. Measured
+  now, `NOT_YET_IMPLEMENTED` holds **five** entries — all under `/einsatz/`, all waiting on the
+  subject model from EYT-14. Implemented are the planning window read, the draft validation, the
+  assignment write and, since EYT-107, `POST /planung/versionen` (publish). The list is not
+  documentation — it is the
   `NOT_YET_IMPLEMENTED` map inside `apps/api/test/openapi-route-conformance.test.ts`, each entry
   carrying its reason, and the test fails both ways: a contract operation with neither a route
   nor an entry, **and** an entry for an operation that has since been implemented. Writes and
@@ -285,8 +289,10 @@ component holding the promise.
 **Modules are hexagonal and their names are frozen.** Each module under
 `apps/api/src/modules/<slug>/` splits into `domain/` (pure), `application/` (ports), `infrastructure/`
 (adapters) and `interface/http/` (controllers). `MODULE_SLUGS` in `src/modules/module-catalogue.ts`
-is the one frozen list of ten slugs (`tenancy`, `workforce`, `worksites`, `planning`, `resources`,
-`timekeeping`, `communications`, `weather`, `files`, `audit`), derived from ADR-001 Z. 60 — the
+is the one frozen list of **eleven** slugs (`tenancy`, `workforce`, `worksites`, `planning`,
+`resources`, `timekeeping`, `communications`, `weather`, `files`, `audit`, `costs`) — the first ten
+derived from ADR-001 Z. 60, `costs` added by ADR-003 (EYT-105). Measured 03.08.2026; an earlier
+revision of this file said "ten slugs" and was stale. The
 directory name, the registry entry and every type parameter are the same string. That list is
 what stops `architecture.test.ts` from running vacuously: `SCAFFOLDED_MODULES` demands real files
 per named module instead of counting whatever files a glob happens to find.
@@ -360,10 +366,16 @@ skipped=…` line that CI asserts. `apps/api/test/tenant-gate.fail-closed.test.t
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every PR. Ten jobs on `master`: `format`, `lint`,
+`.github/workflows/ci.yml` runs on every PR. **Eleven** jobs on `master`: `format`, `lint`,
 `typecheck`, `unit-tests`, `build-web`, `web-smoke`, `build-api`, `secret-scan`, `db-gates`,
-`read-through` (measured 01.08.2026 on run `30672178539`, all ten green). None uses
+`read-through`, `auth-journey` (job ids counted 03.08.2026 on `d9b9607`; an earlier revision said
+"ten" and omitted `auth-journey`, which landed with EYT-106/EYT-134). None uses
 `continue-on-error`.
+
+`auth-journey` is the only job that proves IDENTITY: it starts the real `apps/api/dist/main.js`,
+logs in through the real GoTrue signup and real HttpOnly cookies, and drives a second browser
+context. `read-through` substitutes `REQUEST_IDENTITY` in its harness and therefore proves the
+data path, never the login. Do not cite `read-through` as evidence that authentication works.
 
 **A green job is not a blocking job.** `read-through` passes but is _not_ a required status
 check — the ruleset has not been re-applied since it was added, so it cannot block a merge.

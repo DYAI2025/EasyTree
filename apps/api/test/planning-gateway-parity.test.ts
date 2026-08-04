@@ -20,14 +20,12 @@ import { Test } from "@nestjs/testing";
 
 import { AppModule } from "../src/app.module";
 import { API_BASE_PATH } from "../src/common/api-base-path";
-import { TENANT_SUBJECT_RESOLVER, type TenantSubjectResolver } from "../src/common/tenant-subject";
+import { mitPlanungsIdentitaet } from "./planning-identity.helper";
 import { DATABASE_PING, type DatabasePing } from "../src/health/readiness";
 import {
-  PLANNING_ACCESS_POLICY,
   PLANNING_QUERIES_FACTORY,
   PLANNING_WRITES_FACTORY,
   type CreatedAssignmentRow,
-  type PlanningAccessPolicy,
   type PlanningQueriesFactory,
   type PlanningWritesFactory,
 } from "../src/modules/planning";
@@ -153,23 +151,27 @@ async function httpGatewayHarness(): Promise<PlanningGatewayContractHarness> {
       });
       return Promise.resolve({ ok: true, replayed: false, assignment });
     },
+    // Die geteilte Vertragssuite deckt `publishPlan` nicht ab (ihre sieben
+    // Faelle betreffen Fenster und Anlegen). Ein stiller Erfolg hier waere
+    // die schlechteste Attrappe: sie liesse einen kuenftigen Publish-Fall
+    // gruen laufen, ohne dass irgendetwas geprueft waere. Deshalb wirft sie —
+    // wer sie ausloest, sieht sofort, dass hier nichts gemessen wird.
+    // Der echte Publish-Nachweis liegt in `planning-publish.http.test.ts` und
+    // `planning-publish.integration.test.ts`.
+    publishPlan: () =>
+      Promise.reject(new Error("publishPlan wird von der Vertragsparitaet nicht abgedeckt")),
   });
 
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(DATABASE_PING)
-    .useValue({ ping: (): Promise<boolean> => Promise.resolve(true) } satisfies DatabasePing)
-    .overrideProvider(TENANT_SUBJECT_RESOLVER)
-    .useValue({ resolve: (): string => SUBJECT } satisfies TenantSubjectResolver)
-    .overrideProvider(PLANNING_QUERIES_FACTORY)
-    .useValue(queries)
-    .overrideProvider(PLANNING_WRITES_FACTORY)
-    .useValue(writes)
-    .overrideProvider(PLANNING_ACCESS_POLICY)
-    .useValue({
-      mayReadPlanning: (): Promise<boolean> => Promise.resolve(true),
-      mayWritePlanning: (): Promise<boolean> => Promise.resolve(true),
-    } satisfies PlanningAccessPolicy)
-    .compile();
+  const moduleRef = await mitPlanungsIdentitaet(
+    Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(DATABASE_PING)
+      .useValue({ ping: (): Promise<boolean> => Promise.resolve(true) } satisfies DatabasePing)
+      .overrideProvider(PLANNING_QUERIES_FACTORY)
+      .useValue(queries)
+      .overrideProvider(PLANNING_WRITES_FACTORY)
+      .useValue(writes),
+    { subject: SUBJECT },
+  ).compile();
 
   const app: INestApplication = moduleRef.createNestApplication();
   app.setGlobalPrefix(API_BASE_PATH, { exclude: ["health", "ready"] });

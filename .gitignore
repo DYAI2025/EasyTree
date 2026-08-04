@@ -30,3 +30,6 @@ _sprint2-transfer/
 # Agent runtime state — not product source
 /.claude-flow/
 /.claude/homunculus/
+
+# PRIL-Laufzustand (Plumbline). Kein Repoinhalt.
+.plumbline/

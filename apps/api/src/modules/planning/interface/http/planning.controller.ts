@@ -1,28 +1,47 @@
 /**
- * HTTP-Naht der Planung (EYT-50).
+ * HTTP-Naht der Planung (EYT-50, Auth-Umbau und Publish in EYT-107).
  *
- * Die erste Fachroute des Projekts. Sie ist bewusst schmal: lesen, sonst
- * nichts.
+ * ## Der Umbau, den EYT-107 hier vorgenommen hat
  *
- * ## Reihenfolge der Pruefungen, und warum sie so ist
+ * Bis EYT-106 gab es in diesem `AppModule` ZWEI Identitaetswahrheiten: die
+ * Kostenroute pruefte ein echtes Token samt Session-Liveness
+ * (`REQUEST_IDENTITY`), die Planungsroute fragte einen
+ * `TENANT_SUBJECT_RESOLVER`, dessen Produktionsimplementierung immer `null`
+ * lieferte — jede Planungsanfrage endete in 401, und die fachliche Policy war
+ * ohnehin `DenyAllPlanningAccess`.
  *
- * 1. Subjekt. Ohne verifiziertes Subjekt endet die Anfrage mit 401, BEVOR
- *    irgendeine Query entsteht. Eine Query ohne Subjekt liefe mit leerem
- *    `app.user_org_ids()` — jede Policy griffe fail-closed, und das Ergebnis
- *    waere ein leeres Fenster statt einer Ablehnung. Ein leeres Fenster sieht
- *    aus wie "diese Woche ist nicht geplant"; genau diese Verwechslung soll
- *    hier nicht entstehen.
- * 2. Berechtigung. Verifiziert heisst nicht berechtigt — `PlanningAccessPolicy`
- *    entscheidet, und zwar VOR jeder Abfrage. Laege die Entscheidung erst bei
- *    RLS, kaeme sie zu spaet und waere ausserdem die falsche: RLS kennt den
- *    Mandanten, nicht die fachliche Rolle.
- * 3. Eingabe. `PlanningWindowQuerySchema` aus dem Vertrag, nicht eine eigene
- *    Pruefung. Ein zweiter Satz Regeln waere ein zweiter Ableitungspfad.
- * 4. Abfrage.
- * 5. Antwort gegen `PlanningWindowSchema`. Der Server prueft seine EIGENE
- *    Ausgabe, weil ein Vertragsbruch hier entsteht und nicht beim Client — und
- *    weil der Client ihn sonst als CONTRACT_VIOLATION meldet, ohne dass
- *    jemand die Ursache sieht.
+ * Damit war die Planung produktiv unbenutzbar, und jeder Browsernachweis
+ * darueber waere ein Nachweis ueber einen Testharness gewesen. EYT-107
+ * verlangt einen real autorisierten Publish-Pfad; deshalb zieht die Planung
+ * hier auf dieselbe Kette um, die die Kosten schon benutzen. Der alte
+ * Resolver ist danach ohne Verbraucher und entfaellt.
+ *
+ * ## Reihenfolge jeder Anfrage, ohne Ausnahme
+ *
+ *   1. Identitaet (Cookie ODER Bearer, verifiziert, Session lebt)
+ *   2. Mitgliedschaften und Rechte SERVERSEITIG aufloesen
+ *   3. `PlanningAccessPolicy`: Organisation waehlen und atomares Recht pruefen
+ *   4. Vertragspruefung der Eingabe
+ *   5. Fachliche Arbeit
+ *   6. Antwort gegen das Vertragsschema — der Server prueft seine EIGENE
+ *      Ausgabe, weil ein Vertragsbruch hier entsteht und nicht beim Client.
+ *
+ * Die Vertragspruefung steht bewusst NACH der Berechtigung: eine
+ * Vertragsverletzung vorher zu melden verriete einem Unberechtigten die Form
+ * des Vertrags.
+ *
+ * Keine Rollenabfrage in diesem Controller (PO-Entscheidung): er fragt die
+ * Policy, nie die Rolle. Und selbst wenn die Policy irrte, lehnte RLS
+ * unabhaengig ab (Migration 0015) — das ist die Unabhaengigkeitszusage.
+ *
+ * ## Warum die Organisation hier nicht gewaehlt werden kann
+ *
+ * Die Policy wird mit `requestedOrganisationId = null` aufgerufen: genau eine
+ * aktive Mitgliedschaft ist eindeutig, mehrere ergeben `ORG_CONTEXT_REQUIRED`.
+ * Der Organisationsheader, den die Kostenroute kennt, ist im Planungsvertrag
+ * nicht deklariert und wird vom Planungs-Client nicht gesendet; ihn hier
+ * trotzdem zu lesen waere eine undokumentierte Schnittstelle. Die sichtbare
+ * Auswahl fuer mehrere Organisationen gehoert zu EYT-14.
  */
 import {
   AssignmentDtoSchema,
@@ -32,6 +51,8 @@ import {
   PlanValidationResultSchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
+  PublishPlanCommandSchema,
+  PublishedPlanVersionSchema,
   ValidatePlanCommandSchema,
 } from "@easytree/contracts";
 import {
@@ -48,17 +69,24 @@ import {
   Post,
   Query,
   Req,
-  UnauthorizedException,
   UseFilters,
 } from "@nestjs/common";
+import type { Request } from "express";
 
 import {
-  TENANT_SUBJECT_RESOLVER,
-  type TenantSubjectResolver,
-} from "../../../../common/tenant-subject";
+  RequestIdentityService,
+  REQUEST_IDENTITY,
+} from "../../../../platform/auth/request-identity";
+// Zugriff auf ein fremdes Modul NUR ueber dessen index.ts (ADR-001 Z. 76).
+import {
+  AuthProblemFilter,
+  SESSION_ORGANISATIONS,
+  type SessionOrganisationsPort,
+} from "../../../tenancy";
 import {
   PLANNING_ACCESS_POLICY,
   type PlanningAccessPolicy,
+  type PlanningPermission,
 } from "../../application/planning-access.port";
 import {
   PLANNING_QUERIES_FACTORY,
@@ -128,6 +156,40 @@ function problemFor(problem: PlanningWriteProblem): Error {
         title: "Einsatz außerhalb der Woche",
         detail: `Der Einsatz liegt in Kalenderwoche ${problem.tatsaechlicheWoche}, nicht in der geöffneten Woche. Bitte das Datum prüfen.`,
       });
+    // -------------------------------------------------------------------
+    // Veroeffentlichen (EYT-107) — alle vier sind 409
+    // -------------------------------------------------------------------
+    // Der Status allein traegt hier keine Bedeutung mehr: `HttpPlanningGateway`
+    // bildet 409 fuer `publishPlan` pauschal auf `STALE_VERSION` ab. Die
+    // Unterscheidung haengt am `type`, und die Oberflaeche verzweigt darauf.
+    case "STALE_VERSION":
+      return new ConflictException({
+        type: PLANNING_ERROR_TYPE.STALE_VERSION,
+        title: "Der Plan wurde zwischenzeitlich geändert",
+        detail:
+          "Seit dem Laden dieser Woche hat jemand anders den Entwurf verändert oder veröffentlicht. Es wurde NICHTS veröffentlicht. Bitte die Woche neu laden und erneut entscheiden.",
+      });
+    case "ALREADY_PUBLISHED":
+      return new ConflictException({
+        type: PLANNING_ERROR_TYPE.ALREADY_PUBLISHED,
+        title: "Diese Woche ist bereits veröffentlicht",
+        detail:
+          "Für diese Woche gibt es keinen unveröffentlichten Entwurf mehr. Es wurde nichts erneut veröffentlicht.",
+      });
+    case "BLOCKING_CONFLICT":
+      return new ConflictException({
+        type: PLANNING_ERROR_TYPE.BLOCKING_CONFLICT,
+        title: "Der Entwurf hat blockierende Konflikte",
+        detail: `Der Entwurf wurde NICHT veröffentlicht. Blockierend: ${problem.conflicts
+          .map((konflikt) => konflikt.code)
+          .join(", ")}.`,
+      });
+    case "ASSIGNMENT_OUTSIDE_WEEK":
+      return new ConflictException({
+        type: PLANNING_ERROR_TYPE.ASSIGNMENT_OUTSIDE_WEEK,
+        title: "Einsatz gehört nicht in diese Woche",
+        detail: `Mindestens ein Einsatz dieses Entwurfs liegt in Kalenderwoche ${problem.tatsaechlicheWoche}, nicht in der Woche der Planversion. Der Entwurf wurde NICHT veröffentlicht.`,
+      });
   }
 }
 
@@ -143,11 +205,25 @@ const zuRessource = (row: ResourceRow): { id: string; label: string; active: boo
 });
 
 @Controller("planung")
-@UseFilters(PlanningProblemFilter)
+// Reihenfolge ist bedeutungstragend, und zwar RUECKWAERTS: Nest prueft den
+// ZULETZT genannten Filter zuerst. `PlanningProblemFilter` ist `@Catch()` ohne
+// Argumente, faengt also alles — steht er hinten, verschluckt er
+// `IdentityRejectedError` und die Antwort waere 500 statt 401.
+//
+// Gemessen, nicht vermutet: mit der umgekehrten Reihenfolge schlagen
+// „antwortet ohne verifiziertes Subjekt mit 401" und „fragt ohne Subjekt gar
+// nicht erst ab" in `planning-window.http.test.ts` fehl. Diese beiden Faelle
+// sind damit die Regressionssicherung fuer genau diese Zeile.
+//
+// Der Kostencontroller braucht die Vorsicht nicht: `CostsProblemFilter` ist
+// `@Catch(ConflictProblem)` und damit ohnehin schmal.
+@UseFilters(PlanningProblemFilter, AuthProblemFilter)
 export class PlanningController {
   constructor(
-    @Inject(TENANT_SUBJECT_RESOLVER)
-    private readonly subjects: TenantSubjectResolver,
+    @Inject(REQUEST_IDENTITY)
+    private readonly identitaet: RequestIdentityService,
+    @Inject(SESSION_ORGANISATIONS)
+    private readonly organisationen: SessionOrganisationsPort,
     @Inject(PLANNING_QUERIES_FACTORY)
     private readonly queriesFor: PlanningQueriesFactory,
     @Inject(PLANNING_ACCESS_POLICY)
@@ -156,24 +232,67 @@ export class PlanningController {
     private readonly writesFor: PlanningWritesFactory,
   ) {}
 
-  @Get("fenster")
-  async planningWindow(
-    @Req() request: unknown,
-    @Query("weekKey") weekKey?: string,
-  ): Promise<unknown> {
-    const subject = this.subjects.resolve(request);
-    if (subject === null) {
-      // Kein Detail zur Ursache: ob ein Token fehlte, abgelaufen war oder
-      // ungueltig ist, geht den Aufrufer nichts an.
-      throw new UnauthorizedException("Kein verifiziertes Subjekt.");
+  /**
+   * Die eine Zugangskette. Wirft, wenn irgendetwas daran nicht traegt.
+   *
+   * Identisch aufgebaut wie `CostsController.zugang` — bewusst, denn zwei
+   * verschiedene Formen fuer dieselbe Entscheidung waeren zwei Stellen, an
+   * denen man sie falsch treffen kann.
+   */
+  private async zugang(
+    request: Request,
+    permission: PlanningPermission,
+  ): Promise<{ subjectUserId: string }> {
+    // Wirft `IdentityRejectedError`, `TokenRejectedError` oder
+    // `SessionRejectedError`; `AuthProblemFilter` macht daraus 401/503 mit
+    // stabilem URN. Kein Detail zur Ursache — ob ein Token fehlte, abgelaufen
+    // war oder manipuliert ist, geht den Aufrufer nichts an.
+    const identitaet = await this.identitaet.identify({
+      cookieHeader: request.headers.cookie,
+      authorizationHeader: request.headers.authorization,
+    });
+
+    // Mitgliedschaften und Rechte kommen aus der Datenbank unter RLS, nie aus
+    // dem Request. Ein `orgId`-Feld im Koerper waere Clienteingabe.
+    const mitgliedschaften = await this.organisationen.organisationsFor(identitaet.userId);
+    const entscheidung = this.access.authorize(
+      mitgliedschaften.map((mitgliedschaft) => ({
+        organisationId: mitgliedschaft.organisationId,
+        permissions: mitgliedschaft.permissions,
+      })),
+      // Siehe Dateikopf: keine Organisationsauswahl in diesem Vertrag (EYT-14).
+      null,
+      permission,
+    );
+
+    if (!entscheidung.ok) {
+      if (entscheidung.problem === "ORG_CONTEXT_REQUIRED") {
+        throw new ForbiddenException({
+          type: PLANNING_ERROR_TYPE.AMBIGUOUS_ORGANISATION,
+          title: "Organisation nicht eindeutig",
+          detail:
+            "Keine oder mehrere aktive Organisationen. Die sichtbare Auswahl ist noch nicht modelliert (EYT-14).",
+        });
+      }
+      // ORG_NOT_A_MEMBER und PERMISSION_MISSING antworten GLEICH: sonst
+      // verriete die Antwort, ob eine fremde Organisation existiert oder
+      // welche Rechte es ueberhaupt gibt.
+      throw new ForbiddenException({
+        type: PLANNING_ERROR_TYPE.NO_ORGANISATION,
+        title: "Kein Zugriff",
+        detail: "Kein Zugriff auf die Planung dieser Organisation.",
+      });
     }
 
-    // Verifiziert heisst nicht berechtigt. Die Pruefung steht VOR jeder
-    // Abfrage — sonst laege die Entscheidung faktisch bei RLS, und RLS kennt
-    // nur den Mandanten, nicht die fachliche Rolle.
-    if (!(await this.access.mayReadPlanning(subject))) {
-      throw new ForbiddenException("Keine Leseberechtigung fuer die Planung.");
-    }
+    return { subjectUserId: identitaet.userId };
+  }
+
+  @Get("fenster")
+  async planningWindow(
+    @Req() request: Request,
+    @Query("weekKey") weekKey?: string,
+  ): Promise<unknown> {
+    const { subjectUserId: subject } = await this.zugang(request, "planning.read");
 
     const query = PlanningWindowQuerySchema.safeParse({ weekKey });
     if (!query.success) {
@@ -253,16 +372,10 @@ export class PlanningController {
    */
   @Post("entwuerfe/validierung")
   @HttpCode(200)
-  async validateDraft(@Req() request: unknown, @Body() body: unknown): Promise<unknown> {
-    const subject = this.subjects.resolve(request);
-    if (subject === null) {
-      throw new UnauthorizedException("Kein verifiziertes Subjekt.");
-    }
+  async validateDraft(@Req() request: Request, @Body() body: unknown): Promise<unknown> {
     // Schreibberechtigung, nicht Leseberechtigung: wer nicht anlegen darf, soll
     // auch nicht ausprobieren duerfen, was ein Anlegen ergaebe.
-    if (!(await this.access.mayWritePlanning(subject))) {
-      throw new ForbiddenException("Keine Schreibberechtigung fuer die Planung.");
-    }
+    const { subjectUserId: subject } = await this.zugang(request, "planning.write");
 
     const command = ValidatePlanCommandSchema.safeParse(body);
     if (!command.success) {
@@ -295,17 +408,11 @@ export class PlanningController {
   @Post("einsaetze")
   @HttpCode(201)
   async createAssignment(
-    @Req() request: unknown,
+    @Req() request: Request,
     @Body() body: unknown,
     @Headers(IDEMPOTENCY_HEADER) idempotencyKey?: string,
   ): Promise<unknown> {
-    const subject = this.subjects.resolve(request);
-    if (subject === null) {
-      throw new UnauthorizedException("Kein verifiziertes Subjekt.");
-    }
-    if (!(await this.access.mayWritePlanning(subject))) {
-      throw new ForbiddenException("Keine Schreibberechtigung fuer die Planung.");
-    }
+    const { subjectUserId: subject } = await this.zugang(request, "planning.write");
 
     // Der Schluessel wird GEPRUEFT, nicht geglaubt. Das OpenAPI-Dokument
     // fuehrt ihn seit EYT-47 als Pflichtparameter; bis EYT-92 las ihn
@@ -352,6 +459,83 @@ export class PlanningController {
       },
     };
     const validated = AssignmentDtoSchema.safeParse(angelegt);
+    if (!validated.success) {
+      throw new InternalServerErrorException("Antwort entspricht nicht dem Vertrag.");
+    }
+    return validated.data;
+  }
+
+  /**
+   * Den Entwurf einer Woche veroeffentlichen (EYT-107).
+   *
+   * ## Warum `planning.publish` und nicht `planning.write`
+   *
+   * Veroeffentlichen macht einen Plan verbindlich: ab dann ist er
+   * unveraenderlich (Migration 0010) und die Quelle, aus der Plan-Kosten
+   * entstehen sollen (EYT-109). Wer einen Entwurf bearbeiten darf, hat damit
+   * nicht automatisch die Befugnis, ihn fuer die ganze Organisation
+   * festzuschreiben. Die Trennung ist eine Product-Owner-Entscheidung und
+   * hat einen eigenen Testfall — ohne ihn waere sie eine Behauptung.
+   *
+   * ## Warum 201 und nicht 200
+   *
+   * Es entsteht etwas Neues und Bleibendes: eine veroeffentlichte
+   * Planversion. Das OpenAPI-Dokument fuehrt 201 als einzigen Erfolgsstatus.
+   *
+   * ## Was diese Route NICHT prueft
+   *
+   * Abwesenheiten, Qualifikationen, Zertifikate, Ressourcen, Fahrzeuge,
+   * Geraete, Reise- und Ruhezeiten. Fuer sie existiert im Repository keine
+   * Regel; sie hier zu behaupten waere eine erfundene Zusicherung. EYT-18
+   * bleibt offen. Siehe `docs/runbooks/planning-publish.md`.
+   */
+  @Post("versionen")
+  @HttpCode(201)
+  async publishPlan(
+    @Req() request: Request,
+    @Body() body: unknown,
+    @Headers(IDEMPOTENCY_HEADER) idempotencyKey?: string,
+  ): Promise<unknown> {
+    const { subjectUserId: subject } = await this.zugang(request, "planning.publish");
+
+    // Ohne Schluessel kein Schreibvorgang: ein Wiederholungsversuch nach einer
+    // verlorenen Antwort waere sonst nicht von einer zweiten Veroeffentlichung
+    // zu unterscheiden.
+    const schluessel = IdempotencyKeySchema.safeParse(idempotencyKey);
+    if (!schluessel.success) {
+      throw new BadRequestException({
+        type: PLANNING_ERROR_TYPE.MISSING_IDEMPOTENCY_KEY,
+        title: "Idempotenzschlüssel fehlt oder ist unbrauchbar",
+        detail: `Der Header ${IDEMPOTENCY_HEADER} fehlt oder entspricht nicht dem Vertrag. Ohne ihn kann ein Wiederholungsversuch nicht von einer zweiten Veröffentlichung unterschieden werden.`,
+      });
+    }
+
+    const command = PublishPlanCommandSchema.safeParse(body);
+    if (!command.success) {
+      // Kein ZodError im Rumpf: er traegt die eingesandten Werte.
+      throw new BadRequestException({
+        type: PLANNING_ERROR_TYPE.INVALID_INTERVAL,
+        title: "Veröffentlichungsauftrag unvollständig",
+        detail:
+          "Woche oder erwartete Versions-Id fehlen oder haben nicht das vereinbarte Format. `expectedVersionId` ist Pflicht — `null` bedeutet „ich erwarte, dass noch nichts veröffentlicht ist“.",
+      });
+    }
+
+    const result = await this.writesFor(subject).publishPlan({
+      weekKey: command.data.weekKey,
+      expectedVersionId: command.data.expectedVersionId,
+      idempotencyKey: schluessel.data,
+    });
+
+    if (!result.ok) throw problemFor(result.problem);
+
+    const veroeffentlicht = {
+      versionId: result.version.versionId,
+      weekKey: result.version.weekKey,
+      publishedAtUtc: result.version.publishedAtUtc.toISOString(),
+      assignmentIds: [...result.version.assignmentIds],
+    };
+    const validated = PublishedPlanVersionSchema.safeParse(veroeffentlicht);
     if (!validated.success) {
       throw new InternalServerErrorException("Antwort entspricht nicht dem Vertrag.");
     }

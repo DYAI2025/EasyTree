@@ -25,7 +25,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const navPunkte: Array<{ href: string; label: string }> = [
     { href: "/", label: "Start" },
-    { href: "/planung", label: "Planung" },
+    // Seit EYT-107 gefiltert: bis dahin stand „Planung" unbedingt in der
+    // Navigation, waehrend die API jede Planungsanfrage mit 401/403
+    // beantwortete — ein Link, der fuer niemanden funktionierte. Basisdesign
+    // v2.0 §3.1: „Die Navigation wird serverseitig nach atomaren Rechten
+    // gefiltert. Ein sichtbarer Navigationspunkt ersetzt keine
+    // Autorisierung." Beides gilt: gefiltert wird hier, entschieden dort.
+    ...(hatRecht("planning.read") ? [{ href: "/planung", label: "Planung" }] : []),
     ...(hatRecht("costs.read") ? [{ href: "/kosten", label: "Kosten" }] : []),
   ];
 

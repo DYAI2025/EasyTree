@@ -14,12 +14,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { AppModule } from "../src/app.module";
 import { API_BASE_PATH } from "../src/common/api-base-path";
-import { TENANT_SUBJECT_RESOLVER, type TenantSubjectResolver } from "../src/common/tenant-subject";
+import { mitPlanungsIdentitaet } from "./planning-identity.helper";
 import { DATABASE_PING, type DatabasePing } from "../src/health/readiness";
 import {
-  PLANNING_ACCESS_POLICY,
   PLANNING_QUERIES_FACTORY,
-  type PlanningAccessPolicy,
   type PlanningQueries,
   type PlanningQueriesFactory,
   type PlanningWindowResult,
@@ -46,7 +44,13 @@ async function boot(options: {
   subject: string | null;
   result?: PlanningWindowResult;
   seenSubjects?: string[];
-  /** Default: berechtigt. Der Produktionsstand ist deny (EYT-14). */
+  /**
+   * Default: berechtigt.
+   *
+   * Seit EYT-107 steuert das nicht mehr eine gestellte Policy, sondern die
+   * RECHTE der gestellten Mitgliedschaft. Die echte Policy entscheidet daraus
+   * — sonst pruefte dieser Test nur seine eigene Attrappe.
+   */
   darfLesen?: boolean;
   darfSchreiben?: boolean;
 }): Promise<INestApplication> {
@@ -58,19 +62,21 @@ async function boot(options: {
     } satisfies PlanningQueries;
   };
 
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(DATABASE_PING)
-    .useValue({ ping: (): Promise<boolean> => Promise.resolve(true) } satisfies DatabasePing)
-    .overrideProvider(TENANT_SUBJECT_RESOLVER)
-    .useValue({ resolve: (): string | null => options.subject } satisfies TenantSubjectResolver)
-    .overrideProvider(PLANNING_QUERIES_FACTORY)
-    .useValue(factory)
-    .overrideProvider(PLANNING_ACCESS_POLICY)
-    .useValue({
-      mayReadPlanning: (): Promise<boolean> => Promise.resolve(options.darfLesen ?? true),
-      mayWritePlanning: (): Promise<boolean> => Promise.resolve(options.darfSchreiben ?? true),
-    } satisfies PlanningAccessPolicy)
-    .compile();
+  // Die POLICY wird NICHT ersetzt — sie ist der zu pruefende Teil. Statt
+  // „darf lesen: ja/nein" wird die MITGLIEDSCHAFT gestellt, und die echte
+  // Policy leitet daraus ab. Ein Test, der die Antwort vorgibt, misst nichts.
+  const rechte: string[] = [];
+  if (options.darfLesen ?? true) rechte.push("planning.read");
+  if (options.darfSchreiben ?? true) rechte.push("planning.write");
+
+  const moduleRef = await mitPlanungsIdentitaet(
+    Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(DATABASE_PING)
+      .useValue({ ping: (): Promise<boolean> => Promise.resolve(true) } satisfies DatabasePing)
+      .overrideProvider(PLANNING_QUERIES_FACTORY)
+      .useValue(factory),
+    { subject: options.subject, permissions: rechte },
+  ).compile();
 
   const built = moduleRef.createNestApplication();
   built.setGlobalPrefix(API_BASE_PATH, { exclude: ["health", "ready"] });

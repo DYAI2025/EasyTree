@@ -10,7 +10,7 @@
 -- Verbindungen; EYT-49 AK6 stuetzt sich auf beide Dateien zusammen.
 
 begin;
-select plan(22);
+select plan(23);
 
 -- ===========================================================================
 -- Schemaform
@@ -109,6 +109,23 @@ select lives_ok(
   'Eine unveroeffentlichte Zuweisung laesst sich loeschen'
 );
 
+-- ---------------------------------------------------------------------------
+-- Veroeffentlichen laeuft hier ueber den EIGENTUEMERPFAD (EYT-107 P1)
+-- ---------------------------------------------------------------------------
+-- Seit dem P1-Fix verlangt `plan_versions_update_in_org` zusaetzlich den
+-- Laufzeitkanal (`app.is_runtime_channel()`, also `session_user =
+-- 'easytree_app'`). Die Sitzung dieser Datei ist `postgres`, und
+-- `SET SESSION AUTHORIZATION` steht nicht zur Verfuegung — `postgres` ist in
+-- Supabase kein Superuser. Ueber `authenticated` bewirkt ein UPDATE hier
+-- deshalb nichts mehr, und die Folgeaussagen dieser Datei waeren still vakuos.
+--
+-- Diese Datei misst die 0010-Mechanik: Sync-Trigger, Unveraenderlichkeit,
+-- EXCLUDE. Die gelten unabhaengig von RLS, also wird fuer die
+-- Publish-Anweisungen kurz auf den Eigentuemer zurueckgeschaltet. Die
+-- Kanalgrenze selbst beweist `0011_planning_publish.sql`, den echten
+-- Serverpfad `planning-publish.integration.test.ts`.
+reset role;
+
 select lives_ok(
   $$update public.plan_versions
        set published_at = '2026-07-31T12:00:00Z',
@@ -116,6 +133,8 @@ select lives_ok(
      where id = '00000000-0000-4000-8000-0000006010a1'$$,
   'Eine Planversion laesst sich veroeffentlichen'
 );
+
+set local role authenticated;
 
 select is(
   (
@@ -130,6 +149,28 @@ select is(
 -- ---------------------------------------------------------------------------
 -- Veroeffentlichtes ist unveraenderlich
 -- ---------------------------------------------------------------------------
+-- Zwei getrennte Aussagen, weil seit EYT-107 P1 zwei verschiedene Mechanismen
+-- greifen und die Reihenfolge bedeutungstragend ist.
+--
+-- (a) Ueber `authenticated`: das Spaltenrecht endet bei published_at und
+--     published_by. `week_key` ist gar nicht erst adressierbar — 42501 wird
+--     VOR der Zeilenauswahl und vor jedem Trigger geprueft. Frueher stand hier
+--     23514, weil `authenticated` das volle Tabellen-UPDATE besass; genau das
+--     war die Haelfte des P1-Befunds.
+-- ZWEIstellig (sql, errcode): PostgreSQL formuliert fehlende Spaltenrechte je
+-- nach Version als „permission denied for column …" oder „… for table …". Der
+-- SQLSTATE ist in beiden Faellen 42501 und die stabilere Aussage.
+select throws_ok(
+  $$update public.plan_versions set week_key = '2026-W33'
+     where id = '00000000-0000-4000-8000-0000006010a1'$$,
+  '42501'
+);
+
+-- (b) Ueber den Eigentuemer, der volle Spaltenrechte hat: jetzt entscheidet
+--     der Unveraenderlichkeits-Trigger aus 0010. Ohne diese Zeile waere nach
+--     dem P1-Fix nicht mehr belegt, dass er ueberhaupt noch feuert.
+reset role;
+
 select throws_ok(
   $$update public.plan_versions set week_key = '2026-W33'
      where id = '00000000-0000-4000-8000-0000006010a1'$$,
@@ -137,6 +178,8 @@ select throws_ok(
   'Veroeffentlichte Zeile in public.plan_versions ist unveraenderlich',
   'Eine veroeffentlichte Planversion laesst sich nicht aendern'
 );
+
+set local role authenticated;
 
 select throws_ok(
   $$delete from public.plan_versions where id = '00000000-0000-4000-8000-0000006010a1'$$,
@@ -153,6 +196,14 @@ select throws_ok(
   'Eine veroeffentlichte Zuweisung laesst sich nicht nachtraeglich verschieben'
 );
 
+-- Dieser Fall traegt seit EYT-107 P1 eine zweite Last, und die ist nicht
+-- offensichtlich: er laeuft ueber `authenticated` in einer Sitzung, die NICHT
+-- der Laufzeitkanal ist. `app.reject_assignment_in_published_plan()` liest die
+-- Elternzeile mit `for share`, und PostgreSQL prueft bei einer Sperrklausel
+-- zusaetzlich die `using`-Klausel der UPDATE-Policy. Ohne `security definer`
+-- (0015) faende das select nichts, der Zweig „nicht gefunden" liesse die
+-- Zuweisung durch — und dieser Test waere gruen-falsch. Genau so ist er am
+-- 04.08.2026 in Lauf 30862744360 aufgefallen.
 select throws_ok(
   $$insert into public.assignments
       (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
@@ -193,6 +244,10 @@ select lives_ok(
   'Die kollidierende Zuweisung ist als Entwurf erlaubt'
 );
 
+-- Wieder Eigentuemerpfad, gleiche Begruendung wie oben: gemessen wird der
+-- EXCLUDE, nicht die Kanalgrenze.
+reset role;
+
 select throws_ok(
   $$update public.plan_versions
        set published_at = '2026-07-31T13:00:00Z',
@@ -203,6 +258,8 @@ select throws_ok(
   'Die zweite Veroeffentlichung scheitert an der Ueberlappung derselben Person'
 );
 
+set local role authenticated;
+
 -- Gegenprobe zur Halboffenheit: direkt anschliessend, nicht ueberlappend.
 -- Ohne diese Zeile waere der Constraint auch dann gruen, wenn er JEDE zweite
 -- Veroeffentlichung ablehnt.
@@ -212,6 +269,8 @@ select lives_ok(
      where id = '00000000-0000-4000-8000-0000007099a1'$$,
   'Die kollidierende Zuweisung laesst sich auf einen anschliessenden Zeitraum verschieben'
 );
+
+reset role;
 
 select lives_ok(
   $$update public.plan_versions

@@ -21,12 +21,17 @@ import { expect, test, type Cookie } from "@playwright/test";
  *
  * Eine fruehere Fassung behauptete, ein Aufruf OHNE Cookie liefere gegen den
  * Harness 200 und beweise damit, dass kein Subjekt eingeschleust ist. Das ist
- * FALSCH und am 02.08.2026 widerlegt worden: `apps/api/test/harness/server.ts`
- * ersetzt nur `TENANT_SUBJECT_RESOLVER` — einziger Verbraucher ist
- * `planning.controller.ts:149` — und die Planungs-Policy. Der Kostencontroller
- * haengt an `REQUEST_IDENTITY` (`costs.controller.ts:94,192`), das der Harness
- * nicht anfasst; er liefert dort ebenfalls 401. Die Zusicherung unterschied
- * also nichts, und ihre benannte Gegenmutation waere nie rot geworden.
+ * FALSCH und am 02.08.2026 widerlegt worden: der Harness ersetzte die
+ * Identitaet und lieferte auf dem Kostenpfad ebenfalls 401. Die Zusicherung
+ * unterschied also nichts, und ihre benannte Gegenmutation waere nie rot
+ * geworden.
+ *
+ * NACHTRAG EYT-107: seit dem Auth-Umbau ersetzt `apps/api/test/harness/server.ts`
+ * nur noch `REQUEST_IDENTITY` — `TENANT_SUBJECT_RESOLVER` und
+ * `DenyAllPlanningAccess` gibt es nicht mehr, die Planung haengt an derselben
+ * Kette wie die Kosten. An der Aussage aendert das nichts, im Gegenteil: der
+ * Harness ersetzt jetzt GENAU die Identitaet und kann ueber sie erst recht
+ * nichts beweisen. Dieser Lauf hier kann es.
  *
  * Zwei echte Benutzer unterscheiden sehr wohl. A ist Owner, B ist ein ebenso
  * echter angemeldeter Benutzer ohne jede Mitgliedschaft. Waere eine feste
@@ -50,6 +55,11 @@ import { expect, test, type Cookie } from "@playwright/test";
  * - Die Kosten-Navigation unabhaengig von `costs.read` rendern (Schritt 6
  *   bliebe gruen, aber Schritt 11 nach dem Abmelden wuerde rot).
  * - Das Logout ohne loeschende Cookies (Schritt 12).
+ * - `app.is_runtime_channel()` aus der Update-Policy von `plan_versions`
+ *   entfernen (Migration 0015): Schritt 9c2 wird rot, weil PostgREST die
+ *   Planversion dann tatsaechlich veroeffentlicht. Das ist der P1-Nachweis
+ *   vom 04.08.2026 und der einzige Ort, an dem der ECHTE Angriffskanal
+ *   gefahren wird.
  */
 
 // `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
@@ -80,6 +90,29 @@ const FREMDE_ORG = "00000000-0000-4000-8000-0000000000b2";
 const ABLOESE_DATUM = "2026-09-01";
 const ABLOESE_GRUND = "Tariferhoehung der E2E-Reise";
 
+/**
+ * Die Planwoche der Publish-Reise (EYT-107).
+ *
+ * Muss zu den Zeitstempeln in `fixtures.sql` passen: `2026-08-03T06:00:00Z`
+ * ist in `Europe/Berlin` — der Zeitzone der Reiseorganisation — Montag der
+ * ISO-Woche 32. Der Publish-Pfad prueft genau diese Zuordnung; das Schema tut
+ * es nicht.
+ */
+const PLANWOCHE = "2026-W32";
+
+/**
+ * Idempotenzschluessel des B-Nachweises.
+ *
+ * Als Konstante und nicht als Literal direkt im Header: gitleaks' Regel
+ * `generic-api-key` matcht das Muster `Key": "<wert>"` und meldete den
+ * Inline-Wert als Fund (gemessen 03.08.2026, `secret-scan` rot). Der Wert ist
+ * kein Geheimnis — aber eine Ausnahme in `.gitleaksignore` waere der falsche
+ * Weg: EYT-133 hat den Secret-Guard gerade gegen Dummy- und
+ * Ausnahme-Bypaesse gehaertet. Das Muster zu vermeiden ist billiger als es zu
+ * erlauben.
+ */
+const B_PUBLISH_VORGANG = `e2e-b-ohne-recht-${PLANWOCHE}`;
+
 function pflicht(name: string): string {
   const wert = process.env[name];
   if (wert === undefined || wert === "") {
@@ -100,7 +133,11 @@ function cookie(cookies: readonly Cookie[], name: string): Cookie {
 
 test.describe.configure({ mode: "serial" });
 
-test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ page, context }) => {
+test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
+  page,
+  context,
+  request,
+}) => {
   const email = pflicht("EASYTREE_JOURNEY_EMAIL_A");
   const passwort = pflicht("EASYTREE_JOURNEY_PASSWORT_A");
   const benutzerId = pflicht("EASYTREE_JOURNEY_USER_A");
@@ -112,8 +149,17 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ pa
     if (pfad.startsWith("/api/")) apiAufrufe.push(`${anfrage.method()} ${pfad}`);
   });
 
-  const bericht: Record<string, unknown> = { ticket: "EYT-106", paket: "B", schritte: {} };
+  const bericht: Record<string, unknown> = {
+    ticket: "EYT-106",
+    paket: "B",
+    zusatz: "EYT-107 Publish-Durchstich",
+    schritte: {},
+  };
   const schritte = bericht["schritte"] as Record<string, unknown>;
+
+  /** Serverseitige Ids der Planversion — in 9c gelesen, in 9d verglichen. */
+  let entwurfsVersionId = "";
+  let veroeffentlichteVersionId = "";
 
   await test.step("1 — ohne Anmeldung lehnt die API ab", async () => {
     // Notwendig, aber NICHT hinreichend: der Testharness antwortet hier
@@ -327,6 +373,195 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({ pa
     }
   });
 
+  // ---------------------------------------------------------------------
+  // 9c/9d — Der Publish-Durchstich (EYT-107)
+  // ---------------------------------------------------------------------
+  // Warum HIER und nicht im read-through-Harness: dieser Lauf faehrt die echte
+  // `dist/main.js` mit echter GoTrue-Anmeldung und echten HttpOnly-Cookies.
+  // Der Harness ersetzt `REQUEST_IDENTITY` und koennte deshalb ueber die
+  // Identitaet nichts aussagen — er bewiese nur den Pfad dahinter.
+  await test.step("9c — die Planungswoche zeigt einen Entwurf", async () => {
+    await page.goto(`/planung?weekKey=${PLANWOCHE}`);
+
+    // Der Waechter gibt nur mit `planning.read` frei; A ist owner und traegt
+    // es seit Migration 0015.
+    const stand = page.getByTestId("planungsfenster-stand");
+    await expect(stand).toBeVisible();
+    await expect(stand).toHaveAttribute("data-stand", "entwurf");
+
+    // Die serverseitige Entwurfs-Id — sie geht gleich als
+    // `expectedVersionId` hinaus.
+    const version = page.getByTestId("planungsfenster-version");
+    entwurfsVersionId = (await version.getAttribute("data-source-version-id")) ?? "";
+    expect(entwurfsVersionId).not.toBe("");
+    await expect(version).toHaveAttribute("data-published-version-id", "");
+
+    await page.screenshot({
+      path: join(ARTEFAKTE, "04-planung-entwurf.png"),
+      fullPage: true,
+    });
+    schritte["9c_entwurf"] = { versionId: entwurfsVersionId };
+  });
+
+  // ---------------------------------------------------------------------
+  // 9c2 — Der P1-Nachweis: die Data-API veroeffentlicht NICHT (EYT-107)
+  // ---------------------------------------------------------------------
+  // Der Befund vom 04.08.2026: `authenticated` besass aus Migration 0007 ein
+  // Tabellen-UPDATE auf `plan_versions` ohne Spaltenbegrenzung, und PostgREST
+  // stellt `public` als Data-API bereit. Eine Owner-Rolle konnte damit
+  // `published_at` unmittelbar setzen — am Command vorbei, also ohne
+  // Wochenzuordnungspruefung, ohne benannte Konflikte, ohne Idempotenz, ohne
+  // Audit und ohne Outbox.
+  //
+  // Dies ist die EINZIGE Stelle im Repository, die den echten Angriffskanal
+  // faehrt: ein per GoTrue angemeldeter Mensch, sein echtes Bearer-Token, die
+  // echte PostgREST-Instanz. pgTAP kann das nicht — dort ist `session_user`
+  // `postgres` und laesst sich ohne Superuser nicht wechseln.
+  await test.step("9c2 — ein direkter PostgREST-Schreibzugriff bewirkt nichts", async () => {
+    const supabaseUrl = pflicht("EASYTREE_JOURNEY_SUPABASE_URL");
+    const anonKey = pflicht("EASYTREE_JOURNEY_ANON_KEY");
+
+    // Ein ECHTES Zugriffstoken, ueber denselben oeffentlichen Weg wie ein
+    // Mensch. Nicht das HttpOnly-Cookie: das gehoert der API und ist fuer den
+    // Browser unlesbar — genau deshalb holt sich ein Angreifer sein Token so.
+    const anmeldung = await request.post(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+      headers: { apikey: anonKey, "content-type": "application/json" },
+      data: { email, password: passwort },
+    });
+    expect(anmeldung.status(), "GoTrue hat kein Token ausgegeben").toBe(200);
+    const token = ((await anmeldung.json()) as { access_token?: string }).access_token ?? "";
+    expect(token).not.toBe("");
+
+    const restKopf = {
+      apikey: anonKey,
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    };
+
+    // ZUERST die Nichtvakuositaet: dasselbe Token SIEHT die Zeile ueber
+    // PostgREST. Ohne diesen Schritt bewiese ein fehlgeschlagenes PATCH nur,
+    // dass irgendetwas an der Anfrage nicht stimmt — ein abgelaufenes Token,
+    // ein falscher Pfad, eine nicht exponierte Tabelle. So ist belegt: der
+    // Kanal traegt, nur das Schreiben nicht.
+    const lesen = await request.get(
+      `${supabaseUrl}/rest/v1/plan_versions?id=eq.${entwurfsVersionId}&select=id,published_at`,
+      { headers: restKopf },
+    );
+    expect(lesen.status(), "das Token kann die Planversion nicht einmal lesen").toBe(200);
+    const gelesen = (await lesen.json()) as { id: string; published_at: string | null }[];
+    expect(gelesen).toHaveLength(1);
+    expect(gelesen[0]?.published_at, "die Version ist vor dem Versuch kein Entwurf").toBeNull();
+
+    // Der Angriff.
+    const angriff = await request.patch(
+      `${supabaseUrl}/rest/v1/plan_versions?id=eq.${entwurfsVersionId}`,
+      {
+        headers: { ...restKopf, prefer: "return=representation" },
+        data: { published_at: "2026-08-03T09:00:00Z", published_by: benutzerId },
+      },
+    );
+    const geaendert = angriff.ok() ? ((await angriff.json()) as unknown[]) : [];
+    expect(
+      geaendert,
+      "PostgREST hat eine Planversion veroeffentlicht — der Command ist umgehbar",
+    ).toHaveLength(0);
+
+    // Und die Wahrheit noch einmal aus der Anwendung, nicht aus der Antwort
+    // des Angreifers: die Woche ist weiterhin Entwurf. Waere `published_at`
+    // gesetzt worden, haette der Sync-Trigger aus 0010 in derselben
+    // Transaktion auch die Zuweisungen gestempelt — und Schritt 9d wuerde
+    // gleich „bereits veroeffentlicht" melden statt zu veroeffentlichen.
+    await page.reload();
+    const standDanach = page.getByTestId("planungsfenster-stand");
+    await expect(standDanach).toHaveAttribute("data-stand", "entwurf");
+    await expect(page.getByTestId("planungsfenster-version")).toHaveAttribute(
+      "data-published-version-id",
+      "",
+    );
+
+    schritte["9c2_postgrest_bypass"] = {
+      lesen: lesen.status(),
+      schreiben: angriff.status(),
+      geaenderteZeilen: geaendert.length,
+      erwartet: 0,
+      hinweis: "P1 04.08.2026 — app.is_runtime_channel() in Migration 0015",
+    };
+  });
+
+  await test.step("9d — veroeffentlichen, neu laden, zweiter Kontext", async () => {
+    const knopf = page.getByTestId("planung-veroeffentlichen");
+    await expect(knopf).toBeVisible();
+    await knopf.click();
+
+    const erfolg = page.getByTestId("planung-publish-erfolg");
+    await expect(erfolg).toBeVisible();
+    veroeffentlichteVersionId = (await erfolg.getAttribute("data-published-version-id")) ?? "";
+    // Der Server hat DIESELBE Version veroeffentlicht, die die Ansicht als
+    // Entwurf gezeigt hat — nicht irgendeine.
+    expect(veroeffentlichteVersionId).toBe(entwurfsVersionId);
+
+    await page.screenshot({
+      path: join(ARTEFAKTE, "05-planung-veroeffentlicht.png"),
+      fullPage: true,
+    });
+
+    // Reload: der Zustand liegt im Server, nicht im Komponentenzustand.
+    await page.reload();
+    const nachReload = page.getByTestId("planungsfenster-version");
+    await expect(nachReload).toHaveAttribute(
+      "data-published-version-id",
+      veroeffentlichteVersionId,
+    );
+    await expect(page.getByTestId("planungsfenster-stand")).toHaveAttribute(
+      "data-stand",
+      "veroeffentlicht",
+    );
+    // Und die Aktion ist fort — es gibt keinen Entwurf mehr.
+    await expect(page.getByTestId("planung-veroeffentlichen")).toHaveCount(0);
+
+    // Zweiter Browserkontext: eigene Cookies, eigener Speicher.
+    const zweiter = await page.context().browser()?.newContext();
+    if (zweiter === undefined) throw new Error("[auth-journey] kein zweiter Browserkontext.");
+    try {
+      const seite2 = await zweiter.newPage();
+      await seite2.goto("/anmelden");
+      await seite2.getByLabel("E-Mail").fill(email);
+      await seite2.getByLabel("Passwort").fill(passwort);
+      await seite2.getByRole("button", { name: "Anmelden" }).click();
+      await seite2.waitForURL((u) => !u.pathname.startsWith("/anmelden"));
+      await seite2.goto(`/planung?weekKey=${PLANWOCHE}`);
+      await expect(seite2.getByTestId("planungsfenster-version")).toHaveAttribute(
+        "data-published-version-id",
+        veroeffentlichteVersionId,
+      );
+      await seite2.screenshot({
+        path: join(ARTEFAKTE, "06-planung-zweiter-kontext.png"),
+        fullPage: true,
+      });
+    } finally {
+      await zweiter.close();
+    }
+
+    // Wiederholung ueber die API: derselbe Schluessel, dieselbe Nutzlast.
+    // Es darf keine zweite Veroeffentlichung entstehen.
+    const schluessel = `e2e-publish-${veroeffentlichteVersionId}`;
+    const ersteWiederholung = await page.request.post("/api/v1/planung/versionen", {
+      headers: { "Idempotency-Key": schluessel },
+      data: { weekKey: PLANWOCHE, expectedVersionId: entwurfsVersionId },
+    });
+    // Der Entwurf ist fort, also ist das kein Replay, sondern eine ehrliche
+    // Ablehnung mit STABILEM Code.
+    expect(ersteWiederholung.status()).toBe(409);
+    const problem = (await ersteWiederholung.json()) as { type?: string };
+    expect(problem.type).toBe("urn:easytree:planning:already-published");
+
+    schritte["9d_publish"] = {
+      versionId: veroeffentlichteVersionId,
+      zweiterKontext: true,
+      wiederholung: ersteWiederholung.status(),
+    };
+  });
+
   await test.step("10 — ein fremder Organisationskontext wird abgelehnt", async () => {
     // Dieselbe gueltige Sitzung, aber eine Organisation, in der der Reisende
     // nicht Mitglied ist. Der Header waehlt aus, er autorisiert nicht.
@@ -508,6 +743,41 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
       expect(koerper).not.toContain(MITARBEITER_NAME);
       expect(koerper).not.toContain(MITARBEITER_ID);
       bericht["kein_datenabfluss"] = true;
+    });
+
+    // EYT-107: B darf auch nicht veroeffentlichen — weder sichtbar noch ueber
+    // die API. Ohne diesen Schritt bewiese die Reise nur, dass ein
+    // BERECHTIGTER es kann.
+    await test.step("B sieht keine Planung und darf nicht veroeffentlichen", async () => {
+      await seite.goto(`/planung?weekKey=${PLANWOCHE}`);
+      // Der Waechter blockt VOR jedem Gateway-Aufruf.
+      //
+      // Welcher Zustand? B ist angemeldet, hat aber KEINE aktive
+      // Mitgliedschaft. Damit gibt es keine bestaetigte Organisation, in der
+      // ein Recht ueberhaupt gelten koennte — der Zustand ist „keine
+      // eindeutige Organisation", nicht „Forbidden". `Forbidden` gilt fuer
+      // eine bestaetigte Organisation OHNE `planning.read`; dieser Fall wird
+      // in `planung-zugang.test.tsx` geprueft.
+      //
+      // Eine erste Fassung erwartete hier `planung-forbidden` und war rot.
+      // Nicht die Zusicherung wurde angepasst, sondern der Produktzustand:
+      // der Banner behauptete „Du gehörst mehreren Organisationen an" — fuer
+      // B falsch. Serverseitig entspricht dem `ORG_CONTEXT_REQUIRED`.
+      await expect(seite.getByTestId("planung-org-erforderlich")).toBeVisible();
+      await expect(seite.getByTestId("planung-forbidden")).toHaveCount(0);
+      await expect(seite.getByTestId("planung-veroeffentlichen")).toHaveCount(0);
+      await expect(seite.getByTestId("planungsfenster-stand")).toHaveCount(0);
+
+      // Und der Server lehnt unabhaengig von der Oberflaeche ab. Ein
+      // Idempotenzschluessel wird mitgeschickt, damit die Ablehnung
+      // NICHT aus einer fehlenden Kopfzeile stammt — sonst bewiese der Fall
+      // nur, dass ein Pflichtheader fehlt.
+      const direkt = await seite.request.post("/api/v1/planung/versionen", {
+        headers: { "Idempotency-Key": B_PUBLISH_VORGANG },
+        data: { weekKey: PLANWOCHE, expectedVersionId: null },
+      });
+      expect(direkt.status()).toBe(403);
+      bericht["publish_verweigert"] = { status: direkt.status(), erwartet: 403 };
     });
 
     await test.step("Zusammenfassung von B ablegen", async () => {

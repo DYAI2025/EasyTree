@@ -34,7 +34,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { FailClosedGate, ORG_ALPHA, probeDatabase, USER_A } from "./tenant-context.helper";
 import { PlanningWriteRepository } from "../src/modules/planning";
+import { PgIdempotencyStore } from "../src/platform/idempotency/pg-idempotency-store";
 import type { TenantQuery, TenantQueryRunner } from "../src/platform/database/tenant-query-runner";
+
+/**
+ * Der ECHTE Plattformadapter, nicht eine Attrappe (EYT-107).
+ *
+ * Das Repository bekommt die Wiederholungserkennung seit EYT-107
+ * hereingereicht, statt ihr SQL selbst zu schreiben. Hier steht deshalb
+ * derselbe Adapter, den `AppModule` verdrahtet — eine gestellte Fassung wuerde
+ * genau die Zusicherung wegnehmen, die dieser Test belegen soll.
+ */
+const idempotenzSpeicher = new PgIdempotencyStore();
 
 const DB_URL =
   process.env["EASYTREE_TEST_DB_URL"] ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
@@ -259,7 +270,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     async () => {
       const client = await neueVerbindung();
       await raeumeWoche(client);
-      const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
 
       const eingabe = {
         weekKey: WOCHE,
@@ -304,7 +320,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
   dbIt("Auditzeile und Outboxnachricht entstehen mit dem Einsatz", async () => {
     const client = await neueVerbindung();
     await raeumeWoche(client);
-    const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
+    const repo = new PlanningWriteRepository(
+      runnerAuf(client),
+      USER_A,
+      wochenschluessel,
+      idempotenzSpeicher,
+    );
 
     const ergebnis = await repo.createAssignment({
       weekKey: WOCHE,
@@ -345,6 +366,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       runnerAuf(client),
       USER_A,
       wochenschluessel,
+      idempotenzSpeicher,
       "assignment",
     );
 
@@ -396,8 +418,18 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     const b = await neueVerbindung();
     await raeumeWoche(a);
 
-    const repoA = new PlanningWriteRepository(runnerAuf(a), USER_A, wochenschluessel);
-    const repoB = new PlanningWriteRepository(runnerAuf(b), USER_A, wochenschluessel);
+    const repoA = new PlanningWriteRepository(
+      runnerAuf(a),
+      USER_A,
+      wochenschluessel,
+      idempotenzSpeicher,
+    );
+    const repoB = new PlanningWriteRepository(
+      runnerAuf(b),
+      USER_A,
+      wochenschluessel,
+      idempotenzSpeicher,
+    );
     const basis = {
       weekKey: WOCHE,
       employeeId: EMPLOYEE_ALPHA,
@@ -443,7 +475,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         "2026-11-10T15:00:00Z",
       );
 
-      const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
       const ergebnis = await repo.createAssignment({
         weekKey: WOCHE_BASELINE,
         employeeId: EMPLOYEE_ALPHA,
@@ -474,8 +511,18 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     const b = await neueVerbindung();
     await raeumeWoche(a);
 
-    const repoA = new PlanningWriteRepository(runnerAuf(a), USER_A, wochenschluessel);
-    const repoB = new PlanningWriteRepository(runnerAuf(b), USER_A, wochenschluessel);
+    const repoA = new PlanningWriteRepository(
+      runnerAuf(a),
+      USER_A,
+      wochenschluessel,
+      idempotenzSpeicher,
+    );
+    const repoB = new PlanningWriteRepository(
+      runnerAuf(b),
+      USER_A,
+      wochenschluessel,
+      idempotenzSpeicher,
+    );
     const eingabe = {
       weekKey: WOCHE,
       employeeId: EMPLOYEE_ALPHA,
@@ -509,7 +556,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     async () => {
       const client = await neueVerbindung();
       await raeumeWoche(client);
-      const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
       const schluessel = "77777777-7777-4777-8777-777777777777";
 
       const erst = await repo.createAssignment({
@@ -543,7 +595,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     // urspruenglichen Vorgang erfuellt war.
     const client = await neueVerbindung();
     await raeumeWoche(client);
-    const repo = new PlanningWriteRepository(runnerAuf(client), USER_A, wochenschluessel);
+    const repo = new PlanningWriteRepository(
+      runnerAuf(client),
+      USER_A,
+      wochenschluessel,
+      idempotenzSpeicher,
+    );
     const eingabe = {
       weekKey: WOCHE,
       employeeId: EMPLOYEE_ALPHA,
@@ -587,8 +644,18 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         "2026-11-17T15:00:00Z",
       );
 
-      const repoA = new PlanningWriteRepository(runnerAuf(a), USER_A, wochenschluessel);
-      const repoB = new PlanningWriteRepository(runnerAuf(b), USER_A, wochenschluessel);
+      const repoA = new PlanningWriteRepository(
+        runnerAuf(a),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+      const repoB = new PlanningWriteRepository(
+        runnerAuf(b),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
       const basis = { weekKey: WOCHE_BASELINE_PARALLEL, worksiteId: WORKSITE_ALPHA };
 
       // VERSCHIEDENE Personen, damit der Employee-Lock die beiden nicht ohnehin
