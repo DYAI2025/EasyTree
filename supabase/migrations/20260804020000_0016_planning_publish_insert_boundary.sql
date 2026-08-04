@@ -77,7 +77,6 @@ create policy plan_versions_insert_in_org on public.plan_versions
   for insert to authenticated
   with check (
     org_id in (select app.user_org_ids())
-    and published_at is null
   );
 
 -- ===========================================================================
