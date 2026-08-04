@@ -10,7 +10,7 @@
 -- Verbindungen; EYT-49 AK6 stuetzt sich auf beide Dateien zusammen.
 
 begin;
-select plan(23);
+select plan(24);
 
 -- ===========================================================================
 -- Schemaform
@@ -181,12 +181,28 @@ select throws_ok(
 
 set local role authenticated;
 
+-- Auch das Loeschen zerfaellt seit dem Reviewbefund F3 (04.08.2026) in zwei
+-- Aussagen. `authenticated` besitzt gar kein delete-Recht mehr auf
+-- plan_versions: kein Anwendungspfad loescht Planversionen, und ueber die
+-- Data-API haette jedes Mitglied einen Entwurf samt seiner Zuweisungen
+-- entfernen koennen (`on delete cascade`, 0007). Der Trigger schuetzte nur das
+-- Veroeffentlichte.
+select throws_ok(
+  $$delete from public.plan_versions where id = '00000000-0000-4000-8000-0000006010a1'$$,
+  '42501'
+);
+
+-- Und der Trigger aus 0010, dort wo das Recht nicht mehr im Weg steht.
+reset role;
+
 select throws_ok(
   $$delete from public.plan_versions where id = '00000000-0000-4000-8000-0000006010a1'$$,
   '23514',
   'Veroeffentlichte Zeile in public.plan_versions ist unveraenderlich und kann nicht geloescht werden',
   'Eine veroeffentlichte Planversion laesst sich nicht loeschen'
 );
+
+set local role authenticated;
 
 select throws_ok(
   $$update public.assignments set starts_at_utc = '2026-08-03T05:00:00Z'
