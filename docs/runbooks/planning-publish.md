@@ -1,6 +1,7 @@
 # Runbook: Wochenplan veröffentlichen (EYT-107)
 
-Stand: 03.08.2026 · Basis-SHA `d9b9607` · Branch `feat/eyt-107-publish-core`
+Stand: 04.08.2026 · Basis-SHA `4a605de` (PR #52 gemergt) · offene Nachbesserung
+in `fix/eyt-107-f1-insert-boundary` (Migration 0016, Reviewbefunde F1–F3)
 
 Dieses Dokument beantwortet drei Fragen, und zwar in dieser Reihenfolge:
 **Was wird beim Veröffentlichen tatsächlich geprüft? Was ausdrücklich nicht?
@@ -157,6 +158,23 @@ Migration 0015 zieht deshalb zwei zusätzliche Grenzen:
   `grant update (published_at, published_by)`. `org_id`, `week_key` und
   `created_at` sind über das Publish-Recht nicht mehr erreichbar — dieselbe
   Bauart, die `assignments` seit 0010 schützt.
+
+### Eine Planversion wird als Entwurf geboren (F1, Migration 0016)
+
+Das Selbstreview der P1-Korrektur fand die zweite Tür: das `UPDATE` war
+abgedichtet, das **Anlegen** nicht. `authenticated` durfte `published_at`
+mitgeben, und keiner der beiden Trigger auf `plan_versions` feuert bei INSERT.
+Eine so geborene Planversion wäre sofort veröffentlicht, unveränderlich und
+unlöschbar gewesen — und hätte `publishedVersionId` der Woche dauerhaft besetzt.
+
+Migration 0016 zieht dieselben zwei Riegel wie 0015 beim Ändern:
+
+- `revoke insert on plan_versions`, danach `grant insert (id, org_id, week_key)`;
+- `published_at is null` im `with check` der Insert-Policy.
+
+Ebenfalls in 0016: `revoke delete on plan_versions from authenticated` (F3). Kein
+Command löscht Planversionen; über die Data-API hätte jedes Mitglied einen
+Entwurf samt seiner Zuweisungen entfernen können (`on delete cascade`).
 
 Was diese Grenze **nicht** deckt: `service_role` und `postgres` tragen
 `BYPASSRLS` und umgehen jede Policy, auf jeder Tabelle. Das ist eine

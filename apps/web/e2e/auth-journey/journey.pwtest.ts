@@ -60,6 +60,11 @@ import { expect, test, type Cookie } from "@playwright/test";
  *   Planversion dann tatsaechlich veroeffentlicht. Das ist der P1-Nachweis
  *   vom 04.08.2026 und der einzige Ort, an dem der ECHTE Angriffskanal
  *   gefahren wird.
+ * - Spalten-Grant und `published_at is null` aus der Insert-Policy entfernen
+ *   (Migration **0016**): Schritt 9c3 wird rot — PostgREST legt dann eine von
+ *   Geburt an veroeffentlichte Planversion an. Befund F1 aus dem Selbstreview.
+ *   BEIDE Riegel muessen fallen: einzeln entfernt haelt der jeweils andere
+ *   (gemessen in den Laeufen 30874279915 und 30874546740).
  */
 
 // `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
@@ -461,6 +466,19 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       },
     );
     const geaendert = angriff.ok() ? ((await angriff.json()) as unknown[]) : [];
+
+    // HIER wird bewusst KEIN Fehlerstatus behauptet. Gemessen im gruenen Lauf
+    // 30875136833 antwortet PostgREST mit **200** und einer leeren
+    // Repraesentation: die `using`-Klausel der Update-Policy filtert die Zeile
+    // aus dem Statement heraus, und ein UPDATE ueber null Zeilen ist fuer
+    // PostgreSQL kein Fehler. Es gibt nichts zu melden — also meldet PostgREST
+    // Erfolg ueber die leere Menge.
+    //
+    // Eine Assertion auf einen Nicht-2xx-Status waere hier deshalb falsch und
+    // wuerde diesen Nachweis rot machen, obwohl der Angriff scheitert. Der
+    // Wirkungsnachweis ist die leere Menge plus der Nachlauf ueber die
+    // Anwendung. Beim INSERT in 9c3 liegt es anders — dort wirft PostgreSQL,
+    // und dort steht der Status auch in der Zusicherung.
     expect(
       geaendert,
       "PostgREST hat eine Planversion veroeffentlicht — der Command ist umgehbar",
@@ -485,6 +503,75 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       geaenderteZeilen: geaendert.length,
       erwartet: 0,
       hinweis: "P1 04.08.2026 — app.is_runtime_channel() in Migration 0015",
+    };
+
+    // -----------------------------------------------------------------------
+    // 9c3 — dieselbe Tuer, nur andersherum: INSERT statt UPDATE (Befund F1)
+    // -----------------------------------------------------------------------
+    // Das Selbstreview der P1-Korrektur fand die zweite Tuer. Das UPDATE war
+    // abgedichtet, das ANLEGEN nicht: `authenticated` durfte `published_at`
+    // mitgeben, und keiner der beiden Trigger auf plan_versions feuert bei
+    // INSERT. Eine so geborene Planversion waere sofort veroeffentlicht,
+    // unveraenderlich und unloeschbar gewesen — ohne Wochenzuordnungspruefung,
+    // ohne Konflikte, ohne Idempotenz, ohne Audit, ohne Outbox.
+    //
+    // EIGENE Woche, nicht die der Reise: der Entwurf aus 9c soll unberuehrt
+    // bleiben, damit 9d weiterhin den echten Uebergang misst. Waere die
+    // Angriffswoche dieselbe, wuerde ein erfolgreicher Angriff den Publish in
+    // 9d mit „bereits veroeffentlicht" beantworten — der Fall waere rot, aber
+    // an der falschen Stelle und mit der falschen Begruendung.
+    const ANGRIFFSWOCHE = "2026-W35";
+    const anlegen = await request.post(`${supabaseUrl}/rest/v1/plan_versions`, {
+      headers: { ...restKopf, prefer: "return=representation" },
+      data: {
+        org_id: ORG_ID,
+        week_key: ANGRIFFSWOCHE,
+        published_at: "2026-08-24T09:00:00Z",
+        published_by: benutzerId,
+      },
+    });
+    const angelegt = anlegen.ok() ? ((await anlegen.json()) as unknown[]) : [];
+
+    // ANDERS als beim UPDATE in 9c2 wirft PostgreSQL hier: das Spaltenrecht auf
+    // `published_at` fehlt (0016), das ist SQLSTATE 42501, und PostgREST bildet
+    // 42501 auf HTTP 403 ab. Gemessen im gruenen Lauf 30875136833:
+    // `schritte["9c3_postgrest_insert"].status = 403`.
+    //
+    // 403 und nicht 401: der Reisende IST angemeldet, sein Token ist gueltig,
+    // und derselbe Kopf hat in 9c2 erfolgreich gelesen. Verboten ist die
+    // Handlung, nicht die Identitaet.
+    //
+    // Der Status ist stabil, nicht zufaellig: faellt der Spalten-Grant weg,
+    // greift die Insert-Policy — eine `with check`-Verletzung ist ebenfalls
+    // 42501 und ebenfalls 403 (gemessen in GM-F1a, Lauf 30874279915: dieser
+    // Nachweis blieb gruen, rot wurde allein die Katalogaussage in pgTAP).
+    // Erst wenn BEIDE Riegel fallen, antwortet PostgREST mit einem
+    // Erfolgsstatus und einer angelegten Zeile — gemessen in GM-F1a+F1b,
+    // Lauf 30874546740: „Received length: 1".
+    expect(anlegen.status(), "der blockierte INSERT wurde nicht mit 403 abgewiesen").toBe(403);
+
+    expect(
+      angelegt,
+      "PostgREST hat eine bereits veroeffentlichte Planversion angelegt",
+    ).toHaveLength(0);
+
+    // Und nachgesehen, nicht geglaubt: fuer diese Woche existiert gar keine
+    // Zeile. Ein `insert`, der nur `published_at` verliert und als Entwurf
+    // durchginge, waere ebenfalls ein Befund — die Woche gehoert niemandem,
+    // der sie nicht ueber die Anwendung angelegt hat.
+    const nachsehen = await request.get(
+      `${supabaseUrl}/rest/v1/plan_versions?week_key=eq.${ANGRIFFSWOCHE}&select=id,published_at`,
+      { headers: restKopf },
+    );
+    expect(nachsehen.status()).toBe(200);
+    expect((await nachsehen.json()) as unknown[]).toHaveLength(0);
+
+    schritte["9c3_postgrest_insert"] = {
+      status: anlegen.status(),
+      angelegteZeilen: angelegt.length,
+      erwartet: 0,
+      erwarteterStatus: 403,
+      hinweis: "F1 04.08.2026 — Spalten-Grant und published_at is null in 0016",
     };
   });
 

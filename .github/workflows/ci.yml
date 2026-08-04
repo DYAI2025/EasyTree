@@ -209,6 +209,15 @@ jobs:
         run: |
           PGPASSWORD=postgres psql "host=127.0.0.1 port=54322 dbname=postgres user=postgres sslmode=disable" \
             -v ON_ERROR_STOP=1 -c "alter role easytree_app password 'ci-local-app-password';"
+          # Gegenprobe: die Anwendungsrolle darf RLS nicht umgehen koennen.
+          # Stand frueher unten beim Prozess-Smoke, zusammen mit einer zweiten,
+          # wirkungslosen Provisionierung derselben Rolle (Reviewbefund F5).
+          # Zwischen beiden Stellen liegt kein Stack-Neustart, also genuegt
+          # diese eine — und sie steht dort, wo die Rolle zuerst gebraucht wird.
+          PGPASSWORD=ci-local-app-password psql "host=127.0.0.1 port=54322 dbname=postgres user=easytree_app sslmode=disable" \
+            -v ON_ERROR_STOP=1 -Atc \
+            "select current_user || ' super=' || rolsuper || ' bypassrls=' || rolbypassrls || ' inherit=' || rolinherit from pg_roles where rolname = current_user" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
       # ALLE Workspace-Abhaengigkeiten von @easytree/api, nicht eine namentlich
       # genannte. Die frueher hier hartkodierte Liste (@easytree/config) waere in
       # dem Moment still veraltet, in dem apps/api eine zweite Workspace-Abhaengigkeit
@@ -411,18 +420,12 @@ jobs:
           grep "\[tenant-pooling\]" /tmp/tenant-pooled.log >> "$GITHUB_STEP_SUMMARY" || true
       - name: Build api for runtime smokes
         run: pnpm --filter @easytree/api... build
-      # Die Rolle legt Migration 0003 an; ein Passwort steht bewusst NICHT in der
-      # Migration (das laege in git). Lokal/CI wird es hier gesetzt, produktiv
-      # kommt es aus dem Secret Manager.
-      - name: Provision local password for easytree_app (EYT-45)
-        run: |
-          PGPASSWORD=postgres psql "host=127.0.0.1 port=54322 dbname=postgres user=postgres sslmode=disable" \
-            -v ON_ERROR_STOP=1 -c "alter role easytree_app password 'ci-local-app-password';"
-          # Gegenprobe: die Anwendungsrolle darf RLS nicht umgehen koennen.
-          PGPASSWORD=ci-local-app-password psql "host=127.0.0.1 port=54322 dbname=postgres user=easytree_app sslmode=disable" \
-            -v ON_ERROR_STOP=1 -Atc \
-            "select current_user || ' super=' || rolsuper || ' bypassrls=' || rolbypassrls || ' inherit=' || rolinherit from pg_roles where rolname = current_user" \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+      # Passwort und Rollen-Gegenprobe stehen weiter oben, direkt nach dem
+      # Stack-Neustart (Reviewbefund F5): dort werden sie zuerst gebraucht, und
+      # zwischen beiden Stellen gibt es keinen Neustart, der sie zuruecksetzen
+      # koennte. Die Rolle legt Migration 0003 an; ein Passwort steht bewusst
+      # NICHT in der Migration (das laege in git), produktiv kommt es aus dem
+      # Secret Manager.
       - name: API smoke — healthy runtime (ready must be 200)
         env:
           NODE_ENV: test
