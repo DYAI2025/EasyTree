@@ -89,41 +89,75 @@ ihn wäre die Lücke mit einem grünen Lauf gemergt worden.
 
 ## 1. Ausgeführte Gegenmutationen
 
-Vier vom Prüfbericht geforderte Mutationen. Jede ist eingespielt, gemessen und
-zurückgenommen worden — keine ist nur ausgedacht.
+Jede Mutation ist **eingespielt, in CI gemessen und zurückgenommen** worden.
+Keine ist nur ausgedacht. Sie liefen auf einem Wegwerf-Branch mit
+Wegwerf-PR #53 (geschlossen, Branch gelöscht), damit die Historie von PR #52
+sauber bleibt; die Läufe sind über ihre IDs weiterhin nachlesbar.
 
-| Nr.      | Mutation                                                                         | Erwartet rot                                                                                            | Gemessen | Lauf    |
-| -------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- | ------- |
-| GM-P1    | `app.is_runtime_channel()` aus `using` der Update-Policy entfernen               | pgTAP 0011 „trotz planning.publish bleibt … Entwurf"; `auth-journey` 9c2                                | _s. u._  | _s. u._ |
-| GM-P2/P3 | `grant update on plan_versions to authenticated` (volles Tabellen-UPDATE zurück) | pgTAP 0011 `week_key`/`org_id` → 42501; pgTAP 0006 Test 14; Integrationstest „org_id nicht umschreiben" | _s. u._  | _s. u._ |
-| GM-P4    | `published_by = auth.uid()` aus `with check` entfernen                           | `planning-publish.integration.test.ts` „fremde Urheberangabe"                                           | _s. u._  | _s. u._ |
+| Nr.        | Mutation                                                                          | Lauf                                                                         | Gemessen                                                                                                                                                                                                                                                           |
+| ---------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GM-P1      | `app.is_runtime_channel()` aus **`using`** entfernen                              | [30864133428](https://github.com/DYAI2025/EasyTree/actions/runs/30864133428) | **db-gates rot.** pgTAP 0011 bricht ab: `ERROR: new row violates row-level security policy for table "plan_versions"` (Zeile 183), „Bad plan. You planned 25 tests but ran 10". **`auth-journey` bleibt GRÜN** — siehe die Korrektur darunter.                     |
+| GM-P1b     | `app.is_runtime_channel()` aus **beiden** Klauseln entfernen                      | [30864486050](https://github.com/DYAI2025/EasyTree/actions/runs/30864486050) | **Beide rot.** pgTAP 0011 Test 11 („trotz planning.publish bleibt die Planversion Entwurf — falscher Kanal") und Test 12 („keine einzige Zuweisung wurde mitgestempelt"); `auth-journey` 9c2: „PostgREST hat eine Planversion veroeffentlicht", Received length 1. |
+| GM-P2/P3   | `grant update on table public.plan_versions to authenticated` (Spaltengrenze weg) | [30864795657](https://github.com/DYAI2025/EasyTree/actions/runs/30864795657) | **db-gates rot.** pgTAP 0006 Test 14 „threw 42501 / caught: no exception"; pgTAP 0011 Tests 16, 17 („threw 42501 / caught: no exception") und 18 („authenticated darf plan_versions.week_key NICHT aendern").                                                      |
+| GM-P4      | `published_by = auth.uid()` aus **`with check`** entfernen                        | [30865097594](https://github.com/DYAI2025/EasyTree/actions/runs/30865097594) | **db-gates rot.** `planning-publish.integration.test.ts`: `AssertionError: eine fremde Urheberangabe wurde angenommen: expected null not to be null` (14 von 15 bestanden).                                                                                        |
+| GM-DEFINER | `security definer` an `app.reject_assignment_in_published_plan()` entfernen       | [30862744360](https://github.com/DYAI2025/EasyTree/actions/runs/30862744360) | **db-gates rot.** pgTAP 0006 Test 18 „caught: no exception". Diese Mutation musste nicht eingespielt werden — sie war der Zustand vor der Korrektur und ist so gemessen worden (siehe 0b).                                                                         |
 
 **GM-P2 und GM-P3 sind dieselbe Mutation.** Der Prüfbericht nennt sie getrennt
 („vollständiges Tabellen-UPDATE wieder gewähren" und „Spaltenbegrenzung
 entfernen"), aber in SQL ist beides ein und dieselbe Anweisung: ein
 `grant update on table ... to authenticated` hebt die Spaltenbegrenzung auf, und
-es gibt keinen dritten Zustand dazwischen. Sie wird deshalb **einmal**
-ausgeführt und einmal gezählt, nicht zweimal abgehakt.
+es gibt keinen dritten Zustand dazwischen. Sie wurde deshalb **einmal**
+ausgeführt und wird einmal gezählt, nicht zweimal abgehakt.
+
+**GM-P4 brauchte einen eigenen Lauf.** Im Lauf mit GM-P2/P3 bricht `db-gates`
+bereits an der pgTAP-Stufe ab; der Integrationstest, den GM-P4 rot machen soll,
+wird dort nie ausgeführt. Zwei Mutationen in einem Lauf zu bündeln ist nur
+zulässig, solange beide Nachweise überhaupt zur Ausführung kommen — hier taten
+sie es nicht, also gab es einen zweiten Lauf.
+
+### Korrektur einer Annahme, die dieser Lauf widerlegt hat
+
+Der Abschnitt 2 dieses Dokuments behauptete zunächst, die Kanalbedingung im
+`with check` sei **redundante Tiefenverteidigung** und nicht falsifizierbar.
+**Das ist falsch, und GM-P1 hat es gezeigt.**
+
+Mit der Bedingung nur im `with check` (GM-P1) blieb `auth-journey` grün: der
+PostgREST-Angriff wurde weiterhin abgewiesen, nur anders — nicht still durch
+Herausfiltern der Zeile, sondern laut mit `new row violates row-level security
+policy`. Erst GM-P1b, das **beide** Kopien entfernt, öffnet den Bypass wieder.
+
+Die beiden Klauseln sind also nicht Original und Kopie, sondern zwei
+unabhängige Riegel mit unterschiedlichem Verhalten:
+
+| Konfiguration        | PostgREST-Angriff | Art der Abweisung                    |
+| -------------------- | ----------------- | ------------------------------------ |
+| nur `using`          | abgewiesen        | still, null Zeilen                   |
+| nur `with check`     | abgewiesen        | laut, `42501` / „new row violates …" |
+| beide (Auslieferung) | abgewiesen        | still — `using` entscheidet zuerst   |
+| keine von beiden     | **gelingt**       | —                                    |
+
+Das ist eine bessere Eigenschaft als die dokumentierte, und sie wurde durch
+Messen gefunden, nicht durch Nachdenken. Die entsprechende Passage in Abschnitt
+2 ist unten korrigiert.
 
 ---
 
-## 2. Nicht falsifizierbar — ehrlich als Tiefenverteidigung geführt
+## 2. Was bleibt an nicht falsifizierbaren Bedingungen — und was nicht
 
-Zwei Bedingungen der neuen Policy sind **nicht** durch einen Test widerlegbar,
-solange die Policy im Übrigen intakt ist. Sie stehen trotzdem im Code, und
-zwar bewusst:
+Nach den Messungen ist genau **eine** Bedingung übrig, die kein Test rot machen
+kann:
 
-| Bedingung                                      | Warum kein Test sie rot macht                                                                                                                                |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `app.is_runtime_channel()` im **`with check`** | `using` erzwingt sie bereits. Eine Anweisung, die `using` nicht passiert, erreicht `with check` nie — die Klausel ist unerreichbar, solange die andere hält. |
-| `app.has_permission(...)` im **`with check`**  | Dasselbe, verstärkt durch die Spaltengrenze: `org_id` ist nicht änderbar, also kann die zweite Auswertung nie ein anderes Ergebnis liefern.                  |
+| Bedingung                                      | Status                                                                                                                                                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.is_runtime_channel()` im **`with check`** | **Falsifizierbar — und gemessen.** GM-P1b macht `auth-journey` 9c2 rot. Anders als zunächst angenommen ist diese Klausel ein eigenständiger Riegel, kein Abbild des `using`.       |
+| `app.has_permission(...)` im **`with check`**  | **Nicht falsifizierbar.** `using` erzwingt sie bereits, und die Spaltengrenze verhindert eine Änderung von `org_id` — die zweite Auswertung kann nie ein anderes Ergebnis liefern. |
 
-Das ist kein bestandener Nachweis und wird auch nicht als solcher gezählt. Der
-Grund, es dennoch hinzuschreiben: `with check` ist der Ort, an dem eine
-Bedingung auf dem **neuen** Zeilenzustand steht. Wer die Policy später um einen
-`for insert`-Zweig oder eine zweite Update-Policy ergänzt, findet sie dort vor,
-statt sie zu vergessen. Der Preis ist eine zusätzliche Funktionsauswertung je
-Zeile.
+Für die zweite Zeile gilt weiterhin: kein bestandener Nachweis, wird auch nicht
+als solcher gezählt. Sie steht dennoch im Code, weil `with check` der Ort ist,
+an dem eine Bedingung auf dem **neuen** Zeilenzustand steht. Wer die Policy
+später um einen `for insert`-Zweig oder eine zweite Update-Policy ergänzt,
+findet sie dort vor, statt sie zu vergessen. Der Preis ist eine zusätzliche
+Funktionsauswertung je Zeile.
 
 ---
 

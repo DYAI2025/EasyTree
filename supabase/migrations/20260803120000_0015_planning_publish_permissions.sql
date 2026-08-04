@@ -215,18 +215,26 @@ drop policy plan_versions_update_in_org on public.plan_versions;
 -- dem Lesenden, welche Bedingung die tragende ist. Sie ist ausserdem die
 -- billigste — ein Zeichenkettenvergleich gegen zwei Funktionsaufrufe.
 --
--- Die Kanalbedingung steht in BEIDEN Klauseln. Im `with check` ist sie
--- redundant, solange `using` sie bereits erzwingt, und das wird hier nicht
--- schoengeredet: es ist Tiefenverteidigung, kein zweiter Nachweis. Sie steht
--- trotzdem da, weil `with check` die Bedingung auf dem NEUEN Zeilenzustand
--- erzwingen soll — wer die Policy spaeter um einen `for insert`-Zweig oder um
--- eine zweite Update-Policy ergaenzt, findet sie an der richtigen Stelle vor,
--- statt sie zu vergessen.
+-- Die Kanalbedingung steht in BEIDEN Klauseln, und das ist keine Doppelung aus
+-- Vorsicht — gemessen am 04.08.2026 sind es zwei unabhaengige Riegel mit
+-- unterschiedlichem Verhalten:
 --
--- `app.has_permission` ebenfalls in beiden Klauseln, aus demselben Grund und
--- mit derselben Einschraenkung: solange `org_id` nicht aenderbar ist (siehe
--- Spaltengrenze oben), kann die zweite Auswertung nie ein anderes Ergebnis
--- liefern.
+--   nur `using`        -> Angriff abgewiesen, STILL (null Zeilen)
+--   nur `with check`   -> Angriff abgewiesen, LAUT (42501, „new row violates
+--                         row-level security policy")
+--   beide              -> abgewiesen, still; `using` entscheidet zuerst
+--   keine von beiden   -> Angriff GELINGT
+--
+-- Belegt durch die Gegenmutationen GM-P1 (nur `using` entfernt —
+-- `auth-journey` blieb gruen) und GM-P1b (beide entfernt — `auth-journey` rot).
+-- Eine fruehere Fassung dieses Kommentars nannte die `with check`-Kopie
+-- „redundant"; das war falsch und ist durch Messen widerlegt worden. Protokoll:
+-- docs/reviews/2026-08-04-eyt-107-p1-gegenmutationen.md.
+--
+-- `app.has_permission` steht ebenfalls in beiden Klauseln, aber DORT trifft die
+-- Redundanz zu: solange `org_id` nicht aenderbar ist (siehe Spaltengrenze
+-- oben), kann die zweite Auswertung nie ein anderes Ergebnis liefern. Sie ist
+-- Tiefenverteidigung und wird als solche gefuehrt, nicht als Nachweis.
 --
 -- `published_by is null or published_by = auth.uid()` ist die Urheberzusage
 -- und die EINZIGE Bedingung, die ausschliesslich im `with check` sinnvoll ist:
