@@ -249,6 +249,30 @@ explicit `ssl` object (`Object.assign`), so `?ssl=no-verify`, percent-encoded na
 `apps/api/test/pg-connection.test.ts` (including one asserting the EFFECTIVE pg config)
 go red if you try.
 
+**The login role is part of the security boundary** (EYT-107, migrations `0015`/`0016`).
+Publishing a plan version is a domain command, not an ordinary table UPDATE — and the
+database enforces that itself, because `supabase/config.toml` exposes schema `public` as a
+PostgREST **Data API**. Three rules, all on `public.plan_versions`:
+
+- `app.is_runtime_channel()` compares `session_user` against `easytree_app` and sits in
+  **both** `using` and `with check` of the update policy. API and worker log in as that role
+  and then `set local role authenticated`; `session_user` never changes. PostgREST logs in as
+  `authenticator` and is not a member of `easytree_app` (measured 04.08.2026). Measured, not
+  assumed: with the condition only in `with check` the attack is still refused — loudly
+  instead of silently — so the two clauses are independent bolts, not a copy.
+- Column grants, the same shape `assignments` got in `0010`: `update` reaches only
+  `published_at`/`published_by`, `insert` only `(id, org_id, week_key)`, and there is no
+  `delete` grant at all. A plan version is therefore **born a draft**.
+- `app.reject_assignment_in_published_plan()` is `security definer` — a `select … for share`
+  additionally checks the UPDATE policy's `using` clause, so an invoker read would have gone
+  blind outside the runtime channel and silently disarmed the trigger.
+
+Consequences worth knowing before you touch any of this: moving the app onto the Supavisor
+transaction pooler makes `session_user` `postgres.<tenant>` and **breaks publishing** — loudly,
+via the zero-rows exception in `planning-write.repository.ts`. And `service_role`/`postgres`
+carry `BYPASSRLS`, so none of it constrains them. See
+[`docs/runbooks/planning-publish.md`](docs/runbooks/planning-publish.md).
+
 **Web never talks to Supabase or bare `fetch`.** Components get an `ApiClient` and a
 `PlanningGateway` from React context (`lib/api-client-provider.tsx`,
 `lib/planning-gateway-provider.tsx`); the single construction site for both is the composition

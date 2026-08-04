@@ -173,7 +173,7 @@ Keiner. Status: `ready-for-execution`.
 | REQ-F2  | Eine veröffentlichte Planversion nimmt auch **ohne** JWT-Claims keine Zuweisung auf. | pgTAP: Claims leeren, als Eigentümer einfügen → `23514`.                                                                                                           |
 | REQ-F3  | `authenticated` besitzt kein `delete` auf `plan_versions`.                           | `has_table_privilege(...,'delete') = false`; der bestehende Löschversuch wirft `42501` statt `23514`, der Trigger wird auf dem Eigentümerpfad belegt.              |
 | REQ-F4  | Runbook-Kopf und `CLAUDE.md` beschreiben den Stand.                                  | Kopf nennt Datum und Basis-SHA des aktuellen Stands; `grep -c "is_runtime_channel" CLAUDE.md ≥ 1`.                                                                 |
-| REQ-F5  | `db-gates` provisioniert das Passwort genau einmal.                                  | `grep -c "alter role easytree_app password" .github/workflows/ci.yml` = 1; Job bleibt grün.                                                                        |
+| REQ-F5  | `db-gates` provisioniert das Passwort genau einmal.                                  | Im Job `db-gates` genau eine Provisionierung; die Rollen-Gegenprobe wandert mit. `auth-journey` behält seine eigene — anderer Job, anderer Stack.                  |
 
 ## Architektur- und Dateigrenzen
 
@@ -293,7 +293,8 @@ Riegel welchen Teil trägt; das wird getrennt protokolliert.
 ```bash
 pnpm format && pnpm lint && pnpm typecheck
 bash scripts/plumbline-scope-guard.sh
-grep -c "alter role easytree_app password" .github/workflows/ci.yml   # muss 1 sein
+# 2 = einmal db-gates, einmal auth-journey (eigener Job, eigener Stack)
+grep -c "alter role easytree_app password" .github/workflows/ci.yml
 grep -c "is_runtime_channel" CLAUDE.md                                # muss >= 1 sein
 gh pr checks 52 --watch
 ```
