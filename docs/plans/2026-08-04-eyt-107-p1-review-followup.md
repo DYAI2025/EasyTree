@@ -1,14 +1,30 @@
 ---
 ticket: EYT-107
 titel: "Reviewbefunde F1–F5 zur P1-Korrektur"
-branch: feat/eyt-107-publish-core
-basis: 226f6b69a3ef9ce906701b948fd70c499ab841d9
-pr: 52
+branch: fix/eyt-107-f1-insert-boundary
+basis: 4a605dedc0e61bd4f12f15bb911ddbbfa8c41ab3
+pr: neu
 status: ready-for-execution
 erstellt: 2026-08-04
 ---
 
 # EYT-107 — Reviewbefunde F1 bis F5
+
+> **Planänderung 04.08.2026, erzwungen.** Dieser Plan entstand gegen den offenen
+> PR #52 und sah vor, Migration **0015 an Ort und Stelle** zu korrigieren — das
+> war zulässig, solange sie nirgends angewandt und nicht gemergt war.
+>
+> **PR #52 wurde um 01:57 UTC gemergt** (Merge-Commit `4a605de`, Head `226f6b6`,
+> elf Pflichtchecks grün). Nicht durch diese Sitzung. Damit gilt für 0015 wieder
+> die append-only-Regel aus `CLAUDE.md`.
+>
+> Konsequenz: **T-05 wird zu einer neuen Vorwärtsmigration `0016`.** Inhalt und
+> Nachweise bleiben unverändert; nur der Ort ändert sich. Basis ist jetzt
+> `origin/master`, der Branch ist neu, und es braucht einen neuen PR.
+>
+> Zweite Konsequenz, die benannt gehört: **F1 liegt seit dem Merge auf
+> `master`.** Die gehostete Datenbank ist davon nicht betroffen — sie steht auf
+> 0013, 0014 und 0015 sind dort nicht angewandt.
 
 <!-- GOAL_START -->
 
@@ -161,16 +177,16 @@ Keiner. Status: `ready-for-execution`.
 
 ## Architektur- und Dateigrenzen
 
-| Datei                                                        | Befund     | Art                       |
-| ------------------------------------------------------------ | ---------- | ------------------------- |
-| `supabase/migrations/…0015_planning_publish_permissions.sql` | F1, F2, F3 | Korrektur                 |
-| `supabase/tests/0011_planning_publish.sql`                   | F1, F2, F3 | Ergänzung                 |
-| `supabase/tests/0006_planning_invariants.sql`                | F3         | Aufteilung des Löschfalls |
-| `apps/web/e2e/auth-journey/journey.pwtest.ts`                | F1c        | neuer Schritt 9c3         |
-| `docs/runbooks/planning-publish.md`                          | F4         | Kopf + Abschnitt          |
-| `CLAUDE.md`                                                  | F4         | Kanalgrenze aufnehmen     |
-| `.github/workflows/ci.yml`                                   | F5         | Schritt entfernen         |
-| `docs/reviews/2026-08-04-eyt-107-p1-gegenmutationen.md`      | alle       | Protokoll fortschreiben   |
+| Datei                                                            | Befund     | Art                                                |
+| ---------------------------------------------------------------- | ---------- | -------------------------------------------------- |
+| `supabase/migrations/…0016_planning_publish_insert_boundary.sql` | F1, F2, F3 | **neu** — 0015 ist gemergt und bleibt unangetastet |
+| `supabase/tests/0011_planning_publish.sql`                       | F1, F2, F3 | Ergänzung                                          |
+| `supabase/tests/0006_planning_invariants.sql`                    | F3         | Aufteilung des Löschfalls                          |
+| `apps/web/e2e/auth-journey/journey.pwtest.ts`                    | F1c        | neuer Schritt 9c3                                  |
+| `docs/runbooks/planning-publish.md`                              | F4         | Kopf + Abschnitt                                   |
+| `CLAUDE.md`                                                      | F4         | Kanalgrenze aufnehmen                              |
+| `.github/workflows/ci.yml`                                       | F5         | Schritt entfernen                                  |
+| `docs/reviews/2026-08-04-eyt-107-p1-gegenmutationen.md`          | alle       | Protokoll fortschreiben                            |
 
 Alle Pfade liegen im bestehenden PRIL-Manifest. **Keine Scope-Änderung.**
 
@@ -212,7 +228,10 @@ keine Planversion existiert.
 T-01 bis T-03 committen, pushen, `db-gates` und `auth-journey` lesen. Erwartet:
 beide rot mit den benannten Fällen.
 
-### T-05 — Migration 0015 ergänzen (30 min) · REQ-F1a/b, REQ-F2, REQ-F3
+### T-05 — Neue Migration `0016` (30 min) · REQ-F1a/b, REQ-F2, REQ-F3
+
+`supabase/migrations/20260804020000_0016_planning_publish_insert_boundary.sql`.
+**Nicht** in 0015 — die ist seit dem Merge von PR #52 append-only.
 
 ```sql
 revoke insert, delete on table public.plan_versions from authenticated;
@@ -227,7 +246,7 @@ create policy plan_versions_insert_in_org on public.plan_versions
   );
 ```
 
-und in `app.reject_assignment_in_published_plan()`:
+und `create or replace function app.reject_assignment_in_published_plan()` mit
 
 ```sql
 and (auth.uid() is null or pv.org_id in (select app.user_org_ids()))
@@ -235,7 +254,7 @@ and (auth.uid() is null or pv.org_id in (select app.user_org_ids()))
 
 Kopfkommentar: F1 als Messung, nicht als Behauptung; F2 mit der Begründung,
 warum der Nullfall Wartungszugriff ist; F3 mit „ein Recht ohne Command ist
-Angriffsfläche". Rollbackblock fortschreiben.
+Angriffsfläche". Eigener Rollbackblock; 0015 bleibt unangetastet.
 
 ### T-06 — Doku (25 min) · REQ-F4
 
@@ -297,10 +316,12 @@ gh pr checks 52 --watch
 
 ## Rollback
 
-`git revert` der Folgecommits. 0015 ist nirgends angewandt; alle Änderungen sind
-Rechte- und Policy-Verschärfungen ohne Datenwirkung. Der Rollbackblock im Kopf
-von 0015 wird um `grant insert, delete on table public.plan_versions to
-authenticated;` und die alte Insert-Policy ergänzt.
+`git revert` der Commits dieses Branches. 0016 ist nirgends angewandt (die
+gehostete Datenbank steht auf 0013); alle Änderungen sind Rechte- und
+Policy-Verschärfungen ohne Datenwirkung. Der Rollbackblock steht im Kopf von
+0016 und lautet: `grant insert, delete on table public.plan_versions to
+authenticated;` plus Wiederherstellung der Insert-Policy aus 0007 und der
+Triggerfunktion aus dem Stand von 0015.
 
 ## Execution Handoff
 
