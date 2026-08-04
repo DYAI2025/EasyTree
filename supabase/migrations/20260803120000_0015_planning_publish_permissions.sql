@@ -239,8 +239,7 @@ create policy plan_versions_update_in_org on public.plan_versions
     and app.has_permission(org_id, 'planning.publish')
   )
   with check (
-    app.is_runtime_channel()
-    and org_id in (select app.user_org_ids())
+    org_id in (select app.user_org_ids())
     and app.has_permission(org_id, 'planning.publish')
     and (published_by is null or published_by = auth.uid())
   );
