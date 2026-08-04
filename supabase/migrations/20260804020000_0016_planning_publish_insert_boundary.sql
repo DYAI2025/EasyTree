@@ -69,7 +69,6 @@
 -- mitgegeben.
 revoke insert on table public.plan_versions from authenticated;
 grant insert (id, org_id, week_key) on table public.plan_versions to authenticated;
-grant insert on table public.plan_versions to authenticated; -- GM-F1a
 
 drop policy plan_versions_insert_in_org on public.plan_versions;
 
@@ -77,6 +76,7 @@ create policy plan_versions_insert_in_org on public.plan_versions
   for insert to authenticated
   with check (
     org_id in (select app.user_org_ids())
+    and published_at is null
   );
 
 -- ===========================================================================
@@ -103,7 +103,8 @@ create policy plan_versions_insert_in_org on public.plan_versions
 -- Nutzen. Kaskaden aus `organizations` laufen weiterhin, denn
 -- Fremdschluesselaktionen fuehrt PostgreSQL mit den Rechten des Eigentuemers
 -- aus.
-revoke delete on table public.plan_versions from authenticated;
+-- GM-F3: Entzug ausgesetzt
+grant delete on table public.plan_versions to authenticated;
 
 -- ===========================================================================
 -- F2 — Die Invariante gilt auch ohne Anwendungsidentitaet
@@ -147,7 +148,7 @@ begin
      -- `security definer` die Policy nicht anwendet — aber nur, wenn es
      -- ueberhaupt eine Anwendungsidentitaet gibt. Ohne sie (psql, Migration,
      -- Wartung) gilt die urspruengliche, universelle Regel.
-     and (auth.uid() is null or pv.org_id in (select app.user_org_ids()))
+     and pv.org_id in (select app.user_org_ids())
      for share;
 
   -- Nicht gefunden heisst: fremder Mandant oder Tippfehler. Diese Entscheidung
