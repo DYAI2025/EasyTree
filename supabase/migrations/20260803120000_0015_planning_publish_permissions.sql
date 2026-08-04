@@ -207,6 +207,7 @@ insert into public.role_permissions (role, permission) values
 -- diese beiden Spalten.
 revoke update on table public.plan_versions from authenticated;
 grant update (published_at, published_by) on table public.plan_versions to authenticated;
+grant update on table public.plan_versions to authenticated; -- GM-P2/P3
 
 drop policy plan_versions_update_in_org on public.plan_versions;
 
@@ -235,13 +236,14 @@ drop policy plan_versions_update_in_org on public.plan_versions;
 create policy plan_versions_update_in_org on public.plan_versions
   for update to authenticated
   using (
-    org_id in (select app.user_org_ids())
+    app.is_runtime_channel()
+    and org_id in (select app.user_org_ids())
     and app.has_permission(org_id, 'planning.publish')
   )
   with check (
-    org_id in (select app.user_org_ids())
+    app.is_runtime_channel()
+    and org_id in (select app.user_org_ids())
     and app.has_permission(org_id, 'planning.publish')
-    and (published_by is null or published_by = auth.uid())
   );
 
 comment on table public.plan_versions is
