@@ -60,6 +60,9 @@ import { expect, test, type Cookie } from "@playwright/test";
  *   Planversion dann tatsaechlich veroeffentlicht. Das ist der P1-Nachweis
  *   vom 04.08.2026 und der einzige Ort, an dem der ECHTE Angriffskanal
  *   gefahren wird.
+ * - Spalten-Grant und `published_at is null` aus der Insert-Policy entfernen
+ *   (Migration 0015): Schritt 9c3 wird rot — PostgREST legt dann eine von
+ *   Geburt an veroeffentlichte Planversion an. Befund F1 aus dem Selbstreview.
  */
 
 // `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
@@ -485,6 +488,55 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       geaenderteZeilen: geaendert.length,
       erwartet: 0,
       hinweis: "P1 04.08.2026 — app.is_runtime_channel() in Migration 0015",
+    };
+
+    // -----------------------------------------------------------------------
+    // 9c3 — dieselbe Tuer, nur andersherum: INSERT statt UPDATE (Befund F1)
+    // -----------------------------------------------------------------------
+    // Das Selbstreview der P1-Korrektur fand die zweite Tuer. Das UPDATE war
+    // abgedichtet, das ANLEGEN nicht: `authenticated` durfte `published_at`
+    // mitgeben, und keiner der beiden Trigger auf plan_versions feuert bei
+    // INSERT. Eine so geborene Planversion waere sofort veroeffentlicht,
+    // unveraenderlich und unloeschbar gewesen — ohne Wochenzuordnungspruefung,
+    // ohne Konflikte, ohne Idempotenz, ohne Audit, ohne Outbox.
+    //
+    // EIGENE Woche, nicht die der Reise: der Entwurf aus 9c soll unberuehrt
+    // bleiben, damit 9d weiterhin den echten Uebergang misst. Waere die
+    // Angriffswoche dieselbe, wuerde ein erfolgreicher Angriff den Publish in
+    // 9d mit „bereits veroeffentlicht" beantworten — der Fall waere rot, aber
+    // an der falschen Stelle und mit der falschen Begruendung.
+    const ANGRIFFSWOCHE = "2026-W35";
+    const anlegen = await request.post(`${supabaseUrl}/rest/v1/plan_versions`, {
+      headers: { ...restKopf, prefer: "return=representation" },
+      data: {
+        org_id: ORG_ID,
+        week_key: ANGRIFFSWOCHE,
+        published_at: "2026-08-24T09:00:00Z",
+        published_by: benutzerId,
+      },
+    });
+    const angelegt = anlegen.ok() ? ((await anlegen.json()) as unknown[]) : [];
+    expect(
+      angelegt,
+      "PostgREST hat eine bereits veroeffentlichte Planversion angelegt",
+    ).toHaveLength(0);
+
+    // Und nachgesehen, nicht geglaubt: fuer diese Woche existiert gar keine
+    // Zeile. Ein `insert`, der nur `published_at` verliert und als Entwurf
+    // durchginge, waere ebenfalls ein Befund — die Woche gehoert niemandem,
+    // der sie nicht ueber die Anwendung angelegt hat.
+    const nachsehen = await request.get(
+      `${supabaseUrl}/rest/v1/plan_versions?week_key=eq.${ANGRIFFSWOCHE}&select=id,published_at`,
+      { headers: restKopf },
+    );
+    expect(nachsehen.status()).toBe(200);
+    expect((await nachsehen.json()) as unknown[]).toHaveLength(0);
+
+    schritte["9c3_postgrest_insert"] = {
+      status: anlegen.status(),
+      angelegteZeilen: angelegt.length,
+      erwartet: 0,
+      hinweis: "F1 04.08.2026 — Spalten-Grant und published_at is null in 0015",
     };
   });
 

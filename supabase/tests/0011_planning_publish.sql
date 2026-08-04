@@ -56,7 +56,7 @@
 -- erwartet ERRMSG, nicht eine Beschreibung.
 
 begin;
-select plan(25);
+select plan(31);
 
 -- ===========================================================================
 -- Die Testidentitaet: User C aus dem Seed, nur die Rolle aendert sich
@@ -268,6 +268,67 @@ select is(
   'das Update-Recht existiert — es endet nur bei published_at und published_by'
 );
 
+-- --------------------------------------------------------------------------
+-- Der INSERT-Pfad: eine Planversion wird als ENTWURF geboren (Befund F1)
+-- --------------------------------------------------------------------------
+-- Das Selbstreview der P1-Korrektur am 04.08.2026 fand die zweite Tuer: das
+-- UPDATE war abgedichtet, der INSERT nicht. `authenticated` durfte
+-- `published_at` beim ANLEGEN mitgeben, und keiner der beiden Trigger auf
+-- plan_versions feuert bei INSERT (beide sind `update`/`delete`). Der partielle
+-- Unique-Index deckt nur Entwuerfe ab, eine geborene Veroeffentlichung
+-- kollidierte also mit nichts.
+--
+-- Wirkung waere gewesen: eine veroeffentlichte Planversion ohne
+-- Wochenzuordnungspruefung, ohne Konflikte, ohne Idempotenz, ohne Audit, ohne
+-- Outbox — und dank 0010 unveraenderlich UND unloeschbar. Sie haette
+-- `publishedVersionId` der Woche dauerhaft besetzt.
+--
+-- Dieselbe Bauart wie bei `assignments` in 0010, wo derselbe Entzug schon
+-- steht (dort mit derselben Begruendung: ein gefaelschter Marker beim Anlegen
+-- ist schlimmer als beim Aendern, weil niemand ihn danach korrigieren kann).
+select is(
+  has_column_privilege('authenticated', 'public.plan_versions', 'published_at', 'insert'),
+  false,
+  'authenticated darf plan_versions.published_at NICHT beim Anlegen mitgeben'
+);
+
+-- Gegenprobe: das Anlegen als solches bleibt erlaubt. Ohne sie waere die Zeile
+-- darueber auch dann gruen, wenn `authenticated` gar keine Planversion mehr
+-- anlegen koennte — und der Publish-Pfad haette nichts zu veroeffentlichen.
+select is(
+  has_column_privilege('authenticated', 'public.plan_versions', 'week_key', 'insert'),
+  true,
+  'Entwuerfe darf authenticated weiterhin anlegen'
+);
+
+select throws_ok(
+  $$insert into public.plan_versions (org_id, week_key, published_at, published_by)
+    values ('00000000-0000-4000-8000-0000000000a1', '2026-W35',
+            now(), '00000000-0000-4000-8000-00000000ccc3')$$,
+  '42501'
+);
+
+-- --------------------------------------------------------------------------
+-- Loeschen: ein Recht, das kein Command benutzt (Befund F3)
+-- --------------------------------------------------------------------------
+-- `authenticated` besass `delete` auf plan_versions, und die Delete-Policy
+-- prueft nur die Organisation. Kein Anwendungspfad loescht Planversionen —
+-- ueber die Data-API konnte damit jedes Mitglied einen Entwurf entfernen, und
+-- `assignments.plan_version_id` ist `on delete cascade` (0007): die
+-- Wochenplanung waere still weg gewesen. Veroeffentlichtes schuetzte schon
+-- vorher der Trigger aus 0010; Entwuerfe schuetzte nichts.
+select is(
+  has_table_privilege('authenticated', 'public.plan_versions', 'delete'),
+  false,
+  'authenticated darf Planversionen gar nicht erst loeschen'
+);
+
+select is(
+  has_table_privilege('authenticated', 'public.plan_versions', 'select'),
+  true,
+  'lesen darf es weiterhin — der Entzug trifft nur das Loeschen'
+);
+
 -- ===========================================================================
 -- 4. Der Eigentuemerpfad — Trigger und Unveraenderlichkeit
 -- ===========================================================================
@@ -321,6 +382,37 @@ select throws_ok(
   $$update public.plan_versions
        set week_key = '2026-W33'
      where id = '00000000-0000-4000-8000-0000006010a1'$$,
+  '23514'
+);
+
+-- --------------------------------------------------------------------------
+-- Die Invariante gilt auch OHNE Anwendungsidentitaet (Befund F2)
+-- --------------------------------------------------------------------------
+-- `app.reject_assignment_in_published_plan()` ist seit dem P1-Fix
+-- `security definer` und filterte im ersten Wurf ausnahmslos auf
+-- `pv.org_id in (select app.user_org_ids())`. Das war zu breit: ohne
+-- JWT-Claims liefert `auth.uid()` NULL, `user_org_ids()` die leere Menge, der
+-- Zweig „nicht gefunden heisst fremder Mandant" greift — und die Zuweisung
+-- laeuft durch.
+--
+-- Vorher (invoker, als `postgres` mit BYPASSRLS) fand das `for share` die
+-- Zeile und lehnte ab. Der Fix haette also eine Invariante verengt, die es
+-- schon gab: Wartungszugriffe per psql, Migrationsskripte und Seeds haetten
+-- ohne Warnung in eine veroeffentlichte Planversion schreiben koennen.
+--
+-- Hier wird genau dieser Fall gefahren: Claims leeren, dann als Eigentuemer
+-- einfuegen. Ohne die Bedingung `auth.uid() is null or …` in 0015 ist diese
+-- Zeile gruen-falsch.
+select set_config('request.jwt.claims', '', true);
+
+select throws_ok(
+  $$insert into public.assignments
+      (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+    values ('00000000-0000-4000-8000-0000000000a1',
+            '00000000-0000-4000-8000-0000006010a1',
+            '00000000-0000-4000-8000-0000004010a1',
+            '00000000-0000-4000-8000-0000005010a1',
+            '2026-08-06T06:00:00Z', '2026-08-06T14:00:00Z')$$,
   '23514'
 );
 
