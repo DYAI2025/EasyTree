@@ -85,6 +85,10 @@ const WORKSITE_ALPHA = "00000000-0000-4000-8000-0000005010a1";
  */
 const EMPLOYEE_ALPHA_2 = "00000000-0000-4000-8000-0000004012a1";
 
+/** Aktives Mitglied ohne planning.write — als Fixture angelegt, nicht im Seed. */
+const USER_MITGLIED_ALPHA = "00000000-0000-4000-8000-00000000dd44";
+const MITGLIEDSCHAFT_MITGLIED = "00000000-0000-4000-8000-0000000e0dd4";
+
 /** Woche ohne Seed-Inhalt, damit die Faelle einander nicht stoeren. */
 const WOCHE = "2026-W45";
 
@@ -182,6 +186,24 @@ function adminVerbindung(): Client {
     throw new Error("[planning-write] Verwaltungsverbindung fehlt — beforeAll ist nicht gelaufen.");
   }
   return admin;
+}
+
+/**
+ * Beobachtung — IMMER ueber die Verwaltungsverbindung, nie ueber den
+ * Laufzeitkanal.
+ *
+ * `easytree_app` ist NOINHERIT (Migration 0003) und hat vor
+ * `set local role authenticated` keinerlei Tabellenrechte. Eine rohe Zaehlung
+ * auf dieser Verbindung endet deshalb in `permission denied` — gemessen im
+ * Lauf 31222989167, acht von zehn Pflichttests. Diese Funktion macht die
+ * richtige Wahl zur einzigen bequemen: wer beobachtet, ruft `beobachte`.
+ */
+async function beobachte<TRow extends QueryResultRow>(
+  sql: string,
+  parameter: readonly unknown[] = [],
+): Promise<TRow[]> {
+  const ergebnis = await adminVerbindung().query<TRow>(sql, [...parameter]);
+  return ergebnis.rows;
 }
 
 /**
@@ -287,6 +309,46 @@ async function raeumeWoche(woche: string = WOCHE): Promise<void> {
   );
 }
 
+/**
+ * Aktives Mitglied der Organisation Alpha OHNE `planning.write` (EYT-136).
+ *
+ * Bewusst als Fixture und nicht in `seed.sql`: der Seed wird von mehreren
+ * Suiten gezaehlt, eine zusaetzliche Zeile dort aendert fremde Erwartungen.
+ * `USER_C` aus dem Seed traegt zwar die Rolle `member`, ist aber INAKTIV — er
+ * wuerde an der Mitgliedschaft scheitern, nicht am Recht, und der Test wuerde
+ * den falschen Riegel messen.
+ *
+ * Die `auth.users`-Zeile ist keine Bequemlichkeit: `public.users.id` ist ein
+ * Fremdschluessel auf `auth.users (id)` (Migration 0002), ein Profil ohne
+ * Identitaet laesst sich also gar nicht anlegen. Form und Begruendung sind
+ * dieselben wie in `supabase/seed.sql` — direktes Insert ausschliesslich im
+ * lokalen Stack, Passwort leer, weil Login hier kein Testziel ist.
+ */
+async function legeMitgliedOhneSchreibrechtAn(): Promise<void> {
+  const client = adminVerbindung();
+  await client.query(
+    `insert into auth.users
+       (instance_id, id, aud, role, email, encrypted_password,
+        email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+        created_at, updated_at)
+     values ('00000000-0000-0000-0000-000000000000', $1,
+             'authenticated', 'authenticated', 'member-alpha-eyt136@example.test', '',
+             now(), '{"provider":"email","providers":["email"]}', '{}', now(), now())
+     on conflict (id) do nothing`,
+    [USER_MITGLIED_ALPHA],
+  );
+  await client.query(
+    "insert into public.users (id, display_name) values ($1, $2) on conflict (id) do nothing",
+    [USER_MITGLIED_ALPHA, "Mitglied Alpha (EYT-136 Fixture)"],
+  );
+  await client.query(
+    `insert into public.memberships (id, org_id, user_id, role, active)
+     values ($1, $2, $3, 'member', true)
+     on conflict (org_id, user_id) do update set role = 'member', active = true`,
+    [MITGLIEDSCHAFT_MITGLIED, ORG_ALPHA, USER_MITGLIED_ALPHA],
+  );
+}
+
 function dbIt(name: string, fn: () => Promise<void>): void {
   it(name, async (ctx) => {
     if (!dbAvailable) {
@@ -319,6 +381,7 @@ beforeAll(async () => {
   }
 
   await neueAdminVerbindung();
+  await legeMitgliedOhneSchreibrechtAn();
   await raeumeWoche();
 });
 
@@ -327,6 +390,12 @@ afterAll(async () => {
     for (const woche of [WOCHE, WOCHE_BASELINE, WOCHE_BASELINE_PARALLEL, WOCHE_BASELINE_DEFINER]) {
       await raeumeWoche(woche);
     }
+    // Dieselbe Begruendung wie unten: was diese Suite angelegt hat, raeumt sie
+    // wieder ab. Die Reihenfolge folgt den Fremdschluesseln von innen nach
+    // aussen — `auth.users` zuletzt, weil `public.users` daran haengt.
+    await admin.query("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_MITGLIED]);
+    await admin.query("delete from public.users where id = $1", [USER_MITGLIED_ALPHA]);
+    await admin.query("delete from auth.users where id = $1", [USER_MITGLIED_ALPHA]);
     // Die selbst angelegte Person wieder entfernen — sonst waechst der
     // Bestand mit jedem Lauf, und die naechste Suite zaehlt anders.
     await admin.query("delete from public.employees where id = $1", [EMPLOYEE_ALPHA_2]);
@@ -373,19 +442,19 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       // Und wirklich nur EINE Zeile. Ohne diese Zaehlung waere der Test auch
       // dann gruen, wenn der zweite Aufruf eine zweite Zeile anlegte und
       // zufaellig die erste Id zurueckgaebe.
-      const anzahl = await client.query<{ n: string }>(
+      const anzahl = await beobachte<{ n: string }>(
         `select count(*) as n from public.assignments
         where plan_version_id in (select id from public.plan_versions where week_key = $1)`,
         [WOCHE],
       );
-      expect(anzahl.rows[0]?.n).toBe("1");
+      expect(anzahl[0]?.n).toBe("1");
 
       // Auch die Nebenwirkungen gibt es genau einmal.
-      const outbox = await client.query<{ n: string }>(
+      const outbox = await beobachte<{ n: string }>(
         "select count(*) as n from public.outbox_messages where org_id = $1 and message_type = $2",
         [ORG_ALPHA, "planning.assignment_created"],
       );
-      expect(outbox.rows[0]?.n).toBe("1");
+      expect(outbox[0]?.n).toBe("1");
     },
   );
 
@@ -410,23 +479,23 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     expect(ergebnis.ok).toBe(true);
     if (!ergebnis.ok) return;
 
-    const audit = await client.query<{ subject_id: string; actor_user_id: string }>(
+    const audit = await beobachte<{ subject_id: string; actor_user_id: string }>(
       `select subject_id, actor_user_id from public.audit_events
         where org_id = $1 and event_type = 'planning.assignment_created'`,
       [ORG_ALPHA],
     );
-    expect(audit.rows).toHaveLength(1);
-    expect(audit.rows[0]?.subject_id).toBe(ergebnis.assignment.id);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.subject_id).toBe(ergebnis.assignment.id);
     // Der Urheber kommt aus app.current_user_id(), nicht aus der Anwendung.
-    expect(audit.rows[0]?.actor_user_id).toBe(USER_A);
+    expect(audit[0]?.actor_user_id).toBe(USER_A);
 
-    const outbox = await client.query<{ payload: { assignmentId: string } }>(
+    const outbox = await beobachte<{ payload: { assignmentId: string } }>(
       `select payload from public.outbox_messages
         where org_id = $1 and message_type = 'planning.assignment_created'`,
       [ORG_ALPHA],
     );
-    expect(outbox.rows).toHaveLength(1);
-    expect(outbox.rows[0]?.payload.assignmentId).toBe(ergebnis.assignment.id);
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.payload.assignmentId).toBe(ergebnis.assignment.id);
   });
 
   dbIt("nach erzwungenem Fehler bleibt weder Einsatz noch Audit- oder Outboxzeile", async () => {
@@ -478,8 +547,8 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         `select count(*) as n from public.idempotency_records where org_id = '${ORG_ALPHA}'`,
       ],
     ] as const) {
-      const zeilen = await client.query<{ n: string }>(sql);
-      expect(zeilen.rows[0]?.n, `Teilwirkung in ${tabelle}`).toBe("0");
+      const zeilen = await beobachte<{ n: string }>(sql);
+      expect(zeilen[0]?.n, `Teilwirkung in ${tabelle}`).toBe("0");
     }
   });
 
@@ -524,12 +593,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     expect(erfolge).toHaveLength(1);
     expect(konflikte).toHaveLength(1);
 
-    const anzahl = await a.query<{ n: string }>(
+    const anzahl = await beobachte<{ n: string }>(
       `select count(*) as n from public.assignments
         where plan_version_id in (select id from public.plan_versions where week_key = $1)`,
       [WOCHE],
     );
-    expect(anzahl.rows[0]?.n).toBe("1");
+    expect(anzahl[0]?.n).toBe("1");
   });
 
   dbIt(
@@ -566,11 +635,11 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       // Der neue Entwurf traegt ZWEI Zuweisungen: die uebernommene und die neue.
       // Ohne die Uebernahme waere es eine — und die veroeffentlichte Planung
       // waere aus der Ansicht verschwunden, ohne dass jemand sie geloescht hat.
-      const imEntwurf = await client.query<{ n: string }>(
+      const imEntwurf = await beobachte<{ n: string }>(
         "select count(*) as n from public.assignments where plan_version_id = $1",
         [ergebnis.assignment.planVersionId],
       );
-      expect(imEntwurf.rows[0]?.n).toBe("2");
+      expect(imEntwurf[0]?.n).toBe("2");
       expect(ergebnis.assignment.planVersionId).not.toBe(veroeffentlicht);
     },
   );
@@ -614,12 +683,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     expect(y.assignment.id).toBe(x.assignment.id);
     expect([x.replayed, y.replayed].filter(Boolean)).toHaveLength(1);
 
-    const anzahl = await a.query<{ n: string }>(
+    const anzahl = await beobachte<{ n: string }>(
       `select count(*) as n from public.assignments
         where plan_version_id in (select id from public.plan_versions where week_key = $1)`,
       [WOCHE],
     );
-    expect(anzahl.rows[0]?.n).toBe("1");
+    expect(anzahl[0]?.n).toBe("1");
   });
 
   dbIt(
@@ -684,7 +753,10 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     expect(erst.ok).toBe(true);
     if (!erst.ok) return;
 
-    await client.query("update public.employees set active = false where id = $1", [
+    // Stammdaten umschalten gehoert zur Beobachterseite: der Laufzeitkanal ist
+    // ausserhalb von `runnerAuf` rechtlos (NOINHERIT, Migration 0003), und ein
+    // `update public.employees` von dort endete in `permission denied`.
+    await adminVerbindung().query("update public.employees set active = false where id = $1", [
       EMPLOYEE_ALPHA,
     ]);
     try {
@@ -694,7 +766,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       expect(zweit.assignment.id).toBe(erst.assignment.id);
       expect(zweit.replayed).toBe(true);
     } finally {
-      await client.query("update public.employees set active = true where id = $1", [
+      await adminVerbindung().query("update public.employees set active = true where id = $1", [
         EMPLOYEE_ALPHA,
       ]);
     }
@@ -751,12 +823,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       expect(x.assignment.planVersionId).toBe(y.assignment.planVersionId);
 
       // Baseline genau einmal, beide neuen Einsaetze genau einmal: drei Zeilen.
-      const zeilen = await a.query<{ starts_at_utc: Date }>(
+      const zeilen = await beobachte<{ starts_at_utc: Date }>(
         "select starts_at_utc from public.assignments where plan_version_id = $1 order by starts_at_utc",
         [x.assignment.planVersionId],
       );
-      expect(zeilen.rows).toHaveLength(3);
-      const baseline = zeilen.rows.filter(
+      expect(zeilen).toHaveLength(3);
+      const baseline = zeilen.filter(
         (r) => r.starts_at_utc.toISOString() === "2026-11-17T07:00:00.000Z",
       );
       expect(baseline).toHaveLength(1);
@@ -823,6 +895,108 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       expect(fehler).not.toBeNull();
       expect(fehler?.code).toBe("23514");
       expect(fehler?.message).toContain("nimmt keine Zuweisung mehr auf");
+    },
+  );
+
+  /**
+   * Der Vertrag selbst, nicht seine Wirkung (EYT-136).
+   *
+   * Alle anderen Faelle wuerden auch dann gruen, wenn der Command versehentlich
+   * ueber `postgres` liefe — sie messen Ergebnisse, nicht den Kanal. Dieser Fall
+   * misst den Kanal: `session_user` ist die LOGINrolle und laesst sich durch
+   * `set local role` nicht faelschen, `current_user` ist die gewechselte Rolle.
+   * Genau dieses Paar verlangt `app.is_runtime_channel()` in den Insert-Policies
+   * aus Migration 0017.
+   *
+   * Die Sonde laeuft INNERHALB des Runners und nicht daneben: `easytree_app`
+   * ist NOINHERIT (Migration 0003) und erreicht vor dem Rollenwechsel nicht
+   * einmal das Schema `app`.
+   */
+  dbIt("der Entwurfspfad laeuft auf dem Laufzeitkanal, nicht als postgres", async () => {
+    const client = await neueVerbindung();
+    const wer = await runnerAuf(client).run({ userId: USER_A }, (tx) =>
+      tx.query<{ session_user: string; current_user: string; runtime: boolean }>(
+        "select session_user, current_user, app.is_runtime_channel() as runtime",
+      ),
+    );
+    const zeile = wer.rows[0];
+
+    process.stdout.write(
+      `[planning-write] session_user=${zeile?.session_user ?? "?"} ` +
+        `current_user=${zeile?.current_user ?? "?"} ` +
+        `runtime_channel=${String(zeile?.runtime ?? false)}\n`,
+    );
+
+    // Ohne diese drei Zeilen koennte die Suite eines Tages still wieder als
+    // `postgres` laufen, und jeder Nachweis ueber die Kanalgrenze waere
+    // wertlos, ohne rot zu werden.
+    expect(zeile?.session_user).toBe("easytree_app");
+    expect(zeile?.current_user).toBe("authenticated");
+    expect(zeile?.runtime).toBe(true);
+  });
+
+  /**
+   * Recht UND Kanal — hier faellt allein das Recht (EYT-136).
+   *
+   * Nicht-Vakuositaet zuerst: dieselbe Verbindung, derselbe Runner, derselbe
+   * Command sind fuer USER_A gruen (Faelle oben). Was sich unterscheidet, ist
+   * ausschliesslich die Rolle des Subjekts. Die Mitgliedschaft ist AKTIV und
+   * dieselbe Organisation — sonst schluege die Tenant-Bedingung zu, nicht die
+   * Rechtebedingung, und der Test bewiese den falschen Riegel.
+   *
+   * Ueber PostgREST ist diese Aussage nicht messbar: dort greift der
+   * Kanalriegel zuerst, und welches Recht gefehlt haette, bliebe offen.
+   */
+  dbIt(
+    "ein aktives Mitglied ohne planning.write legt auch ueber den Laufzeitkanal nichts an",
+    async () => {
+      const belegRecht = await beobachte<{ n: string }>(
+        `select count(*) as n from public.role_permissions
+          where role = 'member' and permission = 'planning.write'`,
+      );
+      expect(belegRecht[0]?.n, "member traegt planning.write — die Praemisse stimmt nicht").toBe(
+        "0",
+      );
+
+      const client = await neueVerbindung();
+      await raeumeWoche();
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_MITGLIED_ALPHA,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+
+      let fehler: DatabaseError | null = null;
+      try {
+        await repo.createAssignment({
+          weekKey: WOCHE,
+          employeeId: EMPLOYEE_ALPHA,
+          worksiteId: WORKSITE_ALPHA,
+          startsAtUtc: START,
+          endsAtUtc: ENDE,
+          // Eigener Schluessel, damit kein Replay eines frueheren Falls
+          // antwortet und die Ablehnung ueberdeckt.
+          idempotencyKey: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        });
+      } catch (e) {
+        fehler = e as DatabaseError;
+      }
+
+      // 42501 und nicht irgendein Fehler: die Insert-Policy aus 0017 lehnt den
+      // neuen Zeilenzustand ab. Der Tabellenname im Text unterscheidet diesen
+      // Riegel von einem fehlenden Spaltenrecht anderswo im Pfad.
+      expect(fehler, "das Mitglied konnte einen Entwurf anlegen").not.toBeNull();
+      expect(fehler?.code).toBe("42501");
+      expect(fehler?.message).toContain("plan_versions");
+
+      const danach = await beobachte<{ n: string }>(
+        `select count(*) as n from public.assignments
+          where plan_version_id in (select id from public.plan_versions
+                                     where org_id = $1 and week_key = $2)`,
+        [ORG_ALPHA, WOCHE],
+      );
+      expect(danach[0]?.n, "trotz Fehler ist eine Zuweisung entstanden").toBe("0");
     },
   );
 });
