@@ -52,12 +52,22 @@ select is(
   'authenticated darf assignments.published_at NICHT direkt setzen'
 );
 
--- Gegenprobe: die fachlichen Spalten sind sehr wohl aenderbar. Ohne sie waere
--- die Zeile oben auch dann gruen, wenn gar kein update-Recht mehr existiert.
+-- EYT-136: diese Zeile war die Gegenprobe zur Zeile darueber — sie stellte
+-- sicher, dass „published_at ist nicht aenderbar" nicht bloss deshalb gruen
+-- ist, weil ueberhaupt kein update-Recht mehr existiert.
+--
+-- Genau dieser Fall ist jetzt eingetreten, und zwar absichtlich: Migration 0017
+-- entzieht `authenticated` das update auf `assignments` vollstaendig, weil kein
+-- Produktionspfad eines benutzt. Die Aussage der Zeile darueber ist damit
+-- tatsaechlich vakuos geworden — und wird hier durch die STAERKERE ersetzt,
+-- statt sie stillschweigend stehen zu lassen.
+--
+-- Die Nicht-Vakuositaet des Spaltenmodells traegt ab jetzt die insert-Seite
+-- weiter unten (`starts_at_utc` ja, `published_at` nein) sowie 0012 A1/A3.
 select is(
   has_column_privilege('authenticated', 'public.assignments', 'starts_at_utc', 'update'),
-  true,
-  'authenticated darf assignments.starts_at_utc aendern — das Recht existiert, nur nicht auf dem Marker'
+  false,
+  'authenticated darf assignments GAR NICHT mehr aendern — auch keine Fachspalte (EYT-136)'
 );
 
 -- Dasselbe fuer insert. Ohne den Entzug koennte der Marker beim ANLEGEN

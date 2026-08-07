@@ -37,7 +37,7 @@
 -- dem Eigentuemerpfad, der fuer Fixtures legitim ist.
 
 begin;
-select plan(16);
+select plan(18);
 
 -- ===========================================================================
 -- A. Rechtelage (Struktur)
