@@ -50,6 +50,16 @@ const idempotenzSpeicher = new PgIdempotencyStore();
 const DB_URL =
   process.env["EASYTREE_TEST_DB_URL"] ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
+/**
+ * Der Laufzeitkanal (`easytree_app`), seit EYT-136 zwingend.
+ *
+ * Migration 0017 bindet das Anlegen von Entwuerfen und Zuweisungen an
+ * `app.is_runtime_channel()`. Ohne diese Verbindung misst der Test nicht mehr
+ * den Produktionsvertrag — deshalb ist ihr Fehlen im Pflichtmodus rot und
+ * nicht etwa ein stiller Rueckfall auf `DB_URL`.
+ */
+const APP_DB_URL = process.env["EASYTREE_TEST_APP_DB_URL"];
+
 const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local";
 const gate = new FailClosedGate("planning-write", TENANT_TESTS_MODE, "EYT-92");
 
@@ -146,8 +156,54 @@ const wochenschluessel = (instant: Date, zone: string): string => {
   return planningWeekKey(isoWeekOfLocalDate(localBusinessDate(instant, geprueft.timeZone)));
 };
 
-async function neueVerbindung(): Promise<Client> {
+/**
+ * Verwaltungsverbindung (`postgres`) — Fixtures, Zaehlungen, Aufraeumen.
+ *
+ * Sie arbeitet OHNE `set local role authenticated` und braucht deshalb volle
+ * Tabellenrechte. Seit EYT-136 ist sie ausserdem die EINZIGE Verbindung, die
+ * Entwuerfe wieder loeschen kann: `authenticated` hat auf `public.assignments`
+ * weder `update` noch `delete` (Migration 0017), und das ist der Punkt.
+ */
+async function neueAdminVerbindung(): Promise<Client> {
   const client = new Client({ connectionString: DB_URL });
+  await client.connect();
+  clients.push(client);
+  admin = client;
+  return client;
+}
+
+/** Genau eine Verwaltungsverbindung je Lauf; Fixtures brauchen keine zweite. */
+let admin: Client | undefined;
+
+function adminVerbindung(): Client {
+  if (admin === undefined) {
+    throw new Error("[planning-write] Verwaltungsverbindung fehlt — beforeAll ist nicht gelaufen.");
+  }
+  return admin;
+}
+
+/**
+ * Verbindung auf dem LAUFZEITKANAL (`easytree_app`) — dieselbe Loginrolle wie
+ * API und Worker, und seit EYT-136 die einzige, ueber die ein Entwurf
+ * ueberhaupt entstehen kann.
+ *
+ * Vorher lief dieser Test seinen Kommandopfad ueber `postgres`. Das war schon
+ * damals nicht der Produktionsvertrag, fiel aber nicht auf, weil die
+ * Insert-Policy nur die Organisation prueft. Migration 0017 verlangt
+ * zusaetzlich `app.is_runtime_channel()`, also `session_user = 'easytree_app'`
+ * — eine `postgres`-Sitzung erfuellt das nicht. Dieselbe Umstellung hat der
+ * Publish-Pfad mit EYT-107 bereits erhalten.
+ *
+ * Kein Rueckfall auf `DB_URL`: eine stille Vertretung waere genau die
+ * Bequemlichkeit, die einen Sicherheitsnachweis in eine Behauptung verwandelt.
+ */
+async function neueVerbindung(): Promise<Client> {
+  if (APP_DB_URL === undefined) {
+    throw new Error(
+      "[planning-write] EASYTREE_TEST_APP_DB_URL fehlt — der Laufzeitkanal ist nicht konfiguriert (EYT-136).",
+    );
+  }
+  const client = new Client({ connectionString: APP_DB_URL });
   await client.connect();
   clients.push(client);
   return client;
@@ -166,12 +222,8 @@ async function neueVerbindung(): Promise<Client> {
  * `plan_versions_publish_assignments` leitet es aus der Version ab. Es selbst
  * zu setzen waere eine zweite Wahrheit neben der abgeleiteten.
  */
-async function veroeffentlichteBaseline(
-  client: Client,
-  woche: string,
-  von: string,
-  bis: string,
-): Promise<string> {
+async function veroeffentlichteBaseline(woche: string, von: string, bis: string): Promise<string> {
+  const client = adminVerbindung();
   const version = await client.query<{ id: string }>(
     "insert into public.plan_versions (org_id, week_key) values ($1, $2) returning id",
     [ORG_ALPHA, woche],
@@ -201,7 +253,8 @@ async function veroeffentlichteBaseline(
  * genau daran ist die erste Fassung dieser Funktion gescheitert. Die
  * Einschraenkung ist deshalb keine Bequemlichkeit, sondern die Regel.
  */
-async function raeumeWoche(client: Client, woche: string = WOCHE): Promise<void> {
+async function raeumeWoche(woche: string = WOCHE): Promise<void> {
+  const client = adminVerbindung();
   await client.query(
     `delete from public.assignments
       where published_at is null
@@ -245,19 +298,36 @@ function dbIt(name: string, fn: () => Promise<void>): void {
 beforeAll(async () => {
   dbAvailable = await probeDatabase(DB_URL);
   if (!dbAvailable) return;
-  const admin = await neueVerbindung();
-  await raeumeWoche(admin);
+
+  // Fail-closed, nicht fail-open: ohne Laufzeitkanal misst diese Suite seit
+  // EYT-136 nicht mehr den Produktionsvertrag. Im Pflichtmodus ist das ein
+  // Fehler, kein Ueberspringen — sonst koennte ein fehlendes Secret ein
+  // Sicherheitsgate gruen machen.
+  if (APP_DB_URL === undefined) {
+    if (TENANT_TESTS_MODE === "required") {
+      throw new Error(
+        "[planning-write] fail-closed: EASYTREE_TEST_APP_DB_URL ist nicht gesetzt. " +
+          "Der Entwurfspfad braucht den Laufzeitkanal (Loginrolle easytree_app), " +
+          "seit Migration 0017 (EYT-136).",
+      );
+    }
+    console.warn("[planning-write.integration] SKIPPED: EASYTREE_TEST_APP_DB_URL nicht gesetzt.");
+    dbAvailable = false;
+    return;
+  }
+
+  await neueAdminVerbindung();
+  await raeumeWoche();
 });
 
 afterAll(async () => {
-  const ersteVerbindung = clients[0];
-  if (dbAvailable && ersteVerbindung !== undefined) {
+  if (dbAvailable && admin !== undefined) {
     for (const woche of [WOCHE, WOCHE_BASELINE, WOCHE_BASELINE_PARALLEL]) {
-      await raeumeWoche(ersteVerbindung, woche);
+      await raeumeWoche(woche);
     }
     // Die selbst angelegte Person wieder entfernen — sonst waechst der
     // Bestand mit jedem Lauf, und die naechste Suite zaehlt anders.
-    await ersteVerbindung.query("delete from public.employees where id = $1", [EMPLOYEE_ALPHA_2]);
+    await admin.query("delete from public.employees where id = $1", [EMPLOYEE_ALPHA_2]);
   }
   await Promise.all(clients.map((c) => c.end().catch(() => undefined)));
   process.stdout.write(gate.reportLine());
@@ -269,7 +339,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     "derselbe Idempotenzschluessel liefert dieselbe Id und schreibt kein zweites Mal",
     async () => {
       const client = await neueVerbindung();
-      await raeumeWoche(client);
+      await raeumeWoche();
       const repo = new PlanningWriteRepository(
         runnerAuf(client),
         USER_A,
@@ -319,7 +389,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
 
   dbIt("Auditzeile und Outboxnachricht entstehen mit dem Einsatz", async () => {
     const client = await neueVerbindung();
-    await raeumeWoche(client);
+    await raeumeWoche();
     const repo = new PlanningWriteRepository(
       runnerAuf(client),
       USER_A,
@@ -359,7 +429,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
 
   dbIt("nach erzwungenem Fehler bleibt weder Einsatz noch Audit- oder Outboxzeile", async () => {
     const client = await neueVerbindung();
-    await raeumeWoche(client);
+    await raeumeWoche();
     // Abbruch NACH dem Einsatz-Insert: die Zeile stand bereits in der
     // Transaktion. Nur die Klammer kann sie jetzt noch entfernen.
     const repo = new PlanningWriteRepository(
@@ -416,7 +486,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     // zeigen: sie saehe ihre eigene, noch nicht committete Zeile ohnehin.
     const a = await neueVerbindung();
     const b = await neueVerbindung();
-    await raeumeWoche(a);
+    await raeumeWoche();
 
     const repoA = new PlanningWriteRepository(
       runnerAuf(a),
@@ -464,13 +534,11 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     "der erste Entwurf ueber einer veroeffentlichten Woche laesst den Planstand nicht verschwinden",
     async () => {
       const client = await neueVerbindung();
-      await raeumeWoche(client, WOCHE_BASELINE);
+      await raeumeWoche(WOCHE_BASELINE);
 
       // Eine veroeffentlichte Version mit einer Zuweisung — der Stand, den die
       // Planerin vor sich hat.
-      const veroeffentlicht = await veroeffentlichteBaseline(
-        client,
-        WOCHE_BASELINE,
+      const veroeffentlicht = await veroeffentlichteBaseline(WOCHE_BASELINE,
         "2026-11-10T07:00:00Z",
         "2026-11-10T15:00:00Z",
       );
@@ -509,7 +577,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     // VOR jeder Sperre, also sahen beide Anfragen "nicht vorhanden".
     const a = await neueVerbindung();
     const b = await neueVerbindung();
-    await raeumeWoche(a);
+    await raeumeWoche();
 
     const repoA = new PlanningWriteRepository(
       runnerAuf(a),
@@ -555,7 +623,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     "derselbe Schluessel mit ANDERER Anfrage wird abgelehnt, nicht als Replay beantwortet",
     async () => {
       const client = await neueVerbindung();
-      await raeumeWoche(client);
+      await raeumeWoche();
       const repo = new PlanningWriteRepository(
         runnerAuf(client),
         USER_A,
@@ -594,7 +662,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     // scheiterte eine Wiederholung an einer Bedingung, die beim
     // urspruenglichen Vorgang erfuellt war.
     const client = await neueVerbindung();
-    await raeumeWoche(client);
+    await raeumeWoche();
     const repo = new PlanningWriteRepository(
       runnerAuf(client),
       USER_A,
@@ -634,12 +702,10 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     async () => {
       const a = await neueVerbindung();
       const b = await neueVerbindung();
-      await raeumeWoche(a, WOCHE_BASELINE_PARALLEL);
+      await raeumeWoche(WOCHE_BASELINE_PARALLEL);
 
       // Veroeffentlichte Baseline mit EINER Zuweisung.
-      await veroeffentlichteBaseline(
-        a,
-        WOCHE_BASELINE_PARALLEL,
+      await veroeffentlichteBaseline(WOCHE_BASELINE_PARALLEL,
         "2026-11-17T07:00:00Z",
         "2026-11-17T15:00:00Z",
       );
