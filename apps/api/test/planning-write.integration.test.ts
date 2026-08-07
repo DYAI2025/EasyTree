@@ -29,7 +29,7 @@ import {
   planningWeekKey,
 } from "@easytree/domain";
 import { Client } from "pg";
-import type { QueryResultRow } from "pg";
+import type { DatabaseError, QueryResultRow } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { FailClosedGate, ORG_ALPHA, probeDatabase, USER_A } from "./tenant-context.helper";
@@ -102,6 +102,8 @@ const WOCHE = "2026-W45";
  */
 const WOCHE_BASELINE = "2026-W46";
 const WOCHE_BASELINE_PARALLEL = "2026-W47";
+/** Eigene Woche fuer den aus 0006 umgezogenen Definer-Fall (EYT-136). */
+const WOCHE_BASELINE_DEFINER = "2026-W48";
 const START = new Date("2026-11-03T07:00:00Z");
 const ENDE = new Date("2026-11-03T15:00:00Z");
 
@@ -322,7 +324,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (dbAvailable && admin !== undefined) {
-    for (const woche of [WOCHE, WOCHE_BASELINE, WOCHE_BASELINE_PARALLEL]) {
+    for (const woche of [WOCHE, WOCHE_BASELINE, WOCHE_BASELINE_PARALLEL, WOCHE_BASELINE_DEFINER]) {
       await raeumeWoche(woche);
     }
     // Die selbst angelegte Person wieder entfernen — sonst waechst der
@@ -538,7 +540,8 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
 
       // Eine veroeffentlichte Version mit einer Zuweisung — der Stand, den die
       // Planerin vor sich hat.
-      const veroeffentlicht = await veroeffentlichteBaseline(WOCHE_BASELINE,
+      const veroeffentlicht = await veroeffentlichteBaseline(
+        WOCHE_BASELINE,
         "2026-11-10T07:00:00Z",
         "2026-11-10T15:00:00Z",
       );
@@ -705,7 +708,8 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       await raeumeWoche(WOCHE_BASELINE_PARALLEL);
 
       // Veroeffentlichte Baseline mit EINER Zuweisung.
-      await veroeffentlichteBaseline(WOCHE_BASELINE_PARALLEL,
+      await veroeffentlichteBaseline(
+        WOCHE_BASELINE_PARALLEL,
         "2026-11-17T07:00:00Z",
         "2026-11-17T15:00:00Z",
       );
@@ -756,6 +760,69 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         (r) => r.starts_at_utc.toISOString() === "2026-11-17T07:00:00.000Z",
       );
       expect(baseline).toHaveLength(1);
+    },
+  );
+
+  /**
+   * Umgezogen aus `supabase/tests/0006_planning_invariants.sql` (EYT-136).
+   *
+   * Dort lief dieser Fall ueber `authenticated` und trug eine zweite,
+   * nicht offensichtliche Last: `app.reject_assignment_in_published_plan()`
+   * liest die Elternzeile mit `for share`, und PostgreSQL prueft bei einer
+   * Sperrklausel zusaetzlich die `using`-Klausel der UPDATE-Policy. Ohne
+   * `security definer` (Migration 0015) faende dieses select nichts, der Zweig
+   * „nicht gefunden" liesse die Zuweisung durch — und der Test waere
+   * gruen-falsch. Genau so fiel er am 04.08.2026 auf (Lauf 30862744360).
+   *
+   * Seit Migration 0017 lehnt die INSERT-Policy in pgTAP schon VOR dem Trigger
+   * ab (42501, fehlender Laufzeitkanal), dort ist die Aussage also nicht mehr
+   * messbar. Hier ist sie es: diese Verbindung IST der Laufzeitkanal, der
+   * Insert passiert die Policy und laeuft in den Trigger — genau die
+   * Konstellation, um die es geht.
+   *
+   * Bewusst ein direkter Insert statt `createAssignment`: der Command wuerde
+   * eine eigene Entwurfsversion anlegen und die veroeffentlichte nie
+   * beruehren. Gemessen wird hier die Datenbankregel, nicht der Command.
+   */
+  dbIt(
+    "eine veroeffentlichte Planversion nimmt ueber den Laufzeitkanal keine Zuweisung mehr auf",
+    async () => {
+      await raeumeWoche(WOCHE_BASELINE_DEFINER);
+      const veroeffentlicht = await veroeffentlichteBaseline(
+        WOCHE_BASELINE_DEFINER,
+        "2026-11-24T07:00:00Z",
+        "2026-11-24T15:00:00Z",
+      );
+
+      const client = await neueVerbindung();
+      let fehler: DatabaseError | null = null;
+      try {
+        await runnerAuf(client).run({ userId: USER_A }, async (tx) => {
+          await tx.query(
+            `insert into public.assignments
+               (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+             values ($1, $2, $3, $4, $5, $6)`,
+            [
+              ORG_ALPHA,
+              veroeffentlicht,
+              EMPLOYEE_ALPHA,
+              WORKSITE_ALPHA,
+              new Date("2026-11-25T07:00:00Z"),
+              new Date("2026-11-25T15:00:00Z"),
+            ],
+          );
+        });
+      } catch (e) {
+        fehler = e as DatabaseError;
+      }
+
+      // Nicht `toBeTruthy()`: der Code unterscheidet die Regel (23514) von
+      // einem fehlenden Recht (42501). Waere es 42501, haette die Policy
+      // abgelehnt und der Trigger — also die eigentliche Aussage — waere
+      // ungemessen geblieben.
+      expect(fehler).not.toBeNull();
+      expect(fehler?.code).toBe("23514");
+      expect(fehler?.message).toContain("nimmt keine Zuweisung mehr auf");
     },
   );
 });

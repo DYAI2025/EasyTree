@@ -101,7 +101,12 @@ select set_config(
   json_build_object('sub', '00000000-0000-4000-8000-00000000aaa1', 'role', 'authenticated')::text,
   true
 );
-set local role authenticated;
+-- EYT-136: Eigentuemerpfad statt `authenticated`. Migration 0017 bindet das
+-- Anlegen von Entwuerfen und Zuweisungen an `app.is_runtime_channel()`, und
+-- `session_user` ist in pgTAP immer `postgres`. Gemessen wird in dieser Datei
+-- der Constraint an der Zeitumstellung und die Idempotenz, nicht der Kanal —
+-- dieselbe Begruendung, die weiter oben schon fuer das Veroeffentlichen gilt.
+-- Die Kanalgrenze steht in 0012_planning_data_api_boundary.sql.
 
 -- ---------------------------------------------------------------------------
 -- Der EXCLUDE an einem Umstellungsdatum
@@ -150,7 +155,12 @@ select lives_ok(
   'Die Umstellungswoche laesst sich veroeffentlichen'
 );
 
-set local role authenticated;
+-- EYT-136: Eigentuemerpfad statt `authenticated`. Migration 0017 bindet das
+-- Anlegen von Entwuerfen und Zuweisungen an `app.is_runtime_channel()`, und
+-- `session_user` ist in pgTAP immer `postgres`. Gemessen wird in dieser Datei
+-- der Constraint an der Zeitumstellung und die Idempotenz, nicht der Kanal —
+-- dieselbe Begruendung, die weiter oben schon fuer das Veroeffentlichen gilt.
+-- Die Kanalgrenze steht in 0012_planning_data_api_boundary.sql.
 
 -- Zweite Version: zuerst UEBERLAPPEND. Reihenfolge ist Absicht — waere der
 -- beruehrende Fall zuerst erfolgreich, waere die Zuweisung danach
@@ -185,7 +195,12 @@ select throws_ok(
   '23P01'
 );
 
-set local role authenticated;
+-- EYT-136: Eigentuemerpfad statt `authenticated`. Migration 0017 bindet das
+-- Anlegen von Entwuerfen und Zuweisungen an `app.is_runtime_channel()`, und
+-- `session_user` ist in pgTAP immer `postgres`. Gemessen wird in dieser Datei
+-- der Constraint an der Zeitumstellung und die Idempotenz, nicht der Kanal —
+-- dieselbe Begruendung, die weiter oben schon fuer das Veroeffentlichen gilt.
+-- Die Kanalgrenze steht in 0012_planning_data_api_boundary.sql.
 
 select is(
   (select published_at from public.plan_versions
@@ -214,7 +229,12 @@ select lives_ok(
   'Beruehrung am Umstellungstag ist kein Konflikt — halboffen gilt auch dort'
 );
 
-set local role authenticated;
+-- EYT-136: Eigentuemerpfad statt `authenticated`. Migration 0017 bindet das
+-- Anlegen von Entwuerfen und Zuweisungen an `app.is_runtime_channel()`, und
+-- `session_user` ist in pgTAP immer `postgres`. Gemessen wird in dieser Datei
+-- der Constraint an der Zeitumstellung und die Idempotenz, nicht der Kanal —
+-- dieselbe Begruendung, die weiter oben schon fuer das Veroeffentlichen gilt.
+-- Die Kanalgrenze steht in 0012_planning_data_api_boundary.sql.
 
 -- ---------------------------------------------------------------------------
 -- Idempotenz: derselbe Schluessel erzeugt keine zweite Nachricht (AK4)
