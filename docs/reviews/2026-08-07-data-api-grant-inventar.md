@@ -29,13 +29,13 @@ Zwei unabhängige Quellen, weil eine allein hier in die Irre führt:
 
 ## 1. Rechtematrix für `authenticated` (gemessen, Produktion)
 
-| Tabelle                 | SELECT | INSERT        | UPDATE        | DELETE | Spaltenrechte                                                                                     |
-| ----------------------- | ------ | ------------- | ------------- | ------ | ------------------------------------------------------------------------------------------------- |
-| `public.assignments`    | ✅     | nur Spalten   | nur Spalten   | **✅** | INSERT: `id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc`<br>UPDATE: `plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc` |
-| `public.plan_versions`  | ✅     | nur Spalten   | nur Spalten   | ❌     | INSERT: `id, org_id, week_key`<br>UPDATE: `published_at, published_by`                              |
-| `public.idempotency_records` | ✅ | ✅ (Tabelle) | ✅ (Tabelle)\* | ✅ (Tabelle)\* | keine Spaltenbegrenzung                                                                  |
-| `public.audit_events`   | ✅     | ✅ (Tabelle)  | ✅ (Tabelle)\* | ✅ (Tabelle)\* | keine Spaltenbegrenzung                                                                  |
-| `public.outbox_messages`| ✅     | ✅ (Tabelle)  | ✅ (Tabelle)  | ✅ (Tabelle)\* | keine Spaltenbegrenzung                                                                  |
+| Tabelle                      | SELECT | INSERT       | UPDATE         | DELETE         | Spaltenrechte                                                                                                                                                                  |
+| ---------------------------- | ------ | ------------ | -------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `public.assignments`         | ✅     | nur Spalten  | nur Spalten    | **✅**         | INSERT: `id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc`<br>UPDATE: `plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc` |
+| `public.plan_versions`       | ✅     | nur Spalten  | nur Spalten    | ❌             | INSERT: `id, org_id, week_key`<br>UPDATE: `published_at, published_by`                                                                                                         |
+| `public.idempotency_records` | ✅     | ✅ (Tabelle) | ✅ (Tabelle)\* | ✅ (Tabelle)\* | keine Spaltenbegrenzung                                                                                                                                                        |
+| `public.audit_events`        | ✅     | ✅ (Tabelle) | ✅ (Tabelle)\* | ✅ (Tabelle)\* | keine Spaltenbegrenzung                                                                                                                                                        |
+| `public.outbox_messages`     | ✅     | ✅ (Tabelle) | ✅ (Tabelle)   | ✅ (Tabelle)\* | keine Spaltenbegrenzung                                                                                                                                                        |
 
 `\*` = Recht ist erteilt, ist aber **heute** wirkungslos, weil für diesen Befehl **keine permissive
 RLS-Policy** existiert und alle fünf Tabellen `force row level security` tragen. Das ist eine
@@ -43,39 +43,39 @@ Aussage über den heutigen Zustand, keine Zusicherung: das Recht ist da, es fehl
 
 ## 2. RLS-Policies (gemessen, `pg_policies`)
 
-| Tabelle | Befehl | Policy | Prädikat | atomares Recht | Runtime-Kanal |
-| ------- | ------ | ------ | -------- | -------------- | ------------- |
-| `assignments` | SELECT | `assignments_select_in_org` | `org_id in (app.user_org_ids())` | — | — |
-| `assignments` | INSERT | `assignments_insert_in_org` | `org_id in (…)` | **fehlt** | **fehlt** |
-| `assignments` | UPDATE | `assignments_update_in_org` | `org_id in (…)` (using + check) | **fehlt** | **fehlt** |
-| `assignments` | DELETE | `assignments_delete_in_org` | `org_id in (…)` | **fehlt** | **fehlt** |
-| `plan_versions` | SELECT | `plan_versions_select_in_org` | `org_id in (…)` | — | — |
-| `plan_versions` | INSERT | `plan_versions_insert_in_org` | `org_id in (…) and published_at is null` | **fehlt** | **fehlt** |
-| `plan_versions` | UPDATE | `plan_versions_update_in_org` | `app.is_runtime_channel() and org_id in (…) and app.has_permission(org_id,'planning.publish')`; check zusätzlich `published_by is null or published_by = auth.uid()` | `planning.publish` | **vorhanden** |
-| `plan_versions` | DELETE | `plan_versions_delete_in_org` | `org_id in (…)` — **Policy ohne Grant** (0016 entzog `delete`) | — | — |
-| `idempotency_records` | SELECT/INSERT | `…_in_org` | `org_id in (…)` | — | — |
-| `audit_events` | SELECT | `audit_events_select_in_org` | `org_id in (…)` | — | — |
-| `audit_events` | INSERT | `audit_events_insert_in_org` | `org_id in (…) and actor_user_id = app.current_user_id()` | — (Akteurbindung) | — |
-| `outbox_messages` | SELECT/INSERT/UPDATE | `…_in_org` | `org_id in (…)` | — | — |
+| Tabelle               | Befehl               | Policy                        | Prädikat                                                                                                                                                             | atomares Recht     | Runtime-Kanal |
+| --------------------- | -------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------- |
+| `assignments`         | SELECT               | `assignments_select_in_org`   | `org_id in (app.user_org_ids())`                                                                                                                                     | —                  | —             |
+| `assignments`         | INSERT               | `assignments_insert_in_org`   | `org_id in (…)`                                                                                                                                                      | **fehlt**          | **fehlt**     |
+| `assignments`         | UPDATE               | `assignments_update_in_org`   | `org_id in (…)` (using + check)                                                                                                                                      | **fehlt**          | **fehlt**     |
+| `assignments`         | DELETE               | `assignments_delete_in_org`   | `org_id in (…)`                                                                                                                                                      | **fehlt**          | **fehlt**     |
+| `plan_versions`       | SELECT               | `plan_versions_select_in_org` | `org_id in (…)`                                                                                                                                                      | —                  | —             |
+| `plan_versions`       | INSERT               | `plan_versions_insert_in_org` | `org_id in (…) and published_at is null`                                                                                                                             | **fehlt**          | **fehlt**     |
+| `plan_versions`       | UPDATE               | `plan_versions_update_in_org` | `app.is_runtime_channel() and org_id in (…) and app.has_permission(org_id,'planning.publish')`; check zusätzlich `published_by is null or published_by = auth.uid()` | `planning.publish` | **vorhanden** |
+| `plan_versions`       | DELETE               | `plan_versions_delete_in_org` | `org_id in (…)` — **Policy ohne Grant** (0016 entzog `delete`)                                                                                                       | —                  | —             |
+| `idempotency_records` | SELECT/INSERT        | `…_in_org`                    | `org_id in (…)`                                                                                                                                                      | —                  | —             |
+| `audit_events`        | SELECT               | `audit_events_select_in_org`  | `org_id in (…)`                                                                                                                                                      | —                  | —             |
+| `audit_events`        | INSERT               | `audit_events_insert_in_org`  | `org_id in (…) and actor_user_id = app.current_user_id()`                                                                                                            | — (Akteurbindung)  | —             |
+| `outbox_messages`     | SELECT/INSERT/UPDATE | `…_in_org`                    | `org_id in (…)`                                                                                                                                                      | —                  | —             |
 
 `plan_versions UPDATE` ist damit die **einzige** Planungsschreiboperation, die heute an einen
 Domain-Command gebunden ist. Sie ist das Muster, an dem sich EYT-136 orientiert (Migration 0015).
 
 ## 3. Legitime EasyTree-Verbraucher (gemessen im Produktionscode)
 
-| Tabelle | Legitimer Writer | Fundstelle | Verwendete Spalten |
-| ------- | ---------------- | ---------- | ------------------ |
-| `plan_versions` | Entwurf anlegen | `planning-write.repository.ts:469` | `(org_id, week_key)` |
-| `plan_versions` | Veröffentlichen | `planning-write.repository.ts:801` | `(published_at, published_by)` |
-| `assignments` | Zuweisung anlegen (Übernahme aus Vorversion) | `planning-write.repository.ts:509` | `(org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)` |
-| `assignments` | Zuweisung anlegen (Nutzerpfad) | `planning-write.repository.ts:555` | dieselben sechs |
-| `assignments` | **UPDATE** | — | **kein Verbraucher** |
-| `assignments` | **DELETE** | — | **kein Verbraucher** |
-| `audit_events` | Auditspur | `planning-write.repository.ts:587`, `:851` | INSERT |
-| `outbox_messages` | Outbox-Eintrag | `planning-write.repository.ts:607`, `:871` | INSERT |
-| `outbox_messages` | **UPDATE** (`processed_at`) | — | **kein Verbraucher** (Zusteller existiert nicht) |
-| `idempotency_records` | Ergebnis merken | `pg-idempotency-store.ts:45` | INSERT |
-| `idempotency_records` | **UPDATE/DELETE** | — | **kein Verbraucher** (bewusst, 0012) |
+| Tabelle               | Legitimer Writer                             | Fundstelle                                 | Verwendete Spalten                                                                |
+| --------------------- | -------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------- |
+| `plan_versions`       | Entwurf anlegen                              | `planning-write.repository.ts:469`         | `(org_id, week_key)`                                                              |
+| `plan_versions`       | Veröffentlichen                              | `planning-write.repository.ts:801`         | `(published_at, published_by)`                                                    |
+| `assignments`         | Zuweisung anlegen (Übernahme aus Vorversion) | `planning-write.repository.ts:509`         | `(org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)` |
+| `assignments`         | Zuweisung anlegen (Nutzerpfad)               | `planning-write.repository.ts:555`         | dieselben sechs                                                                   |
+| `assignments`         | **UPDATE**                                   | —                                          | **kein Verbraucher**                                                              |
+| `assignments`         | **DELETE**                                   | —                                          | **kein Verbraucher**                                                              |
+| `audit_events`        | Auditspur                                    | `planning-write.repository.ts:587`, `:851` | INSERT                                                                            |
+| `outbox_messages`     | Outbox-Eintrag                               | `planning-write.repository.ts:607`, `:871` | INSERT                                                                            |
+| `outbox_messages`     | **UPDATE** (`processed_at`)                  | —                                          | **kein Verbraucher** (Zusteller existiert nicht)                                  |
+| `idempotency_records` | Ergebnis merken                              | `pg-idempotency-store.ts:45`               | INSERT                                                                            |
+| `idempotency_records` | **UPDATE/DELETE**                            | —                                          | **kein Verbraucher** (bewusst, 0012)                                              |
 
 Leser: sämtliche Lesepfade laufen über `TenantQueryRunner` (`set local role authenticated` +
 transaktionslokale JWT-Claims) und über die Repositories des Planungs- und Kostenmoduls. Kein
@@ -91,15 +91,15 @@ PostgREST stellt Schema `public` als Data API bereit (`supabase/config.toml`,
 `schemas = ["public", "graphql_public"]`) und meldet sich als `authenticator` an — kein Mitglied
 von `easytree_app`, also `app.is_runtime_channel() = false`.
 
-| # | Weg | Wer kann es | Umgangene Domain-Regeln |
-| - | --- | ----------- | ----------------------- |
-| A-1 | `POST /rest/v1/assignments` | jedes aktive Mitglied, **auch Rolle `member`** (die API antwortet ihm 403) | `planning.write`; Intervall-/Konfliktvalidierung (`draft-validation.ts`); Wochenzugehörigkeit (`week-membership.ts`, Fehlercode `OUTSIDE_WEEK`); Advisory-Lock-Serialisierung; Idempotenz; Auditspur; Outbox; Korrelations-ID; Transaktionsklammer |
-| A-2 | `PATCH /rest/v1/assignments?id=eq.<id>` | dieselbe Gruppe | dieselben; zusätzlich: verschiebt eine Zuweisung in eine andere Planversion, Person oder Baustelle ohne jede Prüfung |
-| A-3 | `DELETE /rest/v1/assignments?…` | dieselbe Gruppe | **löscht den Entwurfsstand einer ganzen Woche.** Der Trigger `assignments_published_immutable` schützt nur Zeilen mit `published_at is not null` |
-| A-4 | `POST /rest/v1/plan_versions` | dieselbe Gruppe | `planning.write`; erzeugt Entwurfs-Planversionen. Da `0016` das `delete`-Recht entzogen hat, sind diese Zeilen über **keinen** Pfad wieder entfernbar |
-| A-5 | `POST /rest/v1/outbox_messages` / `PATCH …` | dieselbe Gruppe | fingiert Nachrichten bzw. setzt `processed_at` auf echten Nachrichten. **Heute wirkungslos, weil kein Zusteller existiert** |
-| A-6 | `POST /rest/v1/idempotency_records` | dieselbe Gruppe | belegt `(org_id, operation, idempotency_key)` vorab. Setzt Schlüsselkenntnis voraus (client-erzeugte UUID) |
-| A-7 | `POST /rest/v1/audit_events` | dieselbe Gruppe | hängt selbst-zugeschriebene Auditzeilen an. Die Policy bindet `actor_user_id` an die eigene Identität — **keine** Fremdzuschreibung möglich |
+| #   | Weg                                         | Wer kann es                                                                | Umgangene Domain-Regeln                                                                                                                                                                                                                            |
+| --- | ------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A-1 | `POST /rest/v1/assignments`                 | jedes aktive Mitglied, **auch Rolle `member`** (die API antwortet ihm 403) | `planning.write`; Intervall-/Konfliktvalidierung (`draft-validation.ts`); Wochenzugehörigkeit (`week-membership.ts`, Fehlercode `OUTSIDE_WEEK`); Advisory-Lock-Serialisierung; Idempotenz; Auditspur; Outbox; Korrelations-ID; Transaktionsklammer |
+| A-2 | `PATCH /rest/v1/assignments?id=eq.<id>`     | dieselbe Gruppe                                                            | dieselben; zusätzlich: verschiebt eine Zuweisung in eine andere Planversion, Person oder Baustelle ohne jede Prüfung                                                                                                                               |
+| A-3 | `DELETE /rest/v1/assignments?…`             | dieselbe Gruppe                                                            | **löscht den Entwurfsstand einer ganzen Woche.** Der Trigger `assignments_published_immutable` schützt nur Zeilen mit `published_at is not null`                                                                                                   |
+| A-4 | `POST /rest/v1/plan_versions`               | dieselbe Gruppe                                                            | `planning.write`; erzeugt Entwurfs-Planversionen. Da `0016` das `delete`-Recht entzogen hat, sind diese Zeilen über **keinen** Pfad wieder entfernbar                                                                                              |
+| A-5 | `POST /rest/v1/outbox_messages` / `PATCH …` | dieselbe Gruppe                                                            | fingiert Nachrichten bzw. setzt `processed_at` auf echten Nachrichten. **Heute wirkungslos, weil kein Zusteller existiert**                                                                                                                        |
+| A-6 | `POST /rest/v1/idempotency_records`         | dieselbe Gruppe                                                            | belegt `(org_id, operation, idempotency_key)` vorab. Setzt Schlüsselkenntnis voraus (client-erzeugte UUID)                                                                                                                                         |
+| A-7 | `POST /rest/v1/audit_events`                | dieselbe Gruppe                                                            | hängt selbst-zugeschriebene Auditzeilen an. Die Policy bindet `actor_user_id` an die eigene Identität — **keine** Fremdzuschreibung möglich                                                                                                        |
 
 ## 5. Scope-Entscheidung für EYT-136
 
@@ -115,7 +115,7 @@ Zustand, konkreter Bypass, legitimer Verbraucher und korrigierter Positivpfad zu
 
 **Nicht im Slice, als Findings geführt:**
 
-- **A-5 (`outbox_messages`)** — der Bypass ist reproduzierbar, die *unerwünschte Wirkung* aber
+- **A-5 (`outbox_messages`)** — der Bypass ist reproduzierbar, die _unerwünschte Wirkung_ aber
   nicht: es gibt keinen Zusteller, der eine fingierte Nachricht zustellen oder eine unterdrückte
   auslassen könnte. Damit fehlt Punkt 2 der PO-Bedingung. Härtung gehört an das Ticket, das den
   Outbox-Consumer baut — dort ist der legitime `UPDATE`-Verbraucher erstmals bekannt.
@@ -144,10 +144,10 @@ Veröffentlichen bereits vorgenommen hat (`0006_planning_invariants.sql` Z. 113 
 
 Betroffen und im Rahmen dieses Slices umzustellen:
 
-| Datei | Zeilen | Art |
-| ----- | ------ | --- |
-| `supabase/tests/0006_planning_invariants.sql` | 90, 106, 208, 224, 252, 283 | Fixture-DML unter `authenticated` |
-| `supabase/tests/0007_temporal_and_idempotency.sql` | 119, 167, 201 | Fixture-DML unter `authenticated` |
+| Datei                                              | Zeilen                      | Art                               |
+| -------------------------------------------------- | --------------------------- | --------------------------------- |
+| `supabase/tests/0006_planning_invariants.sql`      | 90, 106, 208, 224, 252, 283 | Fixture-DML unter `authenticated` |
+| `supabase/tests/0007_temporal_and_idempotency.sql` | 119, 167, 201               | Fixture-DML unter `authenticated` |
 
-Die *Aussagen* dieser Tests bleiben erhalten; nur der Kanal, über den ihre Fixtures entstehen,
+Die _Aussagen_ dieser Tests bleiben erhalten; nur der Kanal, über den ihre Fixtures entstehen,
 wechselt. Constraints und Trigger feuern für den Eigentümer unverändert.
