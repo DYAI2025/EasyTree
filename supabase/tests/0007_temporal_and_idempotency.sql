@@ -229,12 +229,24 @@ select lives_ok(
   'Beruehrung am Umstellungstag ist kein Konflikt — halboffen gilt auch dort'
 );
 
--- EYT-136: Eigentuemerpfad statt `authenticated`. Migration 0017 bindet das
--- Anlegen von Entwuerfen und Zuweisungen an `app.is_runtime_channel()`, und
--- `session_user` ist in pgTAP immer `postgres`. Gemessen wird in dieser Datei
--- der Constraint an der Zeitumstellung und die Idempotenz, nicht der Kanal —
--- dieselbe Begruendung, die weiter oben schon fuer das Veroeffentlichen gilt.
--- Die Kanalgrenze steht in 0012_planning_data_api_boundary.sql.
+-- ---------------------------------------------------------------------------
+-- Der Outboxblock bleibt auf `authenticated` (Kanalmatrix 08.08.2026)
+-- ---------------------------------------------------------------------------
+-- Die erste Fassung dieser Datei hat auch diesen Abschnitt auf den
+-- Eigentuemerpfad gezogen, mit derselben Begruendung wie oben. Sie traegt hier
+-- nicht: Migration 0017 fasst `public.outbox_messages` nicht an. Recht
+-- (`grant select, insert, update`, 0008 Z. 99) und Policy
+-- (`outbox_messages_insert_in_org`, 0008 Z. 135) sind unveraendert, der Kanal
+-- ist also nicht erzwungenermassen gewechselt — er waere freiwillig gewechselt.
+--
+-- Und das haette etwas gekostet: unter `authenticated` belegen die fuenf
+-- folgenden Zusicherungen zusaetzlich, dass ein aktives Mitglied Nachrichten
+-- der EIGENEN Organisation ueberhaupt anfuegen darf. Kein anderer pgTAP-Fall
+-- im Repository sagt das (geprueft ueber alle Dateien in supabase/tests/), und
+-- auf dem Eigentuemerpfad waere ein Entzug dieses Rechts unbemerkt geblieben.
+-- Eine neue Grenze darf den Kanal verschieben, wo sie ihn erzwingt — hier
+-- erzwingt sie nichts.
+set local role authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Idempotenz: derselbe Schluessel erzeugt keine zweite Nachricht (AK4)
@@ -281,6 +293,16 @@ select lives_ok(
 -- ---------------------------------------------------------------------------
 -- Genau ein Entwurf je Woche (AK4, zweiter Mechanismus)
 -- ---------------------------------------------------------------------------
+-- EYT-136: ab hier Eigentuemerpfad, und hier ist er erzwungen — anders als
+-- beim Outboxblock darueber. `plan_versions_insert_in_org` verlangt seit
+-- Migration 0017 `app.is_runtime_channel()`, und `session_user` ist in pgTAP
+-- immer `postgres` (`SET SESSION AUTHORIZATION` braucht Superuser). Ueber
+-- `authenticated` endeten die beiden Inserts unten in 42501 statt im partiellen
+-- Unique-Index, und die Aussage dieses Abschnitts waere still verloren.
+-- Dass der Nicht-Laufzeitkanal abgewiesen wird, steht in
+-- 0012_planning_data_api_boundary.sql (C4).
+reset role;
+
 -- Eigene Woche, damit die Veroeffentlichungen oben nicht hineinspielen.
 select lives_ok(
   $$insert into public.plan_versions (org_id, week_key)

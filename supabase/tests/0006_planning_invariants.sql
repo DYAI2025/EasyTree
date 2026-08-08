@@ -10,11 +10,15 @@
 -- Verbindungen; EYT-49 AK6 stuetzt sich auf beide Dateien zusammen.
 
 begin;
--- 25 statt 24 seit EYT-136: das Verschieben einer veroeffentlichten Zuweisung
--- zerfaellt jetzt in zwei Aussagen — fehlendes Recht (42501) und Trigger
--- (23514) —, damit die urspruengliche Trigger-Aussage nicht im Rechteentzug
--- verschwindet.
-select plan(25);
+-- 26 statt 24 seit EYT-136, in zwei Schritten:
+--   +1  das Verschieben einer veroeffentlichten Zuweisung zerfaellt jetzt in
+--       zwei Aussagen — fehlendes Recht (42501) und Trigger (23514) —, damit
+--       die urspruengliche Trigger-Aussage nicht im Rechteentzug verschwindet.
+--   +1  die Kanalmatrix vom 08.08.2026 hat einen verlorenen Nachweis gefunden
+--       (`security definer` auf app.reject_assignment_in_published_plan()) und
+--       setzt an seine Stelle eine strukturelle Zusicherung; die Begruendung
+--       steht bei ihr, im Abschnitt „dieser Fall hat seinen Kanal gewechselt".
+select plan(26);
 
 -- ===========================================================================
 -- Schemaform
@@ -272,15 +276,50 @@ select throws_ok(
 -- 30862744360 auf.
 --
 -- Seit Migration 0017 lehnt die INSERT-Policy schon VOR dem Trigger ab (42501,
--- fehlender Laufzeitkanal). Der Trigger kaeme gar nicht mehr zum Zug, und die
--- Definer-Aussage waere hier nicht mehr messbar. Sie ist deshalb NICHT
--- entfallen, sondern umgezogen: nach
--- `apps/api/test/planning-write.integration.test.ts`, Fall „eine
--- veroeffentlichte Planversion nimmt ueber den Laufzeitkanal keine Zuweisung
--- mehr auf" — dort passiert der Insert die Policy und laeuft in den Trigger,
--- also genau in die Konstellation, um die es geht.
+-- fehlender Laufzeitkanal). Der Trigger kaeme gar nicht mehr zum Zug, die
+-- Definer-Aussage ist hier also nicht mehr messbar.
 --
--- Was hier bleibt, ist die Trigger-Aussage selbst, auf dem Eigentuemerpfad.
+-- KORREKTUR DER ERSTEN FASSUNG (Kanalmatrix 08.08.2026,
+-- docs/reviews/2026-08-08-eyt-136-kanalmatrix.md, Befund B1). Hier stand, die
+-- Aussage sei nach `apps/api/test/planning-write.integration.test.ts`
+-- umgezogen. Das trifft nicht zu, und der Grund ist nachlesbar statt vermutet:
+-- der dortige Fall „eine veroeffentlichte Planversion nimmt ueber den
+-- Laufzeitkanal keine Zuweisung mehr auf" laeuft IM Laufzeitkanal mit einem
+-- Subjekt, das `planning.publish` traegt (USER_A ist owner in Alpha, seed.sql
+-- Z. 46; 0015 Z. 182-184 gibt owner alle drei Planungsrechte). Damit ist die
+-- `using`-Klausel von `plan_versions_update_in_org` erfuellt, das `for share`
+-- faende die Elternzeile auch als INVOKER — die Definer-Eigenschaft wird dort
+-- weder gebraucht noch gemessen. Der Fall beweist den Trigger, nicht den
+-- Definer.
+--
+-- Der behaviourale Nachweis ist damit heute NIRGENDS mehr erreichbar, nicht
+-- nur nicht hier. Er braeuchte eine Sitzung, die die Insert-Policy passiert
+-- (Laufzeitkanal UND `planning.write`) und zugleich an der using-Klausel der
+-- Update-Policy scheitert (`planning.publish` fehlt). `role_permissions`
+-- vergibt beide Rechte an dieselben zwei Rollen — owner und manager (0015
+-- Z. 181-187) —, `member` bekommt keines. Ein solches Subjekt gibt es im
+-- Rechtemodell nicht.
+--
+-- Was bleibt, ist deshalb ZWEIERLEI, und es wird getrennt benannt statt
+-- vermischt:
+--   (a) eine STRUKTURELLE Zusicherung, direkt hier. Sie ist ein Stolperdraht,
+--       kein Verhaltensbeweis, und wird auch so bezeichnet. Gegenmutation:
+--       die Funktion in einer Folgemigration als `security invoker` neu
+--       anlegen — dann wird diese Zeile rot. NICHT ausgefuehrt (kein
+--       Datenbanklauf auf der Arbeitsmaschine), als offener Punkt gefuehrt.
+--   (b) die Trigger-Aussage selbst, danach, auf dem Eigentuemerpfad.
+select is(
+  (
+    select p.prosecdef
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app'
+      and p.proname = 'reject_assignment_in_published_plan'
+  ),
+  true,
+  'app.reject_assignment_in_published_plan() ist security definer — strukturell gesichert, seit der Verhaltensnachweis seit 0017 nicht mehr erreichbar ist (EYT-136)'
+);
+
 select throws_ok(
   $$insert into public.assignments
       (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
