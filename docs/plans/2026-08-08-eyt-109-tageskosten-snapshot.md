@@ -26,24 +26,24 @@ Playwright.
 Alles hier ist **gemessen**, nicht angenommen. Wer den Plan später ausführt, misst neu; weicht der
 Stand ab, gewinnt der Remote-Stand.
 
-| Gegenstand | Messwert |
-| --- | --- |
-| `git rev-parse origin/master` | `b44e38c6bf7e08a2996c2263309001a1304050f2` |
-| Kopf-Commit | `Merge PR #56: EYT-136 planning Data API boundary` |
-| Lokaler Branch beim Messen | `fix/eyt-136-planning-data-api-boundary` (nicht Basis für diese Arbeit) |
-| Letzte Migration | `20260807220000_0017_planning_write_channel_boundary.sql` |
-| Letzter pgTAP-Test | `supabase/tests/0012_planning_data_api_boundary.sql` |
-| CI-Jobs | `format, lint, typecheck, unit-tests, build-web, web-smoke, build-api, secret-scan, db-gates, read-through, auth-journey` |
+| Gegenstand                    | Messwert                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `git rev-parse origin/master` | `b44e38c6bf7e08a2996c2263309001a1304050f2`                                                                                |
+| Kopf-Commit                   | `Merge PR #56: EYT-136 planning Data API boundary`                                                                        |
+| Lokaler Branch beim Messen    | `fix/eyt-136-planning-data-api-boundary` (nicht Basis für diese Arbeit)                                                   |
+| Letzte Migration              | `20260807220000_0017_planning_write_channel_boundary.sql`                                                                 |
+| Letzter pgTAP-Test            | `supabase/tests/0012_planning_data_api_boundary.sql`                                                                      |
+| CI-Jobs                       | `format, lint, typecheck, unit-tests, build-web, web-smoke, build-api, secret-scan, db-gates, read-through, auth-journey` |
 
 **Jira (gemessen, `issues`-Modus, nicht `count`):**
 
-| Key | Status | Priorität | Typ |
-| --- | --- | --- | --- |
-| EYT-109 | Zu erledigen | Highest | Story |
-| EYT-110 | Zu erledigen | High | Story |
-| EYT-130 | Zu erledigen | Medium | Task |
-| EYT-80 | Zu erledigen | Highest | Task |
-| EYT-136 / 135 / 108 / 107 / 106 / 105 / 95 | Fertig | — | — |
+| Key                                        | Status       | Priorität | Typ   |
+| ------------------------------------------ | ------------ | --------- | ----- |
+| EYT-109                                    | Zu erledigen | Highest   | Story |
+| EYT-110                                    | Zu erledigen | High      | Story |
+| EYT-130                                    | Zu erledigen | Medium    | Task  |
+| EYT-80                                     | Zu erledigen | Highest   | Task  |
+| EYT-136 / 135 / 108 / 107 / 106 / 105 / 95 | Fertig       | —         | —     |
 
 **Confluence gelesen:** `8552449` (Sprint 5) und `8814623` (Basisdesign v2.0) vollständig.
 `5505026`, `7766017` (PRD v1.4) und `9306113` **nicht** in diesem Durchlauf gelesen — die
@@ -59,8 +59,8 @@ nach und meldet Abweichungen als `SOURCE_NEEDED`.
   nach Erstellung unveränderlich.
 - Basisdesign §3.1: `/kosten` erscheint in der Navigation **nur** bei `costs.read`; kein Betrag,
   kein Satz, kein Kostenindikator ohne dieses Recht.
-- Basisdesign §4: Kosten brauchen zusätzlich die Zustände *Satz fehlt*, *Satz mehrdeutig*,
-  *Snapshot wird erstellt*, *Snapshot unveränderlich verfügbar*.
+- Basisdesign §4: Kosten brauchen zusätzlich die Zustände _Satz fehlt_, _Satz mehrdeutig_,
+  _Snapshot wird erstellt_, _Snapshot unveränderlich verfügbar_.
 - Basisdesign §5: sichtbar unter `/kosten` müssen sein — Snapshot-ID, Planversion, erzeugt am,
   Regelversion, Währung, autorisierter Benutzer.
 - Basisdesign §5 nennt als primäre Aktion „Diesen Kostenstand als Excel exportieren“. **Das ist
@@ -76,41 +76,41 @@ nachbauen.**
 
 ### Vorhanden und produktiv verdrahtet
 
-| Baustein | Datei | Rolle für EYT-109 |
-| --- | --- | --- |
+| Baustein                                                            | Datei                                                           | Rolle für EYT-109                                                                                                                                                      |
+| ------------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CostsController` (`/kosten/mitarbeiter`, `/kosten/stundensaetze*`) | `apps/api/src/modules/costs/interface/http/costs.controller.ts` | Die **Zugangskette** (`zugang()`) wird für beide neuen Routen wiederverwendet — Identität → Mitgliedschaften → Policy → Protokoll → Arbeit. Nicht kopieren, erweitern. |
-| `MembershipCostAccessPolicy` | `.../application/cost-access.policy.ts` | Kennt bereits `costs.read` **und** `costs.calculate` als atomare Rechte. |
-| `NestCostAccessAuditLog` + `COST_ACCESS_DECISION_EVENT` | `.../infrastructure/cost-access-audit.logger.ts` | EYT-135. **Keine zweite Audit-Lösung.** |
-| `PgRateRepository` | `.../infrastructure/rate-repository.pg.ts` | Vorlage für das Snapshot-Repository: `TenantQuery`, Advisory-Lock über `IdempotencyStore`, Replay-Erkennung per Fingerabdruck, `bigint` als String. |
-| `effectiveRateVersion` / `rateVersionStatus` | `.../domain/rate-effectivity.ts` | Satzauswahl **halboffen** `[validFrom, validTo)` — identisch mit dem EXCLUDE-Constraint in 0013. |
-| `IdempotencyStore` / `PgIdempotencyStore` | `apps/api/src/platform/idempotency/` | Vorhandene Idempotenzinfrastruktur, Tabelle `public.idempotency_records` (0012). |
-| `TenantQueryRunner` | `apps/api/src/platform/database/tenant-query-runner.ts` | Einzige Stelle mit `pg`. Setzt JWT-Claims + `set local role authenticated`. |
-| `KostenZugang` | `apps/web/components/kosten-zugang.tsx` | Rendert Loading / Fehler / Unauthenticated / Organisationswahl / Forbidden. Wiederverwenden. |
-| `HttpCostsGateway` | `packages/contracts/src/http/costs-gateway.ts` | Wächst um zwei Methoden. |
-| `minorUnitsToEuro` | `apps/web/lib/euro-minor-units.ts` | Anzeigeformat, kein `parseFloat`. |
+| `MembershipCostAccessPolicy`                                        | `.../application/cost-access.policy.ts`                         | Kennt bereits `costs.read` **und** `costs.calculate` als atomare Rechte.                                                                                               |
+| `NestCostAccessAuditLog` + `COST_ACCESS_DECISION_EVENT`             | `.../infrastructure/cost-access-audit.logger.ts`                | EYT-135. **Keine zweite Audit-Lösung.**                                                                                                                                |
+| `PgRateRepository`                                                  | `.../infrastructure/rate-repository.pg.ts`                      | Vorlage für das Snapshot-Repository: `TenantQuery`, Advisory-Lock über `IdempotencyStore`, Replay-Erkennung per Fingerabdruck, `bigint` als String.                    |
+| `effectiveRateVersion` / `rateVersionStatus`                        | `.../domain/rate-effectivity.ts`                                | Satzauswahl **halboffen** `[validFrom, validTo)` — identisch mit dem EXCLUDE-Constraint in 0013.                                                                       |
+| `IdempotencyStore` / `PgIdempotencyStore`                           | `apps/api/src/platform/idempotency/`                            | Vorhandene Idempotenzinfrastruktur, Tabelle `public.idempotency_records` (0012).                                                                                       |
+| `TenantQueryRunner`                                                 | `apps/api/src/platform/database/tenant-query-runner.ts`         | Einzige Stelle mit `pg`. Setzt JWT-Claims + `set local role authenticated`.                                                                                            |
+| `KostenZugang`                                                      | `apps/web/components/kosten-zugang.tsx`                         | Rendert Loading / Fehler / Unauthenticated / Organisationswahl / Forbidden. Wiederverwenden.                                                                           |
+| `HttpCostsGateway`                                                  | `packages/contracts/src/http/costs-gateway.ts`                  | Wächst um zwei Methoden.                                                                                                                                               |
+| `minorUnitsToEuro`                                                  | `apps/web/lib/euro-minor-units.ts`                              | Anzeigeformat, kein `parseFloat`.                                                                                                                                      |
 
 ### Vorhanden, aber **ohne Verbraucher** (Grenze, kein Feature)
 
-| Baustein | Datei | Was EYT-109 damit tut |
-| --- | --- | --- |
-| `PlanCostFactsPort.publishedFacts(weekKey)` | `.../application/plan-cost-facts.port.ts` | **Erweitern** um eine Lesung nach Planversions-ID. Die Wochenmethode bleibt stehen (öffentliche API, Entfernen wäre eine eigene Entscheidung) — als Finding notieren. |
-| `PlanningFactsAdapter` | `.../infrastructure/planning-facts.adapter.ts` | Bekommt die neue Methode und wird **erstmals** in `AppModule` verdrahtet. |
-| `CostExportPort` (`render(snapshotId)`) | `.../application/cost-export.port.ts` | **Nicht anfassen.** EYT-110 hängt daran; der Snapshot muss allein über seine ID renderbar sein. |
-| `PlannedWorkFact` / `PublishedPlanFacts` | `.../domain/planned-work-fact.ts` | Einlassvokabular; wächst um Ressourcenlabels. |
+| Baustein                                    | Datei                                          | Was EYT-109 damit tut                                                                                                                                                 |
+| ------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PlanCostFactsPort.publishedFacts(weekKey)` | `.../application/plan-cost-facts.port.ts`      | **Erweitern** um eine Lesung nach Planversions-ID. Die Wochenmethode bleibt stehen (öffentliche API, Entfernen wäre eine eigene Entscheidung) — als Finding notieren. |
+| `PlanningFactsAdapter`                      | `.../infrastructure/planning-facts.adapter.ts` | Bekommt die neue Methode und wird **erstmals** in `AppModule` verdrahtet.                                                                                             |
+| `CostExportPort` (`render(snapshotId)`)     | `.../application/cost-export.port.ts`          | **Nicht anfassen.** EYT-110 hängt daran; der Snapshot muss allein über seine ID renderbar sein.                                                                       |
+| `PlannedWorkFact` / `PublishedPlanFacts`    | `.../domain/planned-work-fact.ts`              | Einlassvokabular; wächst um Ressourcenlabels.                                                                                                                         |
 
 ### Domänenprimitive aus EYT-95 (`packages/domain`) — Pflichtbausteine
 
-| Export | Datei | Vertrag |
-| --- | --- | --- |
-| `costOfDuration(rate, quantity)` | `cost-position.ts` | Die **einzige** Rundung: `roundHalfUp(satz × ms, 3_600_000)`, alles in `bigint`. |
-| `COST_RULE_VERSION` = `"personnel-plan-cost-v1"` | `cost-position.ts` | Regelversion jeder Position. |
-| `hourlyRateVersion(input)` / `HourlyRateVersion` | `rate-version.ts` | Geprüfte, gebrandete Satzversion. `validTo` **einschließend**. |
-| `selectRateVersion(versions, on)` | `rate-version.ts` | Auswahl, `validTo` **einschließend** — siehe Entscheidung D1. |
-| `durationMilliseconds(bigint)` / `toDurationMilliseconds(number)` | `duration-milliseconds.ts` | Geprüfte nichtnegative Menge. |
-| `localBusinessDate(instant, zone)` | `planning-week.ts` | Kalendertag eines Instants in einer IANA-Zone (`Intl.formatToParts`). |
-| `utcInstantOfLocalWallTime(wall, zone)` | `planning-week.ts` | Gegenrichtung; meldet `NONEXISTENT_LOCAL_TIME` / `AMBIGUOUS_LOCAL_TIME` statt zu raten. |
-| `compareLocalBusinessDate` / `dayAfter` | `local-business-date.ts` | Reine Kalenderarithmetik, kein `Date`. |
-| `createTimeZone(id)` | `planning-week.ts` | Prüft die Zonenkennung gegen `Intl`. |
+| Export                                                            | Datei                      | Vertrag                                                                                 |
+| ----------------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------- |
+| `costOfDuration(rate, quantity)`                                  | `cost-position.ts`         | Die **einzige** Rundung: `roundHalfUp(satz × ms, 3_600_000)`, alles in `bigint`.        |
+| `COST_RULE_VERSION` = `"personnel-plan-cost-v1"`                  | `cost-position.ts`         | Regelversion jeder Position.                                                            |
+| `hourlyRateVersion(input)` / `HourlyRateVersion`                  | `rate-version.ts`          | Geprüfte, gebrandete Satzversion. `validTo` **einschließend**.                          |
+| `selectRateVersion(versions, on)`                                 | `rate-version.ts`          | Auswahl, `validTo` **einschließend** — siehe Entscheidung D1.                           |
+| `durationMilliseconds(bigint)` / `toDurationMilliseconds(number)` | `duration-milliseconds.ts` | Geprüfte nichtnegative Menge.                                                           |
+| `localBusinessDate(instant, zone)`                                | `planning-week.ts`         | Kalendertag eines Instants in einer IANA-Zone (`Intl.formatToParts`).                   |
+| `utcInstantOfLocalWallTime(wall, zone)`                           | `planning-week.ts`         | Gegenrichtung; meldet `NONEXISTENT_LOCAL_TIME` / `AMBIGUOUS_LOCAL_TIME` statt zu raten. |
+| `compareLocalBusinessDate` / `dayAfter`                           | `local-business-date.ts`   | Reine Kalenderarithmetik, kein `Date`.                                                  |
+| `createTimeZone(id)`                                              | `planning-week.ts`         | Prüft die Zonenkennung gegen `Intl`.                                                    |
 
 ### Geplant / nicht vorhanden
 
@@ -237,11 +237,11 @@ und 0017.
 
 ### D6 — Contract-first, drei Operationen, ein Vertrag
 
-| Operation | Recht | Zweck |
-| --- | --- | --- |
-| `GET /kosten/planversionen?von=&bis=` | `costs.read` | Auswahlliste veröffentlichter Planversionen im Wochenbereich |
-| `POST /kosten/snapshots` | `costs.calculate` | Snapshot erzeugen (Idempotenzschlüssel Pflicht) |
-| `GET /kosten/snapshots/{snapshotId}` | `costs.read` | Gespeicherten Snapshot lesen |
+| Operation                             | Recht             | Zweck                                                        |
+| ------------------------------------- | ----------------- | ------------------------------------------------------------ |
+| `GET /kosten/planversionen?von=&bis=` | `costs.read`      | Auswahlliste veröffentlichter Planversionen im Wochenbereich |
+| `POST /kosten/snapshots`              | `costs.calculate` | Snapshot erzeugen (Idempotenzschlüssel Pflicht)              |
+| `GET /kosten/snapshots/{snapshotId}`  | `costs.read`      | Gespeicherten Snapshot lesen                                 |
 
 Alles in `packages/contracts/src/costs/schemas.ts` + `gateway.ts` + `http/costs-gateway.ts` +
 `openapi/document.ts`; `openapi/v1.json` wird **regeneriert**, nie von Hand editiert.
@@ -265,7 +265,7 @@ für die eingefrorene Satzversion. Das ist kein Fremdtabellenzugriff: die Werte 
 XLSX, Download-Endpunkt, Spreadsheet-Bibliothek, Export-UI (EYT-110) · vollständiges EYT-130 ·
 vollständiges EYT-80 (insbesondere **kein** `DateRangeControl` in `packages/ui` — siehe Task 15) ·
 Ist-Kosten, Arbeitszeiten, Tagessätze, Fahrzeuge, Maschinen · Queue, Worker, Cache, materialisierte
-View, Rule-Engine · Merge, Jira-Statuswechsel auf *Fertig*.
+View, Rule-Engine · Merge, Jira-Statuswechsel auf _Fertig_.
 
 ---
 
@@ -290,7 +290,7 @@ Live-Berechnung wäre die Kostenseite eines Tages plötzlich unbenutzbar, weil j
 angelegt hat — ohne dass irgendwer eine Aktion ausgelöst hätte. Als Kommando ist die Blockade ein
 Ergebnis einer Handlung und benennbar.
 
-**Falsifikation:** Wäre `employee_rate_versions` unveränderlich *und* rückwirkungsfrei *und*
+**Falsifikation:** Wäre `employee_rate_versions` unveränderlich _und_ rückwirkungsfrei _und_
 verlangte EYT-110 keine Reproduzierbarkeit, wäre die Live-Berechnung richtig. Gemessen ist das
 Gegenteil (Migration 0013 erlaubt `valid_from` in der Vergangenheit; EYT-108 hat den
 Ablösungspfad gebaut). Die Persistenz bleibt.
@@ -299,13 +299,13 @@ Ablösungspfad gebaut). Die Persistenz bleibt.
 
 ## 4. Failure-Mode-Ketten und wo sie im Plan gebrochen werden
 
-| Kette | Bruchstelle | Task |
-| --- | --- | --- |
-| **A — falsche Quelle:** Entwurf gelangt in den Snapshot → Management bewertet unverbindliche Planung → EYT-110 exportiert vertrauenswürdig aussehende falsche Zahlen | `publishedAssignments` lehnt jede Version ohne `published_at` ab; Test + GM1 | 7, 19 |
-| **B — historische Drift:** Lesen rechnet neu → Satzänderung verändert alten Stand | `GET` liest nur zwei Tabellen; Immutabilitätstest V1→Snapshot→V2; GM5 | 12, 14, 19 |
-| **C — Zeitzonenfehler:** UTC-Tag statt Organisationstag → Stunden auf falschem Kalendertag → Tagessummen falsch | `allocateAcrossLocalDays` mit expliziter Zone; Mitternachts- und DST-Tests; GM6 | 4, 19 |
-| **D — Autorisierung:** Route oder Data-API offen → Mitarbeitende sehen Wirtschaftsdaten | `costs.read`/`costs.calculate` getrennt in Policy **und** RLS; `is_runtime_channel`; Cross-Tenant-Test; GM2/GM3 | 6, 11, 13, 19 |
-| **E — Überengineering:** generisches Berechnungsframework → großer Diff → schwer reviewbar | Ein Use-Case, eine Transaktion, zwei Tabellen. Keine Abstraktion ohne zweiten Verbraucher. | ganzer Plan |
+| Kette                                                                                                                                                                | Bruchstelle                                                                                                     | Task          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------- |
+| **A — falsche Quelle:** Entwurf gelangt in den Snapshot → Management bewertet unverbindliche Planung → EYT-110 exportiert vertrauenswürdig aussehende falsche Zahlen | `publishedAssignments` lehnt jede Version ohne `published_at` ab; Test + GM1                                    | 7, 19         |
+| **B — historische Drift:** Lesen rechnet neu → Satzänderung verändert alten Stand                                                                                    | `GET` liest nur zwei Tabellen; Immutabilitätstest V1→Snapshot→V2; GM5                                           | 12, 14, 19    |
+| **C — Zeitzonenfehler:** UTC-Tag statt Organisationstag → Stunden auf falschem Kalendertag → Tagessummen falsch                                                      | `allocateAcrossLocalDays` mit expliziter Zone; Mitternachts- und DST-Tests; GM6                                 | 4, 19         |
+| **D — Autorisierung:** Route oder Data-API offen → Mitarbeitende sehen Wirtschaftsdaten                                                                              | `costs.read`/`costs.calculate` getrennt in Policy **und** RLS; `is_runtime_channel`; Cross-Tenant-Test; GM2/GM3 | 6, 11, 13, 19 |
+| **E — Überengineering:** generisches Berechnungsframework → großer Diff → schwer reviewbar                                                                           | Ein Use-Case, eine Transaktion, zwei Tabellen. Keine Abstraktion ohne zweiten Verbraucher.                      | ganzer Plan   |
 
 ---
 
@@ -401,10 +401,10 @@ pnpm typecheck && pnpm test
 Erwartet: grün. Ist es das nicht, **stoppen** — ein roter Ausgangsstand macht jeden späteren roten
 Test unlesbar.
 
-**Schritt 4: Jira auf *In Arbeit***
+**Schritt 4: Jira auf _In Arbeit_**
 
 Nur wenn EYT-109 tatsächlich noch `Zu erledigen` ist. Danach Readback (Issue erneut lesen und den
-Status zitieren). **Nicht** auf *Fertig*.
+Status zitieren). **Nicht** auf _Fertig_.
 
 **Schritt 5: Repository-Regeln lesen**
 
@@ -417,6 +417,7 @@ Status zitieren). **Nicht** auf *Fertig*.
 ## Task 1: Contract — Schemata für Snapshot und Planversionsliste
 
 **Dateien:**
+
 - Ändern: `packages/contracts/src/costs/schemas.ts`
 - Ändern: `packages/contracts/src/costs/gateway.ts`
 - Ändern: `packages/contracts/src/index.ts`
@@ -624,6 +625,7 @@ git commit -m "feat(contracts): EYT-109 — Snapshot- und Planversionsschemata"
 > `apps/web`.
 
 **Dateien:**
+
 - Ändern: `packages/contracts/src/http/costs-gateway.ts`
 - Ändern: `packages/contracts/src/openapi/document.ts` (**beides**: `NAMED_SCHEMAS` **und** `paths`)
 - Ändern: `packages/contracts/openapi/v1.json` (**generiert**)
@@ -705,6 +707,7 @@ git commit -m "feat(contracts): EYT-109 — Snapshot-Operationen im HTTP-Gateway
 ## Task 3: Domain — `dayBefore`
 
 **Dateien:**
+
 - Ändern: `packages/domain/src/local-business-date.ts`
 - Ändern: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/local-business-date.test.ts` (vorhanden erweitern)
@@ -788,6 +791,7 @@ git commit -m "feat(domain): EYT-109 — dayBefore als sichtbare Naht zwischen h
 ## Task 4: Domain — Tagesallokation über lokale Kalendertage
 
 **Dateien:**
+
 - Erstellen: `packages/domain/src/local-day-allocation.ts`
 - Ändern: `packages/domain/src/index.ts`
 - Test: `packages/domain/test/local-day-allocation.test.ts` (neu)
@@ -833,7 +837,10 @@ describe("allocateAcrossLocalDays", () => {
     expect(ergebnis.ok).toBe(true);
     if (!ergebnis.ok) return;
     expect(ergebnis.parts.map((teil) => teil.date.day)).toEqual([3, 4]);
-    expect(ergebnis.parts.map((teil) => teil.quantity.milliseconds)).toEqual([2n * STUNDE, 2n * STUNDE]);
+    expect(ergebnis.parts.map((teil) => teil.quantity.milliseconds)).toEqual([
+      2n * STUNDE,
+      2n * STUNDE,
+    ]);
   });
 
   it("ordnet einer UTC-Zuordnung widersprechend dem ORTSTAG zu", () => {
@@ -996,10 +1003,7 @@ export function allocateAcrossLocalDays(
   // Fehler — und dann laut, nicht endlos.
   for (let schutz = 0; schutz < 400; schutz += 1) {
     const naechsterTag = dayAfter(tag);
-    const grenze = utcInstantOfLocalWallTime(
-      { date: naechsterTag, hour: 0, minute: 0 },
-      timeZone,
-    );
+    const grenze = utcInstantOfLocalWallTime({ date: naechsterTag, hour: 0, minute: 0 }, timeZone);
     if (!grenze.ok) {
       return {
         ok: false,
@@ -1056,7 +1060,10 @@ describe("allocateAcrossLocalDays — Eigenschaften", () => {
     fc.assert(
       fc.property(
         // Ein Jahr um die beiden Umstellungen herum, Dauer 1 Minute bis 3 Tage.
-        fc.integer({ min: Date.parse("2026-01-01T00:00:00Z"), max: Date.parse("2027-01-01T00:00:00Z") }),
+        fc.integer({
+          min: Date.parse("2026-01-01T00:00:00Z"),
+          max: Date.parse("2027-01-01T00:00:00Z"),
+        }),
         fc.integer({ min: 60_000, max: 3 * 86_400_000 }),
         fc.constantFrom(...ZONEN),
         (startMs, dauerMs, zonenId) => {
@@ -1110,6 +1117,7 @@ git commit -m "feat(domain): EYT-109 — summenerhaltende Tagesallokation in der
 ## Task 5: Domain-Naht — Satzauswahl und Betrag im Kostenmodul
 
 **Dateien:**
+
 - Erstellen: `apps/api/src/modules/costs/domain/cost-snapshot-assembly.ts`
 - Test: `apps/api/test/costs/cost-snapshot-assembly.test.ts` (neu)
 
@@ -1147,10 +1155,10 @@ Signatur (Fehler im Rückgabetyp, nie als Ausnahme — Hausmuster):
 
 ```ts
 export interface SnapshotAssemblyInput {
-  readonly facts: PublishedPlanFacts;         // Planversion, Woche, Zone, Arbeit, Labels
+  readonly facts: PublishedPlanFacts; // Planversion, Woche, Zone, Arbeit, Labels
   readonly worksiteFilter: string | null;
   readonly ratesByEmployee: ReadonlyMap<string, readonly RateVersionRecord[]>;
-  readonly computedAt: Date;                   // EINGABE, nicht aus der Uhr gelesen
+  readonly computedAt: Date; // EINGABE, nicht aus der Uhr gelesen
 }
 
 export const SNAPSHOT_ASSEMBLY_PROBLEMS = [
@@ -1214,6 +1222,7 @@ git commit -m "feat(costs): EYT-109 — reine Snapshot-Montage aus Tagesanteilen
 ## Task 6: Migration 0018 — Snapshot-Tabellen mit Kanalgrenze
 
 **Dateien:**
+
 - Erstellen: `supabase/migrations/<timestamp>_0018_cost_snapshots.sql`
 - Ändern: `apps/api/src/modules/module-catalogue.ts` (`TABLE_OWNERSHIP`)
 - Ändern: `supabase/tests/0005_schema_meta_gate.sql` (`expected_tables`)
@@ -1448,6 +1457,7 @@ git commit -m "feat(db): EYT-109 — Snapshot-Tabellen mit Kanalgrenze und ohne 
 ## Task 7: Planning — zwei Leseoperationen für veröffentlichte Stände
 
 **Dateien:**
+
 - Ändern: `apps/api/src/modules/planning/application/planning-queries.port.ts`
 - Ändern: `apps/api/src/modules/planning/infrastructure/planning-window.repository.ts`
 - Ändern: `apps/api/src/modules/planning/index.ts`
@@ -1553,6 +1563,7 @@ git commit -m "feat(planning): EYT-109 — veroeffentlichte Versionen und ihre Z
 ## Task 8: Costs — Faktenport und Adapter erweitern
 
 **Dateien:**
+
 - Ändern: `apps/api/src/modules/costs/application/plan-cost-facts.port.ts`
 - Ändern: `apps/api/src/modules/costs/domain/planned-work-fact.ts`
 - Ändern: `apps/api/src/modules/costs/infrastructure/planning-facts.adapter.ts`
@@ -1562,6 +1573,7 @@ git commit -m "feat(planning): EYT-109 — veroeffentlichte Versionen und ihre Z
 **Schritt 1: Roten Test schreiben**
 
 Der Adapter bekommt ein gestelltes `PlanningQueries` und muss:
+
 1. `PLAN_NOT_PUBLISHED` durchreichen;
 2. `PLAN_VERSION_NOT_FOUND` durchreichen;
 3. bei Erfolg Labels und Zone übernehmen;
@@ -1616,6 +1628,7 @@ git commit -m "feat(costs): EYT-109 — Planfakten nach Planversions-Id, mit Lab
 ## Task 9: Costs — Snapshot-Repository-Port
 
 **Dateien:**
+
 - Erstellen: `apps/api/src/modules/costs/application/cost-snapshot-repository.port.ts`
 - Ändern: `apps/api/src/modules/costs/index.ts`
 
@@ -1655,6 +1668,7 @@ git commit -m "feat(costs): EYT-109 — Port des Snapshot-Repositories"
 ## Task 10: Costs — Use-Case `CreateCostSnapshot`
 
 **Dateien:**
+
 - Erstellen: `apps/api/src/modules/costs/application/create-cost-snapshot.use-case.ts`
 - Test: `apps/api/test/costs/create-cost-snapshot.use-case.test.ts` (neu)
 
@@ -1711,6 +1725,7 @@ git commit -m "feat(costs): EYT-109 — Snapshot-Command blockiert vor jedem Sch
 ## Task 11: Costs — PostgreSQL-Repository
 
 **Dateien:**
+
 - Erstellen: `apps/api/src/modules/costs/infrastructure/cost-snapshot-repository.pg.ts`
 - Ändern: `apps/api/src/modules/costs/index.ts`
 - Test: `apps/api/test/costs/cost-snapshot.integration.test.ts` (neu)
@@ -1792,6 +1807,7 @@ git commit -m "feat(costs): EYT-109 — Snapshot atomar schreiben und unveraende
 ## Task 12: pgTAP — Schema, Rechte und Policies
 
 **Dateien:**
+
 - Erstellen: `supabase/tests/0013_cost_snapshots.sql`
 
 **Schritt 1: Test schreiben**
@@ -1845,6 +1861,7 @@ git commit -m "test(db): EYT-109 — Rechte, Policies und Kanalbedingung der Sna
 ## Task 13: API — Routen und Verdrahtung
 
 **Dateien:**
+
 - Ändern: `apps/api/src/modules/costs/interface/http/costs.controller.ts`
 - Ändern: `apps/api/src/modules/costs/interface/http/costs-error-type.ts`
 - Ändern: `apps/api/src/app.module.ts`
@@ -1921,6 +1938,7 @@ git commit -m "feat(api): EYT-109 — Snapshot-Routen an die eine Zugangskette b
 ## Task 14: Immutabilitätsnachweis V1 → Snapshot → V2
 
 **Dateien:**
+
 - Erstellen: `apps/api/test/costs/snapshot-immutability.integration.test.ts`
 
 Das ist der Nachweis, den EYT-108 ausdrücklich an EYT-109 delegiert hat. Er bekommt eine eigene
@@ -1968,6 +1986,7 @@ git commit -m "test(costs): EYT-109 — spaetere Satzversion laesst einen besteh
 ## Task 15: Web — `/kosten`-Ansicht
 
 **Dateien:**
+
 - Erstellen: `apps/web/components/kosten-ansicht.tsx`
 - Ändern: `apps/web/app/kosten/page.tsx`
 - Test: `apps/web/test/kosten-ansicht.test.tsx` (neu)
@@ -1977,18 +1996,18 @@ git commit -m "test(costs): EYT-109 — spaetere Satzversion laesst einen besteh
 
 Ein Test je Zustand, jeder mit `data-testid`:
 
-| Zustand | `data-testid` | Bedingung |
-| --- | --- | --- |
-| Laden | `kosten-laedt` | Gateway-Promise offen |
-| Leer | `kosten-leer` | keine veröffentlichte Planversion im Zeitraum |
-| Snapshot wird erstellt | `kosten-erzeugt` | `POST` läuft |
-| Erfolg | `kosten-snapshot` | Metadaten + Positionen sichtbar |
-| Satz fehlt | `kosten-satz-fehlt` | `RATE_MISSING`, nennt Person und Tag |
-| Satz mehrdeutig | `kosten-satz-mehrdeutig` | `RATE_AMBIGUOUS` |
-| Entwurf/nicht veröffentlicht | `kosten-nicht-veroeffentlicht` | `PLAN_NOT_PUBLISHED` |
-| Forbidden | `kosten-forbidden` | über `KostenZugang`, vorhanden |
-| Stale | `kosten-stale` | `STALE_VERSION` |
-| Fehler | `kosten-fehler` | `UNAVAILABLE` / `CONTRACT_VIOLATION` |
+| Zustand                      | `data-testid`                  | Bedingung                                     |
+| ---------------------------- | ------------------------------ | --------------------------------------------- |
+| Laden                        | `kosten-laedt`                 | Gateway-Promise offen                         |
+| Leer                         | `kosten-leer`                  | keine veröffentlichte Planversion im Zeitraum |
+| Snapshot wird erstellt       | `kosten-erzeugt`               | `POST` läuft                                  |
+| Erfolg                       | `kosten-snapshot`              | Metadaten + Positionen sichtbar               |
+| Satz fehlt                   | `kosten-satz-fehlt`            | `RATE_MISSING`, nennt Person und Tag          |
+| Satz mehrdeutig              | `kosten-satz-mehrdeutig`       | `RATE_AMBIGUOUS`                              |
+| Entwurf/nicht veröffentlicht | `kosten-nicht-veroeffentlicht` | `PLAN_NOT_PUBLISHED`                          |
+| Forbidden                    | `kosten-forbidden`             | über `KostenZugang`, vorhanden                |
+| Stale                        | `kosten-stale`                 | `STALE_VERSION`                               |
+| Fehler                       | `kosten-fehler`                | `UNAVAILABLE` / `CONTRACT_VIOLATION`          |
 
 Zusätzlich:
 
@@ -2054,6 +2073,7 @@ git commit -m "feat(web): EYT-109 — /kosten liest den gespeicherten Snapshot"
 ## Task 16: Web — Gateway-Verdrahtung
 
 **Dateien:**
+
 - Ändern: `apps/web/lib/costs-gateway-factory.ts` (nur falls nötig)
 - Test: `apps/web/test/costs-gateway-factory.test.ts` (neu oder vorhanden erweitern)
 
@@ -2073,6 +2093,7 @@ git commit -m "test(web): EYT-109 — Snapshot-Pfad geht durch dieselbe Gateway-
 ## Task 17: Browser-E2E — die echte Reise
 
 **Dateien:**
+
 - Ändern: `apps/web/e2e/auth-journey/journey.pwtest.ts`
 - Ändern: `apps/web/e2e/auth-journey/fixtures.sql`
 - Ändern: `apps/web/e2e/auth-journey/teardown.sql`
@@ -2138,6 +2159,7 @@ git commit -m "test(e2e): EYT-109 — echte Kostenreise mit Reload, zweitem Kont
 ## Task 18: CI — neue Nachweise in bestehende Jobs
 
 **Dateien:**
+
 - Ändern: `.github/workflows/ci.yml`
 
 **Keine neuen Required Checks.** Ein neuer Job würde die Branch-Protection-Liste in
@@ -2223,17 +2245,17 @@ git branch -D gm/eyt-109-<n>
 git status --short        # muss leer sein
 ```
 
-| # | Mutation (konkret) | Zieltest | Kommando |
-| --- | --- | --- | --- |
-| GM1 | In `planning-window.repository.ts::publishedAssignments` die Bedingung `and published_at is not null` entfernen | „lehnt eine Entwurfsversion ab“ | `EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/planning-published-reads.integration.test.ts` |
-| GM2 | In `costs.controller.ts` bei `POST /kosten/snapshots` das Recht von `costs.calculate` auf `costs.read` ändern | „ohne costs.calculate keine Erzeugung“ | `pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.test.ts` |
-| GM3 | Im Use-Case die Baustellenprüfung `WORKSITE_NOT_IN_ORG` entfernen **und** in Migration 0018 den mandantengebundenen FK auf `worksites` durch einen einspaltigen ersetzen | „fremde Baustelle abgelehnt“ + Cross-Tenant-Fall | `pnpm --filter @easytree/api exec vitest run test/costs/create-cost-snapshot.use-case.test.ts` und der Integrationstest |
-| GM4 | In `cost-snapshot-assembly.ts` `effectiveRateVersion(...)` durch „nimm die Version mit dem größten `validFrom`“ ersetzen | „waehlt die am Leistungsdatum wirksame Version, nicht die neueste“ | `pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot-assembly.test.ts` |
-| GM5 | In `cost-snapshot-repository.pg.ts::read` die Positionen nicht lesen, sondern aus aktuellen Sätzen neu berechnen | Immutabilitätstest, Schritt 7 | `EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/costs/snapshot-immutability.integration.test.ts` |
-| GM6 | In `local-day-allocation.ts` `utcInstantOfLocalWallTime` durch UTC-Mitternacht ersetzen | „ordnet einer UTC-Zuordnung widersprechend dem ORTSTAG zu“ + Summenerhaltung | `pnpm --filter @easytree/domain exec vitest run test/local-day-allocation.test.ts test/local-day-allocation.property.test.ts` |
-| GM7 | In `cost-snapshot-assembly.ts` `costOfDuration` durch `Math.round(satz * ms / 3_600_000)` ersetzen | Rundungsfall mit exaktem Halbwert | `pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot-assembly.test.ts` |
-| GM8 | In Migration 0018 `app.is_runtime_channel()` aus **beiden** insert-Policies entfernen | Kanalgrenze positiv/negativ (Task 11 Fall 7, Task 12 Policy-Assertion) | `pnpm exec supabase db reset && pnpm exec supabase test db` und der Integrationstest |
-| GM9 | In Migration 0018 `grant update … to authenticated` ergänzen | „kein UPDATE-Recht“ (Verhalten **und** `has_table_privilege`) | wie GM8 |
+| #   | Mutation (konkret)                                                                                                                                                       | Zieltest                                                                     | Kommando                                                                                                                          |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| GM1 | In `planning-window.repository.ts::publishedAssignments` die Bedingung `and published_at is not null` entfernen                                                          | „lehnt eine Entwurfsversion ab“                                              | `EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/planning-published-reads.integration.test.ts`    |
+| GM2 | In `costs.controller.ts` bei `POST /kosten/snapshots` das Recht von `costs.calculate` auf `costs.read` ändern                                                            | „ohne costs.calculate keine Erzeugung“                                       | `pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.test.ts`                                                    |
+| GM3 | Im Use-Case die Baustellenprüfung `WORKSITE_NOT_IN_ORG` entfernen **und** in Migration 0018 den mandantengebundenen FK auf `worksites` durch einen einspaltigen ersetzen | „fremde Baustelle abgelehnt“ + Cross-Tenant-Fall                             | `pnpm --filter @easytree/api exec vitest run test/costs/create-cost-snapshot.use-case.test.ts` und der Integrationstest           |
+| GM4 | In `cost-snapshot-assembly.ts` `effectiveRateVersion(...)` durch „nimm die Version mit dem größten `validFrom`“ ersetzen                                                 | „waehlt die am Leistungsdatum wirksame Version, nicht die neueste“           | `pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot-assembly.test.ts`                                           |
+| GM5 | In `cost-snapshot-repository.pg.ts::read` die Positionen nicht lesen, sondern aus aktuellen Sätzen neu berechnen                                                         | Immutabilitätstest, Schritt 7                                                | `EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/costs/snapshot-immutability.integration.test.ts` |
+| GM6 | In `local-day-allocation.ts` `utcInstantOfLocalWallTime` durch UTC-Mitternacht ersetzen                                                                                  | „ordnet einer UTC-Zuordnung widersprechend dem ORTSTAG zu“ + Summenerhaltung | `pnpm --filter @easytree/domain exec vitest run test/local-day-allocation.test.ts test/local-day-allocation.property.test.ts`     |
+| GM7 | In `cost-snapshot-assembly.ts` `costOfDuration` durch `Math.round(satz * ms / 3_600_000)` ersetzen                                                                       | Rundungsfall mit exaktem Halbwert                                            | `pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot-assembly.test.ts`                                           |
+| GM8 | In Migration 0018 `app.is_runtime_channel()` aus **beiden** insert-Policies entfernen                                                                                    | Kanalgrenze positiv/negativ (Task 11 Fall 7, Task 12 Policy-Assertion)       | `pnpm exec supabase db reset && pnpm exec supabase test db` und der Integrationstest                                              |
+| GM9 | In Migration 0018 `grant update … to authenticated` ergänzen                                                                                                             | „kein UPDATE-Recht“ (Verhalten **und** `has_table_privilege`)                | wie GM8                                                                                                                           |
 
 **GM8 und GM9 brauchen einen laufenden Stack.** Ist auf der Maschine kein Docker verfügbar, werden
 sie auf einem Wegwerf-PR gegen die CI gefahren (`db-gates` muss rot werden und den Grund nennen).
@@ -2303,7 +2325,7 @@ Exit 0 = alle Läufe grün. Kein handgeschriebener Poll-Loop.
 **Schritt 5: Jira-Kommentar (optional) und Abschlusspaket**
 
 Kommentar an EYT-109 mit PR-Nummer, Head-SHA, implementiertem Slice, CI-Status und offenen Punkten.
-**Nicht** auf *Fertig*. EYT-110 **nicht** anfassen.
+**Nicht** auf _Fertig_. EYT-110 **nicht** anfassen.
 
 > **Externe Mutation:** Kommentar erst verfassen, dann **erneut lesen**, dann senden. Ein
 > Entwurfsfragment in einem Jira-Kommentar ist hier schon einmal passiert.
@@ -2373,24 +2395,24 @@ Hand.
 
 ## Anhang B: Offene Punkte für den Ausführenden
 
-| Kennung | Punkt | Was zu tun ist |
-| --- | --- | --- |
-| `SOURCE_NEEDED` | Confluence `5505026`, `7766017` (PRD v1.4), `9306113` wurden für diesen Plan nicht gelesen | Vor Task 1 lesen; Abweichungen zu Abschnitt 0/2 melden, nicht still einarbeiten |
-| `SOURCE_NEEDED` | Zone mit fehlender lokaler Mitternacht | In Task 4 Schritt 2 messen; findet sich keine, Testfall entfernen und den ungetesteten Fehlerzweig ausweisen |
-| `DOC_DRIFT` | Zwei Satzauswahlen mit unterschiedlicher Intervallsemantik (D1) | Folgeticket vorschlagen; in diesem Slice nur einfrieren, nicht vereinheitlichen |
-| `DOC_DRIFT` | `DateRangeControl` aus Basisdesign §6 wird hier bewusst nicht gebaut | Im PR-Body und im Abschlusspaket benennen; gehört zu EYT-80 |
-| `DOC_DRIFT` | Basisdesign §5 nennt „Als Excel exportieren“ als primäre Aktion auf `/kosten` | Gehört zu EYT-110; Abweichung benennen |
-| `DOC_DRIFT` | `CLAUDE.md` sagt „`costs` ist eine Grenze, kein laufendes Feature“ und nennt 12 Migrationen | Nach Task 20 korrigieren |
-| `UNVERIFIED` | Migration 0017 in der produktiven DB angewendet? | **Nicht** behaupten. Für diesen Slice irrelevant — 0018 wird ausschließlich lokal und in CI gemessen |
-| `ASSUMPTION` | Mehrere Snapshots je Planversion zulässig (D3) | Im PR-Body als Annahme ausweisen; PO entscheidet |
+| Kennung         | Punkt                                                                                       | Was zu tun ist                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `SOURCE_NEEDED` | Confluence `5505026`, `7766017` (PRD v1.4), `9306113` wurden für diesen Plan nicht gelesen  | Vor Task 1 lesen; Abweichungen zu Abschnitt 0/2 melden, nicht still einarbeiten                              |
+| `SOURCE_NEEDED` | Zone mit fehlender lokaler Mitternacht                                                      | In Task 4 Schritt 2 messen; findet sich keine, Testfall entfernen und den ungetesteten Fehlerzweig ausweisen |
+| `DOC_DRIFT`     | Zwei Satzauswahlen mit unterschiedlicher Intervallsemantik (D1)                             | Folgeticket vorschlagen; in diesem Slice nur einfrieren, nicht vereinheitlichen                              |
+| `DOC_DRIFT`     | `DateRangeControl` aus Basisdesign §6 wird hier bewusst nicht gebaut                        | Im PR-Body und im Abschlusspaket benennen; gehört zu EYT-80                                                  |
+| `DOC_DRIFT`     | Basisdesign §5 nennt „Als Excel exportieren“ als primäre Aktion auf `/kosten`               | Gehört zu EYT-110; Abweichung benennen                                                                       |
+| `DOC_DRIFT`     | `CLAUDE.md` sagt „`costs` ist eine Grenze, kein laufendes Feature“ und nennt 12 Migrationen | Nach Task 20 korrigieren                                                                                     |
+| `UNVERIFIED`    | Migration 0017 in der produktiven DB angewendet?                                            | **Nicht** behaupten. Für diesen Slice irrelevant — 0018 wird ausschließlich lokal und in CI gemessen         |
+| `ASSUMPTION`    | Mehrere Snapshots je Planversion zulässig (D3)                                              | Im PR-Body als Annahme ausweisen; PO entscheidet                                                             |
 
 ### Korrekturen am Plan, gemessen während der Ausführung
 
 Der Plan lag an drei Stellen falsch. Die Korrekturen stehen bei den betroffenen Tasks; hier
 gesammelt, damit sie nicht übersehen werden.
 
-| Datum | Planaussage | Gemessen |
-| --- | --- | --- |
-| 08.08.2026 | „`WeekKeySchema` aus `../planning/schemas.js`" (Task 1) | Existiert nicht. Heißt **`IsoWeekKeySchema`**, `planning/schemas.ts:104`. Zusätzlich unerwähnt geblieben: die Registrierungspflicht in `STELLEN` (`test/iso-week-key.test.ts`). Ohne sie bleibt die Kalenderregel unbewiesen — gemessen blieben alle 125 Tests grün, während `.refine(isValidIsoWeekKey)` aus den Kostenschemata verschwand. |
-| 08.08.2026 | „Der Drift-Test wird rot, sobald ein Schema hinzukommt" (Task 2) | Falsch. `openapi/document.ts:62-94` ist ein handgeschriebenes `NAMED_SCHEMAS`-Register (24 Einträge). Ein unregistriertes Schema erreicht `v1.json` nie; `git diff` darauf ist nach Task 1 leer, Drift-Test grün. Task 2 muss Register **und** Pfade eintragen. |
-| 08.08.2026 | Task-2-Dateiliste | Unvollständig. `apps/web/test/rate-management.test.tsx:86` deklariert `gatewayMit` als `CostsGateway` und ist nach Task 1 strukturell unvollständig (TS2739). `apps/web/lib/costs-gateway-factory.ts:13` ebenfalls rot, klärt sich aber mit `HttpCostsGateway` von selbst. Vollständige Implementorenliste gemessen: genau diese beiden plus `HttpCostsGateway`. |
+| Datum      | Planaussage                                                      | Gemessen                                                                                                                                                                                                                                                                                                                                                         |
+| ---------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 08.08.2026 | „`WeekKeySchema` aus `../planning/schemas.js`" (Task 1)          | Existiert nicht. Heißt **`IsoWeekKeySchema`**, `planning/schemas.ts:104`. Zusätzlich unerwähnt geblieben: die Registrierungspflicht in `STELLEN` (`test/iso-week-key.test.ts`). Ohne sie bleibt die Kalenderregel unbewiesen — gemessen blieben alle 125 Tests grün, während `.refine(isValidIsoWeekKey)` aus den Kostenschemata verschwand.                     |
+| 08.08.2026 | „Der Drift-Test wird rot, sobald ein Schema hinzukommt" (Task 2) | Falsch. `openapi/document.ts:62-94` ist ein handgeschriebenes `NAMED_SCHEMAS`-Register (24 Einträge). Ein unregistriertes Schema erreicht `v1.json` nie; `git diff` darauf ist nach Task 1 leer, Drift-Test grün. Task 2 muss Register **und** Pfade eintragen.                                                                                                  |
+| 08.08.2026 | Task-2-Dateiliste                                                | Unvollständig. `apps/web/test/rate-management.test.tsx:86` deklariert `gatewayMit` als `CostsGateway` und ist nach Task 1 strukturell unvollständig (TS2739). `apps/web/lib/costs-gateway-factory.ts:13` ebenfalls rot, klärt sich aber mit `HttpCostsGateway` von selbst. Vollständige Implementorenliste gemessen: genau diese beiden plus `HttpCostsGateway`. |
