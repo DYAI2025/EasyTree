@@ -10,7 +10,15 @@
 -- Verbindungen; EYT-49 AK6 stuetzt sich auf beide Dateien zusammen.
 
 begin;
-select plan(24);
+-- 26 statt 24 seit EYT-136, in zwei Schritten:
+--   +1  das Verschieben einer veroeffentlichten Zuweisung zerfaellt jetzt in
+--       zwei Aussagen — fehlendes Recht (42501) und Trigger (23514) —, damit
+--       die urspruengliche Trigger-Aussage nicht im Rechteentzug verschwindet.
+--   +1  die Kanalmatrix vom 08.08.2026 hat einen verlorenen Nachweis gefunden
+--       (`security definer` auf app.reject_assignment_in_published_plan()) und
+--       setzt an seine Stelle eine strukturelle Zusicherung; die Begruendung
+--       steht bei ihr, im Abschnitt „dieser Fall hat seinen Kanal gewechselt".
+select plan(26);
 
 -- ===========================================================================
 -- Schemaform
@@ -48,12 +56,22 @@ select is(
   'authenticated darf assignments.published_at NICHT direkt setzen'
 );
 
--- Gegenprobe: die fachlichen Spalten sind sehr wohl aenderbar. Ohne sie waere
--- die Zeile oben auch dann gruen, wenn gar kein update-Recht mehr existiert.
+-- EYT-136: diese Zeile war die Gegenprobe zur Zeile darueber — sie stellte
+-- sicher, dass „published_at ist nicht aenderbar" nicht bloss deshalb gruen
+-- ist, weil ueberhaupt kein update-Recht mehr existiert.
+--
+-- Genau dieser Fall ist jetzt eingetreten, und zwar absichtlich: Migration 0017
+-- entzieht `authenticated` das update auf `assignments` vollstaendig, weil kein
+-- Produktionspfad eines benutzt. Die Aussage der Zeile darueber ist damit
+-- tatsaechlich vakuos geworden — und wird hier durch die STAERKERE ersetzt,
+-- statt sie stillschweigend stehen zu lassen.
+--
+-- Die Nicht-Vakuositaet des Spaltenmodells traegt ab jetzt die insert-Seite
+-- weiter unten (`starts_at_utc` ja, `published_at` nein) sowie 0012 A1/A3.
 select is(
   has_column_privilege('authenticated', 'public.assignments', 'starts_at_utc', 'update'),
-  true,
-  'authenticated darf assignments.starts_at_utc aendern — das Recht existiert, nur nicht auf dem Marker'
+  false,
+  'authenticated darf assignments GAR NICHT mehr aendern — auch keine Fachspalte (EYT-136)'
 );
 
 -- Dasselbe fuer insert. Ohne den Entzug koennte der Marker beim ANLEGEN
@@ -80,7 +98,26 @@ select set_config(
   json_build_object('sub', '00000000-0000-4000-8000-00000000aaa1', 'role', 'authenticated')::text,
   true
 );
-set local role authenticated;
+
+-- ---------------------------------------------------------------------------
+-- EYT-136: die naechsten beiden Faelle laufen auf dem EIGENTUEMERPFAD
+-- ---------------------------------------------------------------------------
+-- Bis EYT-136 liefen sie unter `set local role authenticated`. Das geht nicht
+-- mehr, und der Grund ist der Zweck dieses Tickets: `assignments_insert_in_org`
+-- verlangt seit Migration 0017 `app.is_runtime_channel()`, und `authenticated`
+-- hat gar kein `delete`-Recht mehr. In pgTAP ist `session_user` immer
+-- `postgres` — `SET SESSION AUTHORIZATION` braucht Superuser —, also ist diese
+-- Sitzung nie der Laufzeitkanal.
+--
+-- Was die beiden Faelle beweisen, ist davon unberuehrt: sie sind Aussagen ueber
+-- den partiellen EXCLUDE aus 0010 und ueber den Unveraenderlichkeitstrigger,
+-- nicht ueber den Client-Kanal. Constraints und Trigger feuern fuer den
+-- Eigentuemer unveraendert. Die Erzeugung ist damit Fixture-Arbeit, und dafuer
+-- ist der privilegierte Pfad zulaessig.
+--
+-- Die Kanalgrenze selbst wird nicht hier gemessen, sondern in
+-- `0012_planning_data_api_boundary.sql` (C1 bis C4) und ueber eine echte
+-- `easytree_app`-Verbindung in `planning-write.integration.test.ts`.
 
 -- ---------------------------------------------------------------------------
 -- Entwuerfe duerfen sich ueberschneiden — das ist ihr Zweck
@@ -204,6 +241,21 @@ select throws_ok(
 
 set local role authenticated;
 
+-- EYT-136: dieselbe Zweiteilung wie beim Loeschen von plan_versions darueber.
+-- Erst das RECHT — `authenticated` besitzt seit 0017 kein update auf
+-- assignments mehr, weil kein Anwendungspfad eines benutzt.
+select throws_ok(
+  $$update public.assignments set starts_at_utc = '2026-08-03T05:00:00Z'
+     where id = '00000000-0000-4000-8000-0000007010a1'$$,
+  '42501'
+);
+
+-- Und dann der TRIGGER aus 0010, dort wo das Recht nicht mehr im Weg steht.
+-- Ohne diesen zweiten Teil waere die urspruengliche Aussage verloren: dass
+-- eine veroeffentlichte Zuweisung unveraenderlich ist, haengt nicht am
+-- Spaltenrecht, sondern an `app.reject_published_row_change()`.
+reset role;
+
 select throws_ok(
   $$update public.assignments set starts_at_utc = '2026-08-03T05:00:00Z'
      where id = '00000000-0000-4000-8000-0000007010a1'$$,
@@ -212,14 +264,75 @@ select throws_ok(
   'Eine veroeffentlichte Zuweisung laesst sich nicht nachtraeglich verschieben'
 );
 
--- Dieser Fall traegt seit EYT-107 P1 eine zweite Last, und die ist nicht
--- offensichtlich: er laeuft ueber `authenticated` in einer Sitzung, die NICHT
--- der Laufzeitkanal ist. `app.reject_assignment_in_published_plan()` liest die
--- Elternzeile mit `for share`, und PostgreSQL prueft bei einer Sperrklausel
--- zusaetzlich die `using`-Klausel der UPDATE-Policy. Ohne `security definer`
--- (0015) faende das select nichts, der Zweig „nicht gefunden" liesse die
--- Zuweisung durch — und dieser Test waere gruen-falsch. Genau so ist er am
--- 04.08.2026 in Lauf 30862744360 aufgefallen.
+-- ---------------------------------------------------------------------------
+-- EYT-136: dieser Fall hat seinen Kanal gewechselt — und dabei etwas verloren
+-- ---------------------------------------------------------------------------
+-- Bis hierher lief er ueber `authenticated` und trug damit eine ZWEITE Last:
+-- `app.reject_assignment_in_published_plan()` liest die Elternzeile mit
+-- `for share`, und PostgreSQL prueft bei einer Sperrklausel zusaetzlich die
+-- `using`-Klausel der UPDATE-Policy. Ohne `security definer` (0015) faende das
+-- select nichts, der Zweig „nicht gefunden" liesse die Zuweisung durch — und
+-- der Test waere gruen-falsch. Genau so fiel er am 04.08.2026 in Lauf
+-- 30862744360 auf.
+--
+-- Seit Migration 0017 lehnt die INSERT-Policy schon VOR dem Trigger ab (42501,
+-- fehlender Laufzeitkanal). Der Trigger kaeme gar nicht mehr zum Zug, die
+-- Definer-Aussage ist hier also nicht mehr messbar.
+--
+-- KORREKTUR DER ERSTEN FASSUNG (Kanalmatrix 08.08.2026,
+-- docs/reviews/2026-08-08-eyt-136-kanalmatrix.md, Befund B1). Hier stand, die
+-- Aussage sei nach `apps/api/test/planning-write.integration.test.ts`
+-- umgezogen. Das trifft nicht zu, und der Grund ist nachlesbar statt vermutet:
+-- der dortige Fall „eine veroeffentlichte Planversion nimmt ueber den
+-- Laufzeitkanal keine Zuweisung mehr auf" laeuft IM Laufzeitkanal mit einem
+-- Subjekt, das `planning.publish` traegt (USER_A ist owner in Alpha, seed.sql
+-- Z. 46; 0015 Z. 182-184 gibt owner alle drei Planungsrechte). Damit ist die
+-- `using`-Klausel von `plan_versions_update_in_org` erfuellt, das `for share`
+-- faende die Elternzeile auch als INVOKER — die Definer-Eigenschaft wird dort
+-- weder gebraucht noch gemessen. Der Fall beweist den Trigger, nicht den
+-- Definer.
+--
+-- Im STATISCHEN Rechtemodell ist der behaviourale Nachweis nirgends
+-- erreichbar. Er braeuchte eine Sitzung, die die Insert-Policy passiert
+-- (Laufzeitkanal UND `planning.write`) und zugleich an der using-Klausel der
+-- Update-Policy scheitert (`planning.publish` fehlt). `role_permissions`
+-- vergibt beide Rechte an dieselben zwei Rollen — owner und manager (0015
+-- Z. 181-187) —, `member` bekommt keines.
+--
+-- Der Schluss „also ist er ueberhaupt nicht messbar" waere aber einer zu
+-- weit, und eine erste Fassung dieses Kommentars zog ihn: ein Test muss das
+-- Subjekt nicht FINDEN, er kann das Modell fuer die Dauer eines Falls
+-- HERSTELLEN. Genau das tut `apps/api/test/planning-write.integration.test.ts`
+-- seit dem 08.08.2026. Die Klammer `ohnePublishRecht` (dort Z. 547) entzieht
+-- die eine Zeile ('owner','planning.publish') aus `role_permissions` und
+-- stellt sie unbedingt wieder her; der Fall „eine veroeffentlichte
+-- Planversion weist die Zuweisung auch ab, wenn die Sitzung sie nicht
+-- sperrend lesen darf" (dort Z. 1553) laeuft im Laufzeitkanal mit
+-- `planning.write`, misst `lesbar=1` bei `sperrlesbar=0` und verlangt
+-- weiterhin 23514 (dort Z. 1710-1712).
+--
+-- Was hier bleibt, ist deshalb ZWEIERLEI, und es wird getrennt benannt statt
+-- vermischt:
+--   (a) eine STRUKTURELLE Zusicherung, direkt hier. Sie ist ein Stolperdraht,
+--       kein Verhaltensbeweis, und wird auch so bezeichnet. Gegenmutation:
+--       die Funktion als `security invoker` neu anlegen. AUSGEFUEHRT, in drei
+--       Laeufen: 31238661331 (diese Zeile rot, `have: false / want: true`),
+--       31238804687 (isoliert, fiel weiterhin strukturell) und 31239527407,
+--       in dem der Verhaltensfall oben rot wurde — der Insert lief durch,
+--       `fehler` war null, kein 23514.
+--   (b) die Trigger-Aussage selbst, danach, auf dem Eigentuemerpfad.
+select is(
+  (
+    select p.prosecdef
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app'
+      and p.proname = 'reject_assignment_in_published_plan'
+  ),
+  true,
+  'app.reject_assignment_in_published_plan() ist security definer — Stolperdraht; den Verhaltensnachweis fuehrt planning-write.integration.test.ts (EYT-136)'
+);
+
 select throws_ok(
   $$insert into public.assignments
       (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
@@ -274,19 +387,19 @@ select throws_ok(
   'Die zweite Veroeffentlichung scheitert an der Ueberlappung derselben Person'
 );
 
-set local role authenticated;
-
 -- Gegenprobe zur Halboffenheit: direkt anschliessend, nicht ueberlappend.
 -- Ohne diese Zeile waere der Constraint auch dann gruen, wenn er JEDE zweite
 -- Veroeffentlichung ablehnt.
+--
+-- EYT-136: Eigentuemerpfad. Gemessen wird die Halboffenheit des EXCLUDE, nicht
+-- der Client-Kanal; `authenticated` hat seit 0017 ohnehin kein update-Recht
+-- auf assignments mehr (belegt weiter oben mit 42501).
 select lives_ok(
   $$update public.assignments
        set starts_at_utc = '2026-08-03T14:00:00Z', ends_at_utc = '2026-08-03T18:00:00Z'
      where id = '00000000-0000-4000-8000-0000007099a1'$$,
   'Die kollidierende Zuweisung laesst sich auf einen anschliessenden Zeitraum verschieben'
 );
-
-reset role;
 
 select lives_ok(
   $$update public.plan_versions

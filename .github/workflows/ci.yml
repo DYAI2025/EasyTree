@@ -261,14 +261,38 @@ jobs:
       # Job und kein neuer Status-Check, sonst entstuende ein Pflichtcheck, den
       # das Ruleset nicht kennt und den scripts/setup-branch-protection.sh als
       # Drift meldet.
-      - name: Planning write gate (fail-closed, zwei Verbindungen, EYT-92)
+      # EYT-136: ZWEI Verbindungszeichenketten, dieselbe Bauart wie beim
+      # Publish-Gate. `EASYTREE_TEST_DB_URL` ist die Verwaltungsverbindung
+      # (`postgres`) fuer Fixtures und Aufraeumen — sie ist seit Migration 0017
+      # die einzige, die Entwuerfe wieder loeschen kann.
+      # `EASYTREE_TEST_APP_DB_URL` ist der Laufzeitkanal (`easytree_app`), ueber
+      # den der Entwurfs-Command laeuft: `assignments_insert_in_org` verlangt
+      # seit 0017 `app.is_runtime_channel()`, und eine `postgres`-Sitzung
+      # erfuellt das nicht. Beide Zeichenketten stammen ausschliesslich aus der
+      # in diesem Job provisionierten lokalen Supabase-Instanz.
+      - name: Planning write gate (fail-closed, zwei Verbindungen, EYT-92/EYT-136)
         env:
           EASYTREE_TENANT_TESTS: required
           EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
         shell: bash
         run: |
           pnpm --filter @easytree/api exec vitest run test/planning-write.integration.test.ts 2>&1 | tee /tmp/planning-write.log
           bash scripts/assert-tenant-report.sh planning-write /tmp/planning-write.log
+          # Der Kanal gehoert ins Protokoll, nicht in eine Behauptung — dieselbe
+          # Zusicherung wie beim Publish-Gate unten. Ohne diesen Grep waere die
+          # Kanalzeile nur innerhalb von vitest wirksam; hier wird sie auf
+          # Jobebene tragend.
+          grep -F '[planning-write] session_user=easytree_app current_user=authenticated runtime_channel=true' /tmp/planning-write.log
+          # EYT-136: und der Riegel, der bei fehlendem planning.write faellt.
+          grep -F '[planning-write] member-probe ziel=plan_versions kanal=true mandant_alpha=true recht_alpha=false recht_beta=true' /tmp/planning-write.log
+          grep -F '[planning-write] member-probe ziel=assignments kanal=true mandant_alpha=true recht_alpha=false recht_beta=true' /tmp/planning-write.log
+          # EYT-136 (Kanalmatrix 08.08.2026): der Definer-Nachweis. `sperrlesbar=0`
+          # bei `lesbar=1` ist die ganze Aussage — die sperrende Lesung der
+          # Triggerfunktion faende als INVOKER nichts, `security definer` traegt
+          # sie. Ohne diesen Grep waere die Sonde nur innerhalb von vitest
+          # wirksam; hier wird sie auf Jobebene tragend.
+          grep -F '[planning-write] definer-probe kanal=true mandant_alpha=true recht_write=true recht_publish=false lesbar=1 sperrlesbar=0 definer=true' /tmp/planning-write.log
       # EYT-107: das Veroeffentlichen. Wieder ein Schritt im BESTEHENDEN Job,
       # kein neuer Pflichtcheck.
       #

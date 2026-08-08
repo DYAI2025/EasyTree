@@ -200,6 +200,14 @@ select lives_ok(
 -- ---------------------------------------------------------------------------
 -- start == end war im Prototyp 24 Stunden. Hier ist es ungueltig, und zwar auf
 -- Datenbankebene, nicht nur in TypeScript.
+--
+-- EYT-136: Eigentuemerpfad. Gemessen wird der CHECK-Constraint, nicht der
+-- Kanal. Ueber `authenticated` lehnt seit Migration 0017 die Insert-Policy
+-- ZUERST ab (42501, fehlender Laufzeitkanal) — der Constraint kaeme gar nicht
+-- mehr zum Zug, und die Aussage dieses Falls waere still verloren. Genau so
+-- ist er im ersten Lauf von PR #56 aufgefallen.
+reset role;
+
 select throws_ok(
   $$insert into public.assignments
       (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
