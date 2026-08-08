@@ -1046,7 +1046,44 @@ Export in `packages/domain/src/index.ts`.
 **Schritt 4: Property-Test mit festem Seed**
 
 `packages/domain/test/local-day-allocation.property.test.ts` — die tragende Eigenschaft ist die
-Summenerhaltung über beliebige Intervalle und mehrere Zonen:
+Summenerhaltung über beliebige Intervalle und mehrere Zonen.
+
+> **Ein gleichverteilter Jahresgenerator erreicht die interessanten Fälle nicht — gemessen
+> 08.08.2026** bei `SEED = 20260808`, `RUNS = 300`: **2 von 300** Fällen kreuzten überhaupt einen
+> Offsetwechsel, **kein einziger** erzeugte einen vollständig abgedeckten 23- oder 25-Stunden-Tag,
+> und **kein einziger** landete auf einer kaputten Mitternacht. Die DST-Abdeckung kam
+> ausschliesslich aus den zwei handgeschriebenen Berliner Beispielen — die Kopfzeile des
+> Eigenschaftstests behauptete also etwas, das der Seed nicht einlöst.
+>
+> **Zone und Startinstant müssen als EIN Arbitrary gezogen werden.** Eine flache Liste von
+> Umstellungszeitpunkten mit unabhängig gezogener Zone bringt gar nichts (gemessen: 2 → 2) — ein
+> Start nahe Berlins Umstellung, gepaart mit `Pacific/Chatham`, ist ein gewöhnlicher Fall. Richtig
+> ist die Kopplung:
+>
+> ```ts
+> const paarNaheUmstellung = fc.constantFrom(...ZONEN_MIT_WECHSEL).chain(([zone, wechsel]) =>
+>   fc.tuple(
+>     fc.constant(zone),
+>     fc
+>       .constantFrom(...wechsel)
+>       .chain((t) => fc.integer({ min: t - 36 * STUNDE_MS, max: t + 36 * STUNDE_MS })),
+>   ),
+> );
+> const zoneUndStart = fc.oneof(gleichverteiltesPaar, paarNaheUmstellung);
+> ```
+>
+> Die Umstellungszeitpunkte werden zur Ladezeit **aus `Intl` gemessen** (grobes Raster plus binäre
+> Suche), nicht als Konstante abgeschrieben: eine kopierte Liste stimmt, bis die Zonendatenbank
+> sich bewegt, und ist danach still falsch.
+>
+> Wirkung, gemessen: blockierte Fälle 0 → **14**, Offsetwechsel gekreuzt 2 → **26**, vollständig
+> abgedeckte Tage ≠ 24 h 0 → **17** (23 h ×7, 23,5 h ×5, 25 h ×5).
+>
+> **Die Erreichbarkeitsschwellen gehören mitgemessen, nicht gerundet.** Ein Richtwert wie
+> „`> RUNS / 10`" ist hier strukturell unerreichbar: von den sieben DST-Zonen stellen Santiago,
+> Havanna, Beirut **und** die Azoren _auf_ der lokalen Mitternacht um und **blockieren** deshalb,
+> statt einen Nicht-24-Stunden-Tag zu erzeugen. Nur Berlin, Lord Howe und Chatham können einen
+> liefern. Eine Schwelle, die man verteidigen kann, ist mehr wert als eine runde Zahl.
 
 ```ts
 import fc from "fast-check";
@@ -1179,6 +1216,48 @@ export type SnapshotAssemblyResult =
       readonly localDate: string | null;
     };
 ```
+
+> **`DAY_BOUNDARY_UNDEFINED` ist kein theoretischer Fall — gemessen 08.08.2026.** In drei Zonen
+> springt die Uhr genau über Mitternacht, und dann existiert die lokale Mitternacht nicht oder
+> zweimal: `America/Santiago` (06.09.2026), `America/Havana` (08.03. und 01.11.2026),
+> `Asia/Beirut` (29.03.2026), `Atlantic/Azores` (25.10.2026). Gemessenes Beispiel:
+>
+> ```text
+> America/Santiago  2026-09-06T03:59Z → 11:59Z   (Ortszeit 05.09. 23:59 → 06.09. 08:59)
+>   => allocateAcrossLocalDays blockiert mit DAY_BOUNDARY_NONEXISTENT
+> ```
+>
+> In diesen Zonen ist damit **jeder** Einsatz, der diese eine Mitternacht im Jahr überquert,
+> nicht zuteilbar. `Europe/Berlin` ist davon nicht betroffen (Umstellung um 02:00/03:00), also ist
+> es für den Pilotbetrieb kein Blocker — aber der Slice muss eine **benannte** Antwort darauf
+> haben.
+>
+> **Verbindlich, in fünf Punkten** (Empfehlung des Task-4-Implementierers, der der Funktion am
+> nächsten stand; hier übernommen):
+>
+> 1. **Der Einsatz verschwindet nie still.** Eine fehlende Zeile ist von „niemand hat gearbeitet"
+>    nicht zu unterscheiden und macht die Kosten zu klein — genau die Schadensform, die
+>    `rate-version.ts` für den fehlenden Satz ausdrücklich ausschliesst. Kein `0,00 €`, keine
+>    übersprungene Zeile.
+> 2. **Kein Zweig wird geraten** — dieselbe Begründung wie in der Domänenfunktion.
+> 3. **Abgelehnt werden die betroffenen TAGE, nicht der ganze Snapshot.** Die Woche zu blockieren
+>    liesse einen pathologischen Einsatz die Kosten einer ganzen Organisation verbergen. Die Tage
+>    beiderseits der kaputten Mitternacht sind exakt berechenbar; betroffen sind nur die zwei
+>    angrenzenden Ortstage.
+> 4. **Die Tagessumme ist ein Summentyp, keine Zahl mit Flagge.** Bei
+>    `{ total: Money, incomplete: boolean }` wird der Excel-Export aus EYT-110 `total` rendern und
+>    `incomplete` fallen lassen — das ist nahezu sicher, nicht bloss ein Risiko. Stattdessen
+>    `{ ok: true, total } | { ok: false, reasons }`, wobei jeder Grund Fehlercode, Assignment-Id
+>    und Ortstag trägt. Dann **muss** der Export entscheiden, wie ein unvollständiger Tag auf einem
+>    Blatt aussieht.
+> 5. **Gegenmutation, die dazugehört:** den Snapshot einen blockierten Einsatz überspringen und
+>    trotzdem eine vollständig aussehende Tagessumme ausgeben lassen. Ein Test muss rot werden und
+>    diesen Einsatz benennen. Ohne ihn ist „benannt und abgelehnt" nur Prosa.
+>
+> Getestet wird das mit einer **fremden Zone**, so wie Task 4 es tut. Berlin erreicht den Fall
+> nicht, aber `organizations.time_zone` ist konfigurierbar und nichts hindert einen Mandanten in
+> Santiago. Was der betroffenen Person angeboten wird — vermutlich „Einsatz an der Grenze teilen" —
+> ist eine PO-Entscheidung und gehört nicht in diesen Slice.
 
 Ablauf je Einsatz:
 
@@ -1784,6 +1863,16 @@ Vorlage: `rate-repository.pg.ts`. Wichtige Punkte:
 - `read` selektiert **nur** aus `cost_snapshots` und `cost_snapshot_positions`. Kein Join auf
   `employee_rate_versions`, kein Zugriff auf Planungstabellen. Das ist D7 und wird von
   `costs-touches-only-own-tables` zusätzlich abgesichert.
+- **Obergrenze für die Einsatzdauer, hier und nicht in der Domäne** (Befund aus Task 4,
+  08.08.2026). `allocateAcrossLocalDays` läuft linear in den berührten Ortstagen — gemessen rund
+  0,46 ms je Tag. Die Datenbank kennt nur `check (starts_at_utc < ends_at_utc)`
+  (Migration 0007), keine Obergrenze; eine Zeile mit vertipptem Endjahr 9999 ist speicherbar und
+  belegte die Ereignisschleife rund 20 Minuten. Die Domänenfunktion trägt bewusst **keinen**
+  erfundenen Deckel — ihre Terminierung folgt aus Kalenderarithmetik, und eine Zahl wie „400 Tage"
+  wäre nirgends begründet. Die Grenze gehört an die Naht, an der die Fakten hereinkommen: hier den
+  Einsatz **vor** der Zuteilung abweisen, mit benanntem Grund. Was die Grenze sein soll, ist eine
+  fachliche Entscheidung (ein Einsatz über mehr als, sagen wir, 31 Ortstage ist kein Planungsfall)
+  — als `ASSUMPTION` ausweisen, wenn Jira und Confluence dazu schweigen.
 
 **Schritt 4: Grün bestätigen**
 
@@ -2275,17 +2364,36 @@ git branch -D gm/eyt-109-<n>
 git status --short        # muss leer sein
 ```
 
-| #   | Mutation (konkret)                                                                                                                                                       | Zieltest                                                                     | Kommando                                                                                                                          |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| GM1 | In `planning-window.repository.ts::publishedAssignments` die Bedingung `and published_at is not null` entfernen                                                          | „lehnt eine Entwurfsversion ab“                                              | `EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/planning-published-reads.integration.test.ts`    |
-| GM2 | In `costs.controller.ts` bei `POST /kosten/snapshots` das Recht von `costs.calculate` auf `costs.read` ändern                                                            | „ohne costs.calculate keine Erzeugung“                                       | `pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.test.ts`                                                    |
-| GM3 | Im Use-Case die Baustellenprüfung `WORKSITE_NOT_IN_ORG` entfernen **und** in Migration 0018 den mandantengebundenen FK auf `worksites` durch einen einspaltigen ersetzen | „fremde Baustelle abgelehnt“ + Cross-Tenant-Fall                             | `pnpm --filter @easytree/api exec vitest run test/costs/create-cost-snapshot.use-case.test.ts` und der Integrationstest           |
-| GM4 | In `cost-snapshot-assembly.ts` `effectiveRateVersion(...)` durch „nimm die Version mit dem größten `validFrom`“ ersetzen                                                 | „waehlt die am Leistungsdatum wirksame Version, nicht die neueste“           | `pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot-assembly.test.ts`                                           |
-| GM5 | In `cost-snapshot-repository.pg.ts::read` die Positionen nicht lesen, sondern aus aktuellen Sätzen neu berechnen                                                         | Immutabilitätstest, Schritt 7                                                | `EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/costs/snapshot-immutability.integration.test.ts` |
-| GM6 | In `local-day-allocation.ts` `utcInstantOfLocalWallTime` durch UTC-Mitternacht ersetzen                                                                                  | „ordnet einer UTC-Zuordnung widersprechend dem ORTSTAG zu“ + Summenerhaltung | `pnpm --filter @easytree/domain exec vitest run test/local-day-allocation.test.ts test/local-day-allocation.property.test.ts`     |
-| GM7 | In `cost-snapshot-assembly.ts` `costOfDuration` durch `Math.round(satz * ms / 3_600_000)` ersetzen                                                                       | Rundungsfall mit exaktem Halbwert                                            | `pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot-assembly.test.ts`                                           |
-| GM8 | In Migration 0018 `app.is_runtime_channel()` aus **beiden** insert-Policies entfernen                                                                                    | Kanalgrenze positiv/negativ (Task 11 Fall 7, Task 12 Policy-Assertion)       | `pnpm exec supabase db reset && pnpm exec supabase test db` und der Integrationstest                                              |
-| GM9 | In Migration 0018 `grant update … to authenticated` ergänzen                                                                                                             | „kein UPDATE-Recht“ (Verhalten **und** `has_table_privilege`)                | wie GM8                                                                                                                           |
+| #   | Mutation (konkret)                                                                                                                                                       | Zieltest                                                                                                               | Kommando                                                                                                                          |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| GM1 | In `planning-window.repository.ts::publishedAssignments` die Bedingung `and published_at is not null` entfernen                                                          | „lehnt eine Entwurfsversion ab“                                                                                        | `EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/planning-published-reads.integration.test.ts`    |
+| GM2 | In `costs.controller.ts` bei `POST /kosten/snapshots` das Recht von `costs.calculate` auf `costs.read` ändern                                                            | „ohne costs.calculate keine Erzeugung“                                                                                 | `pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.test.ts`                                                    |
+| GM3 | Im Use-Case die Baustellenprüfung `WORKSITE_NOT_IN_ORG` entfernen **und** in Migration 0018 den mandantengebundenen FK auf `worksites` durch einen einspaltigen ersetzen | „fremde Baustelle abgelehnt“ + Cross-Tenant-Fall                                                                       | `pnpm --filter @easytree/api exec vitest run test/costs/create-cost-snapshot.use-case.test.ts` und der Integrationstest           |
+| GM4 | In `cost-snapshot-assembly.ts` `effectiveRateVersion(...)` durch „nimm die Version mit dem größten `validFrom`“ ersetzen                                                 | „waehlt die am Leistungsdatum wirksame Version, nicht die neueste“                                                     | `pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot-assembly.test.ts`                                           |
+| GM5 | In `cost-snapshot-repository.pg.ts::read` die Positionen nicht lesen, sondern aus aktuellen Sätzen neu berechnen                                                         | Immutabilitätstest, Schritt 7                                                                                          | `EASYTREE_TENANT_TESTS=required pnpm --filter @easytree/api exec vitest run test/costs/snapshot-immutability.integration.test.ts` |
+| GM6 | In `local-day-allocation.ts` die ganze Funktion auf UTC-Tage stellen (`timeZone = "UTC"`), nicht nur die Mitternacht — siehe Korrektur darunter                          | „ordnet einer UTC-Zuordnung widersprechend dem ORTSTAG zu“ + Eigenschaft „verankert ersten und letzten Tag am Ortstag“ | `pnpm --filter @easytree/domain exec vitest run test/local-day-allocation.test.ts test/local-day-allocation.property.test.ts`     |
+| GM7 | In `cost-snapshot-assembly.ts` `costOfDuration` durch `Math.round(satz * ms / 3_600_000)` ersetzen                                                                       | Rundungsfall mit exaktem Halbwert                                                                                      | `pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot-assembly.test.ts`                                           |
+| GM8 | In Migration 0018 `app.is_runtime_channel()` aus **beiden** insert-Policies entfernen                                                                                    | Kanalgrenze positiv/negativ (Task 11 Fall 7, Task 12 Policy-Assertion)                                                 | `pnpm exec supabase db reset && pnpm exec supabase test db` und der Integrationstest                                              |
+| GM9 | In Migration 0018 `grant update … to authenticated` ergänzen                                                                                                             | „kein UPDATE-Recht“ (Verhalten **und** `has_table_privilege`)                                                          | wie GM8                                                                                                                           |
+
+> **Korrektur zu GM6, gemessen 08.08.2026.** Der ursprüngliche Eintrag nannte die Summenerhaltung
+> als zweiten Zieltest. Das ist falsch, und die Fassung der Mutation war zu schwach. Beides
+> nachgemessen:
+>
+> - Eine **kohärente** UTC-Implementierung (Tagesbestimmung _und_ Grenzen auf UTC) lässt die
+>   Summenerhaltung **grün**. Sie muss das: jede Implementierung, die eine monoton wachsende Folge
+>   von `startMs` bis `endeMs` abläuft, teleskopiert exakt auf `durationMs` — gleichgültig, welcher
+>   Kalender die Zwischenpunkte liefert. **Summenerhaltung ist orthogonal zur Kalenderwahl und kann
+>   GM6 grundsätzlich nicht entdecken.** Der einzige Detektor ist eine Zusicherung, die ein
+>   Tagesetikett gegen `localBusinessDate(…, timeZone)` hält.
+> - Die **wörtliche** Fassung des alten Eintrags (UTC-Mitternacht, aber Zonentage) färbt die
+>   Summeneigenschaft zwar rot — jedoch mit `RangeError: … liegt nicht echt zwischen …`, also am
+>   Monotoniewächter, weil die Mutation in sich widersprüchlich ist. Kein Summenfehler. Der zweite
+>   Detektor war Scheinsicherheit.
+>
+> Lehre über GM6 hinaus: Eine Gegenmutation muss die **kohärente** falsche Implementierung
+> herstellen, nicht eine, die auf halbem Weg an einem internen Wächter zerbricht — sonst misst man
+> den Wächter und nicht die Regel.
 
 **GM8 und GM9 brauchen einen laufenden Stack.** Ist auf der Maschine kein Docker verfügbar, werden
 sie auf einem Wegwerf-PR gegen die CI gefahren (`db-gates` muss rot werden und den Grund nennen).
