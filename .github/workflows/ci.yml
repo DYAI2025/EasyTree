@@ -287,6 +287,12 @@ jobs:
           # EYT-136: und der Riegel, der bei fehlendem planning.write faellt.
           grep -F '[planning-write] member-probe ziel=plan_versions kanal=true mandant_alpha=true recht_alpha=false recht_beta=true' /tmp/planning-write.log
           grep -F '[planning-write] member-probe ziel=assignments kanal=true mandant_alpha=true recht_alpha=false recht_beta=true' /tmp/planning-write.log
+          # EYT-136 (Kanalmatrix 08.08.2026): der Definer-Nachweis. `sperrlesbar=0`
+          # bei `lesbar=1` ist die ganze Aussage — die sperrende Lesung der
+          # Triggerfunktion faende als INVOKER nichts, `security definer` traegt
+          # sie. Ohne diesen Grep waere die Sonde nur innerhalb von vitest
+          # wirksam; hier wird sie auf Jobebene tragend.
+          grep -F '[planning-write] definer-probe kanal=true recht_write=true recht_publish=false lesbar=1 sperrlesbar=0 definer=true' /tmp/planning-write.log
       # EYT-107: das Veroeffentlichen. Wieder ein Schritt im BESTEHENDEN Job,
       # kein neuer Pflichtcheck.
       #

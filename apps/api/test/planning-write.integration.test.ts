@@ -133,8 +133,25 @@ const WOCHE_BASELINE_DEFINER = "2026-W48";
 /** Eigene Wochen fuer die beiden Rechte-Faelle (EYT-136), damit sie nichts teilen. */
 const WOCHE_RECHT_VERSION = "2026-W49";
 const WOCHE_RECHT_ZUWEISUNG = "2026-W50";
+/** Eigene Woche fuer den Definer-Nachweis mit entzogenem planning.publish (EYT-136). */
+const WOCHE_DEFINER_OHNE_PUBLISH = "2026-W51";
 const START = new Date("2026-11-03T07:00:00Z");
 const ENDE = new Date("2026-11-03T15:00:00Z");
+
+/**
+ * Die EINE Zuordnungszeile, die fuer die Dauer eines einzigen Falls fehlt
+ * (EYT-136, Definer-Nachweis).
+ *
+ * `public.role_permissions` hat den Primaerschluessel `(role, permission)`
+ * (Migration 0013 Z. 44-48) und ist PRODUKTWEIT — sie traegt kein `org_id`.
+ * Eine ueberlebende Loeschung verfaelscht deshalb nicht einen Mandanten,
+ * sondern jeden spaeteren Schritt des Jobs. Das ist der Grund fuer die
+ * Sorgfalt in `ohnePublishRecht`, nicht Zierde.
+ */
+const RECHT_PUBLISH: readonly [string, string] = ["owner", "planning.publish"];
+
+const ZAEHLE_RECHT =
+  "select count(*) as n from public.role_permissions where role = $1 and permission = $2";
 
 /**
  * Echter Runner auf einer eigenen Verbindung.
@@ -461,6 +478,77 @@ async function mitGeliehenerMitgliedschaft(fn: () => Promise<void>): Promise<voi
   if (fehlerAusFall !== null) throw fehlerAusFall[0];
 }
 
+/**
+ * Entzieht `owner` fuer die Dauer EINES Falls das Recht `planning.publish`
+ * (EYT-136, Definer-Nachweis).
+ *
+ * Warum ueberhaupt: die `security definer`-Eigenschaft von
+ * `app.reject_assignment_in_published_plan()` traegt nur in einer Sitzung, die
+ * die `using`-Klausel von `plan_versions_update_in_org` NICHT erfuellt. Im
+ * statischen Rechtemodell gibt es ein solches Subjekt nicht — `role_permissions`
+ * vergibt `planning.write` und `planning.publish` an dieselben zwei Rollen
+ * (Migration 0015 Z. 181-187). Ein Test darf das Modell fuer die Dauer eines
+ * Falls aber selbst in der Hand haben; genau das macht diese Klammer.
+ *
+ * Dieselbe Bauart wie `mitGeliehenerMitgliedschaft`, und aus demselben Grund:
+ *
+ * - Genau EINE Zeile, adressiert ueber den vollstaendigen Primaerschluessel.
+ *   Nie ein breiteres Praedikat — `where permission like 'planning.%'` haette
+ *   sechs Zeilen getroffen.
+ * - Vorbedingung gemessen, nicht geglaubt: existiert die Zeile vorher nicht,
+ *   misst der Fall nichts und bricht ab, BEVOR etwas mutiert ist.
+ * - `catch` statt `finally`: ein `throw` im `finally` verwuerfe einen bereits
+ *   laufenden Fehler aus dem Fall (`no-unsafe-finally`, im Lauf 31230613284
+ *   schon einmal zugeschlagen).
+ * - Wiederherstellung UNBEDINGT, danach erneut gelesen. Schlaegt sie fehl, hat
+ *   dieser Befund Vorrang vor dem Fehler aus dem Fall — der haengt als `cause`
+ *   daran. Ein verlorener Lauf kostet Minuten, eine ueberlebende Loeschung
+ *   verfaelscht das Publish-Gate im naechsten Schritt desselben Jobs.
+ */
+async function ohnePublishRecht(fn: () => Promise<void>): Promise<void> {
+  const vorher = await beobachte<{ n: string }>(ZAEHLE_RECHT, RECHT_PUBLISH);
+  expect(
+    vorher[0]?.n,
+    "role_permissions traegt (owner, planning.publish) nicht — der Fall wuerde den falschen Riegel messen",
+  ).toBe("1");
+
+  const geloescht = await verwalte<{ role: string }>(
+    "delete from public.role_permissions where role = $1 and permission = $2 returning role",
+    RECHT_PUBLISH,
+  );
+
+  let fehlerAusFall: [unknown] | null = null;
+  try {
+    if (geloescht.length !== 1) {
+      throw new Error(
+        `[planning-write] das Entziehen von planning.publish hat ${String(geloescht.length)} ` +
+          "Zeilen getroffen, erwartet war genau eine (EYT-136).",
+      );
+    }
+    const waehrend = await beobachte<{ n: string }>(ZAEHLE_RECHT, RECHT_PUBLISH);
+    expect(waehrend[0]?.n, "das Recht ist trotz DELETE noch da").toBe("0");
+    await fn();
+  } catch (e) {
+    fehlerAusFall = [e];
+  }
+
+  await verwalte(
+    `insert into public.role_permissions (role, permission)
+     values ($1, $2) on conflict (role, permission) do nothing`,
+    RECHT_PUBLISH,
+  );
+  const rest = await beobachte<{ n: string }>(ZAEHLE_RECHT, RECHT_PUBLISH);
+  if (rest[0]?.n !== "1") {
+    throw new Error(
+      "[planning-write] (owner, planning.publish) ist NICHT wiederhergestellt worden — " +
+        "das Publish-Gate im naechsten Schritt dieses Jobs wuerde auf einem falschen " +
+        "Rechtemodell messen (EYT-136).",
+      fehlerAusFall === null ? undefined : { cause: fehlerAusFall[0] },
+    );
+  }
+  if (fehlerAusFall !== null) throw fehlerAusFall[0];
+}
+
 /** Die SITZUNGSABHAENGIGEN Konjunkte der Insert-Policies aus 0017, einzeln gemessen. */
 type KonjunktSonde = {
   kanal: boolean;
@@ -568,6 +656,16 @@ beforeAll(async () => {
   // der Rest bliebe bis zum naechsten `db reset` liegen und truege sich selbst
   // fort. Idempotent, also im Normalfall ein No-op.
   await verwalte("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_GELIEHEN]);
+  // Dasselbe fuer das entzogene Recht (EYT-136). Ein Lauf, der mitten in
+  // `ohnePublishRecht` abgeschossen wurde — Zeitlimit auf Jobebene, OOM —
+  // hinterlaesst eine fehlende Zeile in einer PRODUKTWEITEN Tabelle, und die
+  // truege sich bis zum naechsten `db reset` fort. Idempotent, im Normalfall
+  // ein No-op; heilt den Fall, in dem sonst niemand mehr nachsieht.
+  await verwalte(
+    `insert into public.role_permissions (role, permission)
+     values ($1, $2) on conflict (role, permission) do nothing`,
+    RECHT_PUBLISH,
+  );
   await raeumeWoche();
 });
 
@@ -580,6 +678,7 @@ afterAll(async () => {
       WOCHE_BASELINE_DEFINER,
       WOCHE_RECHT_VERSION,
       WOCHE_RECHT_ZUWEISUNG,
+      WOCHE_DEFINER_OHNE_PUBLISH,
     ]) {
       await raeumeWoche(woche);
     }
@@ -589,6 +688,14 @@ afterAll(async () => {
     // Faellt ein Fall aber per Zeitlimit mitten im Flug aus, ist dies die
     // letzte Gelegenheit innerhalb dieses Prozesses.
     await admin.query("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_GELIEHEN]);
+    // Dasselbe Netz fuer das entzogene Recht (EYT-136). Primaer stellt
+    // `ohnePublishRecht` es selbst wieder her und prueft das nach; hier steht
+    // nur der Fall, in dem ein Zeitlimit den Fall mitten im Flug abbricht.
+    await admin.query(
+      `insert into public.role_permissions (role, permission)
+       values ($1, $2) on conflict (role, permission) do nothing`,
+      [...RECHT_PUBLISH],
+    );
     // Die selbst angelegte Person wieder entfernen — sonst waechst der
     // Bestand mit jedem Lauf, und die naechste Suite zaehlt anders.
     await admin.query("delete from public.employees where id = $1", [EMPLOYEE_ALPHA_2]);
@@ -1027,19 +1134,31 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
   /**
    * Umgezogen aus `supabase/tests/0006_planning_invariants.sql` (EYT-136).
    *
-   * Dort lief dieser Fall ueber `authenticated` und trug eine zweite,
-   * nicht offensichtliche Last: `app.reject_assignment_in_published_plan()`
-   * liest die Elternzeile mit `for share`, und PostgreSQL prueft bei einer
-   * Sperrklausel zusaetzlich die `using`-Klausel der UPDATE-Policy. Ohne
-   * `security definer` (Migration 0015) faende dieses select nichts, der Zweig
-   * „nicht gefunden" liesse die Zuweisung durch — und der Test waere
-   * gruen-falsch. Genau so fiel er am 04.08.2026 auf (Lauf 30862744360).
+   * Gemessen wird der Trigger `app.reject_assignment_in_published_plan()`
+   * (Migration 0010): eine veroeffentlichte Planversion nimmt keine weitere
+   * Zuweisung mehr auf. In pgTAP ist dieser Fall seit Migration 0017 nicht mehr
+   * ueber `authenticated` fahrbar — die INSERT-Policy lehnt schon vorher mit
+   * 42501 ab (fehlender Laufzeitkanal), der Trigger kaeme gar nicht zum Zug.
+   * Hier passiert der Insert die Policy und laeuft in den Trigger.
    *
-   * Seit Migration 0017 lehnt die INSERT-Policy in pgTAP schon VOR dem Trigger
-   * ab (42501, fehlender Laufzeitkanal), dort ist die Aussage also nicht mehr
-   * messbar. Hier ist sie es: diese Verbindung IST der Laufzeitkanal, der
-   * Insert passiert die Policy und laeuft in den Trigger — genau die
-   * Konstellation, um die es geht.
+   * Was dieser Fall NICHT misst — entgegen der ersten Fassung dieses
+   * Kommentars, korrigiert durch die Kanalmatrix vom 08.08.2026
+   * (docs/reviews/2026-08-08-eyt-136-kanalmatrix.md, Befund B1): die
+   * `security definer`-Eigenschaft der Triggerfunktion.
+   *
+   * Sie traegt ausschliesslich dort, wo die Sitzung die `using`-Klausel von
+   * `plan_versions_update_in_org` NICHT erfuellt: `for share` zieht bei einer
+   * Sperrklausel zusaetzlich diese Klausel heran, ein Invoker faende die
+   * Elternzeile dann nicht, und der Zweig „nicht gefunden" liesse die Zuweisung
+   * durch. Genau so fiel es am 04.08.2026 auf (Lauf 30862744360). `USER_A` ist
+   * aber owner in Alpha (`supabase/seed.sql` Z. 46) und traegt damit
+   * `planning.publish` (Migration 0015 Z. 182-184), erfuellt die Klausel also —
+   * der Invoker faende die Zeile hier ebenso, und die Definer-Eigenschaft wird
+   * weder gebraucht noch gemessen.
+   *
+   * Den Definer-Nachweis fuehrt deshalb der eigene Fall am Ende dieser Datei,
+   * der `planning.publish` fuer seine Dauer entzieht und die Sperrlesbarkeit
+   * direkt misst.
    *
    * Bewusst ein direkter Insert statt `createAssignment`: der Command wuerde
    * eine eigene Entwurfsversion anlegen und die veroeffentlichte nie
@@ -1281,6 +1400,167 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
           [versionId],
         );
         expect(danach[0]?.n, "trotz Fehler ist eine Zuweisung entstanden").toBe("0");
+      });
+    },
+    30_000,
+  );
+
+  /**
+   * Der Definer-Nachweis, behavioural (EYT-136, Kanalmatrix vom 08.08.2026,
+   * Befund B1).
+   *
+   * ## Was hier gemessen wird, und warum es sonst nirgends gemessen wird
+   *
+   * `app.reject_assignment_in_published_plan()` (Migration 0016 Z. 132-155)
+   * liest die Elternzeile mit `select … for share`. PostgreSQL zieht bei einer
+   * Sperrklausel zusaetzlich die `using`-Klausel der UPDATE-Policy heran. Als
+   * INVOKER faende die Funktion die Zeile deshalb nur, wenn die Sitzung
+   * `plan_versions_update_in_org` erfuellt — also Laufzeitkanal UND
+   * `planning.publish`. Fehlt das Recht, findet sie NICHTS, nimmt den Zweig
+   * „nicht gefunden" und laesst die Zuweisung durch. Genau so fiel es am
+   * 04.08.2026 auf (Lauf 30862744360); `security definer` (0015) schliesst es.
+   *
+   * Jeder andere Fall im Repository erfuellt die Klausel und misst die
+   * Eigenschaft deshalb NICHT: der Nachbarfall oben laeuft als `USER_A`, der
+   * owner ist und `planning.publish` traegt; die pgTAP-Faelle laufen auf dem
+   * Eigentuemerpfad, wo `postgres` RLS ohnehin umgeht. Im statischen
+   * Rechtemodell existiert kein Subjekt mit `planning.write` OHNE
+   * `planning.publish` — `role_permissions` vergibt beide an owner und manager
+   * (Migration 0015 Z. 181-187).
+   *
+   * Deshalb stellt dieser Fall die Konstellation her, statt sie zu suchen:
+   * `ohnePublishRecht` entzieht fuer seine Dauer die eine Zuordnungszeile
+   * `(owner, planning.publish)`. `USER_A` behaelt `planning.write` (eigene
+   * Zeile), passiert also weiterhin `assignments_insert_in_org`.
+   *
+   * ## Die Sonde ist der eigentliche Beweis
+   *
+   * `lesbar=1` und `sperrlesbar=0` in derselben Sitzung: die SELECT-Policy
+   * zeigt die Elternzeile, die SPERRENDE Lesung findet sie nicht. Damit ist
+   * benannt, welcher Riegel filtert — ohne das Paar koennte `sperrlesbar=0`
+   * auch heissen, dass die Zeile gar nicht existiert.
+   *
+   * ## Gegenmutation
+   *
+   * `app.reject_assignment_in_published_plan()` in einer Folgemigration als
+   * `security invoker` neu anlegen: das `for share` der Funktion faende dann —
+   * wie die Sonde zeigt — nichts, der Insert gelaenge, und dieser Fall wird rot.
+   * Das ist die behaviourale Schwester zur strukturellen Zusicherung in
+   * `supabase/tests/0006_planning_invariants.sql:311` (`prosecdef`); die beiden
+   * decken verschiedene Ausfaelle ab und ersetzen einander nicht.
+   */
+  dbIt(
+    "eine veroeffentlichte Planversion weist die Zuweisung auch ab, wenn die Sitzung sie nicht sperrend lesen darf",
+    async () => {
+      await raeumeWoche(WOCHE_DEFINER_OHNE_PUBLISH);
+      const veroeffentlicht = await veroeffentlichteBaseline(
+        WOCHE_DEFINER_OHNE_PUBLISH,
+        "2026-12-15T07:00:00Z",
+        "2026-12-15T15:00:00Z",
+      );
+
+      await ohnePublishRecht(async () => {
+        const client = await neueVerbindung();
+
+        const konjunkte = await runnerAuf(client).run({ userId: USER_A }, (tx) =>
+          tx.query<{ kanal: boolean; recht_write: boolean; recht_publish: boolean }>(
+            `select app.is_runtime_channel()                         as kanal,
+                    app.has_permission($1::uuid, 'planning.write')   as recht_write,
+                    app.has_permission($1::uuid, 'planning.publish') as recht_publish`,
+            [ORG_ALPHA],
+          ),
+        );
+        const sonde = konjunkte.rows[0];
+        if (sonde === undefined) {
+          throw new Error("[planning-write] Definer-Sonde lieferte keine Zeile (EYT-136).");
+        }
+
+        // Gewoehnliche Lesung: die SELECT-Policy aus 0007 prueft nur die
+        // Organisation, die Zeile ist also sichtbar.
+        const lesbar = await runnerAuf(client).run({ userId: USER_A }, (tx) =>
+          tx.query<{ id: string }>("select id from public.plan_versions where id = $1::uuid", [
+            veroeffentlicht,
+          ]),
+        );
+
+        // SPERRENDE Lesung — dieselbe Zeile, dieselbe Sitzung, ein Zusatz. Das
+        // ist genau die Anweisung, die in der Triggerfunktion steht.
+        const sperrlesbar = await runnerAuf(client).run({ userId: USER_A }, (tx) =>
+          tx.query<{ id: string }>(
+            "select id from public.plan_versions where id = $1::uuid for share",
+            [veroeffentlicht],
+          ),
+        );
+
+        const definer = await beobachte<{ prosecdef: boolean }>(
+          `select p.prosecdef
+             from pg_proc p
+             join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'app' and p.proname = 'reject_assignment_in_published_plan'`,
+        );
+
+        process.stdout.write(
+          `[planning-write] definer-probe kanal=${String(sonde.kanal)} ` +
+            `recht_write=${String(sonde.recht_write)} ` +
+            `recht_publish=${String(sonde.recht_publish)} ` +
+            `lesbar=${String(lesbar.rows.length)} ` +
+            `sperrlesbar=${String(sperrlesbar.rows.length)} ` +
+            `definer=${String(definer[0]?.prosecdef ?? false)}\n`,
+        );
+
+        expect(sonde.kanal, "kein Laufzeitkanal — der Insert scheiterte am falschen Riegel").toBe(
+          true,
+        );
+        expect(
+          sonde.recht_write,
+          "ohne planning.write lehnte schon die Insert-Policy ab, der Trigger bliebe ungemessen",
+        ).toBe(true);
+        expect(sonde.recht_publish, "planning.publish ist noch da — die Klammer wirkt nicht").toBe(
+          false,
+        );
+        expect(
+          lesbar.rows.length,
+          "die Elternzeile ist nicht einmal gewoehnlich lesbar — sperrlesbar=0 saegte nichts aus",
+        ).toBe(1);
+        expect(
+          sperrlesbar.rows.length,
+          "die sperrende Lesung findet die Zeile doch — ein Invoker braeuchte den Definer hier nicht",
+        ).toBe(0);
+        expect(definer[0]?.prosecdef, "die Triggerfunktion ist nicht security definer").toBe(true);
+
+        let fehler: DatabaseError | null = null;
+        try {
+          await runnerAuf(client).run({ userId: USER_A }, async (tx) => {
+            await tx.query(
+              `insert into public.assignments
+                 (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+               values ($1, $2, $3, $4, $5, $6)`,
+              [
+                ORG_ALPHA,
+                veroeffentlicht,
+                EMPLOYEE_ALPHA,
+                WORKSITE_ALPHA,
+                new Date("2026-12-16T07:00:00Z"),
+                new Date("2026-12-16T15:00:00Z"),
+              ],
+            );
+          });
+        } catch (e) {
+          fehler = e as DatabaseError;
+        }
+
+        // 23514 und nicht 42501: bei 42501 haette die Insert-Policy abgelehnt
+        // (dann waere `recht_write` falsch gewesen), und der Trigger — also die
+        // Aussage dieses Falls — bliebe ungemessen.
+        expect(fehler, "die Zuweisung ist in die veroeffentlichte Version gelaufen").not.toBeNull();
+        expect(fehler?.code).toBe("23514");
+        expect(fehler?.message).toContain("nimmt keine Zuweisung mehr auf");
+
+        const danach = await beobachte<{ n: string }>(
+          "select count(*) as n from public.assignments where plan_version_id = $1",
+          [veroeffentlicht],
+        );
+        expect(danach[0]?.n, "trotz Fehler ist eine zweite Zuweisung entstanden").toBe("1");
       });
     },
     30_000,

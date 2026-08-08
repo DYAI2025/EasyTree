@@ -236,26 +236,52 @@ trifft nicht zu, und der Grund steht in den Migrationen:**
 - Das `for share` fände die Elternzeile also **auch als Invoker**. Die Definer-Eigenschaft wird
   dort weder gebraucht noch gemessen; der Fall beweist den Trigger.
 
-Weiter: der Nachweis ist heute **nirgends** mehr behavioural erreichbar. Er bräuchte ein Subjekt
-mit `planning.write` **ohne** `planning.publish`. `role_permissions` vergibt beide an dieselben
-zwei Rollen (`owner`, `manager`); `member` bekommt keine. Ein solches Subjekt existiert im
-Rechtemodell nicht.
+Im **statischen** Rechtemodell ist der Nachweis damit nirgends erreichbar: er bräuchte ein Subjekt
+mit `planning.write` **ohne** `planning.publish`, und `role_permissions` vergibt beide an dieselben
+zwei Rollen (`owner`, `manager`), `member` bekommt keine.
 
-**Korrektur.** `supabase/tests/0006_planning_invariants.sql:311` erhält eine **strukturelle**
-Zusicherung — `prosecdef` der Funktion ist `true` — und sie wird im Kommentar ausdrücklich als
-Stolperdraht und **nicht** als Verhaltensbeweis bezeichnet. `plan(25)` → `plan(26)`. Der
-irreführende Kommentar in `0006` ist ersetzt.
-Benannte Gegenmutation: die Funktion in einer Folgemigration als `security invoker` neu anlegen;
-dann wird `0006:311` rot. **Nicht ausgeführt** (Abschnitt 7), offener Punkt.
+**Korrektur, in zwei Teilen.**
 
-Zwei Restpunkte, die diese Prüfung nicht schließt:
+_(a) Strukturell._ `supabase/tests/0006_planning_invariants.sql:311` erhält eine strukturelle
+Zusicherung — `prosecdef` der Funktion ist `true` — im Kommentar ausdrücklich als Stolperdraht und
+**nicht** als Verhaltensbeweis bezeichnet. `plan(25)` → `plan(26)`. Der irreführende Kommentar in
+`0006` ist ersetzt.
 
-1. Der Docblock in `apps/api/test/planning-write.integration.test.ts` Z. 1027-1047 erhebt
-   denselben unzutreffenden Anspruch („Hier ist sie es"). Die Datei ist in dieser Aufgabe
-   ausdrücklich gesperrt und wurde **nicht** angefasst. → offener Punkt.
-2. `supabase/tests/0011_planning_publish.sql` Z. 388-418 prüft den Zusatzfilter aus 0016
-   (`auth.uid() is null …`) auf dem Eigentümerpfad. Auch dort ist Invoker == Definer, weil
-   `postgres` RLS ohnehin umgeht — dieser Fall trägt die Definer-Aussage ebenfalls nicht.
+_(b) Behavioural — nachgetragen am 08.08.2026._ Die erste Fassung dieses Befunds schloss aus „kein
+solches Subjekt im Modell" auf „nicht messbar". Das war ein Schluss zu weit: ein Test muss das
+Subjekt nicht **finden**, er kann das Modell für die Dauer eines Falls **herstellen**.
+`apps/api/test/planning-write.integration.test.ts` enthält deshalb jetzt den Fall „eine
+veröffentlichte Planversion weist die Zuweisung auch ab, wenn die Sitzung sie nicht sperrend lesen
+darf": die Klammer `ohnePublishRecht` entzieht die eine Zeile `('owner','planning.publish')`,
+`USER_A` behält `planning.write` und bleibt im Laufzeitkanal, und der rohe Insert in eine
+veröffentlichte Version muss weiterhin 23514 liefern.
+
+Der eigentliche Beweis ist die Sonde davor, in derselben Sitzung: **`lesbar=1` bei
+`sperrlesbar=0`** — die gewöhnliche Lesung findet die Elternzeile, die **sperrende** nicht. Damit
+ist die Filterwirkung der `using`-Klausel nicht erschlossen, sondern gemessen, und `sperrlesbar=0`
+kann nicht „die Zeile existiert gar nicht" bedeuten. Ein `security invoker` würde in genau dieser
+Konstellation nichts finden, den Zweig „nicht gefunden" nehmen und die Zuweisung durchlassen.
+
+Die Sicherungen um die Mutation sind Absicht und nicht Zierde — `role_permissions` ist
+**produktweit**, eine überlebende Löschung verfälscht jeden späteren Schritt desselben Jobs:
+Adressierung über den vollständigen Primärschlüssel `(role, permission)` (Migration 0013 Z. 44-48,
+kein FK zeigt darauf, kein Trigger hängt daran); Vorbedingung gemessen, bevor etwas mutiert ist;
+`catch` statt `finally`; unbedingte Wiederherstellung mit anschließendem Read-after-write, deren
+Fehlschlag Vorrang hat und den Fehler aus dem Fall als `cause` mitführt; idempotente
+Vor-Wiederherstellung in `beforeAll` und ein Netz in `afterAll`.
+
+Benannte Gegenmutation für beide Teile: die Funktion in einer Folgemigration als `security invoker`
+neu anlegen — dann wird `0006:311` rot (strukturell) **und** der neue Fall rot (behavioural).
+**Nicht ausgeführt** (Abschnitt 7).
+
+Restpunkt, der offen bleibt: `supabase/tests/0011_planning_publish.sql` Z. 388-418 prüft den
+Zusatzfilter aus 0016 (`auth.uid() is null …`) auf dem Eigentümerpfad. Auch dort ist Invoker ==
+Definer, weil `postgres` RLS ohnehin umgeht — dieser Fall trägt die Definer-Aussage nicht, und das
+ist in Ordnung, weil er sie auch nicht behauptet.
+
+Erledigt: der Docblock in `apps/api/test/planning-write.integration.test.ts` erhob denselben
+unzutreffenden Anspruch („Hier ist sie es"). Er ist ersetzt und sagt jetzt, was der Fall misst
+(den Trigger) und was er nicht misst (den Definer) — mit dem Grund.
 
 ### B2 — GESCHWÄCHT: der Outboxblock in `0007` hat den Kanal ohne Zwang gewechselt
 
@@ -305,12 +331,14 @@ Begründung in Abschnitt 1. Es folgt keine Zusicherung mehr, die `authenticated`
 Leckrisiko tritt nicht ein. Restrisiko (nichtdeterministisches `limit 1`) ist dort benannt und
 führt im Fehlerfall zu Rot, nicht zu falschem Grün. **Keine Änderung.**
 
-### B5 — Dokumentationsungenauigkeit, keine Korrektur
+### B5 — Dokumentationsungenauigkeit im Kopf von `0012`, korrigiert
 
-Der Kopf von `0012_planning_data_api_boundary.sql` (Z. 30-37) sagt, D1/D2 „führen zwei
-Zusicherungen weiter, die bis EYT-136 in `0006` unter `set local role authenticated` liefen".
-Tatsächlich stehen die Originale **weiterhin** in `0006` (Z. 126 und 142), nur auf dem
-Eigentümerpfad — sie sind gedoppelt, nicht umgezogen. Kein Beweisverlust, deshalb keine Änderung.
+Der Kopf von `0012_planning_data_api_boundary.sql` sagte, D1/D2 seien aus `0006` **übernommen**.
+Tatsächlich stehen die Originale **weiterhin** in `0006` (Z. 126 und 142), ebenfalls auf dem
+Eigentümerpfad — sie sind gedoppelt, nicht umgezogen. Kein Beweisverlust, aber „übernommen" heißt,
+in `0006` sei nichts mehr, und die Datei ist neu in diesem PR: die Formulierung ist unsere.
+Überschrift und Absatz sagen jetzt „mitgeführt (Doppelung, kein Umzug)" und nennen die beiden
+Fundstellen in `0006`. Keine Zusicherung und kein `plan(N)` berührt.
 
 ## 6. `plan(N)` vorher/nachher
 
@@ -337,13 +365,19 @@ Damit niemand Überlegung für Messung hält:
   Migrationstext gelesen**, nicht aus einem Katalog abgefragt. Wo eine Aussage aus einem
   gemessenen Zustand stammt, ist die Quelle genannt (Abschnitt 2, `BYPASSRLS`: aus dem grünen
   Bestand auf `origin/master`).
-- **Befund B1 ist eine Ableitung, keine Gegenmutation.** Dass der Fall in
+- **Der ANLASS von Befund B1 bleibt eine Ableitung.** Dass der bestehende Fall bei
   `planning-write.integration.test.ts` die Definer-Eigenschaft nicht misst, folgt aus dem
   Zusammenspiel von `plan_versions_update_in_org` (0015 Z. 243-255), `role_permissions`
-  (0015 Z. 181-187) und der Rolle von `USER_A` (`seed.sql` Z. 46). **Ausgeführt** wäre der
-  Nachweis erst, wenn die Funktion einmal als `security invoker` liefe und der Test grün bliebe.
-  Das steht aus.
-- **Die Gegenmutation zur neuen Zusicherung `0006:311` ist benannt, aber nicht gefahren.** Sie
-  verlangt eine Wegwerf-Folgemigration und einen eigenen `db-gates`-Lauf.
+  (0015 Z. 181-187) und der Rolle von `USER_A` (`seed.sql` Z. 46) — gelesen, nicht gemessen.
+- **Der MECHANISMUS des neuen Falls ist dagegen gemessen, und zwar in CI.** Die Sonde
+  `[planning-write] definer-probe … lesbar=1 sperrlesbar=0 …` zeigt, dass die sperrende Lesung
+  derselben Zeile in derselben Sitzung nichts findet, während die gewöhnliche sie findet. Das ist
+  eine Messung des `for share`-Verhaltens unter RLS, keine Berufung auf die Dokumentation. Der
+  Grep in `.github/workflows/ci.yml` macht sie auf Jobebene tragend.
+- **Die Gegenmutation ist weiterhin benannt und nicht gefahren.** `security invoker` in einer
+  Wegwerf-Folgemigration würde `0006:311` und den neuen Fall rot machen; das verlangt einen
+  eigenen `db-gates`-Lauf und steht aus. Was der neue Fall heute liefert, ist der Beweis, dass die
+  Konstellation überhaupt erreichbar ist — der Schritt, an dem die erste Fassung dieses Dokuments
+  zu früh aufgehört hat.
 - **Nicht geprüft:** ob der Angriffsweg über PostgREST nach 0017 tatsächlich 42501 liefert. Das
   ist eine Aussage über das laufende Produktivsystem und gehört nicht in pgTAP.
