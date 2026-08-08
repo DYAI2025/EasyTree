@@ -1,7 +1,48 @@
+/* =========================================================================
+ * !!! WEGWERF-FASSUNG — NUR AUF BRANCH `proof/eyt-136-red-baseline` (PR #57) !!!
+ * =========================================================================
+ *
+ * Diese Datei unterscheidet sich von der Fassung auf
+ * `fix/eyt-136-planning-data-api-boundary` (PR #56) in GENAU EINEM Punkt: die
+ * sechs Riegelzusicherungen der Schritte 9c4/9c5 und ihre Wirkungskontrollen
+ * laufen hier als `expect.soft(...)`. Auf dem Featurebranch sind sie HART.
+ *
+ * ## Warum
+ *
+ * Dieser Branch misst den ROTNACHWEIS: er steht auf `origin/master` OHNE
+ * Migration 0017. Auf diesem Stand sollen MEHRERE Angriffe durchgehen. Eine
+ * harte Zusicherung bricht den Fall beim ERSTEN Fehlschlag ab und belegte
+ * damit genau einen Datenpunkt — der Befund waere untertrieben und man
+ * braeuchte sechs Laeufe fuer sechs Aussagen. Weiche Zusicherungen halten den
+ * Fehlschlag fest und laufen weiter; der Fall faellt am Ende trotzdem durch.
+ * Ein Lauf liefert so das vollstaendige Bild.
+ *
+ * ## Was NICHT weich ist, und warum
+ *
+ * Alle Vorbedingungen (Nichtvakuositaet 1-3 in 9c4, Vorbedingung 1-4 in 9c5)
+ * und jede Zusicherung ausserhalb von 9c4/9c5 bleiben HART. Ein Angriff, der
+ * ohne seine Vorbedingung gemessen wird, beweist nichts — der Lauf muss dort
+ * anhalten statt eine wertlose Messung zu produzieren.
+ *
+ * Weich heisst NUR „nach dem Fehlschlag weiterlaufen". Es wurde keine
+ * Zusicherung abgeschwaecht, geloescht oder umgestellt.
+ *
+ * Diese Fassung darf NIEMALS nach `master` oder auf den Featurebranch
+ * gelangen. PR #57 bleibt Entwurf und wird nicht gemergt.
+ * ========================================================================= */
+
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { expect, test, type Cookie } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type APIResponse,
+  type Cookie,
+} from "@playwright/test";
+
+import { psqlMitMarker } from "./global-setup";
 
 /**
  * Die reale Auth-Kostenreise (EYT-106 AK8, EYT-134).
@@ -65,6 +106,33 @@ import { expect, test, type Cookie } from "@playwright/test";
  *   Geburt an veroeffentlichte Planversion an. Befund F1 aus dem Selbstreview.
  *   BEIDE Riegel muessen fallen: einzeln entfernt haelt der jeweils andere
  *   (gemessen in den Laeufen 30874279915 und 30874546740).
+ * - `app.is_runtime_channel()` aus `assignments_insert_in_org` oder
+ *   `plan_versions_insert_in_org` entfernen (Migration **0017**): Schritt 9c4
+ *   wird rot. Das ist der Kern des Nachweises — Reisender A TRAEGT
+ *   `planning.write` (in 9c4 ueber sein eigenes Token gemessen), ihn haelt
+ *   allein der Kanal ab.
+ * - Das `update`- bzw. `delete`-Recht auf `assignments` fuer `authenticated`
+ *   wiederherstellen UND die zugehoerige Policy neu anlegen (Rollback-Rezept
+ *   im Kopf von 0017): Schritt 9c5 wird rot — PATCH bzw. DELETE greifen dann
+ *   durch, und die Nachkontrolle sieht eine veraenderte bzw. fehlende Zeile.
+ * - NUR den Grant wiederherstellen, die Policy weggelassen: 9c5 wird ebenfalls
+ *   rot, aber frueher und aus einem anderen Grund — ohne permissive Policy
+ *   waehlt das UPDATE null Zeilen aus, PostgREST antwortet mit 200 und leerer
+ *   Menge (dieselbe Mechanik wie 9c2), und `erwarteRiegel` faellt schon an der
+ *   Statuszusicherung. Die WIRKUNGSkontrollen blieben dabei gruen. Genau fuer
+ *   diesen Fall gibt es die Riegelzusicherung: sie haelt fest, WELCHER Riegel
+ *   getragen hat, nicht nur dass abgewiesen wurde.
+ * - `('member','planning.write')` in `role_permissions` eintragen: 9c5 wird
+ *   rot — aber NICHT an einer Angriffszusicherung, sondern schon am
+ *   Praemissenwaechter in `eyt136-member-an.sql` (`raise exception`, noch vor
+ *   dem ersten Angriff). Genau so soll es sein: der Angriff waere damit vakuos
+ *   geworden, und das faellt VOR dem Angriff auf statt danach.
+ * - Die Rueckgabe der Leihmitgliedschaft in 9c5 auslassen: die Nachbedingung
+ *   in `eyt136-member-aus.sql` wirft (`leihe`/`b_gesamt` ungleich 0), und
+ *   `psqlMitMarker` macht daraus einen roten Schritt. DAS ist der primaere
+ *   Waechter. Sekundaer — und nur, wenn der Hauptnachweis sonst gruen bleibt —
+ *   wuerde auch „Benutzer B ist angemeldet, aber ohne Mitgliedschaft
+ *   ausgesperrt" rot, weil Bs Sitzung dann eine Organisation naennte.
  */
 
 // `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
@@ -80,6 +148,10 @@ const ORG_ID = "00000000-0000-4000-8000-00000000e201";
 const ORG_NAME = "E2E Reiseorganisation";
 const MITARBEITER_NAME = "E2E-Mitarbeiter Reise";
 const MITARBEITER_ID = "00000000-0000-4000-8000-00000000e211";
+/** Die Baustelle der Fixtur — Ziel der Data-API-Inserts in 9c4/9c5 (EYT-136). */
+const BAUSTELLE_ID = "00000000-0000-4000-8000-00000000e241";
+/** Die Zuweisung der Fixtur — Ziel von PATCH und DELETE in 9c5 (EYT-136). */
+const ZUWEISUNG_ID = "00000000-0000-4000-8000-00000000e261";
 /** 4250 Minor Units, so wie `minorUnitsToEuro` sie deutsch formatiert. */
 const ERWARTETER_BETRAG = "42,50 €";
 /** Eine Organisation, in der der Reisende NICHT Mitglied ist. */
@@ -124,6 +196,221 @@ function pflicht(name: string): string {
     throw new Error(`[auth-journey] ${name} fehlt — global-setup.ts hat nicht gelaufen?`);
   }
   return wert;
+}
+
+/**
+ * Die beiden Angriffswochen der Entwurfsschreibflaeche (EYT-136).
+ *
+ * JE EINE EIGENE, ungenutzte Woche — und ausdruecklich nicht `PLANWOCHE`.
+ * Gelaenge ein Angriff gegen die Reisewoche, antwortete der echte Publish in
+ * 9d mit „bereits veroeffentlicht": der Lauf waere rot, aber an der falschen
+ * Stelle und mit der falschen Begruendung. `2026-W35` gehoert bereits 9c3.
+ */
+const ANGRIFFSWOCHE_OWNER = "2026-W36";
+const ANGRIFFSWOCHE_MEMBER = "2026-W37";
+
+/**
+ * Ein ECHTES Zugriffstoken ueber den oeffentlichen GoTrue-Weg (EYT-107, EYT-136).
+ *
+ * Nicht das HttpOnly-Cookie: das gehoert der API und ist fuer den Browser
+ * unlesbar — genau deshalb holt sich ein Angreifer sein Token so. Dieselbe
+ * Form, die Schritt 9c2 inline benutzt; hier als Funktion, weil 9c4 und 9c5
+ * sie fuer zwei verschiedene Reisende brauchen.
+ */
+async function bearerKopf(
+  request: APIRequestContext,
+  supabaseUrl: string,
+  anonKey: string,
+  email: string,
+  passwort: string,
+): Promise<Record<string, string>> {
+  const anmeldung = await request.post(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+    headers: { apikey: anonKey, "content-type": "application/json" },
+    data: { email, password: passwort },
+  });
+  expect(anmeldung.status(), `GoTrue hat fuer ${email} kein Token ausgegeben`).toBe(200);
+  const token = ((await anmeldung.json()) as { access_token?: string }).access_token ?? "";
+  expect(token, `das Token fuer ${email} ist leer`).not.toBe("");
+  return { apikey: anonKey, authorization: `Bearer ${token}`, "content-type": "application/json" };
+}
+
+/** Ein Lesezugriff ueber die Data-API, der 200 verlangt. */
+async function dataApiLese<T>(
+  request: APIRequestContext,
+  url: string,
+  kopf: Record<string, string>,
+): Promise<T[]> {
+  const antwort = await request.get(url, { headers: kopf });
+  expect(antwort.status(), `Data-API-Lesen fehlgeschlagen: ${url}`).toBe(200);
+  return (await antwort.json()) as T[];
+}
+
+/**
+ * Der Fehlerkoerper von PostgREST — `code` ist der durchgereichte SQLSTATE.
+ *
+ * Er ist das einzige, was von aussen die beiden RIEGEL unterscheidet, die 0017
+ * gesetzt hat. GEMESSEN im Lauf 31235882417 (Job 93048155065), alle sechs
+ * Versuche mit `code = "42501"` und HTTP 403 — der Status allein unterscheidet
+ * also NICHTS:
+ *
+ *   `with check`-Verletzung (0017 Z. 146-152, Z. 164-172)
+ *     message  new row violates row-level security policy for table "assignments"
+ *     hint     (leer)
+ *
+ *   entzogenes Tabellenrecht (0017 Z. 117-118)
+ *     message  permission denied for table assignments
+ *     hint     Grant the required privileges to the current role with:
+ *              GRANT UPDATE ON public.assignments TO authenticated;
+ *
+ * Der `hint` ist der schaerfste der drei Befunde: PostgREST nennt darin das
+ * FEHLENDE Recht beim Namen, also genau das, was 0017 entzogen hat. Deshalb
+ * wird er mitgeprueft und nicht nur mitgeschrieben.
+ *
+ * Ohne diese Unterscheidung koennte ein 403 aus einem DRITTEN Grund kommen und
+ * der Nachweis bliebe still gruen — und „welcher Riegel hat gehalten" ist die
+ * ganze Aussage von EYT-136.
+ */
+interface DataApiFehler {
+  readonly code: string;
+  readonly message: string;
+  readonly details: string;
+  readonly hint: string;
+}
+
+interface Angriffsergebnis {
+  readonly status: number;
+  readonly koerperLaenge: number;
+  readonly zeilen: number;
+  /** Der geparste Fehlerkoerper, oder `null` bei einer Erfolgsantwort. */
+  readonly fehler: DataApiFehler | null;
+}
+
+/** Nimmt nur Zeichenketten an; PostgREST setzt `details`/`hint` oft auf null. */
+function alsText(wert: unknown): string {
+  return typeof wert === "string" ? wert : "";
+}
+
+/**
+ * Ein Data-API-SCHREIBversuch, festgehalten statt geraten.
+ *
+ * Der Koerper wird genau EINMAL gelesen (`text()`) — ein zweiter Zugriff auf
+ * denselben `APIResponse` kann fehlschlagen —, und sowohl die Zeilenzahl als
+ * auch der Fehlerkoerper entstehen daraus, nicht aus einem zweiten Aufruf.
+ *
+ * Jeder Versuch schreibt ausserdem eine greppbare Zeile ins CI-Log. Sie ist
+ * der Rohbefund, gegen den die Zusicherungen im Aufrufer geschrieben sind: wer
+ * sie spaeter aendert, sieht im Log, was gemessen wurde, statt raten zu
+ * muessen.
+ *
+ * Bewusst OHNE Statuszusicherung: die trifft der Aufrufer. `9c2` ist der
+ * stehende Gegenbeleg dafuer, dass ein abgewehrter Data-API-Schreibzugriff
+ * nicht zwingend einen Fehlerstatus traegt (dort: 200 mit leerer Menge).
+ */
+async function dataApiSchreibversuch(
+  name: string,
+  aufruf: Promise<APIResponse>,
+): Promise<Angriffsergebnis> {
+  const antwort = await aufruf;
+  const koerper = await antwort.text();
+  let zeilen = 0;
+  let fehler: DataApiFehler | null = null;
+
+  if (antwort.ok()) {
+    if (koerper !== "") {
+      const geparst: unknown = JSON.parse(koerper);
+      zeilen = Array.isArray(geparst) ? geparst.length : 1;
+    }
+  } else if (koerper !== "") {
+    // Ein nicht-JSON-Koerper (etwa ein Proxy-Fehler) darf hier NICHT werfen:
+    // sonst stuerbe der Fall an der Diagnose statt an der Sache. `fehler`
+    // bleibt dann null, und die Zusicherung des Aufrufers auf `code` wird rot
+    // — laut, mit dem Rohkoerper im Log.
+    try {
+      const roh = JSON.parse(koerper) as Record<string, unknown>;
+      fehler = {
+        code: alsText(roh["code"]),
+        message: alsText(roh["message"]),
+        details: alsText(roh["details"]),
+        hint: alsText(roh["hint"]),
+      };
+    } catch {
+      fehler = null;
+    }
+  }
+
+  console.log(
+    `  [eyt136-riegel] ${name} status=${antwort.status()} laenge=${koerper.length} ` +
+      `code=${JSON.stringify(fehler?.code ?? null)} message=${JSON.stringify(fehler?.message ?? koerper.slice(0, 200))}`,
+  );
+
+  return { status: antwort.status(), koerperLaenge: koerper.length, zeilen, fehler };
+}
+
+/**
+ * Welcher der beiden Riegel aus Migration 0017 einen Versuch abgewiesen hat.
+ *
+ *   `policy`         die `with check`-Klausel — Kanal bzw. Recht fehlt, das
+ *                    Spalten- und Tabellenrecht besteht noch
+ *   `tabellenrecht`  das Recht selbst ist entzogen; die Anweisung scheitert,
+ *                    bevor ueberhaupt eine Zeile ausgewaehlt wird
+ */
+type Riegel =
+  | { readonly art: "policy"; readonly tabelle: string }
+  | {
+      readonly art: "tabellenrecht";
+      readonly tabelle: string;
+      readonly recht: "UPDATE" | "DELETE";
+    };
+
+/**
+ * Verlangt den gemessenen RIEGEL, nicht nur „irgendein 403".
+ *
+ * Warum das noetig ist: 403 ist die Abbildung von SQLSTATE 42501, und 42501
+ * ist mehrdeutig — ein fehlendes Spalten- oder Tabellenrecht liefert ihn
+ * ebenso wie eine RLS-Verletzung. Ohne diese Unterscheidung koennte ein 403
+ * aus einem DRITTEN Grund kommen (ein Tippfehler im Spaltennamen, ein
+ * unbeabsichtigt entzogenes Leserecht) und der Nachweis bliebe still gruen,
+ * waehrend die Aussage „der Kanal hat gehalten" gar nicht mehr stimmt.
+ *
+ * Die erwarteten Zeichenketten sind GEMESSEN (Lauf 31235882417), nicht
+ * hergeleitet. Aendert ein PostgreSQL- oder PostgREST-Update sie, wird dieser
+ * Waechter rot und nennt den Unterschied — dann gilt die neue Messung, und
+ * dieser Kommentar wird mit ihr fortgeschrieben.
+ *
+ * Die Wirkungskontrollen der Aufrufer (Bestand, `starts_at_utc`, leere Woche)
+ * bleiben davon unberuehrt: sie sind kanal- und versionsunabhaengig und der
+ * eigentliche Beweis.
+ */
+function erwarteRiegel(ergebnis: Angriffsergebnis, riegel: Riegel, was: string): void {
+  // WEGWERF-FASSUNG (siehe Kopf der Datei): `expect.soft` statt `expect`.
+  // Diese Funktion wird von 9c4 UND 9c5 benutzt und traegt alle sechs
+  // Riegelzusicherungen; hart wuerde der erste durchgegangene Angriff die
+  // restlichen fuenf ungemessen lassen. Auf PR #56 steht hier `expect`.
+  expect.soft(ergebnis.status, `${was}: nicht mit 403 abgewiesen`).toBe(403);
+  expect.soft(ergebnis.zeilen, `${was}: PostgREST hat Zeilen zurueckgegeben`).toBe(0);
+  expect.soft(ergebnis.fehler?.code, `${was}: nicht SQLSTATE 42501`).toBe("42501");
+
+  if (riegel.art === "policy") {
+    expect
+      .soft(
+        ergebnis.fehler?.message,
+        `${was}: keine RLS-Verletzung — das 403 kommt aus einem anderen Grund`,
+      )
+      .toBe(`new row violates row-level security policy for table "${riegel.tabelle}"`);
+  } else {
+    expect
+      .soft(
+        ergebnis.fehler?.message,
+        `${was}: kein entzogenes Tabellenrecht — das 403 kommt aus einem anderen Grund`,
+      )
+      .toBe(`permission denied for table ${riegel.tabelle}`);
+    // PostgREST nennt im `hint` das fehlende Recht. Damit ist nicht nur
+    // belegt, DASS ein Recht fehlt, sondern WELCHES — genau das, was 0017
+    // Z. 117-118 entzogen hat.
+    expect
+      .soft(ergebnis.fehler?.hint, `${was}: der Hinweis nennt nicht das entzogene Recht`)
+      .toContain(`GRANT ${riegel.recht} ON public.${riegel.tabelle} TO authenticated`);
+  }
 }
 
 function cookie(cookies: readonly Cookie[], name: string): Cookie {
@@ -575,6 +862,491 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     };
   });
 
+  // ---------------------------------------------------------------------
+  // 9c4/9c5 — Die ENTWURFSschreibflaeche der Data-API (EYT-136)
+  // ---------------------------------------------------------------------
+  // 9c2 und 9c3 messen das VEROEFFENTLICHEN. Der Entwurf blieb offen: bis
+  // Migration 0017 konnte ein aktives Mitglied ueber PostgREST
+  //
+  //   POST   /rest/v1/assignments         Entwurfszuweisung anlegen
+  //   PATCH  /rest/v1/assignments?id=eq.  Zuweisung verschieben
+  //   DELETE /rest/v1/assignments?…       Entwurfsstand loeschen
+  //   POST   /rest/v1/plan_versions       Entwurfs-Planversion anlegen
+  //
+  // senden. Der `published_at is null`-Riegel aus 0016 half dabei NICHT — ein
+  // Entwurf erfuellt ihn ja gerade. Umgangen wurden damit das atomare Recht
+  // `planning.write`, die Intervall- und Konfliktvalidierung, die
+  // Wochenzugehoerigkeit (`OUTSIDE_WEEK`), die Advisory-Lock-Serialisierung,
+  // der Idempotenzdatensatz, das Audit-Ereignis, die Outbox und die
+  // Korrelations-Id.
+  //
+  // ZWEI Reisende, weil einer nichts unterscheidet:
+  //
+  //   9c4  Owner MIT `planning.write`  -> beweist den KANAL-Riegel
+  //   9c5  member OHNE `planning.write` -> beweist den RECHTE-Riegel und den
+  //                                        vollstaendigen Entzug von update/delete
+  //
+  // Ohne 9c4 bewiese der Nachweis nur „wer nichts darf, darf nichts". Ohne 9c5
+  // bliebe offen, ob `planning.write` ueberhaupt gilt.
+  //
+  // VOR 9d, und das ist tragend: nach dem Veroeffentlichen wuerde zusaetzlich
+  // `app.reject_published_row_change()` aus 0010 ablehnen, und es waere nicht
+  // mehr entscheidbar, welcher Riegel gehalten hat.
+  await test.step("9c4 — der Owner MIT planning.write schreibt ueber die Data-API nicht", async () => {
+    const supabaseUrl = pflicht("EASYTREE_JOURNEY_SUPABASE_URL");
+    const anonKey = pflicht("EASYTREE_JOURNEY_ANON_KEY");
+    const kopf = await bearerKopf(request, supabaseUrl, anonKey, email, passwort);
+
+    const zuweisungenUrl = `${supabaseUrl}/rest/v1/assignments?org_id=eq.${ORG_ID}&select=id,starts_at_utc,ends_at_utc`;
+
+    // Nichtvakuositaet 1 — der Kanal TRAEGT. Dasselbe Token liest die
+    // Zuweisungen der Organisation ueber PostgREST. Ohne diese Messung bewiese
+    // ein abgelehnter Schreibzugriff nur, dass irgendetwas an der Anfrage nicht
+    // stimmt: ein abgelaufenes Token, ein falscher Pfad, eine nicht exponierte
+    // Tabelle.
+    const zuweisungenVorher = await dataApiLese<{ id: string; starts_at_utc: string }>(
+      request,
+      zuweisungenUrl,
+      kopf,
+    );
+    expect(
+      zuweisungenVorher.length,
+      "der Owner sieht ueber die Data-API keine einzige Zuweisung — der Kanal traegt nicht",
+    ).toBeGreaterThanOrEqual(1);
+
+    // Nichtvakuositaet 2 — A traegt `planning.write` WIRKLICH, gemessen ueber
+    // SEIN EIGENES Token. `app.has_permission` liegt im Schema `app` und ist
+    // ueber PostgREST nicht als RPC erreichbar (supabase/config.toml exponiert
+    // nur `public` und `graphql_public`). Was hier steht, ist stattdessen exakt
+    // der Rumpf jener Funktion, aus zwei Lesezugriffen zusammengesetzt:
+    // `memberships` (Policy `memberships_select_own` gibt nur die EIGENE Zeile
+    // frei) join `role_permissions`.
+    const mitgliedschaftA = await dataApiLese<{ org_id: string; role: string; active: boolean }>(
+      request,
+      `${supabaseUrl}/rest/v1/memberships?select=org_id,role,active`,
+      kopf,
+    );
+    expect(mitgliedschaftA).toHaveLength(1);
+    expect(mitgliedschaftA[0]?.org_id).toBe(ORG_ID);
+    expect(mitgliedschaftA[0]?.role).toBe("owner");
+    expect(mitgliedschaftA[0]?.active).toBe(true);
+
+    const ownerRecht = await dataApiLese<{ role: string; permission: string }>(
+      request,
+      `${supabaseUrl}/rest/v1/role_permissions?role=eq.owner&permission=eq.planning.write&select=role,permission`,
+      kopf,
+    );
+    expect(
+      ownerRecht,
+      "der Owner traegt planning.write nicht — der Kanalnachweis waere vakuos",
+    ).toHaveLength(1);
+    // Diese beiden Lesezugriffe SIND `app.has_permission` — dieselbe
+    // Mitgliedschaft, dieselbe Rollenzuordnung, nur ueber As eigenes Token
+    // statt ueber die Funktion. Die Funktion selbst wird ebenfalls befragt,
+    // aber erst gleich in 9c5: `eyt136-member-an.sql` misst sie fuer BEIDE
+    // Reisenden ueber die Verwaltungsverbindung und verlangt
+    // `a_has_permission=t`. Hier fehlt sie also nicht, sie kommt spaeter.
+
+    // Nichtvakuositaet 3 — die Angriffswoche ist VORHER leer. Die Kontrolle
+    // danach (`toHaveLength(0)`) ist zwar strenger und kann nicht falsch gruen
+    // werden; eine vorbestehende Zeile ergaebe aber ein Rot mit falscher
+    // Begruendung.
+    const wocheUrlOwner = `${supabaseUrl}/rest/v1/plan_versions?week_key=eq.${ANGRIFFSWOCHE_OWNER}&select=id`;
+    expect(
+      await dataApiLese<{ id: string }>(request, wocheUrlOwner, kopf),
+      `${ANGRIFFSWOCHE_OWNER} ist vor dem Angriff nicht leer`,
+    ).toHaveLength(0);
+
+    // Angriff 1 — eine Entwurfszuweisung in die ECHTE Planversion der Reise.
+    // Dienstag derselben Woche, bewusst OHNE Ueberlappung mit der Fixtur: ein
+    // Konflikt mit `assignments_no_published_overlap` liesse den Versuch
+    // scheitern, ohne dass die Kanalgrenze etwas dazu beitraege — der Nachweis
+    // waere gruen und wuerde den falschen Riegel messen.
+    //
+    // Die Nutzlast traegt EXAKT die sechs Spalten, die 0017 noch grantet
+    // (Z. 138-139) — `id` ist NICHT dabei. Das ist tragend: waere auch nur eine
+    // ungegrantete Spalte im Koerper, koennte das 403 aus dem fehlenden
+    // Spaltenrecht stammen, und 9c4 waere ein Grant-Nachweis statt eines
+    // KANAL-Nachweises. Nichts hier hinzufuegen.
+    const insertZuweisung = await dataApiSchreibversuch(
+      "9c4/assignments-insert",
+      request.post(`${supabaseUrl}/rest/v1/assignments`, {
+        headers: { ...kopf, prefer: "return=representation" },
+        data: {
+          org_id: ORG_ID,
+          plan_version_id: entwurfsVersionId,
+          employee_id: MITARBEITER_ID,
+          worksite_id: BAUSTELLE_ID,
+          starts_at_utc: "2026-08-04T06:00:00Z",
+          ends_at_utc: "2026-08-04T14:00:00Z",
+        },
+      }),
+    );
+    // GEMESSEN (Lauf 31235882417): 403, SQLSTATE 42501, „new row violates
+    // row-level security policy for table \"assignments\"". Das ist der
+    // `with check`-Riegel und NICHT das Spaltenrecht — die sechs gesendeten
+    // Spalten sind alle gegrantet (0017 Z. 138-139). Genau deshalb ist dieser
+    // Schritt ein KANAL-Nachweis: A traegt `planning.write`, die Organisation
+    // stimmt, uebrig bleibt `app.is_runtime_channel()`.
+    erwarteRiegel(
+      insertZuweisung,
+      { art: "policy", tabelle: "assignments" },
+      "9c4 INSERT assignments",
+    );
+
+    const zuweisungenDanach = await dataApiLese<{ id: string }>(request, zuweisungenUrl, kopf);
+    // WEGWERF-FASSUNG: weich (siehe Kopf der Datei). Auf PR #56 hart.
+    expect
+      .soft(
+        zuweisungenDanach.length,
+        "PostgREST hat eine Zuweisung angelegt — der Planungscommand ist umgehbar",
+      )
+      .toBe(zuweisungenVorher.length);
+
+    // Angriff 2 — eine ENTWURFS-Planversion, ganz ohne `published_at`. Genau
+    // die Form, die 0016 noch durchliess. Auch hier exakt die gegranteten
+    // Spalten `(org_id, week_key)` aus 0017 Z. 160, ohne `id`.
+    const insertVersion = await dataApiSchreibversuch(
+      "9c4/plan_versions-insert",
+      request.post(`${supabaseUrl}/rest/v1/plan_versions`, {
+        headers: { ...kopf, prefer: "return=representation" },
+        data: { org_id: ORG_ID, week_key: ANGRIFFSWOCHE_OWNER },
+      }),
+    );
+    erwarteRiegel(
+      insertVersion,
+      { art: "policy", tabelle: "plan_versions" },
+      "9c4 INSERT plan_versions",
+    );
+
+    const wocheDanach = await dataApiLese<{ id: string }>(request, wocheUrlOwner, kopf);
+    // WEGWERF-FASSUNG: weich (siehe Kopf der Datei). Auf PR #56 hart.
+    expect
+      .soft(
+        wocheDanach,
+        "PostgREST hat eine Entwurfs-Planversion angelegt — die Woche gehoert jetzt niemandem",
+      )
+      .toHaveLength(0);
+
+    schritte["9c4_owner_entwurfsschreiben"] = {
+      rolle: "owner",
+      hat_planning_write: true,
+      lesen_traegt: zuweisungenVorher.length,
+      assignments_insert: {
+        status: insertZuweisung.status,
+        koerperLaenge: insertZuweisung.koerperLaenge,
+        angelegteZeilen: insertZuweisung.zeilen,
+        erwarteterStatus: 403,
+        fehler: insertZuweisung.fehler,
+      },
+      plan_versions_insert_entwurf: {
+        status: insertVersion.status,
+        koerperLaenge: insertVersion.koerperLaenge,
+        angelegteZeilen: insertVersion.zeilen,
+        erwarteterStatus: 403,
+        woche: ANGRIFFSWOCHE_OWNER,
+        fehler: insertVersion.fehler,
+      },
+      zuweisungen_unveraendert: zuweisungenDanach.length === zuweisungenVorher.length,
+      hinweis: "EYT-136 — app.is_runtime_channel() in den Insert-Policies von 0017",
+    };
+  });
+
+  await test.step("9c5 — ein member OHNE planning.write erreicht die Zuweisungen nicht", async () => {
+    const supabaseUrl = pflicht("EASYTREE_JOURNEY_SUPABASE_URL");
+    const anonKey = pflicht("EASYTREE_JOURNEY_ANON_KEY");
+    const emailB = pflicht("EASYTREE_JOURNEY_EMAIL_B");
+    const passwortB = pflicht("EASYTREE_JOURNEY_PASSWORT_B");
+    const idB = pflicht("EASYTREE_JOURNEY_USER_B");
+    const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+    // `catch` statt `finally`: ein `throw` im `finally` verwuerfe einen bereits
+    // laufenden Fehler aus dem Fall — genau deshalb verbietet
+    // `no-unsafe-finally` ihn. Eingefangen laeuft die Rueckgabe auf JEDEM Weg.
+    // Der Fehler liegt im Tupel, damit „kein Fehler" von „hat null geworfen"
+    // unterscheidbar bleibt.
+    let fehlerAusFall: [unknown] | null = null;
+    try {
+      // Die Leihgabe: B bekommt fuer GENAU diesen Schritt eine aktive
+      // `member`-Mitgliedschaft. Kein neuer Benutzer — `auth.users` bleibt
+      // unberuehrt (PO-Vorgabe 08.08.2026), beide Reisenden stammen aus dem
+      // echten GoTrue-Signup. `psqlMitMarker` wirft, wenn die Markerzeile fehlt
+      // oder psql einen Fehler meldet; das ist der Lesenachweis nach dem
+      // Schreiben.
+      //
+      // Dieser Aufruf steht INNERHALB des `try`, und das ist kein Stilentscheid:
+      // `eyt136-member-an.sql` committet die Zeile und prueft ihre
+      // Nachbedingung DANACH. Wirft die Nachbedingung, ist die Mitgliedschaft
+      // bereits geschrieben — stuende der Aufruf davor, liefe die Rueckgabe
+      // unten nie und die Leihgabe ueberlebte auf genau dem Weg, fuer den
+      // `eyt136-member-aus.sql` geschrieben wurde.
+      const an = psqlMitMarker(
+        verwaltung,
+        join(HIER, "eyt136-member-an.sql"),
+        ["-v", `benutzer_a=${benutzerId}`, "-v", `benutzer_b=${idB}`],
+        "[eyt136-member-an]",
+      );
+      console.log(`  ${an}`);
+
+      const kopfB = await bearerKopf(request, supabaseUrl, anonKey, emailB, passwortB);
+
+      // Vorbedingung 1 — das Token traegt, und die Leihgabe wirkt: B liest
+      // seine EIGENE Mitgliedszeile (Policy `memberships_select_own`).
+      const mitgliedschaftB = await dataApiLese<{
+        org_id: string;
+        role: string;
+        active: boolean;
+      }>(request, `${supabaseUrl}/rest/v1/memberships?select=org_id,role,active`, kopfB);
+      expect(mitgliedschaftB, "B sieht seine geliehene Mitgliedschaft nicht").toHaveLength(1);
+      expect(mitgliedschaftB[0]?.org_id).toBe(ORG_ID);
+      expect(mitgliedschaftB[0]?.role).toBe("member");
+      expect(mitgliedschaftB[0]?.active).toBe(true);
+
+      // Vorbedingung 2 — `member` traegt `planning.write` NICHT. Zusammen mit
+      // Vorbedingung 1 ist das exakt der Rumpf von `app.has_permission`, ueber
+      // Bs eigenes Token gemessen. `role_permissions` ist fuer jeden
+      // Angemeldeten lesbar (`using (true)`, Migration 0013).
+      const memberRecht = await dataApiLese<{ role: string; permission: string }>(
+        request,
+        `${supabaseUrl}/rest/v1/role_permissions?role=eq.member&permission=eq.planning.write&select=role,permission`,
+        kopfB,
+      );
+      expect(
+        memberRecht,
+        "member traegt planning.write — der Rechtenachweis waere vakuos",
+      ).toHaveLength(0);
+
+      // Vorbedingung 3 — die ZIELZEILE von PATCH und DELETE ist fuer B
+      // sichtbar. Ohne sie bewiese eine abgelehnte Aenderung nur, dass die
+      // Zeile fuer ihn gar nicht existiert; die `using`-Klausel haette dann
+      // gefiltert und nicht das fehlende Recht.
+      const zielUrl = `${supabaseUrl}/rest/v1/assignments?id=eq.${ZUWEISUNG_ID}&select=id,starts_at_utc,ends_at_utc`;
+      const zielVorher = await dataApiLese<{
+        id: string;
+        starts_at_utc: string;
+        ends_at_utc: string;
+      }>(request, zielUrl, kopfB);
+      expect(zielVorher, "die Zielzeile ist fuer den member nicht sichtbar").toHaveLength(1);
+      const startVorher = zielVorher[0]?.starts_at_utc ?? "";
+      expect(startVorher).not.toBe("");
+
+      const bestandUrl = `${supabaseUrl}/rest/v1/assignments?org_id=eq.${ORG_ID}&select=id`;
+      const bestandVorher = (await dataApiLese<{ id: string }>(request, bestandUrl, kopfB)).length;
+      expect(bestandVorher).toBeGreaterThanOrEqual(1);
+
+      // Vorbedingung 4 — die Angriffswoche ist VORHER leer (dieselbe
+      // Begruendung wie in 9c4: die Nachkontrolle koennte nicht falsch gruen
+      // werden, wohl aber falsch rot).
+      const wocheUrlMember = `${supabaseUrl}/rest/v1/plan_versions?week_key=eq.${ANGRIFFSWOCHE_MEMBER}&select=id`;
+      expect(
+        await dataApiLese<{ id: string }>(request, wocheUrlMember, kopfB),
+        `${ANGRIFFSWOCHE_MEMBER} ist vor dem Angriff nicht leer`,
+      ).toHaveLength(0);
+
+      // Angriff 1 — anlegen. Spaltenrechte bestehen (dieselben sechs Spalten
+      // wie in 9c4, ohne `id`), es scheitert die `with check`-Klausel: hier
+      // fehlen Kanal UND Recht.
+      const insertZuweisung = await dataApiSchreibversuch(
+        "9c5/assignments-insert",
+        request.post(`${supabaseUrl}/rest/v1/assignments`, {
+          headers: { ...kopfB, prefer: "return=representation" },
+          data: {
+            org_id: ORG_ID,
+            plan_version_id: entwurfsVersionId,
+            employee_id: MITARBEITER_ID,
+            worksite_id: BAUSTELLE_ID,
+            starts_at_utc: "2026-08-05T06:00:00Z",
+            ends_at_utc: "2026-08-05T14:00:00Z",
+          },
+        }),
+      );
+      erwarteRiegel(
+        insertZuweisung,
+        { art: "policy", tabelle: "assignments" },
+        "9c5 INSERT assignments",
+      );
+
+      // Angriff 2 — verschieben. Der neue Beginn liegt VOR dem alten und
+      // verletzt keinen Check (`starts_at_utc < ends_at_utc` bleibt wahr): der
+      // Versuch wuerde ohne 0017 durchgehen, nicht an einer Nebenbedingung
+      // scheitern.
+      //
+      // Hier ist die Erwartung eine ANDERE als in 9c2, und der Unterschied ist
+      // der ganze Punkt von 0017: dort filterte nur die `using`-Klausel, das
+      // Recht bestand — PostgREST antwortete 200 mit leerer Menge. Hier ist das
+      // Tabellenrecht `update` fuer `authenticated` vollstaendig entzogen, und
+      // ein fehlendes Tabellenrecht wirft, bevor ueberhaupt eine Zeile
+      // ausgewaehlt wird.
+      //
+      // GEMESSEN (Lauf 31235882417) und damit belegt statt behauptet: 42501
+      // mit „permission denied for table assignments" und dem Hinweis
+      // „GRANT UPDATE ON public.assignments TO authenticated;" — PostgREST
+      // nennt das entzogene Recht selbst. Ein ANDERER Riegel (etwa eine
+      // RLS-Verletzung) macht `erwarteRiegel` rot.
+      const patchZuweisung = await dataApiSchreibversuch(
+        "9c5/assignments-update",
+        request.patch(`${supabaseUrl}/rest/v1/assignments?id=eq.${ZUWEISUNG_ID}`, {
+          headers: { ...kopfB, prefer: "return=representation" },
+          data: { starts_at_utc: "2026-08-03T04:00:00Z" },
+        }),
+      );
+      erwarteRiegel(
+        patchZuweisung,
+        { art: "tabellenrecht", tabelle: "assignments", recht: "UPDATE" },
+        "9c5 PATCH assignments",
+      );
+
+      // Angriff 3 — loeschen. Dieselbe Zeile, dieselbe Begruendung.
+      const deleteZuweisung = await dataApiSchreibversuch(
+        "9c5/assignments-delete",
+        request.delete(`${supabaseUrl}/rest/v1/assignments?id=eq.${ZUWEISUNG_ID}`, {
+          headers: { ...kopfB, prefer: "return=representation" },
+        }),
+      );
+      erwarteRiegel(
+        deleteZuweisung,
+        { art: "tabellenrecht", tabelle: "assignments", recht: "DELETE" },
+        "9c5 DELETE assignments",
+      );
+
+      // Angriff 4 — eine eigene Entwurfs-Planversion, wieder mit exakt den
+      // gegranteten Spalten `(org_id, week_key)`.
+      const insertVersion = await dataApiSchreibversuch(
+        "9c5/plan_versions-insert",
+        request.post(`${supabaseUrl}/rest/v1/plan_versions`, {
+          headers: { ...kopfB, prefer: "return=representation" },
+          data: { org_id: ORG_ID, week_key: ANGRIFFSWOCHE_MEMBER },
+        }),
+      );
+      erwarteRiegel(
+        insertVersion,
+        { art: "policy", tabelle: "plan_versions" },
+        "9c5 INSERT plan_versions",
+      );
+
+      // ------------------------------------------------------------------
+      // Die Wirkung, nicht die Antwort: nachgesehen statt geglaubt.
+      // ------------------------------------------------------------------
+      // Diese Kontrollen sind kanalunabhaengig. Aendert sich ein Statuscode,
+      // werden die Zusicherungen darueber angepasst — diese hier NIE.
+      // WEGWERF-FASSUNG: die drei Wirkungskontrollen sind weich (siehe Kopf der
+      // Datei). Auf PR #56 sind sie hart. Hart wuerde hier ausserdem der
+      // `catch`-Zweig greifen und die Rueckgabe der Leihgabe zwar noch laufen,
+      // aber die restlichen Kontrollen ungemessen lassen.
+      const bestandDanach = (await dataApiLese<{ id: string }>(request, bestandUrl, kopfB)).length;
+      expect
+        .soft(
+          bestandDanach,
+          "der Zuweisungsbestand hat sich veraendert — INSERT oder DELETE ist durchgegangen",
+        )
+        .toBe(bestandVorher);
+
+      const zielDanach = await dataApiLese<{
+        id: string;
+        starts_at_utc: string;
+        ends_at_utc: string;
+      }>(request, zielUrl, kopfB);
+      expect
+        .soft(zielDanach, "die Zielzeile ist verschwunden — DELETE ist durchgegangen")
+        .toHaveLength(1);
+      expect
+        .soft(
+          zielDanach[0]?.starts_at_utc,
+          "die Zielzeile wurde verschoben — PATCH ist durchgegangen",
+        )
+        .toBe(startVorher);
+
+      // ACHTUNG bei kuenftigen Umbauten: dieser Lesezugriff MUSS vor der
+      // Rueckgabe der Leihgabe stehen. Ohne Mitgliedschaft saehe B die Woche
+      // ohnehin nicht mehr, und „0 Zeilen" waere aus dem falschen Grund wahr.
+      // Heute schuetzt ihn nur seine Nachbarschaft: `bestandDanach` und
+      // `zielDanach` schluegen vorher fehl.
+      const wocheDanach = await dataApiLese<{ id: string }>(request, wocheUrlMember, kopfB);
+      // WEGWERF-FASSUNG: weich (siehe Kopf der Datei). Auf PR #56 hart.
+      expect.soft(wocheDanach, "der member hat eine Entwurfs-Planversion angelegt").toHaveLength(0);
+
+      schritte["9c5_member_entwurfsschreiben"] = {
+        rolle: "member",
+        hat_planning_write: false,
+        mitgliedschaft_geliehen: true,
+        zielzeile_vorher_sichtbar: true,
+        assignments_insert: {
+          status: insertZuweisung.status,
+          koerperLaenge: insertZuweisung.koerperLaenge,
+          angelegteZeilen: insertZuweisung.zeilen,
+          erwarteterStatus: 403,
+          fehler: insertZuweisung.fehler,
+        },
+        assignments_update: {
+          status: patchZuweisung.status,
+          koerperLaenge: patchZuweisung.koerperLaenge,
+          geaenderteZeilen: patchZuweisung.zeilen,
+          erwarteterStatus: 403,
+          fehler: patchZuweisung.fehler,
+        },
+        assignments_delete: {
+          status: deleteZuweisung.status,
+          koerperLaenge: deleteZuweisung.koerperLaenge,
+          geloeschteZeilen: deleteZuweisung.zeilen,
+          erwarteterStatus: 403,
+          fehler: deleteZuweisung.fehler,
+        },
+        plan_versions_insert_entwurf: {
+          status: insertVersion.status,
+          koerperLaenge: insertVersion.koerperLaenge,
+          angelegteZeilen: insertVersion.zeilen,
+          erwarteterStatus: 403,
+          woche: ANGRIFFSWOCHE_MEMBER,
+          fehler: insertVersion.fehler,
+        },
+        bestand_vorher: bestandVorher,
+        bestand_danach: bestandDanach,
+        starts_at_utc_unveraendert: zielDanach[0]?.starts_at_utc === startVorher,
+        hinweis: "EYT-136 — update/delete entzogen, INSERT an Kanal und planning.write gebunden",
+      };
+    } catch (e) {
+      fehlerAusFall = [e];
+    }
+
+    // Die Rueckgabe laeuft UNBEDINGT und ist idempotent: hat `an` gar nicht
+    // erst eingefuegt, loescht sie null Zeilen und ihre Nachbedingung trifft
+    // trotzdem zu. Sie steht ausserdem NACH den Wirkungskontrollen oben — ohne
+    // Mitgliedschaft saehe B die Zeilen nicht mehr, die dort geprueft werden.
+    let fehlerAusRueckgabe: [unknown] | null = null;
+    try {
+      const aus = psqlMitMarker(
+        verwaltung,
+        join(HIER, "eyt136-member-aus.sql"),
+        ["-v", `benutzer_b=${idB}`],
+        "[eyt136-member-aus]",
+      );
+      console.log(`  ${aus}`);
+    } catch (e) {
+      fehlerAusRueckgabe = [e];
+    }
+
+    // Scheitern BEIDE, wird keiner der beiden zum Anhaengsel des anderen: ein
+    // `AggregateError` traegt sie gleichrangig, und der Reporter zeigt beide.
+    // Eine fruehere Fassung machte den Angriffsbefund zum `cause` der
+    // Aufraeummeldung — lesbar blieb dann nur die harmlosere Ueberschrift.
+    // (ES2022 ist das `target` in tsconfig.base.json, `AggregateError` steht
+    // also in `lib`.)
+    if (fehlerAusRueckgabe !== null && fehlerAusFall !== null) {
+      throw new AggregateError(
+        [fehlerAusRueckgabe[0], fehlerAusFall[0]],
+        "[auth-journey] EYT-136: die Rueckgabe der geliehenen member-Mitgliedschaft UND der " +
+          "Angriffsnachweis sind gescheitert. Beide Fehler stehen in `errors`; die ueberlebende " +
+          "Mitgliedschaft ist der dringendere Befund.",
+      );
+    }
+    // Einzeln gilt weiterhin der Vorrang des gefaehrlicheren Befunds: ein
+    // gescheiterter Angriffsnachweis kostet diesen Lauf, eine ueberlebende
+    // Mitgliedschaft macht den nachfolgenden Nachweis „B ist ausgesperrt"
+    // gruen-falsch.
+    if (fehlerAusRueckgabe !== null) throw fehlerAusRueckgabe[0];
+    if (fehlerAusFall !== null) throw fehlerAusFall[0];
+  });
+
   await test.step("9d — veroeffentlichen, neu laden, zweiter Kontext", async () => {
     const knopf = page.getByTestId("planung-veroeffentlichen");
     await expect(knopf).toBeVisible();
@@ -736,6 +1508,33 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
  * Kostenpfad liesse B durch. Beides wird hier gemessen.
  *
  * Eigener Browserkontext: B darf nichts von As Sitzung erben.
+ *
+ * ## Zweite Aufgabe seit EYT-136: SEKUNDAERE Gegenprobe auf die Leihgabe in 9c5
+ *
+ * Schritt 9c5 leiht B fuer seine Dauer eine aktive `member`-Mitgliedschaft und
+ * gibt sie unmittelbar danach zurueck. Ueberlebte sie, naennte Bs Sitzung hier
+ * eine Organisation und dieser Nachweis wuerde rot.
+ *
+ * Die Rangfolge der Waechter, ehrlich benannt:
+ *
+ *  1. PRIMAER ist die Nachbedingung in `eyt136-member-aus.sql`
+ *     (`leihe`/`b_gesamt` muessen 0 sein): sie liest nach dem Loeschen nach,
+ *     und `psqlMitMarker` wirft, wenn ihr Marker fehlt oder psql einen Fehler
+ *     meldet. Sie greift im SELBEN Schritt, in dem die Leihgabe entstand.
+ *  2. SEKUNDAER ist dieser Nachweis — und er greift NUR, wenn der Hauptnachweis
+ *     sonst gruen bleibt. `test.describe.configure({ mode: "serial" })` weiter
+ *     oben laesst nachfolgende Faelle bei einem roten Vorgaenger naemlich
+ *     AUSFALLEN statt sie zu fahren. Ein roter Hauptnachweis SKIPPT diesen
+ *     hier, er faerbt ihn nicht rot. Er deckt also genau den Fall „Leihgabe
+ *     ueberlebt, waehrend alles andere gruen ist" — und den deckt er sicher.
+ *
+ * Dass er ueberhaupt DANACH laeuft, folgt aus der Deklarationsreihenfolge in
+ * dieser Datei plus `workers: 1` und `fullyParallel: false` in `config.ts`;
+ * das SKIP-Verhalten kommt dagegen allein aus dem `serial`-Modus.
+ *
+ * Der Teardown taugt als Waechter NICHT: er loescht alle Mitgliedschaften der
+ * Organisation und zaehlt erst danach — eine ueberlebende Leihgabe wuerde dort
+ * aufgeraeumt, nicht bemerkt.
  */
 test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({ browser }) => {
   const emailB = pflicht("EASYTREE_JOURNEY_EMAIL_B");

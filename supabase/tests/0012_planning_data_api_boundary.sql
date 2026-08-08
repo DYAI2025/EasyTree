@@ -27,17 +27,23 @@
 -- eine echte `easytree_app`-Verbindung, und der echte Angriffsweg ueber
 -- PostgREST steht in `apps/web/e2e/auth-journey/`.
 --
--- ## Uebernommene Invarianten
+-- ## Mitgefuehrte Invarianten (Doppelung, kein Umzug)
 --
--- Abschnitt D fuehrt zwei Zusicherungen weiter, die bis EYT-136 in
+-- Abschnitt D fuehrt zwei Zusicherungen mit, die bis EYT-136 in
 -- `0006_planning_invariants.sql` unter `set local role authenticated` liefen:
 -- „Entwuerfe duerfen sich ueberschneiden" und „eine unveroeffentlichte
 -- Zuweisung laesst sich loeschen". Beide sind Aussagen ueber Constraints und
 -- Trigger, nicht ueber den Client-Kanal; sie laufen deshalb weiter — nur auf
 -- dem Eigentuemerpfad, der fuer Fixtures legitim ist.
+--
+-- Praezisierung aus der Kanalmatrix vom 08.08.2026
+-- (docs/reviews/2026-08-08-eyt-136-kanalmatrix.md, Befund B5): die Originale
+-- stehen WEITERHIN in `0006` (Z. 126 und 142), ebenfalls auf dem
+-- Eigentuemerpfad. D1/D2 sind also eine Doppelung an der Grenze, kein Umzug —
+-- „uebernommen" waere das falsche Wort und hiesse, in `0006` sei nichts mehr.
 
 begin;
-select plan(16);
+select plan(18);
 
 -- ===========================================================================
 -- A. Rechtelage (Struktur)
