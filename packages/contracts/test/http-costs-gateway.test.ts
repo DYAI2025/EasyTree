@@ -353,6 +353,33 @@ describe("HttpCostsGateway — Fehlerzustaende", () => {
     expect(result.failure).toBe(failure);
   });
 
+  it("bildet 409 auf BEIDEN Lesewegen auf REJECTED ab", async () => {
+    // Ein GET erzeugt fachlich keinen Konflikt — trotzdem ist `conflictAs` auf
+    // beiden Lesewegen eine ENTSCHEIDUNG, und eine Entscheidung, die einen
+    // Kommentar wert ist, ist einen Test wert. Ohne diesen Fall blieb die
+    // Zusicherung unbelegt: beide Werte liessen sich auf STALE_VERSION drehen,
+    // ohne dass ein einziger Test rot wurde (gemessen im Review).
+    //
+    // Passiert es doch — ein Proxy, eine Fehlkonfiguration, ein spaeterer
+    // Server —, dann ist REJECTED die ehrliche Antwort: es gibt hier keinen
+    // Stand des Clients, der veraltet sein koennte, also gibt es auch nichts
+    // neu zu entscheiden.
+    const problem = PROBLEM(409);
+
+    const snapshot = await gatewayWith(stubFetch(409, problem, [])).snapshot(SNAPSHOT_ID);
+    expect(snapshot.ok).toBe(false);
+    if (snapshot.ok) return;
+    expect(snapshot.failure).toBe("REJECTED");
+
+    const liste = await gatewayWith(stubFetch(409, problem, [])).publishedPlanVersions({
+      fromWeekKey: "2026-W30",
+      toWeekKey: "2026-W32",
+    });
+    expect(liste.ok).toBe(false);
+    if (liste.ok) return;
+    expect(liste.failure).toBe("REJECTED");
+  });
+
   it("macht aus einem Netzwerkfehler UNAVAILABLE ohne ProblemDocument", async () => {
     const result = await gatewayWith(() => Promise.reject(new Error("ECONNREFUSED"))).snapshot(
       SNAPSHOT_ID,

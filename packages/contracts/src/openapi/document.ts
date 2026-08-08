@@ -104,6 +104,27 @@ const NAMED_SCHEMAS = {
   // benennen. Dass sie im Snapshot zusaetzlich eingebettet erscheinen, ist eine
   // Eigenschaft der Erzeugung, kein zweiter Typenbestand: beide Formen stammen
   // aus demselben Zod-Schema.
+  //
+  // ## Ehrlichkeitshinweis: ZWEI Regeln fallen bei der Erzeugung weg
+  //
+  // Dieselbe Luecke wie bei `weekKeyParam`, nur eine Ebene tiefer — und
+  // deshalb hier benannt statt verschwiegen. Beide Regeln stehen im
+  // Zod-Schema, erscheinen aber in KEINER Form im erzeugten Dokument:
+  //
+  // 1. `CostSnapshotSchema.superRefine` verlangt, dass zu jedem lokalen Tag
+  //    mit Positionen eine Tagessumme in `days` gehoert und kein Tag dort
+  //    zweimal steht. Das ist eine Beziehung zwischen ZWEI Feldern; JSON
+  //    Schema kann sie nicht ausdruecken.
+  // 2. `DurationMillisecondsSchema` verlangt zusaetzlich zur Ziffernfolge
+  //    einen echt positiven Wert (`> 0`, so wie die Tabelle
+  //    `check (duration_ms > 0)` fuehrt). Im Dokument steht nur
+  //    `pattern: ^\d+$` — "0" geht dort durch.
+  //
+  // Ein generierter Client kann also einen Snapshot mit Positionen ohne
+  // Tagessumme oder mit Dauer null bauen. Abgelehnt wird beides trotzdem:
+  // vom Client beim `safeParse` der Antwort und vom Server zur Laufzeit,
+  // nicht vom Schema. Wer eine der beiden Regeln lockert oder verschaerft,
+  // aendert diesen Absatz mit.
   CostPositionDto: CostPositionDtoSchema,
   CostDayTotalDto: CostDayTotalDtoSchema,
   CostSnapshot: CostSnapshotSchema,

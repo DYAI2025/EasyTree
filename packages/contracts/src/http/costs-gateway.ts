@@ -117,6 +117,14 @@ export class HttpCostsGateway implements CostsGateway {
     }
     // `URLSearchParams` statt Zeichenkettenaddition: die Kodierung gehört nicht
     // in die Hand des Aufrufers, auch nicht bei heute harmlosen Werten.
+    //
+    // EHRLICH DAZU: kein gültiger Wochenschlüssel enthält ein Zeichen, das
+    // maskiert werden müsste — eine Zeichenkettenaddition ergäbe heute dieselbe
+    // URL, Byte für Byte. Diese Wahl ist deshalb NICHT durch einen Test
+    // festgehalten, sondern ein Vorbau für den Tag, an dem hier ein Parameter
+    // dazukommt, der maskiert werden muss. Wer sie rückgängig macht, wird von
+    // keinem roten Test aufgehalten. Ein Testfall mit exotischer Eingabe wäre
+    // kein Nachweis, sondern eine Prüfung eines Falls, den das Schema verbietet.
     const suche = new URLSearchParams({
       fromWeekKey: geprueft.data.fromWeekKey,
       toWeekKey: geprueft.data.toWeekKey,
@@ -126,6 +134,8 @@ export class HttpCostsGateway implements CostsGateway {
       method: "GET",
       idempotencyKey: null,
       schema: SelectablePlanVersionsSchema,
+      // Wie beim Snapshot-Lesen: fachlich unmöglich, trotzdem entschieden und
+      // im Test "bildet 409 auf BEIDEN Lesewegen auf REJECTED ab" festgehalten.
       conflictAs: "REJECTED",
     });
   }
@@ -164,7 +174,12 @@ export class HttpCostsGateway implements CostsGateway {
       method: "GET",
       idempotencyKey: null,
       schema: CostSnapshotSchema,
-      // Ein GET erzeugt keinen Konflikt; `Call` verlangt das Feld trotzdem.
+      // Ein GET erzeugt fachlich keinen Konflikt; `Call` verlangt das Feld
+      // trotzdem. Kommt doch eine 409 an — Proxy, Fehlkonfiguration, späterer
+      // Server —, ist REJECTED die ehrliche Antwort: es gibt hier keinen Stand
+      // des Clients, der veralten könnte. Der Test "bildet 409 auf BEIDEN
+      // Lesewegen auf REJECTED ab" hält das fest; ohne ihn wäre dieser Kommentar
+      // eine unbelegte Behauptung.
       conflictAs: "REJECTED",
     });
   }

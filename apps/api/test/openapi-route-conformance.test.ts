@@ -16,9 +16,19 @@
  * 2. Jede implementierte Fachroute steht im Vertrag. Eine Route ohne
  *    Vertragseintrag ist ein undokumentierter Endpunkt — rot.
  * 3. Jede Vertragsoperation ist entweder implementiert ODER steht mit
- *    Begruendung in {@link NOT_YET_IMPLEMENTED}. Diese Liste ist die Messung:
- *    sie darf nur schrumpfen. Wer eine Route baut und den Eintrag stehen
- *    laesst, wird rot; wer eine Operation vergisst, sieht sie hier.
+ *    Begruendung in {@link NOT_YET_IMPLEMENTED}. Wer eine Route baut und den
+ *    Eintrag stehen laesst, wird rot; wer eine Operation vergisst, sieht sie
+ *    hier.
+ *
+ *    Frueher stand hier "die Liste darf nur schrumpfen". Das war Prosa, kein
+ *    Mechanismus, und seit EYT-109 ausserdem falsch: ein vertragserster Slice
+ *    registriert den Pfad, BEVOR die Route existiert, und laesst die Liste
+ *    dabei zwangslaeufig wachsen. Erlaubt ist das nur unter einer Bedingung —
+ *    der Eintrag nennt die Aufgabe, die ihn wieder entfernt. Verbindlich wird
+ *    die Entfernung nicht durch diesen Satz, sondern durch die
+ *    `stale`-Zusicherung weiter unten: sobald die Route existiert, ist der
+ *    Eintrag rot. Ein Eintrag kann also nicht vergammeln, nur zu frueh
+ *    dastehen.
  *
  * Damit ist die Luecke nicht mehr unsichtbar, sondern abzaehlbar — dieselbe
  * Bauart wie `EXPECTED_TABLES` im katalogweiten Metagate (EYT-86).
