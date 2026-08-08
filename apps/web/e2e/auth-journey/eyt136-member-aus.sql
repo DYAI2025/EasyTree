@@ -15,9 +15,15 @@
 -- `teardown.sql` loescht ALLE Mitgliedschaften der Reiseorganisation und zaehlt
 -- ERST DANACH. Eine ueberlebende Leihgabe wuerde dort also aufgeraeumt, nicht
 -- bemerkt — `restzeilen=0` bliebe wahr. Die Rueckgabe muss sich deshalb selbst
--- belegen. Die zweite, unabhaengige Gegenprobe ist der nachfolgende Nachweis
--- „Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt": er liest
--- Bs Sitzung und verlangt eine LEERE Organisationsliste.
+-- belegen: der Block unten ist der PRIMAERE Waechter, und er greift im selben
+-- Schritt, in dem die Leihgabe entstand.
+--
+-- Die zweite, unabhaengige Gegenprobe ist der nachfolgende Nachweis „Benutzer B
+-- ist angemeldet, aber ohne Mitgliedschaft ausgesperrt" (leere
+-- Organisationsliste in Bs Sitzung). Sie ist ausdruecklich SEKUNDAER: die
+-- Reisedatei laeuft im `serial`-Modus, ein roter Hauptnachweis laesst jenen
+-- Fall also AUSFALLEN statt ihn rot zu faerben. Er deckt damit genau den Fall
+-- „Leihgabe ueberlebt, waehrend sonst alles gruen ist".
 
 \set ON_ERROR_STOP on
 

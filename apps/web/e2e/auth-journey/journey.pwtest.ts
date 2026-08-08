@@ -85,13 +85,16 @@ import { psqlMitMarker } from "./global-setup";
  *   Beides zusammen, denn 0017 hat beides entzogen: allein der Grant liefe in
  *   „no policy", allein die Policy in 42501.
  * - `('member','planning.write')` in `role_permissions` eintragen: 9c5 wird
- *   NICHT rot — aber `eyt136-member-an.sql` wirft, weil die Praemisse des
- *   Nachweises fiele. Der Angriff wuerde vakuos, und das faellt VOR dem
- *   Angriff auf statt danach.
- * - Die Rueckgabe der Leihmitgliedschaft in 9c5 auslassen: der nachfolgende
- *   Nachweis „Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt"
- *   wird rot, weil Bs Sitzung dann eine Organisation nennt. Er ist damit die
- *   von aussen kommende Gegenprobe auf die Fixtur des Angriffsschritts.
+ *   rot — aber NICHT an einer Angriffszusicherung, sondern schon am
+ *   Praemissenwaechter in `eyt136-member-an.sql` (`raise exception`, noch vor
+ *   dem ersten Angriff). Genau so soll es sein: der Angriff waere damit vakuos
+ *   geworden, und das faellt VOR dem Angriff auf statt danach.
+ * - Die Rueckgabe der Leihmitgliedschaft in 9c5 auslassen: die Nachbedingung
+ *   in `eyt136-member-aus.sql` wirft (`leihe`/`b_gesamt` ungleich 0), und
+ *   `psqlMitMarker` macht daraus einen roten Schritt. DAS ist der primaere
+ *   Waechter. Sekundaer — und nur, wenn der Hauptnachweis sonst gruen bleibt —
+ *   wuerde auch „Benutzer B ist angemeldet, aber ohne Mitgliedschaft
+ *   ausgesperrt" rot, weil Bs Sitzung dann eine Organisation naennte.
  */
 
 // `__dirname`, nicht `import.meta.url`: Playwright laedt Konfiguration,
@@ -204,34 +207,93 @@ async function dataApiLese<T>(
   return (await antwort.json()) as T[];
 }
 
+/**
+ * Der Fehlerkoerper von PostgREST — `code` ist der durchgereichte SQLSTATE.
+ *
+ * Er ist das einzige, was von aussen die beiden RIEGEL unterscheidet, die 0017
+ * gesetzt hat. Beide melden 42501, aber mit verschiedener Meldung:
+ *
+ *   fehlendes Tabellenrecht  -> „permission denied for table …"
+ *   `with check`-Verletzung  -> „new row violates row-level security policy …"
+ *
+ * Ohne diese Unterscheidung koennte ein 403 aus einem DRITTEN Grund kommen und
+ * der Nachweis bliebe still gruen — und „welcher Riegel hat gehalten" ist die
+ * ganze Aussage von EYT-136.
+ */
+interface DataApiFehler {
+  readonly code: string;
+  readonly message: string;
+  readonly details: string;
+  readonly hint: string;
+}
+
 interface Angriffsergebnis {
   readonly status: number;
   readonly koerperLaenge: number;
   readonly zeilen: number;
+  /** Der geparste Fehlerkoerper, oder `null` bei einer Erfolgsantwort. */
+  readonly fehler: DataApiFehler | null;
+}
+
+/** Nimmt nur Zeichenketten an; PostgREST setzt `details`/`hint` oft auf null. */
+function alsText(wert: unknown): string {
+  return typeof wert === "string" ? wert : "";
 }
 
 /**
  * Ein Data-API-SCHREIBversuch, festgehalten statt geraten.
  *
  * Der Koerper wird genau EINMAL gelesen (`text()`) — ein zweiter Zugriff auf
- * denselben `APIResponse` kann fehlschlagen —, und die Zeilenzahl entsteht
- * daraus, nicht aus einem zweiten Aufruf. Die Laenge wandert in den Bericht,
- * damit im Artefakt nachlesbar ist, WAS PostgREST geantwortet hat und nicht
- * nur, dass es abgelehnt hat.
+ * denselben `APIResponse` kann fehlschlagen —, und sowohl die Zeilenzahl als
+ * auch der Fehlerkoerper entstehen daraus, nicht aus einem zweiten Aufruf.
+ *
+ * Jeder Versuch schreibt ausserdem eine greppbare Zeile ins CI-Log. Sie ist
+ * der Rohbefund, gegen den die Zusicherungen im Aufrufer geschrieben sind: wer
+ * sie spaeter aendert, sieht im Log, was gemessen wurde, statt raten zu
+ * muessen.
  *
  * Bewusst OHNE Statuszusicherung: die trifft der Aufrufer. `9c2` ist der
  * stehende Gegenbeleg dafuer, dass ein abgewehrter Data-API-Schreibzugriff
  * nicht zwingend einen Fehlerstatus traegt (dort: 200 mit leerer Menge).
  */
-async function dataApiSchreibversuch(aufruf: Promise<APIResponse>): Promise<Angriffsergebnis> {
+async function dataApiSchreibversuch(
+  name: string,
+  aufruf: Promise<APIResponse>,
+): Promise<Angriffsergebnis> {
   const antwort = await aufruf;
   const koerper = await antwort.text();
   let zeilen = 0;
-  if (antwort.ok() && koerper !== "") {
-    const geparst: unknown = JSON.parse(koerper);
-    zeilen = Array.isArray(geparst) ? geparst.length : 1;
+  let fehler: DataApiFehler | null = null;
+
+  if (antwort.ok()) {
+    if (koerper !== "") {
+      const geparst: unknown = JSON.parse(koerper);
+      zeilen = Array.isArray(geparst) ? geparst.length : 1;
+    }
+  } else if (koerper !== "") {
+    // Ein nicht-JSON-Koerper (etwa ein Proxy-Fehler) darf hier NICHT werfen:
+    // sonst stuerbe der Fall an der Diagnose statt an der Sache. `fehler`
+    // bleibt dann null, und die Zusicherung des Aufrufers auf `code` wird rot
+    // — laut, mit dem Rohkoerper im Log.
+    try {
+      const roh = JSON.parse(koerper) as Record<string, unknown>;
+      fehler = {
+        code: alsText(roh["code"]),
+        message: alsText(roh["message"]),
+        details: alsText(roh["details"]),
+        hint: alsText(roh["hint"]),
+      };
+    } catch {
+      fehler = null;
+    }
   }
-  return { status: antwort.status(), koerperLaenge: koerper.length, zeilen };
+
+  console.log(
+    `  [eyt136-riegel] ${name} status=${antwort.status()} laenge=${koerper.length} ` +
+      `code=${JSON.stringify(fehler?.code ?? null)} message=${JSON.stringify(fehler?.message ?? koerper.slice(0, 200))}`,
+  );
+
+  return { status: antwort.status(), koerperLaenge: koerper.length, zeilen, fehler };
 }
 
 function cookie(cookies: readonly Cookie[], name: string): Cookie {
@@ -761,13 +823,36 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       ownerRecht,
       "der Owner traegt planning.write nicht — der Kanalnachweis waere vakuos",
     ).toHaveLength(1);
+    // Diese beiden Lesezugriffe SIND `app.has_permission` — dieselbe
+    // Mitgliedschaft, dieselbe Rollenzuordnung, nur ueber As eigenes Token
+    // statt ueber die Funktion. Die Funktion selbst wird ebenfalls befragt,
+    // aber erst gleich in 9c5: `eyt136-member-an.sql` misst sie fuer BEIDE
+    // Reisenden ueber die Verwaltungsverbindung und verlangt
+    // `a_has_permission=t`. Hier fehlt sie also nicht, sie kommt spaeter.
+
+    // Nichtvakuositaet 3 — die Angriffswoche ist VORHER leer. Die Kontrolle
+    // danach (`toHaveLength(0)`) ist zwar strenger und kann nicht falsch gruen
+    // werden; eine vorbestehende Zeile ergaebe aber ein Rot mit falscher
+    // Begruendung.
+    const wocheUrlOwner = `${supabaseUrl}/rest/v1/plan_versions?week_key=eq.${ANGRIFFSWOCHE_OWNER}&select=id`;
+    expect(
+      await dataApiLese<{ id: string }>(request, wocheUrlOwner, kopf),
+      `${ANGRIFFSWOCHE_OWNER} ist vor dem Angriff nicht leer`,
+    ).toHaveLength(0);
 
     // Angriff 1 — eine Entwurfszuweisung in die ECHTE Planversion der Reise.
     // Dienstag derselben Woche, bewusst OHNE Ueberlappung mit der Fixtur: ein
     // Konflikt mit `assignments_no_published_overlap` liesse den Versuch
     // scheitern, ohne dass die Kanalgrenze etwas dazu beitraege — der Nachweis
     // waere gruen und wuerde den falschen Riegel messen.
+    //
+    // Die Nutzlast traegt EXAKT die sechs Spalten, die 0017 noch grantet
+    // (Z. 138-139) — `id` ist NICHT dabei. Das ist tragend: waere auch nur eine
+    // ungegrantete Spalte im Koerper, koennte das 403 aus dem fehlenden
+    // Spaltenrecht stammen, und 9c4 waere ein Grant-Nachweis statt eines
+    // KANAL-Nachweises. Nichts hier hinzufuegen.
     const insertZuweisung = await dataApiSchreibversuch(
+      "9c4/assignments-insert",
       request.post(`${supabaseUrl}/rest/v1/assignments`, {
         headers: { ...kopf, prefer: "return=representation" },
         data: {
@@ -798,8 +883,10 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     ).toBe(zuweisungenVorher.length);
 
     // Angriff 2 — eine ENTWURFS-Planversion, ganz ohne `published_at`. Genau
-    // die Form, die 0016 noch durchliess.
+    // die Form, die 0016 noch durchliess. Auch hier exakt die gegranteten
+    // Spalten `(org_id, week_key)` aus 0017 Z. 160, ohne `id`.
     const insertVersion = await dataApiSchreibversuch(
+      "9c4/plan_versions-insert",
       request.post(`${supabaseUrl}/rest/v1/plan_versions`, {
         headers: { ...kopf, prefer: "return=representation" },
         data: { org_id: ORG_ID, week_key: ANGRIFFSWOCHE_OWNER },
@@ -811,11 +898,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     ).toBe(403);
     expect(insertVersion.zeilen).toBe(0);
 
-    const wocheDanach = await dataApiLese<{ id: string }>(
-      request,
-      `${supabaseUrl}/rest/v1/plan_versions?week_key=eq.${ANGRIFFSWOCHE_OWNER}&select=id`,
-      kopf,
-    );
+    const wocheDanach = await dataApiLese<{ id: string }>(request, wocheUrlOwner, kopf);
     expect(
       wocheDanach,
       "PostgREST hat eine Entwurfs-Planversion angelegt — die Woche gehoert jetzt niemandem",
@@ -830,6 +913,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         koerperLaenge: insertZuweisung.koerperLaenge,
         angelegteZeilen: insertZuweisung.zeilen,
         erwarteterStatus: 403,
+        fehler: insertZuweisung.fehler,
       },
       plan_versions_insert_entwurf: {
         status: insertVersion.status,
@@ -837,6 +921,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         angelegteZeilen: insertVersion.zeilen,
         erwarteterStatus: 403,
         woche: ANGRIFFSWOCHE_OWNER,
+        fehler: insertVersion.fehler,
       },
       zuweisungen_unveraendert: zuweisungenDanach.length === zuweisungenVorher.length,
       hinweis: "EYT-136 — app.is_runtime_channel() in den Insert-Policies von 0017",
@@ -851,20 +936,6 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     const idB = pflicht("EASYTREE_JOURNEY_USER_B");
     const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
 
-    // Die Leihgabe: B bekommt fuer GENAU diesen Schritt eine aktive
-    // `member`-Mitgliedschaft. Kein neuer Benutzer — `auth.users` bleibt
-    // unberuehrt (PO-Vorgabe 08.08.2026), beide Reisenden stammen aus dem
-    // echten GoTrue-Signup. `psqlMitMarker` wirft, wenn die Markerzeile fehlt
-    // oder psql einen Fehler meldet; das ist der Lesenachweis nach dem
-    // Schreiben.
-    const an = psqlMitMarker(
-      verwaltung,
-      join(HIER, "eyt136-member-an.sql"),
-      ["-v", `benutzer_a=${benutzerId}`, "-v", `benutzer_b=${idB}`],
-      "[eyt136-member-an]",
-    );
-    console.log(`  ${an}`);
-
     // `catch` statt `finally`: ein `throw` im `finally` verwuerfe einen bereits
     // laufenden Fehler aus dem Fall — genau deshalb verbietet
     // `no-unsafe-finally` ihn. Eingefangen laeuft die Rueckgabe auf JEDEM Weg.
@@ -872,6 +943,27 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     // unterscheidbar bleibt.
     let fehlerAusFall: [unknown] | null = null;
     try {
+      // Die Leihgabe: B bekommt fuer GENAU diesen Schritt eine aktive
+      // `member`-Mitgliedschaft. Kein neuer Benutzer — `auth.users` bleibt
+      // unberuehrt (PO-Vorgabe 08.08.2026), beide Reisenden stammen aus dem
+      // echten GoTrue-Signup. `psqlMitMarker` wirft, wenn die Markerzeile fehlt
+      // oder psql einen Fehler meldet; das ist der Lesenachweis nach dem
+      // Schreiben.
+      //
+      // Dieser Aufruf steht INNERHALB des `try`, und das ist kein Stilentscheid:
+      // `eyt136-member-an.sql` committet die Zeile und prueft ihre
+      // Nachbedingung DANACH. Wirft die Nachbedingung, ist die Mitgliedschaft
+      // bereits geschrieben — stuende der Aufruf davor, liefe die Rueckgabe
+      // unten nie und die Leihgabe ueberlebte auf genau dem Weg, fuer den
+      // `eyt136-member-aus.sql` geschrieben wurde.
+      const an = psqlMitMarker(
+        verwaltung,
+        join(HIER, "eyt136-member-an.sql"),
+        ["-v", `benutzer_a=${benutzerId}`, "-v", `benutzer_b=${idB}`],
+        "[eyt136-member-an]",
+      );
+      console.log(`  ${an}`);
+
       const kopfB = await bearerKopf(request, supabaseUrl, anonKey, emailB, passwortB);
 
       // Vorbedingung 1 — das Token traegt, und die Leihgabe wirkt: B liest
@@ -918,9 +1010,20 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       const bestandVorher = (await dataApiLese<{ id: string }>(request, bestandUrl, kopfB)).length;
       expect(bestandVorher).toBeGreaterThanOrEqual(1);
 
-      // Angriff 1 — anlegen. Spaltenrechte bestehen, es scheitert die
-      // `with check`-Klausel (Kanal UND Recht fehlen beide).
+      // Vorbedingung 4 — die Angriffswoche ist VORHER leer (dieselbe
+      // Begruendung wie in 9c4: die Nachkontrolle koennte nicht falsch gruen
+      // werden, wohl aber falsch rot).
+      const wocheUrlMember = `${supabaseUrl}/rest/v1/plan_versions?week_key=eq.${ANGRIFFSWOCHE_MEMBER}&select=id`;
+      expect(
+        await dataApiLese<{ id: string }>(request, wocheUrlMember, kopfB),
+        `${ANGRIFFSWOCHE_MEMBER} ist vor dem Angriff nicht leer`,
+      ).toHaveLength(0);
+
+      // Angriff 1 — anlegen. Spaltenrechte bestehen (dieselben sechs Spalten
+      // wie in 9c4, ohne `id`), es scheitert die `with check`-Klausel: hier
+      // fehlen Kanal UND Recht.
       const insertZuweisung = await dataApiSchreibversuch(
+        "9c5/assignments-insert",
         request.post(`${supabaseUrl}/rest/v1/assignments`, {
           headers: { ...kopfB, prefer: "return=representation" },
           data: {
@@ -950,6 +1053,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       // ein fehlendes Tabellenrecht wirft, bevor ueberhaupt eine Zeile
       // ausgewaehlt wird.
       const patchZuweisung = await dataApiSchreibversuch(
+        "9c5/assignments-update",
         request.patch(`${supabaseUrl}/rest/v1/assignments?id=eq.${ZUWEISUNG_ID}`, {
           headers: { ...kopfB, prefer: "return=representation" },
           data: { starts_at_utc: "2026-08-03T04:00:00Z" },
@@ -962,6 +1066,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
 
       // Angriff 3 — loeschen. Dieselbe Zeile, dieselbe Begruendung.
       const deleteZuweisung = await dataApiSchreibversuch(
+        "9c5/assignments-delete",
         request.delete(`${supabaseUrl}/rest/v1/assignments?id=eq.${ZUWEISUNG_ID}`, {
           headers: { ...kopfB, prefer: "return=representation" },
         }),
@@ -971,8 +1076,10 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       );
       expect(deleteZuweisung.zeilen).toBe(0);
 
-      // Angriff 4 — eine eigene Entwurfs-Planversion.
+      // Angriff 4 — eine eigene Entwurfs-Planversion, wieder mit exakt den
+      // gegranteten Spalten `(org_id, week_key)`.
       const insertVersion = await dataApiSchreibversuch(
+        "9c5/plan_versions-insert",
         request.post(`${supabaseUrl}/rest/v1/plan_versions`, {
           headers: { ...kopfB, prefer: "return=representation" },
           data: { org_id: ORG_ID, week_key: ANGRIFFSWOCHE_MEMBER },
@@ -1008,11 +1115,12 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         "die Zielzeile wurde verschoben — PATCH ist durchgegangen",
       ).toBe(startVorher);
 
-      const wocheDanach = await dataApiLese<{ id: string }>(
-        request,
-        `${supabaseUrl}/rest/v1/plan_versions?week_key=eq.${ANGRIFFSWOCHE_MEMBER}&select=id`,
-        kopfB,
-      );
+      // ACHTUNG bei kuenftigen Umbauten: dieser Lesezugriff MUSS vor der
+      // Rueckgabe der Leihgabe stehen. Ohne Mitgliedschaft saehe B die Woche
+      // ohnehin nicht mehr, und „0 Zeilen" waere aus dem falschen Grund wahr.
+      // Heute schuetzt ihn nur seine Nachbarschaft: `bestandDanach` und
+      // `zielDanach` schluegen vorher fehl.
+      const wocheDanach = await dataApiLese<{ id: string }>(request, wocheUrlMember, kopfB);
       expect(wocheDanach, "der member hat eine Entwurfs-Planversion angelegt").toHaveLength(0);
 
       schritte["9c5_member_entwurfsschreiben"] = {
@@ -1025,18 +1133,21 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
           koerperLaenge: insertZuweisung.koerperLaenge,
           angelegteZeilen: insertZuweisung.zeilen,
           erwarteterStatus: 403,
+          fehler: insertZuweisung.fehler,
         },
         assignments_update: {
           status: patchZuweisung.status,
           koerperLaenge: patchZuweisung.koerperLaenge,
           geaenderteZeilen: patchZuweisung.zeilen,
           erwarteterStatus: 403,
+          fehler: patchZuweisung.fehler,
         },
         assignments_delete: {
           status: deleteZuweisung.status,
           koerperLaenge: deleteZuweisung.koerperLaenge,
           geloeschteZeilen: deleteZuweisung.zeilen,
           erwarteterStatus: 403,
+          fehler: deleteZuweisung.fehler,
         },
         plan_versions_insert_entwurf: {
           status: insertVersion.status,
@@ -1044,6 +1155,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
           angelegteZeilen: insertVersion.zeilen,
           erwarteterStatus: 403,
           woche: ANGRIFFSWOCHE_MEMBER,
+          fehler: insertVersion.fehler,
         },
         bestand_vorher: bestandVorher,
         bestand_danach: bestandDanach,
@@ -1054,7 +1166,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       fehlerAusFall = [e];
     }
 
-    let fehlerAusRueckgabe: unknown = null;
+    // Die Rueckgabe laeuft UNBEDINGT und ist idempotent: hat `an` gar nicht
+    // erst eingefuegt, loescht sie null Zeilen und ihre Nachbedingung trifft
+    // trotzdem zu. Sie steht ausserdem NACH den Wirkungskontrollen oben — ohne
+    // Mitgliedschaft saehe B die Zeilen nicht mehr, die dort geprueft werden.
+    let fehlerAusRueckgabe: [unknown] | null = null;
     try {
       const aus = psqlMitMarker(
         verwaltung,
@@ -1064,23 +1180,28 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       );
       console.log(`  ${aus}`);
     } catch (e) {
-      fehlerAusRueckgabe = e;
+      fehlerAusRueckgabe = [e];
     }
 
-    // Vorrang fuer den gefaehrlicheren Befund: ein gescheiterter Angriffs-
-    // nachweis kostet diesen Lauf, eine ueberlebende Mitgliedschaft macht den
-    // nachfolgenden Nachweis „B ist ausgesperrt" gruen-falsch. `cause` haengt
-    // den urspruenglichen Fehler an, statt ihn zu verschlucken.
-    if (fehlerAusRueckgabe !== null) {
-      const grund =
-        fehlerAusRueckgabe instanceof Error
-          ? fehlerAusRueckgabe.message
-          : String(fehlerAusRueckgabe);
-      throw new Error(
-        `[auth-journey] die geliehene member-Mitgliedschaft ist NICHT zurueckgegeben worden (EYT-136): ${grund}`,
-        fehlerAusFall === null ? undefined : { cause: fehlerAusFall[0] },
+    // Scheitern BEIDE, wird keiner der beiden zum Anhaengsel des anderen: ein
+    // `AggregateError` traegt sie gleichrangig, und der Reporter zeigt beide.
+    // Eine fruehere Fassung machte den Angriffsbefund zum `cause` der
+    // Aufraeummeldung — lesbar blieb dann nur die harmlosere Ueberschrift.
+    // (ES2022 ist das `target` in tsconfig.base.json, `AggregateError` steht
+    // also in `lib`.)
+    if (fehlerAusRueckgabe !== null && fehlerAusFall !== null) {
+      throw new AggregateError(
+        [fehlerAusRueckgabe[0], fehlerAusFall[0]],
+        "[auth-journey] EYT-136: die Rueckgabe der geliehenen member-Mitgliedschaft UND der " +
+          "Angriffsnachweis sind gescheitert. Beide Fehler stehen in `errors`; die ueberlebende " +
+          "Mitgliedschaft ist der dringendere Befund.",
       );
     }
+    // Einzeln gilt weiterhin der Vorrang des gefaehrlicheren Befunds: ein
+    // gescheiterter Angriffsnachweis kostet diesen Lauf, eine ueberlebende
+    // Mitgliedschaft macht den nachfolgenden Nachweis „B ist ausgesperrt"
+    // gruen-falsch.
+    if (fehlerAusRueckgabe !== null) throw fehlerAusRueckgabe[0];
     if (fehlerAusFall !== null) throw fehlerAusFall[0];
   });
 
@@ -1246,20 +1367,32 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
  *
  * Eigener Browserkontext: B darf nichts von As Sitzung erben.
  *
- * ## Zweite Aufgabe seit EYT-136: Gegenprobe auf die Leihgabe in 9c5
+ * ## Zweite Aufgabe seit EYT-136: SEKUNDAERE Gegenprobe auf die Leihgabe in 9c5
  *
  * Schritt 9c5 leiht B fuer seine Dauer eine aktive `member`-Mitgliedschaft und
  * gibt sie unmittelbar danach zurueck. Ueberlebte sie, naennte Bs Sitzung hier
- * eine Organisation und dieser Nachweis wuerde rot — er ist damit die von
- * aussen kommende Kontrolle darauf, dass die Fixtur des Angriffsschritts
- * wirklich abgeraeumt wurde. Dass er DANACH laeuft, folgt aus der
- * Deklarationsreihenfolge in dieser Datei plus `workers: 1` und
- * `fullyParallel: false` in `config.ts`.
+ * eine Organisation und dieser Nachweis wuerde rot.
  *
- * Der Teardown taugt dafuer NICHT: er loescht alle Mitgliedschaften der
+ * Die Rangfolge der Waechter, ehrlich benannt:
+ *
+ *  1. PRIMAER ist die Nachbedingung in `eyt136-member-aus.sql`
+ *     (`leihe`/`b_gesamt` muessen 0 sein): sie liest nach dem Loeschen nach,
+ *     und `psqlMitMarker` wirft, wenn ihr Marker fehlt oder psql einen Fehler
+ *     meldet. Sie greift im SELBEN Schritt, in dem die Leihgabe entstand.
+ *  2. SEKUNDAER ist dieser Nachweis — und er greift NUR, wenn der Hauptnachweis
+ *     sonst gruen bleibt. `test.describe.configure({ mode: "serial" })` weiter
+ *     oben laesst nachfolgende Faelle bei einem roten Vorgaenger naemlich
+ *     AUSFALLEN statt sie zu fahren. Ein roter Hauptnachweis SKIPPT diesen
+ *     hier, er faerbt ihn nicht rot. Er deckt also genau den Fall „Leihgabe
+ *     ueberlebt, waehrend alles andere gruen ist" — und den deckt er sicher.
+ *
+ * Dass er ueberhaupt DANACH laeuft, folgt aus der Deklarationsreihenfolge in
+ * dieser Datei plus `workers: 1` und `fullyParallel: false` in `config.ts`;
+ * das SKIP-Verhalten kommt dagegen allein aus dem `serial`-Modus.
+ *
+ * Der Teardown taugt als Waechter NICHT: er loescht alle Mitgliedschaften der
  * Organisation und zaehlt erst danach — eine ueberlebende Leihgabe wuerde dort
- * aufgeraeumt, nicht bemerkt. Die zweite Kontrolle ist deshalb die
- * Nachbedingung in `eyt136-member-aus.sql`.
+ * aufgeraeumt, nicht bemerkt.
  */
 test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({ browser }) => {
   const emailB = pflicht("EASYTREE_JOURNEY_EMAIL_B");
