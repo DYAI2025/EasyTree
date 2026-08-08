@@ -88,6 +88,21 @@ export {
 export type { EffectiveRateResult, RateEffectivityProblem } from "./domain/rate-effectivity";
 export type { RateVersionRecord as RateVersion } from "./domain/rate-version";
 
+// EYT-109: die Snapshot-Montage — Tagesallokation, Satzauswahl und Geldregel an
+// einer Naht. Sie steht hier, weil sie ausserhalb des Moduls gebraucht wird
+// (Use-Case und Test); ein tiefer Pfad daran vorbei waere eine Grenze, die nur
+// im Verzeichnisnamen existiert (Waechter `costs-cross-module-public-api-only`).
+export {
+  SNAPSHOT_ASSEMBLY_PROBLEMS,
+  assembleCostSnapshotPositions,
+} from "./domain/cost-snapshot-assembly";
+export type {
+  AssembledPosition,
+  SnapshotAssemblyInput,
+  SnapshotAssemblyProblem,
+  SnapshotAssemblyResult,
+} from "./domain/cost-snapshot-assembly";
+
 export { PgRateRepository } from "./infrastructure/rate-repository.pg";
 
 export { CostsController } from "./interface/http/costs.controller";
