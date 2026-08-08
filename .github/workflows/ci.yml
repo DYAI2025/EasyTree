@@ -279,6 +279,14 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/planning-write.integration.test.ts 2>&1 | tee /tmp/planning-write.log
           bash scripts/assert-tenant-report.sh planning-write /tmp/planning-write.log
+          # Der Kanal gehoert ins Protokoll, nicht in eine Behauptung — dieselbe
+          # Zusicherung wie beim Publish-Gate unten. Ohne diesen Grep waere die
+          # Kanalzeile nur innerhalb von vitest wirksam; hier wird sie auf
+          # Jobebene tragend.
+          grep -F '[planning-write] session_user=easytree_app current_user=authenticated runtime_channel=true' /tmp/planning-write.log
+          # EYT-136: und der Riegel, der bei fehlendem planning.write faellt.
+          grep -F '[planning-write] member-probe ziel=plan_versions kanal=true mandant_alpha=true recht_alpha=false recht_beta=true' /tmp/planning-write.log
+          grep -F '[planning-write] member-probe ziel=assignments kanal=true mandant_alpha=true recht_alpha=false recht_beta=true' /tmp/planning-write.log
       # EYT-107: das Veroeffentlichen. Wieder ein Schritt im BESTEHENDEN Job,
       # kein neuer Pflichtcheck.
       #

@@ -232,6 +232,52 @@ async function beobachte<TRow extends QueryResultRow>(
 }
 
 /**
+ * Verwaltende ANWEISUNG — ebenfalls ueber die Verwaltungsverbindung.
+ *
+ * Mechanisch dasselbe wie `beobachte`, und das ist Absicht: der Unterschied
+ * liegt in der AUSSAGE, nicht in der Faehigkeit. Wer liest, ruft `beobachte`;
+ * wer Stammdaten oder Fixtures setzt, ruft `verwalte`. Eine Funktion namens
+ * „beobachte" fuer ein `update` waere schlimmer als gar keine Regel — und ohne
+ * die zweite Haelfte bliebe `adminVerbindung()` roh im Umlauf, wo der naechste
+ * Lesezugriff sich dann wieder unbemerkt anschliesst. Zurueck kommt, was die
+ * Anweisung liefert, etwa aus einem `returning`.
+ */
+async function verwalte<TRow extends QueryResultRow = QueryResultRow>(
+  sql: string,
+  parameter: readonly unknown[] = [],
+): Promise<TRow[]> {
+  const ergebnis = await adminVerbindung().query<TRow>(sql, [...parameter]);
+  return ergebnis.rows;
+}
+
+/**
+ * Gegenprobe zum Spaltenrecht — fuer JEDE Spalte, die die Anweisung nennt.
+ *
+ * Eine Sonde auf nur einer Spalte schliesst die Mehrdeutigkeit nicht: waere
+ * etwa `insert (org_id)` entzogen, meldete PostgreSQL dasselbe 42501, und der
+ * Fall bliebe gruen, obwohl seine Begruendung nicht mehr traegt. Dieselbe
+ * Luecke steckt in `supabase/tests/0012_planning_data_api_boundary.sql`
+ * (:59, :69) — hier wiegt sie schwerer, weil die Faelle darauf ihre ganze
+ * Aussage stuetzen.
+ */
+async function alleSpaltenrechteVorhanden(
+  tabelle: string,
+  spalten: readonly string[],
+): Promise<void> {
+  for (const spalte of spalten) {
+    const recht = await beobachte<{ erlaubt: boolean }>(
+      `select has_column_privilege('authenticated'::name, $1::text, $2::text, 'INSERT'::text)
+                as erlaubt`,
+      [tabelle, spalte],
+    );
+    expect(
+      recht[0]?.erlaubt,
+      `authenticated fehlt das Insert-Recht auf ${tabelle}.${spalte} — 42501 waere mehrdeutig`,
+    ).toBe(true);
+  }
+}
+
+/**
  * Verbindung auf dem LAUFZEITKANAL (`easytree_app`) — dieselbe Loginrolle wie
  * API und Worker, und seit EYT-136 die einzige, ueber die ein Entwurf
  * ueberhaupt entstehen kann.
@@ -349,15 +395,22 @@ async function raeumeWoche(woche: string = WOCHE): Promise<void> {
  * Seine Seed-Zeile bleibt deshalb unangetastet, ebenso die Beta-Mitgliedschaft
  * von `USER_B`; diese Funktion FUEGT nur hinzu.
  *
- * Warum genau ein Fall und nicht die ganze Suite: `tenant-isolation` laeuft im
- * db-gates-Job vor dieser Datei, `tenant-pooling` danach — und letzteres prueft,
- * wer welche Organisation sieht. Die Mitgliedschaft darf deshalb keine Sekunde
- * laenger existieren als der Fall, der sie braucht. Das `finally` raeumt auch
- * nach einem geworfenen Fehler ab, und die Nachkontrolle glaubt dem DELETE
- * nicht, sondern sieht nach.
+ * Warum genau ein Fall und nicht die ganze Suite: das ist Vorsicht, nicht die
+ * Abwehr einer gemessenen Gefahr. Gemessen (08.08.2026) verwendet
+ * `tenant-pooling.integration.test.ts` ausschliesslich `USER_A` und `USER_C`,
+ * nie `USER_B` — heute wuerde eine ueberlebende Zeile dort also nichts
+ * verfaelschen. Der Job fuehrt die Mandantengates aber als eigene Schritte um
+ * diese Datei herum aus (`tenant-isolation` davor, `tenant-pooling` danach),
+ * und wer dort spaeter `USER_B` heranzieht, soll das tun koennen, ohne von
+ * dieser Datei zu wissen. Die Mitgliedschaft lebt deshalb nur so lange wie der
+ * Fall, der sie braucht.
+ *
+ * Aufgeraeumt wird auf JEDEM Weg — auch nach einem geworfenen Fehler —, und die
+ * Nachkontrolle glaubt dem DELETE nicht, sondern sieht nach. Wie das ohne
+ * `finally` geht, steht unten an der Stelle, wo es passiert.
  */
-async function mitGeliehenerMitgliedschaft<T>(fn: () => Promise<T>): Promise<T> {
-  await adminVerbindung().query(
+async function mitGeliehenerMitgliedschaft(fn: () => Promise<void>): Promise<void> {
+  await verwalte(
     `insert into public.memberships (id, org_id, user_id, role, active)
      values ($1, $2, $3, 'member', true)`,
     [MITGLIEDSCHAFT_GELIEHEN, ORG_ALPHA, USER_B],
@@ -368,8 +421,11 @@ async function mitGeliehenerMitgliedschaft<T>(fn: () => Promise<T>): Promise<T> 
   // Fassung im Lauf 31230613284 gescheitert. Eingefangen statt durchgereicht
   // laeuft das Aufraeumen auf JEDEM Weg, die Nachkontrolle ebenso, und beide
   // Fehler bleiben unterscheidbar.
+  //
+  // Der Fehler liegt in einem Tupel und nicht nackt in der Variablen: `fn` ist
+  // von aussen hereingereicht, und ein nacktes `let fehler: unknown = null`
+  // koennte „kein Fehler" nicht von „hat `null` geworfen" unterscheiden.
   let fehlerAusFall: [unknown] | null = null;
-  let ergebnis: T | undefined;
   try {
     // Die Leihe hat gewirkt — gemessen, nicht angenommen. Ohne diese Kontrolle
     // koennte eine unwirksame Mitgliedschaft den Fall gruen lassen, waehrend in
@@ -380,32 +436,32 @@ async function mitGeliehenerMitgliedschaft<T>(fn: () => Promise<T>): Promise<T> 
     );
     expect(stand[0]?.role, "die geliehene Mitgliedschaft traegt die falsche Rolle").toBe("member");
     expect(stand[0]?.active, "die geliehene Mitgliedschaft ist nicht aktiv").toBe(true);
-    ergebnis = await fn();
+    await fn();
   } catch (e) {
     fehlerAusFall = [e];
   }
 
-  await adminVerbindung().query("delete from public.memberships where id = $1", [
-    MITGLIEDSCHAFT_GELIEHEN,
-  ]);
+  await verwalte("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_GELIEHEN]);
   const rest = await beobachte<{ n: string }>(
     "select count(*) as n from public.memberships where id = $1",
     [MITGLIEDSCHAFT_GELIEHEN],
   );
   // Vorrang fuer den gefaehrlicheren Befund: ein fehlgeschlagener Fall kostet
   // diesen Lauf, eine ueberlebende Mitgliedschaft verfaelscht spaetere
-  // Mandantengates im selben Job.
+  // Mandantengates im selben Job. `cause` haengt den urspruenglichen Fehler an,
+  // statt ihn zu verschlucken — sonst berichtete ein doppelt gescheiterter Lauf
+  // nur das Aufraeumproblem und verloere den Grund.
   if (rest[0]?.n !== "0") {
     throw new Error(
       "[planning-write] die geliehene Mitgliedschaft ist NICHT entfernt worden — " +
         "spaetere Mandantengates wuerden auf einem falschen Zustand messen (EYT-136).",
+      fehlerAusFall === null ? undefined : { cause: fehlerAusFall[0] },
     );
   }
   if (fehlerAusFall !== null) throw fehlerAusFall[0];
-  return ergebnis as T;
 }
 
-/** Die drei Konjunkte der Insert-Policies aus Migration 0017, einzeln gemessen. */
+/** Die SITZUNGSABHAENGIGEN Konjunkte der Insert-Policies aus 0017, einzeln gemessen. */
 type KonjunktSonde = {
   kanal: boolean;
   mandant_alpha: boolean;
@@ -419,8 +475,15 @@ type KonjunktSonde = {
  *
  * Ohne diese Sonde ist ein 42501 mehrdeutig: fehlendes Spaltenrecht, fehlender
  * Mandant und fehlendes Recht melden denselben Code, und die Meldung nennt nur
- * die Tabelle, nie den Riegel. Danach ist genau ein Konjunkt falsch, und es ist
- * benannt.
+ * die Tabelle, nie den Riegel. Danach ist von den sitzungsabhaengigen
+ * Bedingungen genau eine falsch, und sie ist benannt.
+ *
+ * Was diese Sonde NICHT misst: `plan_versions_insert_in_org` traegt seit 0017
+ * einen vierten Konjunkt, `published_at is null`. Der haengt an der ZEILE und
+ * nicht an der Sitzung, laesst sich hier also nicht abfragen. Er ist
+ * strukturell erfuellt — die Anweisung nennt die Spalte gar nicht, es gilt der
+ * Vorgabewert NULL —, und genau deshalb bleibt die Aussage „nur das Recht
+ * fehlt" tragfaehig, ohne dass die Sonde ihn beruehrt.
  *
  * `recht_beta` ist die Gegenprobe zur Sonde selbst: `USER_B` ist Owner in BETA
  * und traegt `planning.write` DORT. Antwortete die Sonde schlicht auf alles mit
@@ -454,14 +517,26 @@ async function konjunkteAlsMitglied(client: Client, ziel: string): Promise<void>
   expect(sonde.recht_beta, "die Sonde antwortet auf alles mit false und misst nichts").toBe(true);
 }
 
-function dbIt(name: string, fn: () => Promise<void>): void {
-  it(name, async (ctx) => {
-    if (!dbAvailable) {
-      gate.markSkipped();
-      ctx.skip(`SKIPPED: Supabase-Postgres unter ${DB_URL} nicht erreichbar.`);
-    }
-    await gate.run(fn);
-  });
+/**
+ * `zeitlimitMs` ist optional und wird nur dort gesetzt, wo ein Fall spuerbar
+ * mehr Runden dreht als die uebrigen. Die Vorgabe von vitest sind 5000 ms
+ * (`apps/api/vitest.config.ts` setzt kein `testTimeout`); die beiden
+ * Rechte-Faelle machen ueber zwei Verbindungen mehr als ein Dutzend
+ * Round-Trips, und ein Abbruch mittendrin liesse die geliehene Mitgliedschaft
+ * stehen — siehe `mitGeliehenerMitgliedschaft`.
+ */
+function dbIt(name: string, fn: () => Promise<void>, zeitlimitMs?: number): void {
+  it(
+    name,
+    async (ctx) => {
+      if (!dbAvailable) {
+        gate.markSkipped();
+        ctx.skip(`SKIPPED: Supabase-Postgres unter ${DB_URL} nicht erreichbar.`);
+      }
+      await gate.run(fn);
+    },
+    zeitlimitMs,
+  );
 }
 
 beforeAll(async () => {
@@ -486,6 +561,13 @@ beforeAll(async () => {
   }
 
   await neueAdminVerbindung();
+  // Rest einer geliehenen Mitgliedschaft aus einem abgebrochenen Lauf.
+  // `memberships` traegt `unique (org_id, user_id)` (0002): ohne dieses
+  // Aufraeumen scheiterte das Anlegen im ersten Rechte-Fall an 23505, und weil
+  // das Insert VOR dem try steht, liefe danach auch das Loeschen nicht mehr —
+  // der Rest bliebe bis zum naechsten `db reset` liegen und truege sich selbst
+  // fort. Idempotent, also im Normalfall ein No-op.
+  await verwalte("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_GELIEHEN]);
   await raeumeWoche();
 });
 
@@ -501,9 +583,12 @@ afterAll(async () => {
     ]) {
       await raeumeWoche(woche);
     }
-    // Die geliehene Mitgliedschaft wird NICHT hier abgeraeumt: sie lebt und
-    // stirbt innerhalb ihres Falls (siehe mitGeliehenerMitgliedschaft). Ein
-    // Aufraeumen erst hier waere zu spaet — dazwischen laufen weitere Faelle.
+    // NETZ, nicht Primaeraufraeumen: die geliehene Mitgliedschaft lebt und
+    // stirbt innerhalb ihres Falls (siehe mitGeliehenerMitgliedschaft), und
+    // erst hier abzuraeumen waere zu spaet — dazwischen laufen weitere Faelle.
+    // Faellt ein Fall aber per Zeitlimit mitten im Flug aus, ist dies die
+    // letzte Gelegenheit innerhalb dieses Prozesses.
+    await admin.query("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_GELIEHEN]);
     // Die selbst angelegte Person wieder entfernen — sonst waechst der
     // Bestand mit jedem Lauf, und die naechste Suite zaehlt anders.
     await admin.query("delete from public.employees where id = $1", [EMPLOYEE_ALPHA_2]);
@@ -864,9 +949,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     // Stammdaten umschalten gehoert zur Beobachterseite: der Laufzeitkanal ist
     // ausserhalb von `runnerAuf` rechtlos (NOINHERIT, Migration 0003), und ein
     // `update public.employees` von dort endete in `permission denied`.
-    await adminVerbindung().query("update public.employees set active = false where id = $1", [
-      EMPLOYEE_ALPHA,
-    ]);
+    await verwalte("update public.employees set active = false where id = $1", [EMPLOYEE_ALPHA]);
     try {
       const zweit = await repo.createAssignment(eingabe);
       expect(zweit.ok).toBe(true);
@@ -874,9 +957,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
       expect(zweit.assignment.id).toBe(erst.assignment.id);
       expect(zweit.replayed).toBe(true);
     } finally {
-      await adminVerbindung().query("update public.employees set active = true where id = $1", [
-        EMPLOYEE_ALPHA,
-      ]);
+      await verwalte("update public.employees set active = true where id = $1", [EMPLOYEE_ALPHA]);
     }
   });
 
@@ -1074,15 +1155,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
   dbIt(
     "ein aktives Mitglied ohne planning.write legt ueber den Laufzeitkanal keine Planversion an",
     async () => {
+      await raeumeWoche(WOCHE_RECHT_VERSION);
       await mitGeliehenerMitgliedschaft(async () => {
         // Gegenprobe zum Spaltenrecht, in derselben Bauart wie A3 in
-        // supabase/tests/0012_planning_data_api_boundary.sql: waere das
-        // Insert-Recht entzogen, meldete PostgreSQL denselben Code 42501, und
-        // die Ablehnung sagte nichts ueber die Policy aus.
-        const rechte = await beobachte<{ v1: boolean }>(
-          `select has_column_privilege('authenticated','public.plan_versions','week_key','INSERT') as v1`,
-        );
-        expect(rechte[0]?.v1, "ohne Insert-Spaltenrecht waere 42501 mehrdeutig").toBe(true);
+        // supabase/tests/0012_planning_data_api_boundary.sql — aber ueber ALLE
+        // Spalten, die die Anweisung unten nennt.
+        await alleSpaltenrechteVorhanden("public.plan_versions", ["org_id", "week_key"]);
 
         const client = await neueVerbindung();
         await konjunkteAlsMitglied(client, "plan_versions");
@@ -1101,6 +1179,14 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
 
         expect(fehler, "das Mitglied konnte eine Planversion anlegen").not.toBeNull();
         expect(fehler?.code).toBe("42501");
+        // Der Code allein trennt die beiden 42501-Familien nicht: ein
+        // fehlendes Spaltenrecht meldet „permission denied for …", eine
+        // verletzte `with check`-Klausel „new row violates row-level security
+        // policy for table …". Erst der Text sagt, welcher Riegel gefallen ist.
+        // Kein neues Sprachrisiko: dieselbe Zeichenkette steht schon in
+        // supabase/tests/0002_rls_isolation.sql (:56, :66, :147) und
+        // 0004_core_domain.sql (:114, :122, :130).
+        expect(fehler?.message).toContain("row-level security policy");
 
         const danach = await beobachte<{ n: string }>(
           "select count(*) as n from public.plan_versions where org_id = $1 and week_key = $2",
@@ -1109,6 +1195,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         expect(danach[0]?.n, "trotz Fehler ist eine Planversion entstanden").toBe("0");
       });
     },
+    30_000,
   );
 
   /**
@@ -1137,20 +1224,24 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     "ein aktives Mitglied ohne planning.write haengt auch in einen Entwurf keine Zuweisung",
     async () => {
       await raeumeWoche(WOCHE_RECHT_ZUWEISUNG);
-      const entwurf = await adminVerbindung().query<{ id: string }>(
+      const entwurf = await verwalte<{ id: string }>(
         "insert into public.plan_versions (org_id, week_key) values ($1, $2) returning id",
         [ORG_ALPHA, WOCHE_RECHT_ZUWEISUNG],
       );
-      const versionId = entwurf.rows[0]?.id;
+      const versionId = entwurf[0]?.id;
       if (versionId === undefined) {
         throw new Error("[planning-write] Entwurfsversion liess sich nicht anlegen.");
       }
 
       await mitGeliehenerMitgliedschaft(async () => {
-        const rechte = await beobachte<{ v1: boolean }>(
-          `select has_column_privilege('authenticated','public.assignments','starts_at_utc','INSERT') as v1`,
-        );
-        expect(rechte[0]?.v1, "ohne Insert-Spaltenrecht waere 42501 mehrdeutig").toBe(true);
+        await alleSpaltenrechteVorhanden("public.assignments", [
+          "org_id",
+          "plan_version_id",
+          "employee_id",
+          "worksite_id",
+          "starts_at_utc",
+          "ends_at_utc",
+        ]);
 
         const client = await neueVerbindung();
         await konjunkteAlsMitglied(client, "assignments");
@@ -1181,6 +1272,9 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         // gewesen, und die Policy bliebe ungemessen.
         expect(fehler, "das Mitglied konnte eine Zuweisung anlegen").not.toBeNull();
         expect(fehler?.code).toBe("42501");
+        // Wie oben: der Text trennt die verletzte Policy vom fehlenden
+        // Spaltenrecht, was der Code allein nicht kann.
+        expect(fehler?.message).toContain("row-level security policy");
 
         const danach = await beobachte<{ n: string }>(
           "select count(*) as n from public.assignments where plan_version_id = $1",
@@ -1189,5 +1283,6 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         expect(danach[0]?.n, "trotz Fehler ist eine Zuweisung entstanden").toBe("0");
       });
     },
+    30_000,
   );
 });
