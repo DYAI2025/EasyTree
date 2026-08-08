@@ -83,16 +83,21 @@ describe("Wochenschluessel: jahresabhaengige 53. Woche", () => {
 });
 
 /**
- * Alle fuenf oeffentlichen weekKey-Stellen tragen DIESELBE Regel (EYT-88).
+ * Alle sieben oeffentlichen weekKey-Stellen tragen DIESELBE Regel (EYT-88).
  *
  * Zuvor stand an fuenf Stellen ein eigener regulaerer Ausdruck, und nur einer
  * davon kannte die Kalenderregel. `2025-W53` waere ueber die Leseabfrage
  * abgelehnt und ueber das Publish-Kommando angenommen worden — dieselbe Woche,
  * zwei Urteile.
  *
- * Tabellengetrieben, damit eine sechste Stelle nicht durchrutscht: wer ein
+ * Tabellengetrieben, damit eine weitere Stelle nicht durchrutscht: wer ein
  * Schema hinzufuegt und hier nicht eintraegt, hat keine Abdeckung — und wer es
  * eintraegt, aber `IsoWeekKeySchema` nicht verwendet, wird rot.
+ *
+ * Die Stellen sechs und sieben kamen mit EYT-109 aus dem Kostenbereich dazu.
+ * Sie stehen hier und nicht nur in `costs-snapshot-schemas.test.ts`, weil die
+ * dortige Zusicherung nur `2026-W54` prueft — das faengt schon das Muster. Erst
+ * `2025-W53` aus VEKTOREN unten trennt die Kalenderregel vom blossen Bereich.
  */
 import {
   PlanningWindowQuerySchema,
@@ -102,11 +107,15 @@ import {
   ValidatePlanCommandSchema,
 } from "../src/planning/schemas.js";
 
+import { CostSnapshotSchema, PublishedPlanVersionDtoSchema } from "../src/costs/schemas.js";
+
 const VERSION_ID = "00000000-0000-4000-8000-0000006010a1";
 const INSTANT = "2026-08-03T06:00:00.000Z";
 const INSTANT_SPAETER = "2026-08-03T14:00:00.000Z";
 const EMPLOYEE_ID = "00000000-0000-4000-8000-0000004010a1";
 const WORKSITE_ID = "00000000-0000-4000-8000-0000005010a1";
+const SNAPSHOT_ID = "00000000-0000-4000-8000-0000007010a1";
+const USER_ID = "00000000-0000-4000-8000-0000008010a1";
 
 /** Je Schema ein minimal gueltiger Rumpf, in den der Wochenschluessel eingesetzt wird. */
 const STELLEN: ReadonlyArray<{
@@ -158,6 +167,30 @@ const STELLEN: ReadonlyArray<{
       assignmentIds: [],
     }),
   },
+  {
+    name: "CostSnapshotSchema",
+    schema: CostSnapshotSchema,
+    baue: (weekKey) => ({
+      id: SNAPSHOT_ID,
+      planVersionId: VERSION_ID,
+      worksiteId: null,
+      weekKey,
+      timeZone: "Europe/Berlin",
+      currency: "EUR",
+      ruleVersion: "personnel-plan-cost-v1",
+      createdAt: INSTANT,
+      createdBy: USER_ID,
+      correlationId: "eyt-109",
+      totalMinorUnits: "0",
+      days: [],
+      positions: [],
+    }),
+  },
+  {
+    name: "PublishedPlanVersionDtoSchema",
+    schema: PublishedPlanVersionDtoSchema,
+    baue: (weekKey) => ({ id: VERSION_ID, weekKey, publishedAt: INSTANT }),
+  },
 ];
 
 const VEKTOREN = [
@@ -169,8 +202,8 @@ const VEKTOREN = [
 ] as const;
 
 describe("alle oeffentlichen weekKey-Stellen tragen dieselbe Regel", () => {
-  it("deckt alle fuenf Stellen ab — sonst misst diese Tabelle zu wenig", () => {
-    expect(STELLEN).toHaveLength(5);
+  it("deckt alle sieben Stellen ab — sonst misst diese Tabelle zu wenig", () => {
+    expect(STELLEN).toHaveLength(7);
   });
 
   for (const stelle of STELLEN) {

@@ -131,21 +131,38 @@ export type { HttpAuthGatewayOptions } from "./http/auth-gateway.js";
 
 // EYT-108 ff.: Kostenbereich. Betraege reisen als Minor-Unit-String, nie Float;
 // Versionen sind unveraenderlich, es gibt kein Update-Kommando.
+//
+// Achtung auf zwei aehnliche Namen: `PublishedPlanVersionSchema` (Planung, oben)
+// ist die ANTWORT auf ein Veroeffentlichungskommando mit ihren Einsatz-Ids;
+// `PublishedPlanVersionDtoSchema` hier ist der duenne Eintrag der Auswahlliste
+// von `/kosten` (EYT-109).
 export {
   BusinessDateSchema,
+  CostDayTotalSchema,
+  CostPositionDtoSchema,
+  CostSnapshotSchema,
+  CreateCostSnapshotCommandSchema,
   CreateRateVersionCommandSchema,
   EmployeeForRatesDtoSchema,
   EmployeesForRatesSchema,
   MinorUnitsSchema,
+  PublishedPlanVersionDtoSchema,
+  PublishedPlanVersionsSchema,
   RATE_VERSION_STATUS,
   RateHistorySchema,
   RateVersionDtoSchema,
   RateVersionStatusSchema,
 } from "./costs/schemas.js";
 export type {
+  CostDayTotal,
+  CostPositionDto,
+  CostSnapshot,
+  CreateCostSnapshotCommand,
   CreateRateVersionCommand,
   EmployeeForRatesDto,
   EmployeesForRates,
+  PublishedPlanVersionDto,
+  PublishedPlanVersions,
   RateHistory,
   RateVersionDto,
   RateVersionStatus,

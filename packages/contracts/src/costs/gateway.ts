@@ -9,8 +9,11 @@
 import type { GatewayResult } from "../gateway.js";
 import type { WriteOptions } from "../planning/gateway.js";
 import type {
+  CostSnapshot,
+  CreateCostSnapshotCommand,
   CreateRateVersionCommand,
   EmployeesForRates,
+  PublishedPlanVersions,
   RateHistory,
   RateVersionDto,
 } from "./schemas.js";
@@ -25,4 +28,16 @@ export interface CostsGateway {
     command: CreateRateVersionCommand,
     options: WriteOptions,
   ): Promise<GatewayResult<RateVersionDto>>;
+  /** Veroeffentlichte Planversionen im Wochenbereich — die Auswahlliste von `/kosten`. */
+  publishedPlanVersions(
+    fromWeekKey: string,
+    toWeekKey: string,
+  ): Promise<GatewayResult<PublishedPlanVersions>>;
+  /** Erzeugt einen unveraenderlichen Snapshot. Pflicht-Idempotenzschluessel wie jeder Write. */
+  createSnapshot(
+    command: CreateCostSnapshotCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<CostSnapshot>>;
+  /** Liest einen GESPEICHERTEN Snapshot. Rechnet nichts neu. */
+  snapshot(snapshotId: string): Promise<GatewayResult<CostSnapshot>>;
 }

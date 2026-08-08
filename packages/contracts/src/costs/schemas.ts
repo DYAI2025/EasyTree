@@ -17,6 +17,8 @@
  */
 import { z } from "zod";
 
+import { IsoWeekKeySchema } from "../planning/schemas.js";
+
 import { IdSchema, InstantSchema } from "../primitives.js";
 
 /** Betrag in Minor Units (Cent) als dezimaler String, nie Float. */
@@ -85,3 +87,86 @@ export const CreateRateVersionCommandSchema = z.strictObject({
   expectedActiveVersionId: IdSchema.nullable(),
 });
 export type CreateRateVersionCommand = z.infer<typeof CreateRateVersionCommandSchema>;
+
+// ---------------------------------------------------------------------------
+// Der gespeicherte Tageskosten-Snapshot (EYT-109) — Positionen, Tagessummen und
+// der Kopf, der sie zusammenhält.
+//
+// Ein Snapshot ist eine Momentaufnahme, kein Bericht: er wird EINMAL aus einer
+// veröffentlichten Planversion berechnet und danach nur noch gelesen. Deshalb
+// reisen `timeZone` und `ruleVersion` mit — ohne sie wäre später nicht mehr
+// entscheidbar, nach welcher Zonen- und Rechenregel die Tagesgrenzen gezogen
+// wurden, und ein Export (EYT-110) zeigte Zahlen ohne nachvollziehbare
+// Herkunft. Es gibt aus demselben Grund kein Update-Kommando.
+// ---------------------------------------------------------------------------
+
+/** Ein Kostenanteil einer Person an einem lokalen Kalendertag. */
+export const CostPositionDtoSchema = z.strictObject({
+  id: IdSchema,
+  assignmentId: IdSchema,
+  worksiteId: IdSchema,
+  worksiteLabel: z.string().min(1),
+  employeeId: IdSchema,
+  employeeLabel: z.string().min(1),
+  /** Lokaler Leistungstag in der Zone der Organisation. */
+  localDate: BusinessDateSchema,
+  /**
+   * Anteil an diesem lokalen Tag, in Millisekunden — als String, nie als Zahl.
+   *
+   * Dasselbe Schema wie ein Betrag, weil dieselbe Regel gilt: eine reine
+   * Ziffernfolge, die an der Naht zu `bigint` wird. Ein eigener `^\d+$` wäre
+   * ein zweiter Ausdruck für dieselbe Aussage.
+   */
+  durationMilliseconds: MinorUnitsSchema,
+  rateVersionId: IdSchema,
+  amountMinorUnits: MinorUnitsSchema,
+});
+export type CostPositionDto = z.infer<typeof CostPositionDtoSchema>;
+
+/** Tagessumme — vorberechnet, damit die UI nicht selbst addiert. */
+export const CostDayTotalSchema = z.strictObject({
+  localDate: BusinessDateSchema,
+  worksiteId: IdSchema,
+  amountMinorUnits: MinorUnitsSchema,
+});
+export type CostDayTotal = z.infer<typeof CostDayTotalSchema>;
+
+export const CostSnapshotSchema = z.strictObject({
+  id: IdSchema,
+  planVersionId: IdSchema,
+  /** Baustellenfilter, mit dem der Snapshot entstand. `null` = alle Baustellen. */
+  worksiteId: IdSchema.nullable(),
+  /** Siehe {@link IsoWeekKeySchema} — die eine geprüfte Wochenregel (EYT-88). */
+  weekKey: IsoWeekKeySchema,
+  /** IANA-Zone, nach der die lokalen Tage abgegrenzt wurden. Festgehalten, nicht geraten. */
+  timeZone: z.string().min(1),
+  currency: z.literal("EUR"),
+  /** Rechenregel, nach der die Positionen entstanden — macht den Betrag nachvollziehbar. */
+  ruleVersion: z.literal("personnel-plan-cost-v1"),
+  createdAt: InstantSchema,
+  createdBy: IdSchema,
+  correlationId: z.string().min(1),
+  totalMinorUnits: MinorUnitsSchema,
+  days: z.array(CostDayTotalSchema),
+  positions: z.array(CostPositionDtoSchema),
+});
+export type CostSnapshot = z.infer<typeof CostSnapshotSchema>;
+
+export const CreateCostSnapshotCommandSchema = z.strictObject({
+  publishedPlanVersionId: IdSchema,
+  /** Optionaler Baustellenfilter desselben Mandanten. `null` = alle Baustellen. */
+  worksiteId: IdSchema.nullable(),
+});
+export type CreateCostSnapshotCommand = z.infer<typeof CreateCostSnapshotCommandSchema>;
+
+export const PublishedPlanVersionDtoSchema = z.strictObject({
+  id: IdSchema,
+  weekKey: IsoWeekKeySchema,
+  publishedAt: InstantSchema,
+});
+export type PublishedPlanVersionDto = z.infer<typeof PublishedPlanVersionDtoSchema>;
+
+export const PublishedPlanVersionsSchema = z.strictObject({
+  versions: z.array(PublishedPlanVersionDtoSchema),
+});
+export type PublishedPlanVersions = z.infer<typeof PublishedPlanVersionsSchema>;
