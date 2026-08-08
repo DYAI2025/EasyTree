@@ -485,10 +485,21 @@ Erwartet: FAIL — `CostSnapshotSchema` existiert nicht.
 
 **Schritt 3: Schemata ergänzen**
 
-An `packages/contracts/src/costs/schemas.ts` anhängen. `WeekKeySchema` aus
+An `packages/contracts/src/costs/schemas.ts` anhängen. Den vorhandenen Wochenschlüssel aus
 `../planning/schemas.js` wiederverwenden (**nicht** neu bauen — EYT-88 hat den
-`^\d{4}-W\d{2}$`-Fehler dort bereits einmal gekostet; den vorhandenen, deterministisch validierenden
-Schlüssel importieren).
+`^\d{4}-W\d{2}$`-Fehler dort bereits einmal gekostet).
+
+> **Korrektur, gemessen 08.08.2026:** Der Export heißt **`IsoWeekKeySchema`**
+> (`packages/contracts/src/planning/schemas.ts:104`), nicht `WeekKeySchema`. Er trägt neben dem
+> Muster ein `.refine(isValidIsoWeekKey)` und damit die Kalenderregel — `2025-W53` fällt nur an
+> dieser Prüfung, nicht am Muster.
+>
+> **Pflicht, sonst ist die Kalenderregel unbewiesen:** Jedes neue Schema mit einem `weekKey` muss
+> als Zeile in `STELLEN` in `packages/contracts/test/iso-week-key.test.ts` eingetragen und
+> `expect(STELLEN).toHaveLength(n)` mitgezogen werden. Der Wächter merkt eine ausgelassene Zeile
+> **nicht** von selbst. Gemessen: ohne die Registrierung bleiben alle 125 Tests grün, während die
+> Kalenderregel aus den Kostenschemata verschwindet. Betrifft in diesem Plan Task 1 (erledigt,
+> Stellen 6 und 7) und jede spätere Task, die ein `weekKey`-Schema anlegt.
 
 ```ts
 /** Ein Kostenanteil einer Person an einem lokalen Kalendertag. */
@@ -592,11 +603,36 @@ git commit -m "feat(contracts): EYT-109 — Snapshot- und Planversionsschemata"
 
 ## Task 2: Contract — HTTP-Gateway und OpenAPI
 
+> **Task 2 ist blockierend, nicht bloß der nächste Schritt.** Nach Task 1 erfüllt
+> `HttpCostsGateway` das erweiterte `CostsGateway` nicht mehr (TS2420); `@easytree/contracts#build`
+> scheitert, turbo hält an, und **kein Downstream-Paket kann typechecken oder testen**, bis Task 2
+> landet. Gemessen 08.08.2026 auf `7be8ebb`: genau ein Fehler in `contracts`, zwei Folgefehler in
+> `apps/web`.
+
 **Dateien:**
 - Ändern: `packages/contracts/src/http/costs-gateway.ts`
-- Ändern: `packages/contracts/src/openapi/document.ts`
+- Ändern: `packages/contracts/src/openapi/document.ts` (**beides**: `NAMED_SCHEMAS` **und** `paths`)
 - Ändern: `packages/contracts/openapi/v1.json` (**generiert**)
+- Ändern: `apps/web/test/rate-management.test.tsx` (`gatewayMit` bei `:86` ist als `CostsGateway`
+  deklariert und jetzt strukturell unvollständig, TS2739)
 - Test: `packages/contracts/test/costs-gateway.contract.test.ts` (vorhanden erweitern oder neu)
+
+`apps/web/lib/costs-gateway-factory.ts:13` ist ebenfalls rot, klärt sich aber von selbst, sobald
+`HttpCostsGateway` wieder vollständig ist — keine eigene Änderung nötig, nur nach dem Fix messen.
+
+> **Vollständige Implementorenliste, gemessen** (`HttpCostsGateway`, `gatewayMit`): mehr gibt es
+> nicht. Kein Mock-Gateway in `packages/contracts/src/mock/` oder `src/testing/`, keine Referenz in
+> `apps/api`. Wer hier etwas hinzufügt, ergänzt diese Liste.
+
+> **Korrektur zu Schritt 4, gemessen 08.08.2026:** Ein neues Schema bewegt `v1.json` **nicht** von
+> allein, und der Drift-Test wird davon **nicht** rot. `packages/contracts/src/openapi/document.ts`
+> baut das Dokument aus einer handgeschriebenen Registrierung
+> `const NAMED_SCHEMAS = { … } as const satisfies Record<string, z.ZodType>` (heute 24 Einträge,
+> iteriert weiter unten). Was dort nicht steht, erreicht `v1.json` nie. Nach Task 1 ist
+> `git diff b44e38c -- packages/contracts/openapi/v1.json` **leer** und der Drift-Test grün.
+> Task 2 muss deshalb die neuen Schemata **in `NAMED_SCHEMAS` eintragen UND die drei Pfade
+> ergänzen** — sonst schickt der Vertrag stillschweigend eine Route ohne Schema, und der
+> Konformitätstest in Task 13 fällt erst viel später darüber.
 
 **Schritt 1: Roten Test schreiben**
 
@@ -626,11 +662,26 @@ git diff --stat packages/contracts/openapi/v1.json
 
 `v1.json` **niemals** von Hand editieren. Der Drift-Test vergleicht byteweise.
 
-**Schritt 5: Committen**
+Der `git diff --stat` ist hier die eigentliche Messung: bleibt er **leer**, sind die Schemata nicht
+in `NAMED_SCHEMAS` angekommen und die Arbeit ist nicht getan — auch wenn alle Tests grün sind.
+
+**Schritt 5: Ganzen Baum wieder gruen bekommen**
+
+Task 2 ist die Task, die den Build repariert. Deshalb hier vollständig messen, nicht nur das eigene
+Paket:
+
+```bash
+pnpm --filter @easytree/contracts exec tsc -p tsconfig.json --noEmit   # TS2420 muss weg sein
+pnpm --filter @easytree/web exec tsc -p tsconfig.json --noEmit         # beide TS2739 muessen weg sein
+pnpm typecheck && pnpm test
+```
+
+**Schritt 6: Committen**
 
 ```bash
 git add packages/contracts/src/http/costs-gateway.ts packages/contracts/src/openapi/document.ts \
-        packages/contracts/openapi/v1.json packages/contracts/test/costs-gateway.contract.test.ts
+        packages/contracts/openapi/v1.json packages/contracts/test/costs-gateway.contract.test.ts \
+        apps/web/test/rate-management.test.tsx
 git diff --cached --name-only
 git commit -m "feat(contracts): EYT-109 — Snapshot-Operationen im HTTP-Gateway und in OpenAPI"
 ```
@@ -2283,6 +2334,8 @@ packages/domain/src/local-business-date.ts, index.ts
 packages/domain/test/local-business-date.test.ts
 packages/contracts/src/costs/schemas.ts, costs/gateway.ts, http/costs-gateway.ts,
   openapi/document.ts, index.ts, openapi/v1.json (generiert)
+packages/contracts/test/iso-week-key.test.ts   (STELLEN 6 und 7 — Pflicht, siehe Task 1)
+apps/web/test/rate-management.test.tsx         (zweiter Implementor von CostsGateway — Task 2)
 apps/api/src/modules/planning/application/planning-queries.port.ts,
   infrastructure/planning-window.repository.ts, index.ts
 apps/api/src/modules/costs/application/plan-cost-facts.port.ts,
@@ -2316,3 +2369,14 @@ Hand.
 | `DOC_DRIFT` | `CLAUDE.md` sagt „`costs` ist eine Grenze, kein laufendes Feature“ und nennt 12 Migrationen | Nach Task 20 korrigieren |
 | `UNVERIFIED` | Migration 0017 in der produktiven DB angewendet? | **Nicht** behaupten. Für diesen Slice irrelevant — 0018 wird ausschließlich lokal und in CI gemessen |
 | `ASSUMPTION` | Mehrere Snapshots je Planversion zulässig (D3) | Im PR-Body als Annahme ausweisen; PO entscheidet |
+
+### Korrekturen am Plan, gemessen während der Ausführung
+
+Der Plan lag an drei Stellen falsch. Die Korrekturen stehen bei den betroffenen Tasks; hier
+gesammelt, damit sie nicht übersehen werden.
+
+| Datum | Planaussage | Gemessen |
+| --- | --- | --- |
+| 08.08.2026 | „`WeekKeySchema` aus `../planning/schemas.js`" (Task 1) | Existiert nicht. Heißt **`IsoWeekKeySchema`**, `planning/schemas.ts:104`. Zusätzlich unerwähnt geblieben: die Registrierungspflicht in `STELLEN` (`test/iso-week-key.test.ts`). Ohne sie bleibt die Kalenderregel unbewiesen — gemessen blieben alle 125 Tests grün, während `.refine(isValidIsoWeekKey)` aus den Kostenschemata verschwand. |
+| 08.08.2026 | „Der Drift-Test wird rot, sobald ein Schema hinzukommt" (Task 2) | Falsch. `openapi/document.ts:62-94` ist ein handgeschriebenes `NAMED_SCHEMAS`-Register (24 Einträge). Ein unregistriertes Schema erreicht `v1.json` nie; `git diff` darauf ist nach Task 1 leer, Drift-Test grün. Task 2 muss Register **und** Pfade eintragen. |
+| 08.08.2026 | Task-2-Dateiliste | Unvollständig. `apps/web/test/rate-management.test.tsx:86` deklariert `gatewayMit` als `CostsGateway` und ist nach Task 1 strukturell unvollständig (TS2739). `apps/web/lib/costs-gateway-factory.ts:13` ebenfalls rot, klärt sich aber mit `HttpCostsGateway` von selbst. Vollständige Implementorenliste gemessen: genau diese beiden plus `HttpCostsGateway`. |
