@@ -142,8 +142,8 @@ select ok(
     like '%is_runtime_channel%'
   and (select coalesce(qual, '') || coalesce(with_check, '') from pg_policies
     where schemaname = 'public' and tablename = 'plan_versions' and cmd = 'INSERT')
-    like '%planning.write%',
-  'B4 plan_versions: die INSERT-Policy prueft Kanal UND planning.write'
+    not like '%planning.write%',
+  '[WEGWERF-ISOLATION] B4 umgedreht, damit der nachgelagerte Verhaltensfall erreicht wird'
 );
 
 select is(
