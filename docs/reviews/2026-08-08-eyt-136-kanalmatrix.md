@@ -390,10 +390,47 @@ recht_publish=false lesbar=1 sperrlesbar=0 definer=true` zeigt, dass die sperren
 ## 8. Ausgeführte Gegenmutationen (08.08.2026)
 
 Sieben benannte Gegenmutationen wurden gegen den Stand `6c793ad` gefahren, jede auf einem eigenen
-Wegwerf-Branch mit Draft-PR; alle Branches und PRs sind danach gelöscht bzw. geschlossen. Die
-vollständige Tabelle liegt im Produktverantwortlichen-Paket. Zwei Beobachtungen gehören hierher,
-weil sie beim Lesen eines roten Laufs gebraucht werden. **Beide sind Beobachtungen, keine
-Handlungsaufträge — an der Struktur des CI-Jobs wird im Rahmen von EYT-136 nichts geändert.**
+Wegwerf-Branch mit Draft-PR; alle Branches und PRs sind danach gelöscht bzw. geschlossen.
+
+| Mutation                                           | Lauf                                    | rot geworden ist                                                          |
+| -------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
+| Kanal-Riegel aus `assignments_insert_in_org`       | 31238564685                             | `auth-journey` 9c4, `POST /rest/v1/assignments` → **201**, Zeile angelegt |
+| `planning.write` aus `plan_versions_insert_in_org` | 31238574199                             | `db-gates`, pgTAP `0012` B4 (Verhaltensfall nicht erreicht)               |
+| `planning.write` aus `assignments_insert_in_org`   | 31238584914                             | `db-gates`, pgTAP `0012` B3 (Verhaltensfall nicht erreicht)               |
+| `assignments` UPDATE wieder geöffnet               | 31238598756                             | `auth-journey` 9c5, `PATCH` → **200**                                     |
+| `assignments` DELETE wieder geöffnet               | 31238658106                             | `auth-journey` 9c5, `DELETE` → **200**                                    |
+| Kanal-Riegel aus `plan_versions_insert_in_org`     | 31238659805                             | `auth-journey` 9c4, `POST /rest/v1/plan_versions` → **201**               |
+| Trigger als `security invoker`                     | 31238661331                             | `db-gates`, pgTAP `0006` `prosecdef`: `have: false / want: true`          |
+| …dieselbe, mit Isolation der pgTAP-Zeile           | 31238802272 / 31238803760 / 31238804687 | die drei nachgelagerten Verhaltensfälle                                   |
+| …dieselbe, nach der Umstellung dieses Falls        | **31239527407**                         | **behavioural**, siehe unten                                              |
+
+Zwei Beobachtungen gehören hierher, weil sie beim Lesen eines roten Laufs gebraucht werden.
+**Beide sind Beobachtungen, keine Handlungsaufträge — an der Struktur des CI-Jobs wird im Rahmen
+von EYT-136 nichts geändert.**
+
+### O0 — der Definer ist tragend, und das ist jetzt gemessen
+
+Lauf **31239527407**, `db-gates`, Schritt _Planning write gate_, gegen den umgestellten Fall:
+
+```
+[planning-write] definer-probe kanal=true mandant_alpha=true recht_write=true recht_publish=false lesbar=1 sperrlesbar=0 definer=false
+AssertionError: die Zuweisung ist in die veroeffentlichte Version gelaufen: expected null not to be null
+```
+
+`fehler` ist **null** — der Insert in die veröffentlichte Planversion ist nicht etwa mit einem
+anderen SQLSTATE gescheitert, er ist **durchgelaufen**. Damit ist belegt, was bis dahin nur
+plausibel war: ohne `security definer` findet das `for share` der Triggerfunktion die Elternzeile
+nicht, der Trigger hält sie für nicht vorhanden und lässt die Zuweisung durch.
+
+Die Kontrolle im selben Lauf: der Nachbarfall „eine veröffentlichte Planversion nimmt über den
+Laufzeitkanal keine Zuweisung mehr auf" blieb **grün**. Er läuft mit `planning.publish`, die
+sperrende Lesung findet die Zeile also auch als Invoker — der Trigger selbst funktioniert weiter.
+Gebrochen ist ausschließlich der Pfad, der auf die Definer-Eigenschaft angewiesen ist. Ein Lauf,
+in dem beide Fälle fielen, hätte statt der Definer-Aussage nur „der Trigger ist kaputt" gezeigt.
+
+Genau dieser Nachweis war vorher unerreichbar: bis zur Umstellung stand `expect(prosecdef)` vor
+dem Insert, der Fall fiel strukturell (Lauf 31238804687) und die Verhaltensaussage blieb
+unausgeführt.
 
 ### O1 — `db-gates` verdeckt seine eigenen Verhaltensnachweise
 

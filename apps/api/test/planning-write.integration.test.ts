@@ -1538,8 +1538,13 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
    * damit keine behaviourale Schwester, sondern eine zweite Kopie der
    * pgTAP-Aussage. Die Reihenfolge ist seither umgestellt — Vorbedingungen,
    * Versuch, Verhalten; `prosecdef` nur noch als protokollierter Wert (siehe
-   * die Begruendung am Lesezugriff weiter unten). Belege, Laufnummern und der
-   * Ablauf stehen in `docs/reviews/2026-08-08-eyt-136-kanalmatrix.md` §7.
+   * die Begruendung am Lesezugriff weiter unten).
+   *
+   * Danach GEMESSEN, Lauf 31239527407: der Insert lief DURCH, `fehler` blieb
+   * null — kein 23514, kein anderer SQLSTATE. Der Definer ist also tragend.
+   * Kontrolle im selben Lauf: der Nachbarfall MIT `planning.publish` blieb
+   * gruen, der Trigger selbst funktioniert weiter. Belege und Laufnummern in
+   * `docs/reviews/2026-08-08-eyt-136-kanalmatrix.md` §8.
    *
    * Was den Nachweis schon vorher stuetzte: `sperrlesbar=0` ist die direkte
    * Messung genau der Lesung, die ein Invoker ausfuehren wuerde.
