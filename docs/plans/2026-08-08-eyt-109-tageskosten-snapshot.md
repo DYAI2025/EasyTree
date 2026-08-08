@@ -339,6 +339,20 @@ Code. **Nach jeder Aufgabe committen.** Nur benannte Dateien stagen
 (`git add <pfad> …`, danach `git diff --cached --name-only` lesen) — ein verzeichnisweites
 `git add` hat in diesem Repo schon zweimal fremde Dateien mitgenommen.
 
+> **Falle, gemessen 08.08.2026 — gilt für jede Task ab hier.** `apps/api` und `apps/web`
+> importieren `@easytree/contracts` und `@easytree/domain` **per Paketname**, lesen also `dist/`,
+> nicht `src/`. `noEmitOnError` ist im ganzen Monorepo nirgends gesetzt, also erzeugt `tsc` auch
+> bei einem Typfehler vollständige Ausgabe und verlässt sich mit Exitcode ≠ 0. Turbo überspringt
+> danach die Downstream-Aufgaben, lässt aber ein **benutzbares, veraltetes** `dist` liegen. Wer den
+> Test dann einzeln mit `pnpm --filter @easytree/api exec vitest run …` fährt, bekommt grün — und
+> misst nichts. Real passiert: ein `dist` von 19:04 gegen eine Quelle von 20:27, ohne einen der
+> neuen Namen.
+>
+> **Deshalb: vor jedem `apps/api`- oder `apps/web`-Testlauf, der neue Contract- oder
+> Domain-Exporte benutzt, erst explizit `pnpm --filter @easytree/contracts build` bzw.
+> `… @easytree/domain build`.** Im Zweifel `ls -la` auf `dist/<datei>.d.ts` gegen `src/<datei>.ts`
+> — ist `dist` älter, ist das Ergebnis wertlos. Besonders scharf in Task 2, 5, 8, 10 und 13.
+
 ---
 
 ## Task 0: Arbeitsbaum und Branch
