@@ -21,6 +21,12 @@
  * 4. Entfernt man die Uebernahme des veroeffentlichten Stands in den ersten
  *    Entwurf, wird „der erste Entwurf laesst den Planstand nicht verschwinden"
  *    rot: die Woche zeigte danach nur noch die eine neue Zeile.
+ * 5. Legt man `app.reject_assignment_in_published_plan()` als `security invoker`
+ *    neu an, wird „eine veroeffentlichte Planversion weist die Zuweisung auch
+ *    ab, wenn die Sitzung sie nicht sperrend lesen darf" rot: das `for share`
+ *    der Funktion faende die Elternzeile nicht mehr und der Insert gelaenge
+ *    (EYT-136). Als einzige der fuenf ist sie NICHT ausgefuehrt — sie verlangt
+ *    eine Wegwerf-Folgemigration; Begruendung am Fall selbst.
  */
 import {
   createTimeZone,
@@ -350,10 +356,25 @@ async function veroeffentlichteBaseline(woche: string, von: string, bis: string)
     [ORG_ALPHA, id, EMPLOYEE_ALPHA, WORKSITE_ALPHA, von, bis],
   );
 
-  await client.query(
+  // `rowCount` gepruft, nicht geglaubt: dieses UPDATE laeuft ueber die
+  // Verwaltungsverbindung und haengt daran, dass `postgres` BYPASSRLS traegt.
+  // Traegt es das eines Tages nicht mehr, filterte `plan_versions_update_in_org`
+  // die Zeile weg — RLS wirft nicht, sie filtert. Das UPDATE beruehrte null
+  // Zeilen, die „veroeffentlichte" Baseline waere in Wahrheit ein Entwurf, und
+  // jeder Fall, der auf ihr aufbaut, wuerde etwas anderes messen als er sagt.
+  // Genau diese Klasse von stillem Null-Zeilen-Schreiben hat dieses Repository
+  // schon zweimal Zeit gekostet.
+  const veroeffentlichung = await client.query(
     "update public.plan_versions set published_at = now(), published_by = $2 where id = $1",
     [id, USER_A],
   );
+  if (veroeffentlichung.rowCount !== 1) {
+    throw new Error(
+      `[planning-write] die Baseline fuer ${woche} liess sich nicht veroeffentlichen — ` +
+        `das UPDATE beruehrte ${String(veroeffentlichung.rowCount)} Zeilen statt einer. ` +
+        "Ohne veroeffentlichte Elternzeile misst kein darauf aufbauender Fall, was er behauptet.",
+    );
+  }
   return id;
 }
 
@@ -496,14 +517,27 @@ async function mitGeliehenerMitgliedschaft(fn: () => Promise<void>): Promise<voi
  *   Nie ein breiteres Praedikat — `where permission like 'planning.%'` haette
  *   sechs Zeilen getroffen.
  * - Vorbedingung gemessen, nicht geglaubt: existiert die Zeile vorher nicht,
- *   misst der Fall nichts und bricht ab, BEVOR etwas mutiert ist.
+ *   misst der Fall nichts und bricht ab, BEVOR etwas mutiert ist. Nur diese
+ *   eine Lesung steht ausserhalb des `try` — sie kann nichts hinterlassen.
+ * - Das DELETE steht INNERHALB des `try`. Das ist nicht Formsache: committet es
+ *   serverseitig und der Client sieht die Antwort nicht mehr (Verbindung weg,
+ *   Timeout), dann wirft es — und stuende es davor, liefe die Wiederherstellung
+ *   nie. So laeuft sie auch dann, und weil sie `on conflict do nothing` ist,
+ *   schadet sie nicht, falls das DELETE gar nicht ausgefuehrt wurde.
  * - `catch` statt `finally`: ein `throw` im `finally` verwuerfe einen bereits
  *   laufenden Fehler aus dem Fall (`no-unsafe-finally`, im Lauf 31230613284
  *   schon einmal zugeschlagen).
- * - Wiederherstellung UNBEDINGT, danach erneut gelesen. Schlaegt sie fehl, hat
- *   dieser Befund Vorrang vor dem Fehler aus dem Fall — der haengt als `cause`
- *   daran. Ein verlorener Lauf kostet Minuten, eine ueberlebende Loeschung
- *   verfaelscht das Publish-Gate im naechsten Schritt desselben Jobs.
+ * - Die Wiederherstellung hat ihr EIGENES `try`. Vorher war nur der Fall
+ *   „insert lief durch, Zeile fehlt trotzdem" abgesichert — der praktisch
+ *   unerreichbare. Wirft das insert selbst (Verwaltungsverbindung tot), stiege
+ *   sonst ein roher `DatabaseError` auf: ohne die benannte Meldung, ohne
+ *   `cause`, und mit stillschweigend verworfenem Fehler aus dem Fall. Jetzt
+ *   fuehren BEIDE Wege zu derselben benannten Meldung.
+ * - Vorrang: der Wiederherstellungsfehler schlaegt den Fehler aus dem Fall.
+ *   Ein verlorener Lauf kostet Minuten, eine ueberlebende Loeschung verfaelscht
+ *   das Publish-Gate im naechsten Schritt desselben Jobs. Verloren geht dabei
+ *   keiner von beiden — gibt es beide, haengen sie als `AggregateError` an
+ *   `cause`.
  */
 async function ohnePublishRecht(fn: () => Promise<void>): Promise<void> {
   const vorher = await beobachte<{ n: string }>(ZAEHLE_RECHT, RECHT_PUBLISH);
@@ -512,13 +546,12 @@ async function ohnePublishRecht(fn: () => Promise<void>): Promise<void> {
     "role_permissions traegt (owner, planning.publish) nicht — der Fall wuerde den falschen Riegel messen",
   ).toBe("1");
 
-  const geloescht = await verwalte<{ role: string }>(
-    "delete from public.role_permissions where role = $1 and permission = $2 returning role",
-    RECHT_PUBLISH,
-  );
-
   let fehlerAusFall: [unknown] | null = null;
   try {
+    const geloescht = await verwalte<{ role: string }>(
+      "delete from public.role_permissions where role = $1 and permission = $2 returning role",
+      RECHT_PUBLISH,
+    );
     if (geloescht.length !== 1) {
       throw new Error(
         `[planning-write] das Entziehen von planning.publish hat ${String(geloescht.length)} ` +
@@ -532,18 +565,39 @@ async function ohnePublishRecht(fn: () => Promise<void>): Promise<void> {
     fehlerAusFall = [e];
   }
 
-  await verwalte(
-    `insert into public.role_permissions (role, permission)
-     values ($1, $2) on conflict (role, permission) do nothing`,
-    RECHT_PUBLISH,
-  );
-  const rest = await beobachte<{ n: string }>(ZAEHLE_RECHT, RECHT_PUBLISH);
-  if (rest[0]?.n !== "1") {
+  let wiederherstellung: [unknown] | null = null;
+  try {
+    await verwalte(
+      `insert into public.role_permissions (role, permission)
+       values ($1, $2) on conflict (role, permission) do nothing`,
+      RECHT_PUBLISH,
+    );
+    const rest = await beobachte<{ n: string }>(ZAEHLE_RECHT, RECHT_PUBLISH);
+    if (rest[0]?.n !== "1") {
+      wiederherstellung = [
+        new Error(
+          "das insert lief fehlerfrei, die Zeile fehlt danach trotzdem " +
+            `(count=${rest[0]?.n ?? "keine Antwort"}).`,
+        ),
+      ];
+    }
+  } catch (e) {
+    wiederherstellung = [e];
+  }
+
+  if (wiederherstellung !== null) {
+    const ursache =
+      fehlerAusFall === null
+        ? wiederherstellung[0]
+        : new AggregateError(
+            [wiederherstellung[0], fehlerAusFall[0]],
+            "[planning-write] Wiederherstellung UND Fall sind gescheitert (EYT-136).",
+          );
     throw new Error(
       "[planning-write] (owner, planning.publish) ist NICHT wiederhergestellt worden — " +
         "das Publish-Gate im naechsten Schritt dieses Jobs wuerde auf einem falschen " +
         "Rechtemodell messen (EYT-136).",
-      fehlerAusFall === null ? undefined : { cause: fehlerAusFall[0] },
+      { cause: ursache },
     );
   }
   if (fehlerAusFall !== null) throw fehlerAusFall[0];
@@ -631,6 +685,35 @@ beforeAll(async () => {
   dbAvailable = await probeDatabase(DB_URL);
   if (!dbAvailable) return;
 
+  // ---------------------------------------------------------------------
+  // Erst heilen, dann Bedingungen pruefen
+  // ---------------------------------------------------------------------
+  // Die beiden idempotenten Heilungen stehen VOR dem Kanal-Gate, und das ist
+  // seit dem Review vom 08.08.2026 Absicht. Vorher standen sie dahinter: im
+  // Pflichtmodus warf das Gate, und die Heilung — deren ganzer Zweck der
+  // abgebrochene Vorlauf ist — kam nie dazu. Sie haben genau EINE Vorbedingung,
+  // naemlich eine erreichbare Datenbank; die ist oben geprueft. Alles Weitere
+  // (Laufzeitkanal, Secrets) ist fuer das Aufraeumen irrelevant, denn beide
+  // Anweisungen laufen ueber die Verwaltungsverbindung.
+  await neueAdminVerbindung();
+  // Rest einer geliehenen Mitgliedschaft aus einem abgebrochenen Lauf.
+  // `memberships` traegt `unique (org_id, user_id)` (0002): ohne dieses
+  // Aufraeumen scheiterte das Anlegen im ersten Rechte-Fall an 23505, und weil
+  // das Insert VOR dem try steht, liefe danach auch das Loeschen nicht mehr —
+  // der Rest bliebe bis zum naechsten `db reset` liegen und truege sich selbst
+  // fort. Idempotent, also im Normalfall ein No-op.
+  await verwalte("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_GELIEHEN]);
+  // Dasselbe fuer das entzogene Recht (EYT-136). Ein Lauf, der mitten in
+  // `ohnePublishRecht` abgeschossen wurde — Zeitlimit auf Jobebene, OOM —
+  // hinterlaesst eine fehlende Zeile in einer PRODUKTWEITEN Tabelle, und die
+  // truege sich bis zum naechsten `db reset` fort. Idempotent, im Normalfall
+  // ein No-op.
+  await verwalte(
+    `insert into public.role_permissions (role, permission)
+     values ($1, $2) on conflict (role, permission) do nothing`,
+    RECHT_PUBLISH,
+  );
+
   // Fail-closed, nicht fail-open: ohne Laufzeitkanal misst diese Suite seit
   // EYT-136 nicht mehr den Produktionsvertrag. Im Pflichtmodus ist das ein
   // Fehler, kein Ueberspringen — sonst koennte ein fehlendes Secret ein
@@ -648,24 +731,6 @@ beforeAll(async () => {
     return;
   }
 
-  await neueAdminVerbindung();
-  // Rest einer geliehenen Mitgliedschaft aus einem abgebrochenen Lauf.
-  // `memberships` traegt `unique (org_id, user_id)` (0002): ohne dieses
-  // Aufraeumen scheiterte das Anlegen im ersten Rechte-Fall an 23505, und weil
-  // das Insert VOR dem try steht, liefe danach auch das Loeschen nicht mehr —
-  // der Rest bliebe bis zum naechsten `db reset` liegen und truege sich selbst
-  // fort. Idempotent, also im Normalfall ein No-op.
-  await verwalte("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_GELIEHEN]);
-  // Dasselbe fuer das entzogene Recht (EYT-136). Ein Lauf, der mitten in
-  // `ohnePublishRecht` abgeschossen wurde — Zeitlimit auf Jobebene, OOM —
-  // hinterlaesst eine fehlende Zeile in einer PRODUKTWEITEN Tabelle, und die
-  // truege sich bis zum naechsten `db reset` fort. Idempotent, im Normalfall
-  // ein No-op; heilt den Fall, in dem sonst niemand mehr nachsieht.
-  await verwalte(
-    `insert into public.role_permissions (role, permission)
-     values ($1, $2) on conflict (role, permission) do nothing`,
-    RECHT_PUBLISH,
-  );
   await raeumeWoche();
 });
 
@@ -1411,14 +1476,15 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
    *
    * ## Was hier gemessen wird, und warum es sonst nirgends gemessen wird
    *
-   * `app.reject_assignment_in_published_plan()` (Migration 0016 Z. 132-155)
+   * `app.reject_assignment_in_published_plan()` (Migration 0016 Z. 132-165)
    * liest die Elternzeile mit `select … for share`. PostgreSQL zieht bei einer
    * Sperrklausel zusaetzlich die `using`-Klausel der UPDATE-Policy heran. Als
    * INVOKER faende die Funktion die Zeile deshalb nur, wenn die Sitzung
    * `plan_versions_update_in_org` erfuellt — also Laufzeitkanal UND
    * `planning.publish`. Fehlt das Recht, findet sie NICHTS, nimmt den Zweig
-   * „nicht gefunden" und laesst die Zuweisung durch. Genau so fiel es am
-   * 04.08.2026 auf (Lauf 30862744360); `security definer` (0015) schliesst es.
+   * „nicht gefunden" (0016 Z. 155-157) und laesst die Zuweisung durch, statt
+   * bei Z. 159-161 mit 23514 abzulehnen. Genau so fiel es am 04.08.2026 auf
+   * (Lauf 30862744360); `security definer` (0015) schliesst es.
    *
    * Jeder andere Fall im Repository erfuellt die Klausel und misst die
    * Eigenschaft deshalb NICHT: der Nachbarfall oben laeuft als `USER_A`, der
@@ -1440,6 +1506,18 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
    * benannt, welcher Riegel filtert — ohne das Paar koennte `sperrlesbar=0`
    * auch heissen, dass die Zeile gar nicht existiert.
    *
+   * Die Sonde nennt alle drei sitzungsabhaengigen Konjunkte der using-Klausel
+   * einzeln (`kanal`, `mandant_alpha`, `recht_publish`), damit `sperrlesbar=0`
+   * genau EINEM falschen Konjunkt zugeordnet ist und nicht einem von dreien.
+   * Dieselbe Bauart wie `konjunkteAlsMitglied` weiter oben.
+   *
+   * Was den Fall NICHT still gruen machen kann: eine zweite permissive
+   * UPDATE-Policy auf `plan_versions`. Mehrere permissive Policies werden mit
+   * ODER verknuepft, die Sperrlesung faende die Zeile also wieder — dann steht
+   * `sperrlesbar=1` in der Sonde und dieser Fall wird ROT. Er faellt damit auf
+   * die sichere Seite: ein zweiter Riegel, der die Aussage aushebeln wuerde,
+   * meldet sich, statt sich zu verstecken.
+   *
    * ## Gegenmutation
    *
    * `app.reject_assignment_in_published_plan()` in einer Folgemigration als
@@ -1448,6 +1526,15 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
    * Das ist die behaviourale Schwester zur strukturellen Zusicherung in
    * `supabase/tests/0006_planning_invariants.sql:311` (`prosecdef`); die beiden
    * decken verschiedene Ausfaelle ab und ersetzen einander nicht.
+   *
+   * Diese Gegenmutation ist **NICHT ausgefuehrt** — sie verlangt eine
+   * Wegwerf-Folgemigration und einen eigenen `db-gates`-Lauf; dieselbe Angabe
+   * steht in `supabase/tests/0006_planning_invariants.sql` (Z. 307-309) und in
+   * `docs/reviews/2026-08-08-eyt-136-kanalmatrix.md` §7. Was den offenen Punkt
+   * klein haelt: `sperrlesbar=0` ist bereits die direkte Messung genau der
+   * Lesung, die ein Invoker ausfuehren wuerde — also des Verhaltens, das die
+   * Gegenmutation vorfuehren wuerde. Ungemessen bleibt allein, dass der Trigger
+   * daraufhin wirklich durchliesse.
    */
   dbIt(
     "eine veroeffentlichte Planversion weist die Zuweisung auch ab, wenn die Sitzung sie nicht sperrend lesen darf",
@@ -1463,8 +1550,14 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         const client = await neueVerbindung();
 
         const konjunkte = await runnerAuf(client).run({ userId: USER_A }, (tx) =>
-          tx.query<{ kanal: boolean; recht_write: boolean; recht_publish: boolean }>(
+          tx.query<{
+            kanal: boolean;
+            mandant_alpha: boolean;
+            recht_write: boolean;
+            recht_publish: boolean;
+          }>(
             `select app.is_runtime_channel()                         as kanal,
+                    $1::uuid in (select app.user_org_ids())          as mandant_alpha,
                     app.has_permission($1::uuid, 'planning.write')   as recht_write,
                     app.has_permission($1::uuid, 'planning.publish') as recht_publish`,
             [ORG_ALPHA],
@@ -1483,8 +1576,19 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
           ]),
         );
 
-        // SPERRENDE Lesung — dieselbe Zeile, dieselbe Sitzung, ein Zusatz. Das
-        // ist genau die Anweisung, die in der Triggerfunktion steht.
+        // SPERRENDE Lesung — dieselbe Zeile, DIESELBE SITZUNG, eigene
+        // Transaktion, ein Zusatz. Das ist genau die Anweisung, die in der
+        // Triggerfunktion steht.
+        //
+        // Eigene Transaktion und nicht derselbe Snapshot wie `lesbar` darueber:
+        // `runnerAuf(...).run(...)` klammert jeden Aufruf in `begin`/`commit`.
+        // Fuer die Aussage ist das ohne Belang, weil sich zwischen den beiden
+        // Lesungen nichts aendern kann — eine VEROEFFENTLICHTE Planversion ist
+        // nach Migration 0010 (Z. 188-191, `before update or delete`) weder
+        // aenderbar noch loeschbar, und ein nebenlaeufiger Schreiber existiert
+        // in dieser Suite nicht. Was zaehlt, ist die Sitzung, denn an ihr
+        // haengen `session_user` und die JWT-Claims — also alles, was die
+        // using-Klausel auswertet.
         const sperrlesbar = await runnerAuf(client).run({ userId: USER_A }, (tx) =>
           tx.query<{ id: string }>(
             "select id from public.plan_versions where id = $1::uuid for share",
@@ -1501,6 +1605,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
 
         process.stdout.write(
           `[planning-write] definer-probe kanal=${String(sonde.kanal)} ` +
+            `mandant_alpha=${String(sonde.mandant_alpha)} ` +
             `recht_write=${String(sonde.recht_write)} ` +
             `recht_publish=${String(sonde.recht_publish)} ` +
             `lesbar=${String(lesbar.rows.length)} ` +
@@ -1512,6 +1617,10 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
           true,
         );
         expect(
+          sonde.mandant_alpha,
+          "USER_A sieht Alpha nicht — dann faellt schon der Mandantenkonjunkt, nicht das Recht",
+        ).toBe(true);
+        expect(
           sonde.recht_write,
           "ohne planning.write lehnte schon die Insert-Policy ab, der Trigger bliebe ungemessen",
         ).toBe(true);
@@ -1520,7 +1629,7 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         );
         expect(
           lesbar.rows.length,
-          "die Elternzeile ist nicht einmal gewoehnlich lesbar — sperrlesbar=0 saegte nichts aus",
+          "die Elternzeile ist nicht einmal gewoehnlich lesbar — sperrlesbar=0 sagte nichts aus",
         ).toBe(1);
         expect(
           sperrlesbar.rows.length,

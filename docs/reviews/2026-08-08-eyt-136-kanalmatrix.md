@@ -370,10 +370,17 @@ Damit niemand Überlegung für Messung hält:
   Zusammenspiel von `plan_versions_update_in_org` (0015 Z. 243-255), `role_permissions`
   (0015 Z. 181-187) und der Rolle von `USER_A` (`seed.sql` Z. 46) — gelesen, nicht gemessen.
 - **Der MECHANISMUS des neuen Falls ist dagegen gemessen, und zwar in CI.** Die Sonde
-  `[planning-write] definer-probe … lesbar=1 sperrlesbar=0 …` zeigt, dass die sperrende Lesung
-  derselben Zeile in derselben Sitzung nichts findet, während die gewöhnliche sie findet. Das ist
-  eine Messung des `for share`-Verhaltens unter RLS, keine Berufung auf die Dokumentation. Der
-  Grep in `.github/workflows/ci.yml` macht sie auf Jobebene tragend.
+  `[planning-write] definer-probe kanal=true mandant_alpha=true recht_write=true
+recht_publish=false lesbar=1 sperrlesbar=0 definer=true` zeigt, dass die sperrende Lesung
+  derselben Zeile in derselben Sitzung nichts findet, während die gewöhnliche sie findet — und sie
+  nennt alle drei sitzungsabhängigen Konjunkte der `using`-Klausel einzeln, so dass `sperrlesbar=0`
+  genau **einem** falschen Konjunkt zugeordnet ist. Das ist eine Messung des `for share`-Verhaltens
+  unter RLS, keine Berufung auf die Dokumentation. Der Grep in `.github/workflows/ci.yml` macht sie
+  auf Jobebene tragend.
+- **Der Fall fällt auf die sichere Seite.** Käme eine zweite permissive UPDATE-Policy auf
+  `plan_versions` hinzu, würde sie mit ODER in die `using`-Auswertung eingehen, die sperrende
+  Lesung fände die Zeile wieder — `sperrlesbar=1`, und der Fall wird **rot**. Ein zweiter Riegel,
+  der die Aussage aushebeln würde, meldet sich also, statt sich zu verstecken.
 - **Die Gegenmutation ist weiterhin benannt und nicht gefahren.** `security invoker` in einer
   Wegwerf-Folgemigration würde `0006:311` und den neuen Fall rot machen; das verlangt einen
   eigenen `db-gates`-Lauf und steht aus. Was der neue Fall heute liefert, ist der Beweis, dass die
