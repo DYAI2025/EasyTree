@@ -46,10 +46,16 @@ import {
 } from "../planning/schemas.js";
 import { LoginCommandSchema, SessionDtoSchema } from "../auth/schemas.js";
 import {
+  CostDayTotalDtoSchema,
+  CostPositionDtoSchema,
+  CostSnapshotSchema,
+  CreateCostSnapshotCommandSchema,
   CreateRateVersionCommandSchema,
   EmployeesForRatesSchema,
   RateHistorySchema,
   RateVersionDtoSchema,
+  SelectablePlanVersionSchema,
+  SelectablePlanVersionsSchema,
 } from "../costs/schemas.js";
 import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, ProblemDocumentSchema } from "../primitives.js";
 
@@ -91,6 +97,19 @@ const NAMED_SCHEMAS = {
   RateHistory: RateHistorySchema,
   RateVersionDto: RateVersionDtoSchema,
   CreateRateVersionCommand: CreateRateVersionCommandSchema,
+  // EYT-109: der gespeicherte Tageskosten-Snapshot. Position und Tagessumme
+  // stehen ZUSAETZLICH einzeln hier — aus demselben Grund wie
+  // `PlanningResource`: ein generierter Client bekommt so EINEN Positionstyp
+  // statt eines namenlosen Inline-Objekts, und der Export (EYT-110) kann ihn
+  // benennen. Dass sie im Snapshot zusaetzlich eingebettet erscheinen, ist eine
+  // Eigenschaft der Erzeugung, kein zweiter Typenbestand: beide Formen stammen
+  // aus demselben Zod-Schema.
+  CostPositionDto: CostPositionDtoSchema,
+  CostDayTotalDto: CostDayTotalDtoSchema,
+  CostSnapshot: CostSnapshotSchema,
+  CreateCostSnapshotCommand: CreateCostSnapshotCommandSchema,
+  SelectablePlanVersion: SelectablePlanVersionSchema,
+  SelectablePlanVersions: SelectablePlanVersionsSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type NamedSchema = keyof typeof NAMED_SCHEMAS;
@@ -156,6 +175,31 @@ const weekKeyParam = {
     "ISO-Woche im Format 2026-W32. Woche 01-53. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben (etwa 2020 und 2026, nicht 2021 oder 2025). Diese Kalenderregel kann JSON Schema nicht ausdruecken und wird hier NICHT erzwungen - der Server lehnt einen ungueltigen Schluessel zur Laufzeit ab.",
   schema: { type: "string", pattern: "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$" },
 } as const;
+
+/**
+ * Die beiden Grenzen des Wochenbereichs der Auswahlliste (EYT-109).
+ *
+ * Abgeleitet aus {@link weekKeyParam} statt danebengeschrieben: Muster UND
+ * Beschreibung werden uebernommen, damit die dortige Ehrlichkeit zur
+ * Kalenderregel hier nicht bei einer Kopie verlorengeht.
+ *
+ * Dazu kommt eine ZWEITE nicht ausdrueckbare Regel. `fromWeekKey <= toWeekKey`
+ * ist eine Beziehung zwischen zwei Parametern; ein Parameterschema beschreibt
+ * immer nur einen einzelnen Wert und kann davon nichts wissen. Ein generierter
+ * Client darf also einen verkehrten Bereich bilden — abgelehnt wird er
+ * trotzdem, zur Laufzeit: im Client von `PublishedPlanVersionsQuerySchema`, im
+ * Server noch einmal. Dieselbe Grenzziehung, die `weekKeyParam` fuer die
+ * Kalenderregel und `TimeIntervalDtoSchema` fuer "Ende nach Beginn" macht.
+ */
+function wochenbereichParam(name: "fromWeekKey" | "toWeekKey", rolle: string): unknown {
+  return {
+    name,
+    in: "query",
+    required: true,
+    description: `${rolle} ${weekKeyParam.description} Zusaetzlich muss fromWeekKey vor oder gleich toWeekKey liegen; diese Regel verbindet ZWEI Parameter und kann in einem Parameterschema ebenfalls NICHT ausgedrueckt werden - der Server lehnt einen verkehrten Bereich zur Laufzeit ab.`,
+    schema: weekKeyParam.schema,
+  };
+}
 
 function jsonBody(name: NamedSchema): unknown {
   return { required: true, content: { "application/json": { schema: ref(name) } } };
@@ -324,6 +368,50 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           parameters: [idempotencyHeader],
           requestBody: jsonBody("CreateRateVersionCommand"),
           responses: { "201": jsonOk("RateVersionDto", "Angelegte Version"), ...problemResponses },
+        },
+      },
+      "/kosten/planversionen": {
+        get: {
+          operationId: "listPublishedPlanVersions",
+          summary: "Auswaehlbare veroeffentlichte Planversionen im Wochenbereich",
+          parameters: [
+            wochenbereichParam("fromWeekKey", "Erste Woche des Bereichs, einschliesslich."),
+            wochenbereichParam("toWeekKey", "Letzte Woche des Bereichs, einschliesslich."),
+          ],
+          responses: {
+            "200": jsonOk("SelectablePlanVersions", "Auswaehlbare Planversionen"),
+            ...problemResponses,
+          },
+        },
+      },
+      "/kosten/snapshots": {
+        post: {
+          operationId: "createCostSnapshot",
+          summary: "Tageskosten-Snapshot aus einer veroeffentlichten Planversion erzeugen",
+          parameters: [idempotencyHeader],
+          requestBody: jsonBody("CreateCostSnapshotCommand"),
+          responses: {
+            "201": jsonOk("CostSnapshot", "Erzeugter Snapshot"),
+            ...problemResponses,
+          },
+        },
+      },
+      "/kosten/snapshots/{snapshotId}": {
+        get: {
+          operationId: "getCostSnapshot",
+          summary: "Gespeicherten Tageskosten-Snapshot lesen",
+          parameters: [
+            {
+              name: "snapshotId",
+              in: "path",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+          ],
+          responses: {
+            "200": jsonOk("CostSnapshot", "Gespeicherter Snapshot"),
+            ...problemResponses,
+          },
         },
       },
     },

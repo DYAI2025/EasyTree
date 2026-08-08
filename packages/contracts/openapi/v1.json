@@ -1096,6 +1096,237 @@
           }
         }
       }
+    },
+    "/kosten/planversionen": {
+      "get": {
+        "operationId": "listPublishedPlanVersions",
+        "summary": "Auswaehlbare veroeffentlichte Planversionen im Wochenbereich",
+        "parameters": [
+          {
+            "name": "fromWeekKey",
+            "in": "query",
+            "required": true,
+            "description": "Erste Woche des Bereichs, einschliesslich. ISO-Woche im Format 2026-W32. Woche 01-53. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben (etwa 2020 und 2026, nicht 2021 oder 2025). Diese Kalenderregel kann JSON Schema nicht ausdruecken und wird hier NICHT erzwungen - der Server lehnt einen ungueltigen Schluessel zur Laufzeit ab. Zusaetzlich muss fromWeekKey vor oder gleich toWeekKey liegen; diese Regel verbindet ZWEI Parameter und kann in einem Parameterschema ebenfalls NICHT ausgedrueckt werden - der Server lehnt einen verkehrten Bereich zur Laufzeit ab.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$"
+            }
+          },
+          {
+            "name": "toWeekKey",
+            "in": "query",
+            "required": true,
+            "description": "Letzte Woche des Bereichs, einschliesslich. ISO-Woche im Format 2026-W32. Woche 01-53. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben (etwa 2020 und 2026, nicht 2021 oder 2025). Diese Kalenderregel kann JSON Schema nicht ausdruecken und wird hier NICHT erzwungen - der Server lehnt einen ungueltigen Schluessel zur Laufzeit ab. Zusaetzlich muss fromWeekKey vor oder gleich toWeekKey liegen; diese Regel verbindet ZWEI Parameter und kann in einem Parameterschema ebenfalls NICHT ausgedrueckt werden - der Server lehnt einen verkehrten Bereich zur Laufzeit ab.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Auswaehlbare Planversionen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectablePlanVersions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kosten/snapshots": {
+      "post": {
+        "operationId": "createCostSnapshot",
+        "summary": "Tageskosten-Snapshot aus einer veroeffentlichten Planversion erzeugen",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCostSnapshotCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Erzeugter Snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kosten/snapshots/{snapshotId}": {
+      "get": {
+        "operationId": "getCostSnapshot",
+        "summary": "Gespeicherten Tageskosten-Snapshot lesen",
+        "parameters": [
+          {
+            "name": "snapshotId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gespeicherter Snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2243,6 +2474,360 @@
           "validTo",
           "reason",
           "expectedActiveVersionId"
+        ],
+        "additionalProperties": false
+      },
+      "CostPositionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "worksiteId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "worksiteLabel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "employeeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "employeeLabel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "localDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "durationMilliseconds": {
+            "type": "string",
+            "maxLength": 18,
+            "pattern": "^\\d+$"
+          },
+          "rateVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "amountMinorUnits": {
+            "type": "string",
+            "maxLength": 18,
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": [
+          "id",
+          "assignmentId",
+          "worksiteId",
+          "worksiteLabel",
+          "employeeId",
+          "employeeLabel",
+          "localDate",
+          "durationMilliseconds",
+          "rateVersionId",
+          "amountMinorUnits"
+        ],
+        "additionalProperties": false
+      },
+      "CostDayTotalDto": {
+        "type": "object",
+        "properties": {
+          "localDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "amountMinorUnits": {
+            "type": "string",
+            "maxLength": 18,
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": [
+          "localDate",
+          "amountMinorUnits"
+        ],
+        "additionalProperties": false
+      },
+      "CostSnapshot": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "planVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "worksiteId": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$",
+            "description": "ISO-Woche im Format 2026-W32. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben."
+          },
+          "timeZone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "EUR"
+            ]
+          },
+          "ruleVersion": {
+            "type": "string",
+            "enum": [
+              "personnel-plan-cost-v1"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "correlationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "totalMinorUnits": {
+            "type": "string",
+            "maxLength": 18,
+            "pattern": "^\\d+$"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "localDate": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                },
+                "amountMinorUnits": {
+                  "type": "string",
+                  "maxLength": 18,
+                  "pattern": "^\\d+$"
+                }
+              },
+              "required": [
+                "localDate",
+                "amountMinorUnits"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "assignmentId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "worksiteId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "worksiteLabel": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "employeeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "employeeLabel": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "localDate": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                },
+                "durationMilliseconds": {
+                  "type": "string",
+                  "maxLength": 18,
+                  "pattern": "^\\d+$"
+                },
+                "rateVersionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "amountMinorUnits": {
+                  "type": "string",
+                  "maxLength": 18,
+                  "pattern": "^\\d+$"
+                }
+              },
+              "required": [
+                "id",
+                "assignmentId",
+                "worksiteId",
+                "worksiteLabel",
+                "employeeId",
+                "employeeLabel",
+                "localDate",
+                "durationMilliseconds",
+                "rateVersionId",
+                "amountMinorUnits"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "planVersionId",
+          "worksiteId",
+          "weekKey",
+          "timeZone",
+          "currency",
+          "ruleVersion",
+          "createdAt",
+          "createdBy",
+          "correlationId",
+          "totalMinorUnits",
+          "days",
+          "positions"
+        ],
+        "additionalProperties": false
+      },
+      "CreateCostSnapshotCommand": {
+        "type": "object",
+        "properties": {
+          "publishedPlanVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "worksiteId": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          }
+        },
+        "required": [
+          "publishedPlanVersionId",
+          "worksiteId"
+        ],
+        "additionalProperties": false
+      },
+      "SelectablePlanVersion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$",
+            "description": "ISO-Woche im Format 2026-W32. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben."
+          },
+          "publishedAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+          }
+        },
+        "required": [
+          "id",
+          "weekKey",
+          "publishedAt"
+        ],
+        "additionalProperties": false
+      },
+      "SelectablePlanVersions": {
+        "type": "object",
+        "properties": {
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "weekKey": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$",
+                  "description": "ISO-Woche im Format 2026-W32. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben."
+                },
+                "publishedAt": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                  "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                }
+              },
+              "required": [
+                "id",
+                "weekKey",
+                "publishedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "versions"
         ],
         "additionalProperties": false
       }

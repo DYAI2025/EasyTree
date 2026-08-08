@@ -91,6 +91,19 @@ function gatewayMit(historie: RateHistory): CostsGateway {
     createRateVersion: () => {
       throw new Error("in dieser Ansicht nicht benutzt");
     },
+    // Die Snapshot-Operationen (EYT-109) gehoeren zu `/kosten`, nicht zur
+    // Satzverwaltung. Sie werfen, statt etwas Plausibles zu liefern: ruft die
+    // Ansicht sie doch auf, soll der Test laut scheitern und nicht still auf
+    // einer erfundenen Antwort weiterlaufen.
+    publishedPlanVersions: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
+    createSnapshot: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
+    snapshot: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
   };
 }
 

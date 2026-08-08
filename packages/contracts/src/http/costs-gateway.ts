@@ -18,14 +18,22 @@ import {
 import type { WriteOptions } from "../planning/gateway.js";
 import type { CostsGateway } from "../costs/gateway.js";
 import {
+  CostSnapshotSchema,
+  CreateCostSnapshotCommandSchema,
   CreateRateVersionCommandSchema,
   EmployeesForRatesSchema,
+  PublishedPlanVersionsQuerySchema,
   RateHistorySchema,
   RateVersionDtoSchema,
+  SelectablePlanVersionsSchema,
+  type CostSnapshot,
+  type CreateCostSnapshotCommand,
   type CreateRateVersionCommand,
   type EmployeesForRates,
+  type PublishedPlanVersionsQuery,
   type RateHistory,
   type RateVersionDto,
+  type SelectablePlanVersions,
 } from "../costs/schemas.js";
 
 export const ORGANISATION_HEADER = "X-EasyTree-Organization-Id";
@@ -93,6 +101,71 @@ export class HttpCostsGateway implements CostsGateway {
       // ProblemDocument; der Zustand für die UI ist in beiden Fällen "nicht
       // gespeichert, neu laden und entscheiden".
       conflictAs: "STALE_VERSION",
+    });
+  }
+
+  publishedPlanVersions(
+    query: PublishedPlanVersionsQuery,
+  ): Promise<GatewayResult<SelectablePlanVersions>> {
+    // Erst prüfen, dann senden — sonst wäre die Reihenfolgeregel des Schemas
+    // (`fromWeekKey <= toWeekKey`) ein Kommentar. Ein verkehrter Bereich sähe
+    // für den Server aus wie ein leerer, und die Oberfläche zeigte „keine
+    // Planversionen" statt eines Eingabefehlers.
+    const geprueft = PublishedPlanVersionsQuerySchema.safeParse(query);
+    if (!geprueft.success) {
+      return Promise.resolve(gatewayFailed<SelectablePlanVersions>("CONTRACT_VIOLATION", null));
+    }
+    // `URLSearchParams` statt Zeichenkettenaddition: die Kodierung gehört nicht
+    // in die Hand des Aufrufers, auch nicht bei heute harmlosen Werten.
+    const suche = new URLSearchParams({
+      fromWeekKey: geprueft.data.fromWeekKey,
+      toWeekKey: geprueft.data.toWeekKey,
+    });
+    return this.send({
+      path: `/kosten/planversionen?${suche.toString()}`,
+      method: "GET",
+      idempotencyKey: null,
+      schema: SelectablePlanVersionsSchema,
+      conflictAs: "REJECTED",
+    });
+  }
+
+  createSnapshot(
+    command: CreateCostSnapshotCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<CostSnapshot>> {
+    const geprueft = CreateCostSnapshotCommandSchema.safeParse(command);
+    if (!geprueft.success) {
+      return Promise.resolve(gatewayFailed<CostSnapshot>("CONTRACT_VIOLATION", null));
+    }
+    return this.send({
+      path: "/kosten/snapshots",
+      method: "POST",
+      body: geprueft.data,
+      idempotencyKey: options.idempotencyKey,
+      schema: CostSnapshotSchema,
+      // REJECTED, nicht STALE_VERSION — anders als bei `createRateVersion`.
+      //
+      // Der Unterschied ist die Handlung, die der Mensch danach vornehmen muss.
+      // Dort heisst 409 „jemand hat die aktive Version unter dir geändert":
+      // neu laden und NEU ENTSCHEIDEN. Hier gibt es keinen Stand, der veralten
+      // könnte — ein Snapshot ist unveränderlich und wird nur angelegt. Die
+      // einzige 409 dieser Route ist ein wiederverwendeter Idempotenzschlüssel
+      // mit abweichender Nutzlast, also ein Aufruferfehler, der mit einem
+      // frischen Schlüssel behoben ist. Als STALE_VERSION gemeldet, schickte er
+      // den Nutzer in einen Neu-laden-Dialog, der nichts ändert.
+      conflictAs: "REJECTED",
+    });
+  }
+
+  snapshot(snapshotId: string): Promise<GatewayResult<CostSnapshot>> {
+    return this.send({
+      path: `/kosten/snapshots/${encodeURIComponent(snapshotId)}`,
+      method: "GET",
+      idempotencyKey: null,
+      schema: CostSnapshotSchema,
+      // Ein GET erzeugt keinen Konflikt; `Call` verlangt das Feld trotzdem.
+      conflictAs: "REJECTED",
     });
   }
 
