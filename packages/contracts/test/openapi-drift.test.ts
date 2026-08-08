@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { CostSnapshotSchema, DurationMillisecondsSchema } from "../src/costs/schemas.js";
 import {
   API_BASE_PATH,
   API_VERSION,
@@ -78,6 +79,124 @@ describe("Vertragsform", () => {
       expect(header, `${path} ohne Idempotency-Key`).toBeDefined();
       expect(header?.required).toBe(true);
     }
+  });
+
+  it("misst die Ehrlichkeitszusage des Kostenschnappschusses (EYT-109)", () => {
+    // ## Warum dieser Fall existiert
+    //
+    // `openapi/document.ts` traegt bei den Kostenschemata einen
+    // Ehrlichkeitsabsatz: zwei Zod-Regeln fallen bei der Erzeugung weg —
+    // die Beziehung `days` <-> `positions` aus `CostSnapshotSchema.superRefine`
+    // und `DurationMillisecondsSchema.refine(> 0)` — und werden statt dessen zur
+    // Laufzeit erzwungen. Bis hierher war dieser Absatz reine Prosa.
+    // `openapi-drift.test.ts` konnte ihn nicht schuetzen: eine geloeschte
+    // `.refine()` aendert `v1.json` um kein Byte, genau deshalb gibt es die
+    // Luecke ueberhaupt. Damit war der Absatz die dritte unbelegte Zusicherung
+    // dieses Slices — nach dem `strictObject`-Versprechen, das nur eines von
+    // sechs Schemata deckte, und dem `toHaveLength(7)` ueber acht Stellen.
+    //
+    // Der Satz hat ZWEI Haelften, und beide werden hier gemessen, weil er in
+    // beide Richtungen verrotten kann:
+    //   * Nimmt jemand die Zod-Regel heraus, ist sie auch zur Laufzeit weg —
+    //     die Haelfte "wird zur Laufzeit erzwungen" wird rot.
+    //   * Faengt ein kuenftiges zod / `z.toJSONSchema` an, dafuer doch etwas
+    //     auszugeben, wird die Haelfte "steht nicht im Vertrag" rot. Auch das
+    //     will man wissen: dann gehoert der Absatz geloescht, nicht gepflegt.
+    const schemas = (doc["components"] as { schemas: Record<string, Record<string, unknown>> })
+      .schemas;
+
+    // Vakanzschutz zuerst. Ohne ihn waere jede "… ist nicht vorhanden"-Aussage
+    // unten auch bei einem Tippfehler im Komponentennamen gruen.
+    const snapshot = schemas["CostSnapshot"];
+    expect(snapshot, "Komponente CostSnapshot fehlt — der Rest misst nichts").toBeDefined();
+    const felder = (snapshot?.["properties"] ?? {}) as Record<string, Record<string, unknown>>;
+    expect(Object.keys(felder)).toEqual(expect.arrayContaining(["days", "positions"]));
+    const dauer = (
+      schemas["CostPositionDto"]?.["properties"] as Record<string, unknown> | undefined
+    )?.["durationMilliseconds"] as Record<string, unknown> | undefined;
+    expect(dauer, "CostPositionDto.durationMilliseconds nicht gefunden").toBeDefined();
+
+    // (1) Die Beziehung zwischen zwei Feldern steht nicht im Dokument.
+    // Die Liste nennt, was gefunden WURDE, statt nur "ungleich" zu melden.
+    const beziehung = [
+      "allOf",
+      "anyOf",
+      "oneOf",
+      "not",
+      "if",
+      "then",
+      "else",
+      "dependentSchemas",
+      "dependentRequired",
+    ].filter((schluessel) => snapshot !== undefined && schluessel in snapshot);
+    expect(
+      beziehung,
+      "CostSnapshot traegt jetzt Schluesselwoerter, mit denen sich eine Feldbeziehung " +
+        "ausdruecken laesst. Entweder wird die Regel nun doch abgebildet — dann gehoert " +
+        "der Ehrlichkeitsabsatz in openapi/document.ts geloescht — oder hier entstand " +
+        "etwas Unbeabsichtigtes.",
+    ).toEqual([]);
+    expect(
+      felder["days"]?.["minItems"],
+      "days hat jetzt minItems; das waere eine TEILWEISE Abbildung der Regel und macht " +
+        "den Absatz ungenau.",
+    ).toBeUndefined();
+
+    // (2) "Dauer > 0" steht nicht im Dokument — belegt am Muster selbst, nicht
+    // an der Abwesenheit eines Schluessels: das erzeugte Schema nimmt "0" an.
+    expect(
+      new RegExp(dauer?.["pattern"] as string).test("0"),
+      "Das erzeugte Muster fuer durationMilliseconds lehnt '0' inzwischen ab — die Regel " +
+        "steht also doch im Vertrag und der Ehrlichkeitsabsatz ist ueberholt.",
+    ).toBe(true);
+    const numerisch = ["minimum", "exclusiveMinimum", "const", "enum"].filter(
+      (schluessel) => dauer !== undefined && schluessel in dauer,
+    );
+    expect(numerisch, "durationMilliseconds traegt jetzt eine numerische Schranke").toEqual([]);
+
+    // (3) Die andere Haelfte des Satzes: erzwungen wird beides trotzdem.
+    // Bewusst knapp — die vollstaendige Abdeckung liegt in
+    // `costs-snapshot-schemas.test.ts`. Hier stehen genau die zwei Regeln, die
+    // der Absatz namentlich nennt, damit er nicht ueberlebt, wenn sie fallen.
+    expect(
+      DurationMillisecondsSchema.safeParse("0").success,
+      "Die Regel 'Dauer > 0' gibt es nicht mehr — dann behauptet der Absatz eine " +
+        "Laufzeitpruefung, die niemand mehr macht.",
+    ).toBe(false);
+    const id = "3f1c9c2a-5b7e-4d21-9f0a-8c6e2b1d4a77";
+    const ohneTagessumme = {
+      id,
+      planVersionId: id,
+      worksiteId: null,
+      weekKey: "2026-W32",
+      timeZone: "Europe/Berlin",
+      currency: "EUR",
+      ruleVersion: "personnel-plan-cost-v1",
+      createdAt: "2026-08-08T10:00:00.000Z",
+      createdBy: id,
+      correlationId: "abc",
+      totalMinorUnits: "12000",
+      days: [],
+      positions: [
+        {
+          id,
+          assignmentId: id,
+          worksiteId: id,
+          worksiteLabel: "Baustelle Nord",
+          employeeId: id,
+          employeeLabel: "Mira Baumgart",
+          localDate: "2026-08-03",
+          durationMilliseconds: "28800000",
+          rateVersionId: id,
+          amountMinorUnits: "12000",
+        },
+      ],
+    };
+    expect(
+      CostSnapshotSchema.safeParse(ohneTagessumme).success,
+      "Die Beziehung days <-> positions wird nicht mehr geprueft — dann behauptet der " +
+        "Absatz eine Laufzeitpruefung, die niemand mehr macht.",
+    ).toBe(false);
   });
 
   it("schliesst jedes Antwortobjekt gegen unbekannte Felder", () => {
