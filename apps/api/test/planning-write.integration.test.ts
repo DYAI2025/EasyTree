@@ -25,8 +25,9 @@
  *    neu an, wird „eine veroeffentlichte Planversion weist die Zuweisung auch
  *    ab, wenn die Sitzung sie nicht sperrend lesen darf" rot: das `for share`
  *    der Funktion faende die Elternzeile nicht mehr und der Insert gelaenge
- *    (EYT-136). Als einzige der fuenf ist sie NICHT ausgefuehrt — sie verlangt
- *    eine Wegwerf-Folgemigration; Begruendung am Fall selbst.
+ *    (EYT-136). Ausgefuehrt am 08.08.2026 ueber eine Wegwerf-Folgemigration;
+ *    sie hat dabei zuerst die Reihenfolge dieses Falls korrigiert — Einzelheiten
+ *    am Fall selbst und in `docs/reviews/2026-08-08-eyt-136-kanalmatrix.md` §7.
  */
 import {
   createTimeZone,
@@ -1528,17 +1529,20 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
    * `security invoker` neu anlegen: das `for share` der Funktion faende dann —
    * wie die Sonde zeigt — nichts, der Insert gelaenge, und dieser Fall wird rot.
    * Das ist die behaviourale Schwester zur strukturellen Zusicherung in
-   * `supabase/tests/0006_planning_invariants.sql:311` (`prosecdef`); die beiden
+   * `supabase/tests/0006_planning_invariants.sql` (`prosecdef`); die beiden
    * decken verschiedene Ausfaelle ab und ersetzen einander nicht.
    *
-   * Diese Gegenmutation ist **NICHT ausgefuehrt** — sie verlangt eine
-   * Wegwerf-Folgemigration und einen eigenen `db-gates`-Lauf; dieselbe Angabe
-   * steht in `supabase/tests/0006_planning_invariants.sql` (Z. 307-309) und in
-   * `docs/reviews/2026-08-08-eyt-136-kanalmatrix.md` §7. Was den offenen Punkt
-   * klein haelt: `sperrlesbar=0` ist bereits die direkte Messung genau der
-   * Lesung, die ein Invoker ausfuehren wuerde — also des Verhaltens, das die
-   * Gegenmutation vorfuehren wuerde. Ungemessen bleibt allein, dass der Trigger
-   * daraufhin wirklich durchliesse.
+   * Diese Gegenmutation ist **AUSGEFUEHRT** (08.08.2026). Sie hat dabei zuerst
+   * einen Fehler in DIESEM Fall aufgedeckt: die `prosecdef`-Zusicherung stand
+   * vor dem Insert, der Fall fiel also strukturell statt behavioural und war
+   * damit keine behaviourale Schwester, sondern eine zweite Kopie der
+   * pgTAP-Aussage. Die Reihenfolge ist seither umgestellt — Vorbedingungen,
+   * Versuch, Verhalten; `prosecdef` nur noch als protokollierter Wert (siehe
+   * die Begruendung am Lesezugriff weiter unten). Belege, Laufnummern und der
+   * Ablauf stehen in `docs/reviews/2026-08-08-eyt-136-kanalmatrix.md` §7.
+   *
+   * Was den Nachweis schon vorher stuetzte: `sperrlesbar=0` ist die direkte
+   * Messung genau der Lesung, die ein Invoker ausfuehren wuerde.
    */
   dbIt(
     "eine veroeffentlichte Planversion weist die Zuweisung auch ab, wenn die Sitzung sie nicht sperrend lesen darf",
@@ -1600,23 +1604,9 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
           ),
         );
 
-        const definer = await beobachte<{ prosecdef: boolean }>(
-          `select p.prosecdef
-             from pg_proc p
-             join pg_namespace n on n.oid = p.pronamespace
-            where n.nspname = 'app' and p.proname = 'reject_assignment_in_published_plan'`,
-        );
-
-        process.stdout.write(
-          `[planning-write] definer-probe kanal=${String(sonde.kanal)} ` +
-            `mandant_alpha=${String(sonde.mandant_alpha)} ` +
-            `recht_write=${String(sonde.recht_write)} ` +
-            `recht_publish=${String(sonde.recht_publish)} ` +
-            `lesbar=${String(lesbar.rows.length)} ` +
-            `sperrlesbar=${String(sperrlesbar.rows.length)} ` +
-            `definer=${String(definer[0]?.prosecdef ?? false)}\n`,
-        );
-
+        // Die VORBEDINGUNGEN stehen hart und vor dem Versuch. Eine Mutation, die
+        // eine davon bricht, sagt nichts ueber den Riegel — gemessen an GM2a/GM2b
+        // am 08.08.2026, wo genau diese Trennung den Unterschied machte.
         expect(sonde.kanal, "kein Laufzeitkanal — der Insert scheiterte am falschen Riegel").toBe(
           true,
         );
@@ -1639,7 +1629,6 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
           sperrlesbar.rows.length,
           "die sperrende Lesung findet die Zeile doch — ein Invoker braeuchte den Definer hier nicht",
         ).toBe(0);
-        expect(definer[0]?.prosecdef, "die Triggerfunktion ist nicht security definer").toBe(true);
 
         let fehler: DatabaseError | null = null;
         try {
@@ -1661,6 +1650,54 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
         } catch (e) {
           fehler = e as DatabaseError;
         }
+
+        /**
+         * `prosecdef` wird NACH dem Versuch gelesen und ABSICHTLICH NICHT
+         * zugesichert — es ist hier Diagnose, nicht Riegel.
+         *
+         * Warum ueberhaupt umgestellt (gemessen, nicht befuerchtet): bis zum
+         * 08.08.2026 stand `expect(prosecdef).toBe(true)` VOR dem Insert. Die
+         * Gegenmutation „Funktion als `security invoker` neu anlegen" machte
+         * diesen Fall damit an der STRUKTURELLEN Zeile rot (Lauf 31238804687:
+         * „die Triggerfunktion ist nicht security definer: expected false to be
+         * true") — also an derselben `pg_proc.prosecdef`-Aussage, die
+         * `supabase/tests/0006_planning_invariants.sql` ohnehin prueft. Die
+         * Behauptung, die dieser Fall TRAEGT — ohne `security definer` liefe die
+         * Zuweisung durch, statt 23514 zu werfen —, blieb unausgefuehrt. Ein
+         * Fall, der „behavioural" heisst und strukturell faellt, ist kein
+         * Verhaltensbeweis.
+         *
+         * Warum die Zusicherung ganz entfaellt statt nur nach hinten zu wandern:
+         * die strukturelle Aussage hat bereits ZWEI unabhaengige Waechter, beide
+         * gemessen.
+         *   1. `0006_planning_invariants.sql` (pgTAP) — Gegenmutation ausgefuehrt,
+         *      Lauf 31238661331: `have: false / want: true`.
+         *   2. Der Job-Grep in `.github/workflows/ci.yml`, Schritt „Planning write
+         *      gate", der die Zeile unten mit `definer=true` woertlich verlangt.
+         *      Er ist von vitest unabhaengig: bliebe dieser Fall trotz
+         *      `security invoker` gruen, faellt der Schritt am Grep.
+         * Eine dritte Kopie an dieser Stelle kauft nichts hinzu und stellt genau
+         * den Beschattungsfehler wieder her, den die Umstellung beseitigt.
+         *
+         * Der Wert bleibt in der greppbaren Zeile: faellt der Verhaltensbeweis
+         * unten, steht `definer=false` unmittelbar darueber und erklaert ihn.
+         */
+        const definer = await beobachte<{ prosecdef: boolean }>(
+          `select p.prosecdef
+             from pg_proc p
+             join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'app' and p.proname = 'reject_assignment_in_published_plan'`,
+        );
+
+        process.stdout.write(
+          `[planning-write] definer-probe kanal=${String(sonde.kanal)} ` +
+            `mandant_alpha=${String(sonde.mandant_alpha)} ` +
+            `recht_write=${String(sonde.recht_write)} ` +
+            `recht_publish=${String(sonde.recht_publish)} ` +
+            `lesbar=${String(lesbar.rows.length)} ` +
+            `sperrlesbar=${String(sperrlesbar.rows.length)} ` +
+            `definer=${String(definer[0]?.prosecdef ?? false)}\n`,
+        );
 
         // 23514 und nicht 42501: bei 42501 haette die Insert-Policy abgelehnt
         // (dann waere `recht_write` falsch gewesen), und der Trigger — also die

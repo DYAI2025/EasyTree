@@ -381,10 +381,50 @@ recht_publish=false lesbar=1 sperrlesbar=0 definer=true` zeigt, dass die sperren
   `plan_versions` hinzu, würde sie mit ODER in die `using`-Auswertung eingehen, die sperrende
   Lesung fände die Zeile wieder — `sperrlesbar=1`, und der Fall wird **rot**. Ein zweiter Riegel,
   der die Aussage aushebeln würde, meldet sich also, statt sich zu verstecken.
-- **Die Gegenmutation ist weiterhin benannt und nicht gefahren.** `security invoker` in einer
-  Wegwerf-Folgemigration würde `0006:311` und den neuen Fall rot machen; das verlangt einen
-  eigenen `db-gates`-Lauf und steht aus. Was der neue Fall heute liefert, ist der Beweis, dass die
-  Konstellation überhaupt erreichbar ist — der Schritt, an dem die erste Fassung dieses Dokuments
-  zu früh aufgehört hat.
+- **Die Gegenmutation ist inzwischen gefahren.** Dieser Satz stand hier als offener Punkt; er ist
+  am 08.08.2026 eingelöst worden. Siehe Abschnitt 8 — samt des Fehlers, den sie in genau diesem
+  Fall aufgedeckt hat.
 - **Nicht geprüft:** ob der Angriffsweg über PostgREST nach 0017 tatsächlich 42501 liefert. Das
   ist eine Aussage über das laufende Produktivsystem und gehört nicht in pgTAP.
+
+## 8. Ausgeführte Gegenmutationen (08.08.2026)
+
+Sieben benannte Gegenmutationen wurden gegen den Stand `6c793ad` gefahren, jede auf einem eigenen
+Wegwerf-Branch mit Draft-PR; alle Branches und PRs sind danach gelöscht bzw. geschlossen. Die
+vollständige Tabelle liegt im Produktverantwortlichen-Paket. Zwei Beobachtungen gehören hierher,
+weil sie beim Lesen eines roten Laufs gebraucht werden. **Beide sind Beobachtungen, keine
+Handlungsaufträge — an der Struktur des CI-Jobs wird im Rahmen von EYT-136 nichts geändert.**
+
+### O1 — `db-gates` verdeckt seine eigenen Verhaltensnachweise
+
+Die Schritte laufen in dieser Reihenfolge: `pgTAP suite (run 1)` … `Planning invariants gate` …
+`Planning write gate`. `shell: bash` impliziert in GitHub Actions `pipefail`, ein roter
+pgTAP-Lauf beendet den Job also sofort; alle späteren Schritte erscheinen als `skipped`.
+
+Folge: Eine Mutation, die **zugleich** eine strukturelle pgTAP-Zusicherung und einen
+nachgelagerten Verhaltensfall bricht, zeigt nur die pgTAP-Zeile. Gemessen an drei Mutationen —
+das Entfernen von `planning.write` aus `assignments_insert_in_org` bzw.
+`plan_versions_insert_in_org` und das Umstellen der Triggerfunktion auf `security invoker`:
+`db-gates` brach jedes Mal in `pgTAP suite (run 1)` ab (an `0012` B3, `0012` B4 bzw. `0006`
+`prosecdef`), und `Planning write gate` lief **gar nicht**.
+
+Wer einen roten `db-gates` liest, sollte deshalb nicht aus „der Verhaltensfall ist grün"
+schließen, dass er gelaufen ist — er kann übersprungen worden sein. Der Schrittstatus sagt es;
+`skipped` ist nicht `success`.
+
+### O2 — `auth-journey` kann den Rechte-Riegel prinzipiell nicht sehen
+
+`app.is_runtime_channel()` vergleicht `session_user` mit `easytree_app`. PostgREST meldet sich als
+`authenticator` an und erfüllt das nie. In der Reise fällt daher **immer der Kanal-Riegel zuerst**,
+unabhängig davon, ob das Subjekt `planning.write` trägt.
+
+Gemessen: Beide Mutationen, die ausschließlich `app.has_permission(org_id, 'planning.write')` aus
+einer Insert-Policy entfernen, ließen `auth-journey` **grün** durchlaufen. Die Reise beweist damit
+den Kanal-Riegel und nur ihn.
+
+Der Rechte-Riegel hat folglich genau **einen** Zeugen: die beiden Verhaltensfälle in
+`apps/api/test/planning-write.integration.test.ts` („ein aktives Mitglied ohne planning.write legt
+über den Laufzeitkanal keine Planversion an" bzw. „… hängt auch in einen Entwurf keine Zuweisung").
+Bis zum zweiten Reviewgang war er nur durch eine Textzusicherung gedeckt, die gegen
+`has_permission(...) or true` grün geblieben wäre. Das ist die Begründung dafür, dass diese beiden
+Fälle existieren — und dafür, sie nicht wieder auf eine Textprüfung zurückzustufen.
