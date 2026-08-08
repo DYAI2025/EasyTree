@@ -71,6 +71,9 @@ const WALL = "packages/domain/test/wall-time.test.ts";
 // EYT-95 — Money-, Rate- und Rundungsvertrag.
 const MONEY = "packages/domain/test/money-rate.test.ts";
 const RATE_PROP = "packages/domain/test/rate-version.property.test.ts";
+// EYT-109 — Tagesallokation ueber lokale Kalendertage.
+const DAY_ALLOC = "packages/domain/test/local-day-allocation.test.ts";
+const DAY_ALLOC_PROP = "packages/domain/test/local-day-allocation.property.test.ts";
 
 export const INVARIANTS: readonly Invariant[] = [
   // -------------------------------------------------------------------------
@@ -459,6 +462,41 @@ export const INVARIANTS: readonly Invariant[] = [
       file: MONEY,
       title: "widerlegt die blosse Tagesdekrementierung an Jahres- und Schaltjahresgrenze",
     },
+  },
+
+  // ---------------------------------------------------------------------------
+  // EYT-109 — Tagesallokation ueber lokale Kalendertage (S5-REQ-05)
+  // ---------------------------------------------------------------------------
+  {
+    exportName: "allocateAcrossLocalDays",
+    statement:
+      "Ein Einsatz wird auf die lokalen Kalendertage der Organisationszone verteilt; die Anteile sind aufsteigend, lueckenlos, nie leer und summieren sich EXAKT auf die verstrichene Dauer — auch an den Ortstagen mit 23 oder 25 Stunden. An einer fehlenden oder doppelten lokalen Mitternacht wird blockiert, nie geraten. Das ist ausdruecklich die GEGENTEILIGE Regel zu planningWeekOf, das eine Schicht ueber Mitternacht ungeteilt laesst.",
+    kind: "regel",
+    // Die tragende Aussage ist eine Eigenschaft ueber alle Einsaetze und acht
+    // Zonen, nicht ein Punkt: deshalb steht der Eigenschaftstest als Positivfall.
+    positive: {
+      file: DAY_ALLOC_PROP,
+      title: "summiert die Anteile exakt auf die verstrichene Dauer",
+    },
+    // Unterscheidender Gegenfall: 2026-08-02T22:30Z bis 2026-08-03T06:30Z ist in
+    // Europe/Berlin EIN Ortstag (der 3.), in UTC dagegen zwei. Eine Umsetzung
+    // ueber UTC-Mitternacht liefert hier zwei Anteile und bucht die halbe
+    // Nachtschicht auf einen Tag, an dem vor Ort niemand gearbeitet hat.
+    negative: {
+      file: DAY_ALLOC,
+      title: "ordnet einer UTC-Zuordnung widersprechend dem ORTSTAG zu",
+    },
+  },
+  {
+    exportName: "LOCAL_DAY_ALLOCATION_ERRORS",
+    statement:
+      "Die Tagesgrenze kennt genau zwei blockierende Ausgaenge — fehlende und doppelte lokale Mitternacht — und beide sind mit echten Zonen und echten Daten ausloesbar; einen dritten, stillen Ausgang gibt es nicht.",
+    kind: "konstante",
+    positive: {
+      file: DAY_ALLOC,
+      title: "fuehrt jeden Tagesgrenzen-Fehlercode genau einmal und erreicht jeden",
+    },
+    negative: null,
   },
 
   // ---------------------------------------------------------------------------

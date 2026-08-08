@@ -1492,6 +1492,12 @@ describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
     expect([...fehlerlisten].sort()).toEqual([
       "COST_POSITION_INPUT_ERRORS",
       "HOURLY_RATE_AMOUNT_ERRORS",
+      // EYT-109: die neunte Liste. Sie steht hier, weil dieser Test genau das
+      // verlangt — die Ableitung oben deckt sie ab dem ersten Moment ab, diese
+      // Zeile ist die Quittung dafuer, dass jemand sie gesehen hat. Ihre
+      // Erreichbarkeit wird in `local-day-allocation.test.ts` mit echten Zonen
+      // belegt, nicht hier.
+      "LOCAL_DAY_ALLOCATION_ERRORS",
       "MONEY_ERRORS",
       "PLAN_COST_AMOUNT_ERRORS",
       "QUANTITY_ERRORS",
