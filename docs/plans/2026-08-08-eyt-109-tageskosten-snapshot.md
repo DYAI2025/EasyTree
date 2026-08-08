@@ -2325,6 +2325,15 @@ Ausgabe **lesen**, dann erst pushen.
   ebenfalls bricht — laut, nicht still.
 - `CLAUDE.md`: die Migrationsanzahl, die Tabellenliste und der Satz „`costs` ist heute eine Grenze,
   kein laufendes Feature“ sind nach diesem Slice **veraltet**. Korrigieren.
+- `CLAUDE.md`, Abschnitt _Commands_: **die Turbo-Cache-Falle aufnehmen.** Die Datei nennt
+  `pnpm test` als das Gate — und genau dieser Befehl kann `Cached: 10 cached, 10 total >>> FULL
+TURBO` melden, eine vollständige grüne Zusammenfassung drucken und **kein einziges Paket
+  ausgeführt haben** (gemessen 08.08.2026: „1061 passed“ aus dem Replay). Am schärfsten direkt
+  nach einer Gegenmutation, weil das Zurücknehmen der Datei den Vorher-Cache-Schlüssel
+  wiederherstellt. Jede Zahl, die als Nachweis dienen soll, braucht
+  `pnpm exec turbo run <task> --force` oder den Paketaufruf — und einen Blick auf die
+  `Cached:`-Zeile. Das trifft jede Person und jeden Agenten, der der Datei folgt, nicht nur diesen
+  Slice.
 - `docs/traceability/REQUIREMENT_TO_JIRA_v1.3.csv`: EYT-109 auf die neuen Artefakte zeigen lassen.
 
 **Schritt 3: Pushen und PR öffnen**
