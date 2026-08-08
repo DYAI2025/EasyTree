@@ -1883,6 +1883,23 @@ Muster: `apps/api/test/costs/cost-access-audit.http.test.ts`.
    erlaubt wie abgelehnt.
 7. Antwortkörper werden gegen `CostSnapshotSchema` geparst.
 
+> **Die 409-Menge dieser Route ist eine Entscheidung, keine Selbstverständlichkeit** (Befund aus
+> Task 2, 08.08.2026). `HttpCostsGateway.createSnapshot` bildet 409 auf `REJECTED` ab — nicht auf
+> `STALE_VERSION` —, weil laut D3 die einzigen 409 ein wiederverwendeter und ein fehlender
+> Idempotenzschlüssel sind: beides Aufruferfehler, mit einem frischen Schlüssel behebbar.
+>
+> **Aufzuzählen, wenn `costs-error-type.ts` seine URNs bekommt:** jede Bedingung, unter der
+> `POST /kosten/snapshots` mit 409 antwortet.
+>
+> - Ist die Menge genau {`IDEMPOTENCY_KEY_REUSED`, fehlender Schlüssel} → `REJECTED` bleibt, und
+>   ein Test sichert die **URN-Menge** zu, nicht bloß Status → Failure. Der vorhandene Test
+>   (`test/http-costs-gateway.test.ts:366-398`) prüft nur die Abbildung und liest `problem.type`
+>   nie — er bliebe grün, während die Zuordnung falsch würde.
+> - Bedeutet irgendein 409 „der veröffentlichte Stand hat sich unter dir geändert", muss die
+>   Abbildung aufgeteilt werden. **Das ist keine Einzeiler-Änderung:** `Call.conflictAs` ist ein
+>   Skalar (`packages/contracts/src/http/costs-gateway.ts:56`) und müsste eine Funktion des
+>   geparsten `ProblemDocument` werden — also eine Änderung an `send` selbst.
+
 **Schritt 2: Rot bestätigen**
 
 ```bash
@@ -1920,8 +1937,21 @@ pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.test.ts \
 ```
 
 Der Konformitätstest ist die Messung: eine Route ohne Vertragseintrag **und** ein Vertragseintrag
-ohne Route werden beide rot. `NOT_YET_IMPLEMENTED` (heute fünf `/einsatz/`-Einträge) darf dabei
-**nicht** wachsen.
+ohne Route werden beide rot.
+
+> **Korrektur, gemessen 08.08.2026 nach Task 2.** Eine frühere Fassung dieser Zeile sagte,
+> `NOT_YET_IMPLEMENTED` habe „heute fünf `/einsatz/`-Einträge" und dürfe **nicht** wachsen. Beides
+> ist inzwischen falsch. Task 2 registriert die drei Kostenpfade in `v1.json`, bevor es die Routen
+> gibt — das ist die Reihenfolge, die contract-first verlangt —, und hat sie deshalb als Einträge
+> ergänzt. Es sind jetzt **acht**.
+>
+> **Task 13 muss alle drei `/kosten/*`-Einträge im SELBEN Commit entfernen, der die Routen
+> anlegt.** Das ist keine Bitte: `openapi-route-conformance.test.ts:212-217` prüft mit einer
+> `stale`-Zusicherung, dass kein Eintrag eine bereits implementierte Operation nennt, und wird
+> sonst rot. Die Liste muss auf fünf **schrumpfen**; sie ist nicht fünf.
+>
+> Zu prüfen ist außerdem, ob der Kopfkommentar der Datei die contract-first-Ausnahme inzwischen
+> benennt — Task 2 hat ihn dafür angepasst.
 
 **Schritt 5: Committen**
 
@@ -2380,6 +2410,8 @@ apps/api/src/modules/costs/application/plan-cost-facts.port.ts,
 apps/api/src/modules/module-catalogue.ts
 apps/api/src/app.module.ts
 apps/api/test/domain-invariants/registry.ts
+apps/api/test/openapi-route-conformance.test.ts  (Task 2 traegt drei Eintraege ein,
+                                                  Task 13 MUSS sie wieder entfernen)
 supabase/tests/0005_schema_meta_gate.sql
 apps/web/app/kosten/page.tsx, test/a11y.test.tsx
 apps/web/e2e/auth-journey/journey.pwtest.ts, fixtures.sql, teardown.sql
@@ -2411,8 +2443,20 @@ Hand.
 Der Plan lag an drei Stellen falsch. Die Korrekturen stehen bei den betroffenen Tasks; hier
 gesammelt, damit sie nicht übersehen werden.
 
-| Datum      | Planaussage                                                      | Gemessen                                                                                                                                                                                                                                                                                                                                                         |
-| ---------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 08.08.2026 | „`WeekKeySchema` aus `../planning/schemas.js`" (Task 1)          | Existiert nicht. Heißt **`IsoWeekKeySchema`**, `planning/schemas.ts:104`. Zusätzlich unerwähnt geblieben: die Registrierungspflicht in `STELLEN` (`test/iso-week-key.test.ts`). Ohne sie bleibt die Kalenderregel unbewiesen — gemessen blieben alle 125 Tests grün, während `.refine(isValidIsoWeekKey)` aus den Kostenschemata verschwand.                     |
-| 08.08.2026 | „Der Drift-Test wird rot, sobald ein Schema hinzukommt" (Task 2) | Falsch. `openapi/document.ts:62-94` ist ein handgeschriebenes `NAMED_SCHEMAS`-Register (24 Einträge). Ein unregistriertes Schema erreicht `v1.json` nie; `git diff` darauf ist nach Task 1 leer, Drift-Test grün. Task 2 muss Register **und** Pfade eintragen.                                                                                                  |
-| 08.08.2026 | Task-2-Dateiliste                                                | Unvollständig. `apps/web/test/rate-management.test.tsx:86` deklariert `gatewayMit` als `CostsGateway` und ist nach Task 1 strukturell unvollständig (TS2739). `apps/web/lib/costs-gateway-factory.ts:13` ebenfalls rot, klärt sich aber mit `HttpCostsGateway` von selbst. Vollständige Implementorenliste gemessen: genau diese beiden plus `HttpCostsGateway`. |
+| Datum      | Planaussage                                                                                              | Gemessen                                                                                                                                                                                                                                                                                                                                                         |
+| ---------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 08.08.2026 | „`WeekKeySchema` aus `../planning/schemas.js`" (Task 1)                                                  | Existiert nicht. Heißt **`IsoWeekKeySchema`**, `planning/schemas.ts:104`. Zusätzlich unerwähnt geblieben: die Registrierungspflicht in `STELLEN` (`test/iso-week-key.test.ts`). Ohne sie bleibt die Kalenderregel unbewiesen — gemessen blieben alle 125 Tests grün, während `.refine(isValidIsoWeekKey)` aus den Kostenschemata verschwand.                     |
+| 08.08.2026 | „Der Drift-Test wird rot, sobald ein Schema hinzukommt" (Task 2)                                         | Falsch. `openapi/document.ts:62-94` ist ein handgeschriebenes `NAMED_SCHEMAS`-Register (24 Einträge). Ein unregistriertes Schema erreicht `v1.json` nie; `git diff` darauf ist nach Task 1 leer, Drift-Test grün. Task 2 muss Register **und** Pfade eintragen.                                                                                                  |
+| 08.08.2026 | Task-2-Dateiliste                                                                                        | Unvollständig. `apps/web/test/rate-management.test.tsx:86` deklariert `gatewayMit` als `CostsGateway` und ist nach Task 1 strukturell unvollständig (TS2739). `apps/web/lib/costs-gateway-factory.ts:13` ebenfalls rot, klärt sich aber mit `HttpCostsGateway` von selbst. Vollständige Implementorenliste gemessen: genau diese beiden plus `HttpCostsGateway`. |
+| 08.08.2026 | „Test: `packages/contracts/test/costs-gateway.contract.test.ts` (vorhanden erweitern oder neu)" (Task 2) | Die Datei existiert nicht, und der Name passt nicht zur Konvention — das Geschwister heißt `http-planning-gateway.test.ts`. Angelegt wurde `http-costs-gateway.test.ts`. Nebenbefund: `HttpCostsGateway` hatte **überhaupt keinen** Test, auch die drei bestehenden Methoden nicht.                                                                              |
+| 08.08.2026 | „`NOT_YET_IMPLEMENTED` darf dabei nicht wachsen" (Task 13 Schritt 4)                                     | Falsch bei contract-first. Task 2 registriert die Pfade vor den Routen und musste deshalb drei Einträge ergänzen — es sind acht. Task 13 muss auf fünf **schrumpfen**, erzwungen durch die `stale`-Zusicherung in `openapi-route-conformance.test.ts:212-217`.                                                                                                   |
+
+### Nebenbefunde ausserhalb dieses Slices
+
+Gemessen während der Ausführung, nicht Teil von EYT-109 — gehören in den PR-Body und vor den PO.
+
+| Befund                                                             | Messung                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`pnpm build` ist an der Wurzel kaputt, und kein Gate merkt es.** | `turbo.json` deklariert weder `env` noch `globalEnv`; turbo 2.x läuft im Strict-Env-Modus und streift `EASYTREE_API_PROXY_TARGET` ab, worauf `@easytree/web#build` mit „ist in production Pflicht" abbricht. CI fährt für Web `pnpm --filter @easytree/web... build` und umgeht turbo damit vollständig — deshalb ist `build-web` grün. Auf `origin/master` identisch, also vorbestehend. Ein Fix wäre eine `env`-Deklaration in `turbo.json`; das berührt die Cache-Schlüssel aller Aufgaben und gehört nicht in diesen Slice. |
+| **Turbo meldet grün, ohne etwas auszuführen.**                     | Ein zweiter `pnpm test` im selben Worktree ergab `Cached: 10 cached, 10 total >>> FULL TURBO` — kein Paket lief, die Ausgabe zeigte trotzdem „1061 passed". Besonders scharf direkt nach einer Gegenmutation: das Zurücknehmen stellt den alten Cache-Schlüssel her. Jede Zahl, die als Nachweis gilt, deshalb mit `pnpm exec turbo run <task> --force` oder per Paketaufruf messen.                                                                                                                                            |
+| **Node-Version weicht ab.**                                        | Der Arbeitsbaum lief auf Node v24.16.0, `.nvmrc` verlangt 22. Alle Gates grün, aber lokale Läufe bleiben damit eine Stufe unter dem CI-Nachweis.                                                                                                                                                                                                                                                                                                                                                                                |
