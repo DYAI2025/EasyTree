@@ -82,8 +82,13 @@ import { psqlMitMarker } from "./global-setup";
  *   wiederherstellen UND die zugehoerige Policy neu anlegen (Rollback-Rezept
  *   im Kopf von 0017): Schritt 9c5 wird rot — PATCH bzw. DELETE greifen dann
  *   durch, und die Nachkontrolle sieht eine veraenderte bzw. fehlende Zeile.
- *   Beides zusammen, denn 0017 hat beides entzogen: allein der Grant liefe in
- *   „no policy", allein die Policy in 42501.
+ * - NUR den Grant wiederherstellen, die Policy weggelassen: 9c5 wird ebenfalls
+ *   rot, aber frueher und aus einem anderen Grund — ohne permissive Policy
+ *   waehlt das UPDATE null Zeilen aus, PostgREST antwortet mit 200 und leerer
+ *   Menge (dieselbe Mechanik wie 9c2), und `erwarteRiegel` faellt schon an der
+ *   Statuszusicherung. Die WIRKUNGSkontrollen blieben dabei gruen. Genau fuer
+ *   diesen Fall gibt es die Riegelzusicherung: sie haelt fest, WELCHER Riegel
+ *   getragen hat, nicht nur dass abgewiesen wurde.
  * - `('member','planning.write')` in `role_permissions` eintragen: 9c5 wird
  *   rot — aber NICHT an einer Angriffszusicherung, sondern schon am
  *   Praemissenwaechter in `eyt136-member-an.sql` (`raise exception`, noch vor
@@ -211,10 +216,22 @@ async function dataApiLese<T>(
  * Der Fehlerkoerper von PostgREST — `code` ist der durchgereichte SQLSTATE.
  *
  * Er ist das einzige, was von aussen die beiden RIEGEL unterscheidet, die 0017
- * gesetzt hat. Beide melden 42501, aber mit verschiedener Meldung:
+ * gesetzt hat. GEMESSEN im Lauf 31235882417 (Job 93048155065), alle sechs
+ * Versuche mit `code = "42501"` und HTTP 403 — der Status allein unterscheidet
+ * also NICHTS:
  *
- *   fehlendes Tabellenrecht  -> „permission denied for table …"
- *   `with check`-Verletzung  -> „new row violates row-level security policy …"
+ *   `with check`-Verletzung (0017 Z. 146-152, Z. 164-172)
+ *     message  new row violates row-level security policy for table "assignments"
+ *     hint     (leer)
+ *
+ *   entzogenes Tabellenrecht (0017 Z. 117-118)
+ *     message  permission denied for table assignments
+ *     hint     Grant the required privileges to the current role with:
+ *              GRANT UPDATE ON public.assignments TO authenticated;
+ *
+ * Der `hint` ist der schaerfste der drei Befunde: PostgREST nennt darin das
+ * FEHLENDE Recht beim Namen, also genau das, was 0017 entzogen hat. Deshalb
+ * wird er mitgeprueft und nicht nur mitgeschrieben.
  *
  * Ohne diese Unterscheidung koennte ein 403 aus einem DRITTEN Grund kommen und
  * der Nachweis bliebe still gruen — und „welcher Riegel hat gehalten" ist die
@@ -294,6 +311,65 @@ async function dataApiSchreibversuch(
   );
 
   return { status: antwort.status(), koerperLaenge: koerper.length, zeilen, fehler };
+}
+
+/**
+ * Welcher der beiden Riegel aus Migration 0017 einen Versuch abgewiesen hat.
+ *
+ *   `policy`         die `with check`-Klausel — Kanal bzw. Recht fehlt, das
+ *                    Spalten- und Tabellenrecht besteht noch
+ *   `tabellenrecht`  das Recht selbst ist entzogen; die Anweisung scheitert,
+ *                    bevor ueberhaupt eine Zeile ausgewaehlt wird
+ */
+type Riegel =
+  | { readonly art: "policy"; readonly tabelle: string }
+  | {
+      readonly art: "tabellenrecht";
+      readonly tabelle: string;
+      readonly recht: "UPDATE" | "DELETE";
+    };
+
+/**
+ * Verlangt den gemessenen RIEGEL, nicht nur „irgendein 403".
+ *
+ * Warum das noetig ist: 403 ist die Abbildung von SQLSTATE 42501, und 42501
+ * ist mehrdeutig — ein fehlendes Spalten- oder Tabellenrecht liefert ihn
+ * ebenso wie eine RLS-Verletzung. Ohne diese Unterscheidung koennte ein 403
+ * aus einem DRITTEN Grund kommen (ein Tippfehler im Spaltennamen, ein
+ * unbeabsichtigt entzogenes Leserecht) und der Nachweis bliebe still gruen,
+ * waehrend die Aussage „der Kanal hat gehalten" gar nicht mehr stimmt.
+ *
+ * Die erwarteten Zeichenketten sind GEMESSEN (Lauf 31235882417), nicht
+ * hergeleitet. Aendert ein PostgreSQL- oder PostgREST-Update sie, wird dieser
+ * Waechter rot und nennt den Unterschied — dann gilt die neue Messung, und
+ * dieser Kommentar wird mit ihr fortgeschrieben.
+ *
+ * Die Wirkungskontrollen der Aufrufer (Bestand, `starts_at_utc`, leere Woche)
+ * bleiben davon unberuehrt: sie sind kanal- und versionsunabhaengig und der
+ * eigentliche Beweis.
+ */
+function erwarteRiegel(ergebnis: Angriffsergebnis, riegel: Riegel, was: string): void {
+  expect(ergebnis.status, `${was}: nicht mit 403 abgewiesen`).toBe(403);
+  expect(ergebnis.zeilen, `${was}: PostgREST hat Zeilen zurueckgegeben`).toBe(0);
+  expect(ergebnis.fehler?.code, `${was}: nicht SQLSTATE 42501`).toBe("42501");
+
+  if (riegel.art === "policy") {
+    expect(
+      ergebnis.fehler?.message,
+      `${was}: keine RLS-Verletzung — das 403 kommt aus einem anderen Grund`,
+    ).toBe(`new row violates row-level security policy for table "${riegel.tabelle}"`);
+  } else {
+    expect(
+      ergebnis.fehler?.message,
+      `${was}: kein entzogenes Tabellenrecht — das 403 kommt aus einem anderen Grund`,
+    ).toBe(`permission denied for table ${riegel.tabelle}`);
+    // PostgREST nennt im `hint` das fehlende Recht. Damit ist nicht nur
+    // belegt, DASS ein Recht fehlt, sondern WELCHES — genau das, was 0017
+    // Z. 117-118 entzogen hat.
+    expect(ergebnis.fehler?.hint, `${was}: der Hinweis nennt nicht das entzogene Recht`).toContain(
+      `GRANT ${riegel.recht} ON public.${riegel.tabelle} TO authenticated`,
+    );
+  }
 }
 
 function cookie(cookies: readonly Cookie[], name: string): Cookie {
@@ -865,16 +941,17 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         },
       }),
     );
-    // 403 ist die BEGRUENDETE Erwartung, nicht die gemessene Wahrheit: die
-    // Spaltenrechte fuer diese sechs Spalten bestehen weiterhin (0017), es
-    // scheitert also die `with check`-Klausel — eine RLS-Verletzung ist
-    // SQLSTATE 42501, und PostgREST bildet 42501 auf HTTP 403 ab (dieselbe
-    // Kette wie in 9c3). Weicht die Messung ab, gilt die Messung; der
-    // Wirkungsnachweis darunter bleibt davon unberuehrt.
-    expect(insertZuweisung.status, "der blockierte INSERT wurde nicht mit 403 abgewiesen").toBe(
-      403,
+    // GEMESSEN (Lauf 31235882417): 403, SQLSTATE 42501, „new row violates
+    // row-level security policy for table \"assignments\"". Das ist der
+    // `with check`-Riegel und NICHT das Spaltenrecht — die sechs gesendeten
+    // Spalten sind alle gegrantet (0017 Z. 138-139). Genau deshalb ist dieser
+    // Schritt ein KANAL-Nachweis: A traegt `planning.write`, die Organisation
+    // stimmt, uebrig bleibt `app.is_runtime_channel()`.
+    erwarteRiegel(
+      insertZuweisung,
+      { art: "policy", tabelle: "assignments" },
+      "9c4 INSERT assignments",
     );
-    expect(insertZuweisung.zeilen).toBe(0);
 
     const zuweisungenDanach = await dataApiLese<{ id: string }>(request, zuweisungenUrl, kopf);
     expect(
@@ -892,11 +969,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         data: { org_id: ORG_ID, week_key: ANGRIFFSWOCHE_OWNER },
       }),
     );
-    expect(
-      insertVersion.status,
-      "der blockierte Entwurfs-INSERT wurde nicht mit 403 abgewiesen",
-    ).toBe(403);
-    expect(insertVersion.zeilen).toBe(0);
+    erwarteRiegel(
+      insertVersion,
+      { art: "policy", tabelle: "plan_versions" },
+      "9c4 INSERT plan_versions",
+    );
 
     const wocheDanach = await dataApiLese<{ id: string }>(request, wocheUrlOwner, kopf);
     expect(
@@ -1036,10 +1113,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
           },
         }),
       );
-      expect(insertZuweisung.status, "der INSERT des member wurde nicht mit 403 abgewiesen").toBe(
-        403,
+      erwarteRiegel(
+        insertZuweisung,
+        { art: "policy", tabelle: "assignments" },
+        "9c5 INSERT assignments",
       );
-      expect(insertZuweisung.zeilen).toBe(0);
 
       // Angriff 2 — verschieben. Der neue Beginn liegt VOR dem alten und
       // verletzt keinen Check (`starts_at_utc < ends_at_utc` bleibt wahr): der
@@ -1052,6 +1130,12 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       // Tabellenrecht `update` fuer `authenticated` vollstaendig entzogen, und
       // ein fehlendes Tabellenrecht wirft, bevor ueberhaupt eine Zeile
       // ausgewaehlt wird.
+      //
+      // GEMESSEN (Lauf 31235882417) und damit belegt statt behauptet: 42501
+      // mit „permission denied for table assignments" und dem Hinweis
+      // „GRANT UPDATE ON public.assignments TO authenticated;" — PostgREST
+      // nennt das entzogene Recht selbst. Ein ANDERER Riegel (etwa eine
+      // RLS-Verletzung) macht `erwarteRiegel` rot.
       const patchZuweisung = await dataApiSchreibversuch(
         "9c5/assignments-update",
         request.patch(`${supabaseUrl}/rest/v1/assignments?id=eq.${ZUWEISUNG_ID}`, {
@@ -1059,10 +1143,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
           data: { starts_at_utc: "2026-08-03T04:00:00Z" },
         }),
       );
-      expect(patchZuweisung.status, "das PATCH des member wurde nicht mit 403 abgewiesen").toBe(
-        403,
+      erwarteRiegel(
+        patchZuweisung,
+        { art: "tabellenrecht", tabelle: "assignments", recht: "UPDATE" },
+        "9c5 PATCH assignments",
       );
-      expect(patchZuweisung.zeilen).toBe(0);
 
       // Angriff 3 — loeschen. Dieselbe Zeile, dieselbe Begruendung.
       const deleteZuweisung = await dataApiSchreibversuch(
@@ -1071,10 +1156,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
           headers: { ...kopfB, prefer: "return=representation" },
         }),
       );
-      expect(deleteZuweisung.status, "das DELETE des member wurde nicht mit 403 abgewiesen").toBe(
-        403,
+      erwarteRiegel(
+        deleteZuweisung,
+        { art: "tabellenrecht", tabelle: "assignments", recht: "DELETE" },
+        "9c5 DELETE assignments",
       );
-      expect(deleteZuweisung.zeilen).toBe(0);
 
       // Angriff 4 — eine eigene Entwurfs-Planversion, wieder mit exakt den
       // gegranteten Spalten `(org_id, week_key)`.
@@ -1085,11 +1171,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
           data: { org_id: ORG_ID, week_key: ANGRIFFSWOCHE_MEMBER },
         }),
       );
-      expect(
-        insertVersion.status,
-        "der Entwurfs-INSERT des member wurde nicht mit 403 abgewiesen",
-      ).toBe(403);
-      expect(insertVersion.zeilen).toBe(0);
+      erwarteRiegel(
+        insertVersion,
+        { art: "policy", tabelle: "plan_versions" },
+        "9c5 INSERT plan_versions",
+      );
 
       // ------------------------------------------------------------------
       // Die Wirkung, nicht die Antwort: nachgesehen statt geglaubt.
