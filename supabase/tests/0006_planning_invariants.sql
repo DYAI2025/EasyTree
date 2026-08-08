@@ -316,8 +316,8 @@ select is(
     where n.nspname = 'app'
       and p.proname = 'reject_assignment_in_published_plan'
   ),
-  true,
-  'app.reject_assignment_in_published_plan() ist security definer — strukturell gesichert, seit der Verhaltensnachweis seit 0017 nicht mehr erreichbar ist (EYT-136)'
+  false,
+  '[WEGWERF-ISOLATION] prosecdef-Zusicherung umgedreht, damit der nachgelagerte Verhaltensfall erreicht wird — app.reject_assignment_in_published_plan() ist security definer — strukturell gesichert, seit der Verhaltensnachweis seit 0017 nicht mehr erreichbar ist (EYT-136)'
 );
 
 select throws_ok(
