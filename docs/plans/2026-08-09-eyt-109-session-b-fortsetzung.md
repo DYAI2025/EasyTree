@@ -838,21 +838,25 @@ git commit -m "docs(plan): EYT-109 — Task-5-Divergenzen und gemessene Korrektu
 
 Für alles hier nicht Genannte gilt der Basisplan unverändert.
 
-### Task 6 — Migrationsnummer prüfen, nicht annehmen
+### Task 6 — Migrationsnummer gemessen: `0018` ist frei
 
-`0018` ist eine Hypothese aus dem alten Plan. **Vor dem Anlegen messen:**
+**Gemessen 09.08.2026:** der Branch trägt 17 Migrationen, die höchste ist
+`20260807220000_0017_planning_write_channel_boundary.sql`. **`0018` ist damit frei und
+korrekt** — die Hypothese des Basisplans hält. Dateiname der Konvention
+`<timestamp>_NNNN_<slug>.sql` folgen lassen; `supabase migration new` liefert nur den
+Timestamp, also **umbenennen**.
 
-```bash
-ls supabase/migrations/ | tail -5
-git log origin/master --oneline -- supabase/migrations/ | head -5
-```
-
-Ist `0018` belegt, die nächste freie Nummer nehmen und den Dateinamen der Konvention
-`<timestamp>_NNNN_<slug>.sql` folgen lassen (`supabase migration new` liefert nur den
-Timestamp — **umbenennen**).
+**`app.is_runtime_channel()` existiert bereits** (Migration `0015`, `language sql`, `stable`,
+`set search_path = ''`, Rumpf `select session_user = 'easytree_app'`). Task 6 **benutzt** sie
+und definiert sie nicht neu — dieselbe Kanalgrenze, die EYT-107 und EYT-136 gezogen haben.
 
 Zusatz gegenüber dem Basisplan: **keine** Unvollständigkeitsspalte, **keine** Gründetabelle
 (B.1). `total_minor_units` bleibt eine einzelne Summe.
+
+> **Auf diesem Rechner läuft kein Supabase.** Die Migration wird lokal nicht ausgeführt; erster
+> echter Lauf ist `db-gates` in CI. Alles, was vor dem CI-Lauf über sie behauptet wird, ist
+> Planungsstand, kein Nachweis — und die pgTAP-Zusicherungen aus Task 12 gehören in denselben
+> Commit, sonst misst der erste grüne Lauf nichts.
 
 ### Task 8 — `PublishedPlanFacts` erweitern, Task 5 nicht anfassen
 
@@ -902,12 +906,17 @@ Zusätzlich zu den Punkten des Basisplans in das PO-Paket aufnehmen:
 Hier trägt der Ausführende ein, wo dieser Plan falsch lag. Leer zu bleiben ist das
 unwahrscheinlichste Ergebnis.
 
-| Datum      | Planaussage                                                           | Gemessen                                                                                                                                                                                |
-| ---------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 09.08.2026 | Erster Entwurf dieses Plans rief `timeInterval(start, end)` auf       | Existiert nicht. `TimeInterval` ist eine **Klasse**; der Einstieg heisst `TimeInterval.create` (`index.ts:32-40` exportiert sie ausdruecklich als Wert, damit `create` erreichbar ist). |
-| 09.08.2026 | Erster Entwurf rief `parseLocalBusinessDate(iso)` auf                 | Existiert nicht und ist bewusst nicht exportiert. `local-business-date.ts` sagt: Validierung gehoert an die Grenze, an der das Datum entsteht. Lokaler Helfer `parseLocalDate`.         |
-| 09.08.2026 | `hourlyRateAmount(...)` direkt als `amountPerHour` eingesetzt         | Ist eine Result-Factory (`money.ts:266`). Ebenso `hourlyRateVersion` (`rate-version.ts:138`). Beide auspacken; daraus entstand der Code `RATE_INVALID`.                                 |
-| 09.08.2026 | `hourlyRateVersion` bekomme nur `{validFrom, validTo, amountPerHour}` | `HourlyRateVersionInput` verlangt zusaetzlich `rateVersionId: RateVersionId` — **gebrandet**, also ueber `unsafeIdentifier`.                                                            |
+| Datum      | Planaussage                                                                | Gemessen                                                                                                                                                                                                                                                                                                                                           |
+| ---------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 09.08.2026 | Erster Entwurf dieses Plans rief `timeInterval(start, end)` auf            | Existiert nicht. `TimeInterval` ist eine **Klasse**; der Einstieg heisst `TimeInterval.create` (`index.ts:32-40` exportiert sie ausdruecklich als Wert, damit `create` erreichbar ist).                                                                                                                                                            |
+| 09.08.2026 | Erster Entwurf rief `parseLocalBusinessDate(iso)` auf                      | Existiert nicht und ist bewusst nicht exportiert. `local-business-date.ts` sagt: Validierung gehoert an die Grenze, an der das Datum entsteht. Lokaler Helfer `parseLocalDate`.                                                                                                                                                                    |
+| 09.08.2026 | `hourlyRateAmount(...)` direkt als `amountPerHour` eingesetzt              | Ist eine Result-Factory (`money.ts:266`). Ebenso `hourlyRateVersion` (`rate-version.ts:138`). Beide auspacken; daraus entstand der Code `RATE_INVALID`.                                                                                                                                                                                            |
+| 09.08.2026 | `hourlyRateVersion` bekomme nur `{validFrom, validTo, amountPerHour}`      | `HourlyRateVersionInput` verlangt zusaetzlich `rateVersionId: RateVersionId` — **gebrandet**, also ueber `unsafeIdentifier`.                                                                                                                                                                                                                       |
+| 09.08.2026 | `anteil.quantity.milliseconds` sei `number` (`BigInt(...)` im Planentwurf) | **`bigint`** (`duration-milliseconds.ts:29`). Die Umwandlung im Plan wandelt nichts. Schwerwiegender: GM7 in der Planfassung (`Number(satz) * anteil.quantity.milliseconds`) haette `TypeError: Cannot mix BigInt` geworfen — ein **Scheinrot aus einem Absturz**, kein fachlicher Nachweis. Kohaerente Fassung: `Number(...)` auf beide Faktoren. |
+| 09.08.2026 | GM7-Halbwerthypothese („Satz `333` ueber 30 min")                          | Widerlegt. `HALF_UP_NON_NEGATIVE` und `Math.round` gehen bei nichtnegativen Halbwerten **nie** auseinander — beide liefern `167`. Der Unterschied ist allein die Gleitkommadrift. Der Plan-Fallback lag richtig: gemessen rot bei `2^53+1` Minor Units ⇒ exakt `72057594037927944n` vs. float `72057594037927936`. **Nicht** `GM7_NOT_ACHIEVABLE`. |
+| 09.08.2026 | Testfixtures als schlichte `as const`-Literale                             | Kompiliert nicht. `PlannedWorkFact` traegt **gebrandete** Bezeichner; die Fixtures brauchen `unsafeIdentifier<AssignmentId>(…)` usw., weil `fakten({work:[…]})` eine Zuweisung ist und kein Cast.                                                                                                                                                  |
+| 09.08.2026 | „Exakt zwei Dateien; eine dritte waere Task-8-Leckage" (Task 5)            | **Falsch.** `costs-cross-module-public-api-only` (`test/architecture/costs-rules.ts:712`) prueft auch Tests und verbietet jeden tiefen Pfad ins Kostenmodul. Alle 7 bestehenden Kostentests importieren ueber `../../src/modules/costs`. Der Indexeintrag ist damit **Bestandteil von Task 5**, nicht Leckage. Drei Dateien.                       |
+| 09.08.2026 | Die acht Testfaelle des Plans genuegen fuer GM4                            | **Nein — gemessener Befund.** Unter GM4 fiel nur „blockiert bei zwei gueltigen Saetzen": gemessen wurde der **Blockadezweig**, die **Auswahlregel** blieb unbelegt. Der Nahtstellentag-Fall bleibt gruen, weil der wirksame Satz dort zufaellig auch der neueste ist. Noetig war ein Fall, in dem der wirksame Satz der **Vorgaenger** ist.        |
 
 ---
 
