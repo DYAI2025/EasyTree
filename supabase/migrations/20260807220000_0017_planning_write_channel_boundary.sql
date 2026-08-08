@@ -114,10 +114,8 @@
 -- ein Grant ist eine Zeile, die niemand als Sicherheitsentscheidung liest.
 -- Faellt die Policy mit, verweigert RLS auch dann noch (kein permissiver
 -- Eintrag fuer den Befehl), und der Fehler zeigt auf diese Migration.
-revoke update on table public.assignments from authenticated;
 revoke delete on table public.assignments from authenticated;
 
-drop policy assignments_update_in_org on public.assignments;
 drop policy assignments_delete_in_org on public.assignments;
 
 -- Der Sync-Trigger aus 0010 ist davon NICHT betroffen: er ist
