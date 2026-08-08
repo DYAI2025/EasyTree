@@ -121,7 +121,7 @@ export {
   toDurationMilliseconds,
 } from "./duration-milliseconds.js";
 
-export { compareLocalBusinessDate, dayAfter } from "./local-business-date.js";
+export { compareLocalBusinessDate, dayAfter, dayBefore } from "./local-business-date.js";
 
 export type {
   HourlyRateVersion,

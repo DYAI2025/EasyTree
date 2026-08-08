@@ -443,6 +443,23 @@ export const INVARIANTS: readonly Invariant[] = [
       title: "widerlegt die blosse Tagesinkrementierung an Jahres- und Schaltjahresgrenze",
     },
   },
+  {
+    exportName: "dayBefore",
+    statement:
+      "Der Vorgaenger eines Kalendertages ist die einzige Umrechnung von der halboffenen Lesart der Datenbank (Migration 0013, rate-effectivity) in die einschliessende der Domaene (EYT-109) — echte Kalenderarithmetik, kein Zeitpunkt.",
+    kind: "regel",
+    positive: {
+      file: MONEY,
+      title: "bildet den Vortag innerhalb des Monats und ueber die Monatsgrenze",
+    },
+    // Unterscheidender Gegenfall: `{ ...date, day: date.day - 1 }` ergaebe den
+    // "0. Januar", keinen Kalendertag; eine Regel "durch vier teilbar" statt der
+    // gregorianischen verfehlte den 28.02.2100 und den 29.02.2000.
+    negative: {
+      file: MONEY,
+      title: "widerlegt die blosse Tagesdekrementierung an Jahres- und Schaltjahresgrenze",
+    },
+  },
 
   // ---------------------------------------------------------------------------
   // EYT-95 — Satzversionen (AK3, V3, V4)
