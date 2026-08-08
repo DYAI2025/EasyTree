@@ -482,6 +482,15 @@ export const INVARIANTS: readonly Invariant[] = [
     // Europe/Berlin EIN Ortstag (der 3.), in UTC dagegen zwei. Eine Umsetzung
     // ueber UTC-Mitternacht liefert hier zwei Anteile und bucht die halbe
     // Nachtschicht auf einen Tag, an dem vor Ort niemand gearbeitet hat.
+    //
+    // Bewusst NICHT der Blockierfall, obwohl die Aussage oben auch das
+    // Blockieren nennt. Der Kopf dieser Datei definiert den Negativfall fuer
+    // eine RECHNENDE Funktion als „den unterscheidenden Gegenfall, bei dem die
+    // naheliegende falsche Implementierung nachweislich etwas anderes liefert
+    // (z. B. UTC-Tag statt Ortstag)" — woertlich dieser Fall. Die
+    // Ablehnungsrichtung haengt trotzdem nicht in der Luft: der Nachbareintrag
+    // LOCAL_DAY_ALLOCATION_ERRORS fuehrt sie und loest beide Codes mit echten
+    // Zonen aus.
     negative: {
       file: DAY_ALLOC,
       title: "ordnet einer UTC-Zuordnung widersprechend dem ORTSTAG zu",

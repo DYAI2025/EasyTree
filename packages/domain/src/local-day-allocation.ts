@@ -65,8 +65,19 @@
  * `costOfDuration`, `daysInMonth` und der Konstruktor von `TimeInterval` es
  * halten. Ein verschluckter Programmierfehler waere hier eine stillschweigend
  * falsche Kostenzeile.
+ *
+ * Eine gemessene Ausnahme zur Formel „mit geprueftem Intervall kann nichts
+ * werfen": ein VORCHRISTLICHER Instant. `localBusinessDate` liest die Jahreszahl
+ * ohne Aera, `472 v. Chr.` kommt also als `year: 472` an. Gemessen am 08.08.2026:
+ * ein solches Intervall INNERHALB eines Ortstages liefert klaglos einen Anteil
+ * mit falsch beschriftetem Jahr, eines UEBER Mitternacht bricht am
+ * Monotoniewaechter mit `RangeError` ab. Ueber keinen realistischen Pfad
+ * erreichbar — ein veroeffentlichter Einsatz liegt nicht im Jahr 472 v. Chr. —,
+ * und die laute Variante ist die bessere der beiden. Die Formel gilt also fuer
+ * jeden erreichbaren Eingabebereich, nicht buchstaeblich fuer jedes
+ * konstruierbare `TimeInterval`.
  */
-import { durationMilliseconds } from "./duration-milliseconds.js";
+import { toDurationMilliseconds } from "./duration-milliseconds.js";
 import type { DurationMilliseconds } from "./duration-milliseconds.js";
 import { compareLocalBusinessDate, dayAfter } from "./local-business-date.js";
 import { localBusinessDate, utcInstantOfLocalWallTime } from "./planning-week.js";
@@ -95,22 +106,33 @@ export type LocalDayAllocationResult =
   | { readonly ok: false; readonly error: LocalDayAllocationError };
 
 /**
- * Baut einen Anteil und bricht laut ab, wenn die Menge negativ waere.
+ * Baut einen Anteil und bricht laut ab, wenn die Menge nicht darstellbar waere.
  *
  * Unerreichbar mit einem geprueften Intervall: jeder Aufrufer unten hat vorher
  * zugesichert, dass das Ende des Anteils echt nach seinem Beginn liegt. Der
- * Aufruf steht trotzdem hier, weil `durationMilliseconds` die einzige Stelle
- * ist, an der eine gepruefte Menge entsteht — ein Cast an dieser Stelle waere
- * die Marke ohne die Pruefung.
+ * Aufruf steht trotzdem hier, weil dies die einzige Stelle ist, an der eine
+ * gepruefte Menge entsteht — ein Cast waere die Marke ohne die Pruefung.
+ *
+ * `toDurationMilliseconds` und nicht `durationMilliseconds(BigInt(...))`: die
+ * `bigint`-Tuer ueberspringt `Number.isSafeInteger`, und genau diese Pruefung
+ * fordert V2b ausdruecklich fuer „die Differenz zweier Epoch-Millisekunden"
+ * (`duration-milliseconds.ts`). Dass ein Tagesanteil hier durch einen Ortstag
+ * begrenzt ist, macht die Pruefung ueberfluessig — aber nicht falsch, und die
+ * Tuer mit der Pruefung ist die richtige.
+ *
+ * Das Datum wird mit eingefroren: `localBusinessDate` und `dayAfter` liefern
+ * offene Objektliterale, und Task 5 gruppiert nach genau diesem Objekt. Ein
+ * gemeinsam genutzter, veraenderbarer Gruppierungsschluessel waere eine leichte
+ * Falle; das Paket friert seine geprueften Werte ohnehin ein.
  */
 function anteil(date: LocalBusinessDate, vonMs: number, bisMs: number): LocalDayPart {
-  const menge = durationMilliseconds(BigInt(bisMs - vonMs));
+  const menge = toDurationMilliseconds(bisMs - vonMs);
   if (!menge.ok) {
     throw new RangeError(
       `Invariante verletzt: Tagesanteil ${String(bisMs - vonMs)} ms ist nicht darstellbar (${menge.error}).`,
     );
   }
-  return Object.freeze({ date, quantity: menge.quantity });
+  return Object.freeze({ date: Object.freeze(date), quantity: menge.quantity });
 }
 
 /**

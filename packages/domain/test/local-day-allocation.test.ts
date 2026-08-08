@@ -122,6 +122,38 @@ describe("allocateAcrossLocalDays — ueber lokale Mitternacht", () => {
     expect(summeMs(ergebnis)).toBe(4n * STUNDE);
   });
 
+  it("endet punktgenau auf der lokalen Mitternacht und erzeugt keinen leeren Folgetag", () => {
+    // 2026-08-03 22:00–24:00 Europe/Berlin — eine ganz gewoehnliche Spaetschicht.
+    // Das Intervall ist HALBOFFEN, `endMs` gehoert also nicht mehr dazu; der
+    // 4. August darf hier nicht auftauchen.
+    //
+    // Gegenmutation: `endeMs - 1` in der Zeile, die `letzterTag` bestimmt, zu
+    // `endeMs` machen. Dann faellt der 4. August als Zieltag an, die Schleife
+    // laeuft einmal, und die Mitternacht des 4. ist zugleich das Intervallende —
+    // der Monotoniewaechter bricht mit RangeError ab. Gemessen: ohne diesen Fall
+    // und den naechsten bleibt die gesamte Domainsuite dabei gruen, weil kein
+    // anderer Beispielfall auf einer lokalen Mitternacht endet und der Generator
+    // sie nur mit Wahrscheinlichkeit ~1 zu 8,64e7 je Lauf trifft.
+    const ergebnis = allocateAcrossLocalDays(
+      intervall("2026-08-03T20:00:00.000Z", "2026-08-03T22:00:00.000Z"),
+      EUROPE_BERLIN,
+    );
+    expect(tabelle(ergebnis)).toEqual([{ tag: "2026-08-03", stunden: 2 }]);
+  });
+
+  it("deckt einen Ortstag von Mitternacht bis Mitternacht als genau einen Anteil ab", () => {
+    // 2026-08-04 00:00–24:00 Europe/Berlin. Beide Enden liegen auf einer lokalen
+    // Mitternacht; korrekt ist EIN Anteil ueber 24 Stunden, nicht zwei Anteile
+    // und nicht ein leerer fuer den 5. August. Zweiter Traeger derselben
+    // Gegenmutation, hier zusaetzlich am Beginn der Grenze.
+    const ergebnis = allocateAcrossLocalDays(
+      intervall("2026-08-03T22:00:00.000Z", "2026-08-04T22:00:00.000Z"),
+      EUROPE_BERLIN,
+    );
+    expect(tabelle(ergebnis)).toEqual([{ tag: "2026-08-04", stunden: 24 }]);
+    expect(summeMs(ergebnis)).toBe(24n * STUNDE);
+  });
+
   it("verteilt einen Einsatz ueber vier Ortstage in aufsteigender Reihenfolge", () => {
     // Beginnt 2026-08-03 00:30 Ortszeit und endet 2026-08-06 06:00 Ortszeit.
     // Beweist die Schleife, nicht nur den Zweitagesfall — und zugleich, dass
