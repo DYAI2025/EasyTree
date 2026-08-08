@@ -1,9 +1,14 @@
 # Grant-/Policy-Inventar der Planungs-Data-API (EYT-136, Phase 1)
 
 **Stand:** 07.08.2026, Abschnitte 7-13 nachgetragen am 08.08.2026 · **Baseline:** `origin/master` =
-`aad46ddca12abf1c4862e70248f61978dcce96e7` (Migrationsstand `0016`) · **Geprüfter Stand:** PR #56,
-Kopf `41f0b5f63e488f585b0eb3098feeade42c4d417f` (Lauf `31239875658`, 11/11 grün) · **Zweck:**
-Pflichtinventar vor jeder Rechteänderung (EYT-136 AK1) und Evidenzakte des Slices.
+`aad46ddca12abf1c4862e70248f61978dcce96e7` (Migrationsstand `0016`) · **Zweck:** Pflichtinventar vor
+jeder Rechteänderung (EYT-136 AK1) und Evidenzakte des Slices.
+
+**Gemessener Code-Stand:** PR #56, Kopf `41f0b5f63e488f585b0eb3098feeade42c4d417f`, Lauf
+`31239875658` (11/11 grün). Spätere Commits dieses Zweigs sind **reine Dokumentation** und ändern
+weder Migration noch Test noch Produktionscode — die Messungen unten bleiben damit gültig. Den
+jeweils aktuellen Kopf nennt der PR-Text, nicht dieses Dokument: eine Datei, die ihren eigenen
+Commit zitieren müsste, wäre bei jedem Schreibvorgang veraltet.
 
 Abschnitte 1-6 sind das Inventar **vor** der Änderung (Messung 07.08.2026). Abschnitte 7-13 sind
 die ausgeführte Evidenz: zwei unabhängige Rotnachweise, elf Gegenmutationen, der Positivpfad und
