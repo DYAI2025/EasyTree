@@ -13,9 +13,10 @@ import type {
   CreateCostSnapshotCommand,
   CreateRateVersionCommand,
   EmployeesForRates,
-  PublishedPlanVersions,
+  PublishedPlanVersionsQuery,
   RateHistory,
   RateVersionDto,
+  SelectablePlanVersions,
 } from "./schemas.js";
 
 export interface CostsGateway {
@@ -28,12 +29,16 @@ export interface CostsGateway {
     command: CreateRateVersionCommand,
     options: WriteOptions,
   ): Promise<GatewayResult<RateVersionDto>>;
-  /** Veroeffentlichte Planversionen im Wochenbereich — die Auswahlliste von `/kosten`. */
+  /**
+   * Auswählbare Planversionen im Wochenbereich — die Auswahlliste von `/kosten`.
+   *
+   * Ein Objekt statt zweier gleichtypiger Strings, damit `from` und `to` nicht
+   * vertauschbar sind; die Reihenfolgeregel steckt im Schema.
+   */
   publishedPlanVersions(
-    fromWeekKey: string,
-    toWeekKey: string,
-  ): Promise<GatewayResult<PublishedPlanVersions>>;
-  /** Erzeugt einen unveraenderlichen Snapshot. Pflicht-Idempotenzschluessel wie jeder Write. */
+    query: PublishedPlanVersionsQuery,
+  ): Promise<GatewayResult<SelectablePlanVersions>>;
+  /** Erzeugt einen unveränderlichen Snapshot. Pflicht-Idempotenzschlüssel wie jeder Write. */
   createSnapshot(
     command: CreateCostSnapshotCommand,
     options: WriteOptions,

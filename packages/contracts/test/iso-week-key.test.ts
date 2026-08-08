@@ -83,7 +83,7 @@ describe("Wochenschluessel: jahresabhaengige 53. Woche", () => {
 });
 
 /**
- * Alle sieben oeffentlichen weekKey-Stellen tragen DIESELBE Regel (EYT-88).
+ * Alle oeffentlichen weekKey-Stellen tragen DIESELBE Regel (EYT-88).
  *
  * Zuvor stand an fuenf Stellen ein eigener regulaerer Ausdruck, und nur einer
  * davon kannte die Kalenderregel. `2025-W53` waere ueber die Leseabfrage
@@ -94,12 +94,26 @@ describe("Wochenschluessel: jahresabhaengige 53. Woche", () => {
  * Schema hinzufuegt und hier nicht eintraegt, hat keine Abdeckung — und wer es
  * eintraegt, aber `IsoWeekKeySchema` nicht verwendet, wird rot.
  *
- * Die Stellen sechs und sieben kamen mit EYT-109 aus dem Kostenbereich dazu.
- * Sie stehen hier und nicht nur in `costs-snapshot-schemas.test.ts`, weil die
- * dortige Zusicherung nur `2026-W54` prueft — das faengt schon das Muster. Erst
- * `2025-W53` aus VEKTOREN unten trennt die Kalenderregel vom blossen Bereich.
+ * ## Warum die Vollstaendigkeit GEZAEHLT und nicht behauptet wird
+ *
+ * Hier stand eine feste Zahl. Eine feste Zahl kann genau den einen Fall nicht
+ * erkennen, fuer den sie da ist: eine FEHLENDE Zeile. Sie schlaegt an, wenn
+ * jemand eine Zeile hinzufuegt, nie wenn jemand eine vergisst — und so trug die
+ * Tabelle laenger die Aufschrift "vollstaendig", waehrend
+ * `CreateAssignmentCommandSchema` nie geprueft wurde. Die Zahl kommt deshalb
+ * jetzt aus dem Quelltext (siehe unten), nicht aus dem Gedaechtnis.
+ *
+ * Die Stellen aus dem Kostenbereich kamen mit EYT-109 dazu. Sie stehen hier und
+ * nicht nur in `costs-snapshot-schemas.test.ts`, weil die dortige Zusicherung
+ * nur `2026-W54` prueft — das faengt schon das Muster. Erst `2025-W53` aus
+ * VEKTOREN unten trennt die Kalenderregel vom blossen Bereich.
  */
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
+  CreateAssignmentCommandSchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
   PublishPlanCommandSchema,
@@ -107,7 +121,7 @@ import {
   ValidatePlanCommandSchema,
 } from "../src/planning/schemas.js";
 
-import { CostSnapshotSchema, PublishedPlanVersionDtoSchema } from "../src/costs/schemas.js";
+import { CostSnapshotSchema, SelectablePlanVersionSchema } from "../src/costs/schemas.js";
 
 const VERSION_ID = "00000000-0000-4000-8000-0000006010a1";
 const INSTANT = "2026-08-03T06:00:00.000Z";
@@ -168,6 +182,16 @@ const STELLEN: ReadonlyArray<{
     }),
   },
   {
+    name: "CreateAssignmentCommandSchema",
+    schema: CreateAssignmentCommandSchema,
+    baue: (weekKey) => ({
+      weekKey,
+      employeeId: EMPLOYEE_ID,
+      worksiteId: WORKSITE_ID,
+      interval: { startUtc: INSTANT, endUtc: INSTANT_SPAETER },
+    }),
+  },
+  {
     name: "CostSnapshotSchema",
     schema: CostSnapshotSchema,
     baue: (weekKey) => ({
@@ -187,11 +211,40 @@ const STELLEN: ReadonlyArray<{
     }),
   },
   {
-    name: "PublishedPlanVersionDtoSchema",
-    schema: PublishedPlanVersionDtoSchema,
+    name: "SelectablePlanVersionSchema",
+    schema: SelectablePlanVersionSchema,
     baue: (weekKey) => ({ id: VERSION_ID, weekKey, publishedAt: INSTANT }),
   },
 ];
+
+/**
+ * Zaehlt `weekKey: IsoWeekKeySchema,` im Quelltext — die Gegenprobe zur Handliste.
+ *
+ * Dieselbe Bauart wie `redact.test.ts`, das `SECRET_CONFIG_KEYS` an
+ * `ENV_VAR_META` koppelt: nicht die Liste gegen sich selbst pruefen, sondern
+ * gegen die Wirklichkeit, die sie beschreibt. Der Quelltextscan ist hier
+ * erlaubt, weil das Paket `types: ["node"]` fuehrt und `openapi-drift.test.ts`
+ * ohnehin schon aus `node:fs` liest.
+ */
+function weekKeyStellenImQuelltext(): readonly string[] {
+  const wurzel = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src");
+  const gefunden: string[] = [];
+  const laufe = (ordner: string): void => {
+    for (const eintrag of readdirSync(ordner, { withFileTypes: true })) {
+      const pfad = join(ordner, eintrag.name);
+      if (eintrag.isDirectory()) {
+        laufe(pfad);
+        continue;
+      }
+      if (!eintrag.name.endsWith(".ts")) continue;
+      for (const zeile of readFileSync(pfad, "utf8").split("\n")) {
+        if (/^\s*weekKey:\s*IsoWeekKeySchema,/.test(zeile)) gefunden.push(pfad);
+      }
+    }
+  };
+  laufe(wurzel);
+  return gefunden;
+}
 
 const VEKTOREN = [
   { key: "2026-W53", gueltig: true, warum: "2026 hat 53 ISO-Wochen" },
@@ -202,8 +255,16 @@ const VEKTOREN = [
 ] as const;
 
 describe("alle oeffentlichen weekKey-Stellen tragen dieselbe Regel", () => {
-  it("deckt alle sieben Stellen ab — sonst misst diese Tabelle zu wenig", () => {
-    expect(STELLEN).toHaveLength(7);
+  it("kennt jede weekKey-Stelle im Quelltext — sonst misst diese Tabelle zu wenig", () => {
+    const gefunden = weekKeyStellenImQuelltext();
+    // Erst die Gegenprobe: findet der Scan ueberhaupt etwas? Sonst waere die
+    // Gleichheit unten auch bei einem kaputten Muster erfuellbar (0 === 0).
+    expect(gefunden.length).toBeGreaterThan(5);
+    expect(
+      STELLEN.length,
+      `Der Quelltext bindet IsoWeekKeySchema an ${gefunden.length} Stellen, STELLEN fuehrt ${STELLEN.length}. ` +
+        `Gefunden in:\n${[...new Set(gefunden)].join("\n")}`,
+    ).toBe(gefunden.length);
   });
 
   for (const stelle of STELLEN) {

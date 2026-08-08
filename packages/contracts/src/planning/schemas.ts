@@ -94,8 +94,10 @@ export type AssignmentDto = z.infer<typeof AssignmentDtoSchema>;
  * Antwortvertrag unterschiedliche Regeln getragen — `2025-W53` waere ueber die
  * Abfrage abgelehnt und ueber das Publish-Kommando angenommen worden.
  *
- * Ein Schema, fuenf Verwendungen. Wer eine sechste Stelle hinzufuegt, nimmt
- * dieses hier und nicht wieder einen eigenen Ausdruck.
+ * Ein Schema, viele Verwendungen — inzwischen auch im Kostenbereich. Wer eine
+ * weitere Stelle hinzufuegt, nimmt dieses hier und nicht wieder einen eigenen
+ * Ausdruck, und traegt sie als Zeile in `STELLEN` (`test/iso-week-key.test.ts`)
+ * ein — der Waechter merkt eine ausgelassene Zeile nicht von selbst.
  *
  * Das Muster bleibt vorgeschaltet, obwohl `isValidIsoWeekKey` die Form selbst
  * prueft: es liefert die praezisere Meldung fuer den haeufigen Tippfehler,
