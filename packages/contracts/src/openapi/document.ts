@@ -57,7 +57,12 @@ import {
   SelectablePlanVersionSchema,
   SelectablePlanVersionsSchema,
 } from "../costs/schemas.js";
-import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, ProblemDocumentSchema } from "../primitives.js";
+import {
+  IDEMPOTENCY_HEADER,
+  IdSchema,
+  IdempotencyKeySchema,
+  ProblemDocumentSchema,
+} from "../primitives.js";
 
 /** Vertragsversion. Aenderungen hier sind eine bewusste Entscheidung, kein Nebeneffekt. */
 export const API_VERSION = "1.0.0";
@@ -98,12 +103,15 @@ const NAMED_SCHEMAS = {
   RateVersionDto: RateVersionDtoSchema,
   CreateRateVersionCommand: CreateRateVersionCommandSchema,
   // EYT-109: der gespeicherte Tageskosten-Snapshot. Position und Tagessumme
-  // stehen ZUSAETZLICH einzeln hier — aus demselben Grund wie
-  // `PlanningResource`: ein generierter Client bekommt so EINEN Positionstyp
-  // statt eines namenlosen Inline-Objekts, und der Export (EYT-110) kann ihn
-  // benennen. Dass sie im Snapshot zusaetzlich eingebettet erscheinen, ist eine
-  // Eigenschaft der Erzeugung, kein zweiter Typenbestand: beide Formen stammen
-  // aus demselben Zod-Schema.
+  // stehen ZUSAETZLICH einzeln hier, damit der Export (EYT-110) sie benennen
+  // kann. Was das NICHT bewirkt: `CostSnapshot.positions.items` bleibt im
+  // erzeugten Dokument ein vollstaendig eingebettetes, namenloses Objekt — der
+  // Eintrag stellt einen Namen DANEBEN, er ersetzt die Kopie nicht. Ein
+  // Generator gibt beides aus. Dieselbe Lage haben `PlanningResource`,
+  // `TimeIntervalDto` und `PlanningConflictDto` schon vorher; die Entscheidung
+  // ist also konsistent, nur der frueher hier behauptete Nutzen ("EIN
+  // Positionstyp statt eines Inline-Objekts") war es nicht. Auf `$ref`-Ausgabe
+  // umzustellen waere eine eigene, groessere Aenderung.
   //
   // ## Ehrlichkeitshinweis: ZWEI Regeln fallen bei der Erzeugung weg
   //
@@ -188,7 +196,7 @@ const idempotencyHeader = {
  *    trotzdem, aber vom Server zur Laufzeit und nicht vom Schema. Dieselbe
  *    ehrliche Grenzziehung wie bei `TimeIntervalDtoSchema` ("Ende nach Beginn").
  */
-const weekKeyParam = {
+export const weekKeyParam = {
   name: "weekKey",
   in: "query",
   required: true,
@@ -211,14 +219,44 @@ const weekKeyParam = {
  * trotzdem, zur Laufzeit: im Client von `PublishedPlanVersionsQuerySchema`, im
  * Server noch einmal. Dieselbe Grenzziehung, die `weekKeyParam` fuer die
  * Kalenderregel und `TimeIntervalDtoSchema` fuer "Ende nach Beginn" macht.
+ *
+ * Die Rolle steht in einer Tabelle statt in einem zweiten Parameter. Als freier
+ * String liesse sich `wochenbereichParam("toWeekKey", "Erste Woche …")`
+ * schreiben — uebersetzbar, veroeffentlicht, und in sich widersprechend. So ist
+ * die Verwechslung nicht darstellbar. Der Punkt am Ende jedes Eintrags gehoert
+ * dazu: die Beschreibung wird zusammengesetzt, ohne ihn liefen zwei Saetze
+ * ineinander.
  */
-function wochenbereichParam(name: "fromWeekKey" | "toWeekKey", rolle: string): unknown {
+const WOCHENBEREICH_ROLLE = {
+  fromWeekKey: "Erste Woche des Bereichs, einschliesslich.",
+  toWeekKey: "Letzte Woche des Bereichs, einschliesslich.",
+} as const;
+
+function wochenbereichParam(name: keyof typeof WOCHENBEREICH_ROLLE): unknown {
   return {
     name,
     in: "query",
     required: true,
-    description: `${rolle} ${weekKeyParam.description} Zusaetzlich muss fromWeekKey vor oder gleich toWeekKey liegen; diese Regel verbindet ZWEI Parameter und kann in einem Parameterschema ebenfalls NICHT ausgedrueckt werden - der Server lehnt einen verkehrten Bereich zur Laufzeit ab.`,
+    description: `${WOCHENBEREICH_ROLLE[name]} ${weekKeyParam.description} Zusaetzlich muss fromWeekKey vor oder gleich toWeekKey liegen; diese Regel verbindet ZWEI Parameter und kann in einem Parameterschema ebenfalls NICHT ausgedrueckt werden - der Server lehnt einen verkehrten Bereich zur Laufzeit ab.`,
     schema: weekKeyParam.schema,
+  };
+}
+
+/**
+ * Ein Pfadparameter, der einen Bezeichner traegt — aus `IdSchema`, nicht von Hand.
+ *
+ * Der Dateikopf verspricht "kein zweiter Typenbestand, der abdriften koennte".
+ * Genau den gab es hier: die beiden Pfadparameter standen als handgeschriebenes
+ * `{ type: "string", format: "uuid" }` da und waren damit schwaecher als
+ * derselbe Begriff in jedem Rumpf und jeder Antwort — ohne Muster, ohne
+ * Beschreibung. `idempotencyHeader` macht es seit jeher richtig vor.
+ */
+function idPathParam(name: string): unknown {
+  return {
+    name,
+    in: "path",
+    required: true,
+    schema: z.toJSONSchema(IdSchema, { target: "openapi-3.0" }),
   };
 }
 
@@ -371,14 +409,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
         get: {
           operationId: "getRateHistory",
           summary: "Aktive Satzversion und Historie eines Mitarbeiters",
-          parameters: [
-            {
-              name: "employeeId",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
+          parameters: [idPathParam("employeeId")],
           responses: { "200": jsonOk("RateHistory", "Satzhistorie"), ...problemResponses },
         },
       },
@@ -395,10 +426,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
         get: {
           operationId: "listPublishedPlanVersions",
           summary: "Auswaehlbare veroeffentlichte Planversionen im Wochenbereich",
-          parameters: [
-            wochenbereichParam("fromWeekKey", "Erste Woche des Bereichs, einschliesslich."),
-            wochenbereichParam("toWeekKey", "Letzte Woche des Bereichs, einschliesslich."),
-          ],
+          parameters: [wochenbereichParam("fromWeekKey"), wochenbereichParam("toWeekKey")],
           responses: {
             "200": jsonOk("SelectablePlanVersions", "Auswaehlbare Planversionen"),
             ...problemResponses,
@@ -421,14 +449,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
         get: {
           operationId: "getCostSnapshot",
           summary: "Gespeicherten Tageskosten-Snapshot lesen",
-          parameters: [
-            {
-              name: "snapshotId",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
+          parameters: [idPathParam("snapshotId")],
           responses: {
             "200": jsonOk("CostSnapshot", "Gespeicherter Snapshot"),
             ...problemResponses,

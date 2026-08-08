@@ -10,6 +10,7 @@ import { z } from "zod";
 import { gatewayFailed, gatewayOk, type GatewayFailure, type GatewayResult } from "../gateway.js";
 import {
   IDEMPOTENCY_HEADER,
+  IdSchema,
   IdempotencyKeySchema,
   ProblemDocumentSchema,
   type IdempotencyKey,
@@ -108,9 +109,22 @@ export class HttpCostsGateway implements CostsGateway {
     query: PublishedPlanVersionsQuery,
   ): Promise<GatewayResult<SelectablePlanVersions>> {
     // Erst prüfen, dann senden — sonst wäre die Reihenfolgeregel des Schemas
-    // (`fromWeekKey <= toWeekKey`) ein Kommentar. Ein verkehrter Bereich sähe
-    // für den Server aus wie ein leerer, und die Oberfläche zeigte „keine
-    // Planversionen" statt eines Eingabefehlers.
+    // (`fromWeekKey <= toWeekKey`) ein Kommentar.
+    //
+    // WAS DAS BRINGT: keine sinnlose Anfrage, keine irreführend leere Liste
+    // (ein verkehrter Bereich sieht für den Server aus wie ein leerer), und ein
+    // zweiter Riegel, der fail-closed schliesst.
+    //
+    // WAS DAS NICHT BRINGT: eine anzeigbare Meldung. Der Zweig gibt
+    // `CONTRACT_VIOLATION` mit `problem: null` zurück — nicht unterscheidbar
+    // von einer verstümmelten 200-Antwort, und die Meldung des `.refine()`
+    // fällt dabei weg. Ein hier zusammengebautes `ProblemDocument` wäre eine
+    // Lüge: `primitives.ts` definiert es als Spiegel der Serverantwort, eine
+    // erfundene `correlationId` zeigte auf nichts. Die für den Menschen
+    // lesbare Meldung gehört deshalb in das FORMULAR (EYT-109 Task 15), das
+    // denselben `PublishedPlanVersionsQuerySchema` vor dem Absenden prüft und
+    // dessen Fehlermeldung am Feld anzeigt. Wer die Oberfläche baut, darf
+    // nicht darauf warten, dass das Gateway sie liefert.
     const geprueft = PublishedPlanVersionsQuerySchema.safeParse(query);
     if (!geprueft.success) {
       return Promise.resolve(gatewayFailed<SelectablePlanVersions>("CONTRACT_VIOLATION", null));
@@ -169,8 +183,27 @@ export class HttpCostsGateway implements CostsGateway {
   }
 
   snapshot(snapshotId: string): Promise<GatewayResult<CostSnapshot>> {
+    // Auch der nackte String wird geprüft, nicht nur die schemagetippten
+    // Objekte. Der Wert kommt in Task 15 als `params.id` unmittelbar aus der
+    // Adresszeile — ohne diese Zeile trüge jede vertippte URL eine beliebige
+    // Zeichenkette in einen Serverpfad. `encodeURIComponent` verhindert das
+    // Ausbrechen aus dem Pfad, aber nicht die Anfrage; ein Ausbruchsversuch
+    // gehört gar nicht erst abgeschickt.
+    //
+    // Damit wird `rateHistory` oben zum Ausreisser: derselbe Fall, ungeprüft.
+    // Das gehört ebenfalls geprüft — aber es ist EYT-108er Code, und ihn in
+    // diesem Slice mitzuändern hiesse, eine fremde Zusicherung ohne eigenen
+    // Test zu verschieben. Als Nachzug notiert, nicht still erledigt.
+    const geprueft = IdSchema.safeParse(snapshotId);
+    if (!geprueft.success) {
+      return Promise.resolve(gatewayFailed<CostSnapshot>("CONTRACT_VIOLATION", null));
+    }
     return this.send({
-      path: `/kosten/snapshots/${encodeURIComponent(snapshotId)}`,
+      // Nach der Prüfung kann kein gültiger Bezeichner mehr ein Zeichen
+      // enthalten, das maskiert werden müsste — `encodeURIComponent` ist ab
+      // hier Gürtel zum Hosenträger und durch keinen Test festgehalten, genau
+      // wie `URLSearchParams` oben.
+      path: `/kosten/snapshots/${encodeURIComponent(geprueft.data)}`,
       method: "GET",
       idempotencyKey: null,
       schema: CostSnapshotSchema,

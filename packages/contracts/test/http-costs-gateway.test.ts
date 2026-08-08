@@ -8,11 +8,23 @@
  * Oberflaeche aus wie ein Betrag, haette oberhalb von 2^53 aber still Stellen
  * verloren. Lieber eine abgelehnte Antwort als eine falsche Zahl.
  *
- * Die zweite Zusicherung ist LOKAL: Kommando und Wochenbereich werden VOR dem
- * Absenden gegen ihr Schema geprueft. Ohne diese Pruefung faende der Fehler erst
- * im Server statt, und die Refine-Regel in `PublishedPlanVersionsQuerySchema`
- * ("from <= to") waere ein Kommentar. Jeder Negativfall hat darum seinen
- * Positivfall daneben — sonst waere ein Client, der ALLES verwirft, gruen.
+ * Die zweite Zusicherung ist LOKAL: Kommando, Wochenbereich und Snapshot-Id
+ * werden VOR dem Absenden gegen ihr Schema geprueft. Ohne diese Pruefung faende
+ * der Fehler erst im Server statt, und die Refine-Regel in
+ * `PublishedPlanVersionsQuerySchema` ("from <= to") waere ein Kommentar. Jeder
+ * Negativfall hat darum seinen Positivfall daneben — sonst waere ein Client,
+ * der ALLES verwirft, gruen.
+ *
+ * ## EHRLICH DAZU: dies deckt VIER der sechs Portmethoden ab
+ *
+ * Die Blockueberschriften nennen `HttpCostsGateway`, gemeint sind aber nur
+ * `publishedPlanVersions`, `createSnapshot`, `snapshot` und — an einer Stelle,
+ * zum Vergleich der 409-Bedeutung — `createRateVersion`. Fuer `listEmployees`
+ * und `rateHistory` gibt es HTTP-seitig nirgends im Projekt einen Test; sie
+ * kamen mit EYT-108 und blieben ungedeckt. Das ist hier bewusst nicht
+ * nachgeholt (ausserhalb des Auftrags von EYT-109), steht aber hier, damit
+ * niemand aus dem Dateinamen schliesst, die Klasse sei vollstaendig geprueft.
+ * Wer die Luecke schliesst, streicht diesen Absatz.
  */
 import { describe, expect, it } from "vitest";
 
@@ -206,14 +218,40 @@ describe("HttpCostsGateway — Aufrufform", () => {
     expect(recorded[0]?.init?.body).toBeUndefined();
     // Ein Lesevorgang entsteht nicht zweimal; ein Schluessel taeuschte Bedeutung vor.
     expect(headersOf(recorded[0])[IDEMPOTENCY_HEADER]).toBeUndefined();
+    // Die Sitzung reist im HttpOnly-Cookie. Ohne diese Zeile im Client waere
+    // JEDE Kostenanfrage anonym und der Server antwortete durchgehend 401 —
+    // und kein anderer Test haette es bemerkt (im Review gemessen: geloescht,
+    // 182 gruen).
+    expect(recorded[0]?.init?.credentials).toBe("same-origin");
+    expect(headersOf(recorded[0])["accept"]).toBe("application/json");
   });
 
-  it("kodiert die Snapshot-Id, statt sie in den Pfad zu kleben", async () => {
-    // Ohne Kodierung wuerde `../` den Pfad verlassen und eine fremde Route
-    // treffen — der Server saehe eine Anfrage, die der Aufrufer nie stellte.
+  it("lehnt eine Snapshot-Id ab, die kein Bezeichner ist, statt sie zu senden", async () => {
+    // In Task 15 kommt dieser Wert als `params.id` direkt aus der Adresszeile.
+    // `encodeURIComponent` verhindert nur das AUSBRECHEN aus dem Pfad, nicht
+    // die Anfrage: vor der lokalen Pruefung ging `../mitarbeiter` als
+    // `..%2Fmitarbeiter` tatsaechlich hinaus. Ein Ausbruchsversuch gehoert gar
+    // nicht erst abgeschickt.
     const recorded: Recorded[] = [];
-    await gatewayWith(stubFetch(200, SNAPSHOT, recorded)).snapshot("../mitarbeiter");
-    expect(recorded[0]?.url).toBe(`${BASE}/kosten/snapshots/..%2Fmitarbeiter`);
+    const gateway = gatewayWith(stubFetch(200, SNAPSHOT, recorded));
+
+    for (const bad of ["", "../mitarbeiter", "nicht-uuid", `${SNAPSHOT_ID} `]) {
+      const result = await gateway.snapshot(bad);
+      expect(result.ok, bad).toBe(false);
+      if (result.ok) continue;
+      expect(result.failure, bad).toBe("CONTRACT_VIOLATION");
+    }
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("laesst einen gueltigen Bezeichner unveraendert durch", async () => {
+    // Gegenprobe: ohne sie waere die Ablehnung oben auch dann gruen, wenn der
+    // Client JEDE Id verwuerfe und das Lesen nie funktionierte.
+    const recorded: Recorded[] = [];
+    const result = await gatewayWith(stubFetch(200, SNAPSHOT, recorded)).snapshot(SNAPSHOT_ID);
+    expect(result.ok).toBe(true);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.url).toBe(`${BASE}/kosten/snapshots/${SNAPSHOT_ID}`);
   });
 
   it("haengt den Wochenbereich an die URL und nicht in den Koerper", async () => {
@@ -238,8 +276,13 @@ describe("HttpCostsGateway — Aufrufform", () => {
     expect(result.ok).toBe(true);
     expect(recorded[0]?.url).toBe(`${BASE}/kosten/snapshots`);
     expect(recorded[0]?.init?.method).toBe("POST");
-    expect(recorded[0]?.init?.body).toBe(JSON.stringify(COMMAND));
+    // Ueber den geparsten Wert, nicht ueber die Zeichenkette: ein Byte-Vergleich
+    // haette nur gehalten, weil die Schluesselreihenfolge des Literals zufaellig
+    // der Schemaform entspricht.
+    expect(JSON.parse(String(recorded[0]?.init?.body))).toEqual(COMMAND);
     expect(headersOf(recorded[0])[IDEMPOTENCY_HEADER]).toBe(key);
+    expect(recorded[0]?.init?.credentials).toBe("same-origin");
+    expect(headersOf(recorded[0])["content-type"]).toBe("application/json");
   });
 
   it("lehnt einen formal ungueltigen Idempotenzschluessel ab, statt ihn zu senden", async () => {
