@@ -32,7 +32,13 @@ import { Client } from "pg";
 import type { DatabaseError, QueryResultRow } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { FailClosedGate, ORG_ALPHA, probeDatabase, USER_A } from "./tenant-context.helper";
+import {
+  FailClosedGate,
+  ORG_ALPHA,
+  ORG_BETA,
+  probeDatabase,
+  USER_A,
+} from "./tenant-context.helper";
 import { PlanningWriteRepository } from "../src/modules/planning";
 import { PgIdempotencyStore } from "../src/platform/idempotency/pg-idempotency-store";
 import type { TenantQuery, TenantQueryRunner } from "../src/platform/database/tenant-query-runner";
@@ -85,9 +91,25 @@ const WORKSITE_ALPHA = "00000000-0000-4000-8000-0000005010a1";
  */
 const EMPLOYEE_ALPHA_2 = "00000000-0000-4000-8000-0000004012a1";
 
-/** Aktives Mitglied ohne planning.write — als Fixture angelegt, nicht im Seed. */
-const USER_MITGLIED_ALPHA = "00000000-0000-4000-8000-00000000dd44";
-const MITGLIEDSCHAFT_MITGLIED = "00000000-0000-4000-8000-0000000e0dd4";
+/**
+ * `USER_B` aus `supabase/seed.sql` — Owner in Organisation BETA, in ALPHA ohne
+ * Zeile.
+ *
+ * Die Konstante steht hier und nicht im Import, weil
+ * `tenant-context.helper.ts` nur `USER_A` und `USER_C` exportiert (geprueft
+ * 08.08.2026). Quelle des Wertes ist der Seed, nicht diese Datei.
+ */
+const USER_B = "00000000-0000-4000-8000-00000000bbb2";
+
+/**
+ * Id der GELIEHENEN Mitgliedschaft — bewusst unverwechselbar testspezifisch.
+ *
+ * `e136` traegt die Ticketnummer im Wert selbst: taucht die Zeile je in einem
+ * Dump auf, ist ohne Nachschlagen klar, wer sie erzeugt hat. Gueltiges v4-Muster
+ * (Version `4`, Variante `8`) — gegen `IdSchema` geprueft, weil EYT-91 offen
+ * ist und ungueltige v4-Ids im Bestand dort bereits 500er ausgeloest haben.
+ */
+const MITGLIEDSCHAFT_GELIEHEN = "00000000-0000-4000-8000-0000e136b001";
 
 /** Woche ohne Seed-Inhalt, damit die Faelle einander nicht stoeren. */
 const WOCHE = "2026-W45";
@@ -108,6 +130,9 @@ const WOCHE_BASELINE = "2026-W46";
 const WOCHE_BASELINE_PARALLEL = "2026-W47";
 /** Eigene Woche fuer den aus 0006 umgezogenen Definer-Fall (EYT-136). */
 const WOCHE_BASELINE_DEFINER = "2026-W48";
+/** Eigene Wochen fuer die beiden Rechte-Faelle (EYT-136), damit sie nichts teilen. */
+const WOCHE_RECHT_VERSION = "2026-W49";
+const WOCHE_RECHT_ZUWEISUNG = "2026-W50";
 const START = new Date("2026-11-03T07:00:00Z");
 const ENDE = new Date("2026-11-03T15:00:00Z");
 
@@ -310,43 +335,108 @@ async function raeumeWoche(woche: string = WOCHE): Promise<void> {
 }
 
 /**
- * Aktives Mitglied der Organisation Alpha OHNE `planning.write` (EYT-136).
+ * Leiht `USER_B` fuer die Dauer EINES Falls eine aktive `member`-Mitgliedschaft
+ * in Organisation Alpha (EYT-136).
  *
- * Bewusst als Fixture und nicht in `seed.sql`: der Seed wird von mehreren
- * Suiten gezaehlt, eine zusaetzliche Zeile dort aendert fremde Erwartungen.
- * `USER_C` aus dem Seed traegt zwar die Rolle `member`, ist aber INAKTIV — er
- * wuerde an der Mitgliedschaft scheitern, nicht am Recht, und der Test wuerde
- * den falschen Riegel messen.
+ * Warum geliehen und nicht angelegt: eine neue Identitaet braeuchte eine Zeile
+ * in `auth.users` — das legt in echten Umgebungen ausschliesslich GoTrue an,
+ * und der Product Owner hat den direkten Schreibzugriff fuer diesen Slice
+ * ausgeschlossen. `USER_B` existiert im Seed bereits, ist Owner in Organisation
+ * BETA und hat in ALPHA bis hierher keine Zeile (geprueft gegen
+ * `supabase/seed.sql`: dort stehen A/Alpha, B/Beta und C/Alpha-inaktiv).
+ * `USER_C` waere naeher dran, ist aber INAKTIV — er scheiterte an der
+ * Mitgliedschaft statt am Recht, und der Test bewiese den falschen Riegel.
+ * Seine Seed-Zeile bleibt deshalb unangetastet, ebenso die Beta-Mitgliedschaft
+ * von `USER_B`; diese Funktion FUEGT nur hinzu.
  *
- * Die `auth.users`-Zeile ist keine Bequemlichkeit: `public.users.id` ist ein
- * Fremdschluessel auf `auth.users (id)` (Migration 0002), ein Profil ohne
- * Identitaet laesst sich also gar nicht anlegen. Form und Begruendung sind
- * dieselben wie in `supabase/seed.sql` — direktes Insert ausschliesslich im
- * lokalen Stack, Passwort leer, weil Login hier kein Testziel ist.
+ * Warum genau ein Fall und nicht die ganze Suite: `tenant-isolation` laeuft im
+ * db-gates-Job vor dieser Datei, `tenant-pooling` danach — und letzteres prueft,
+ * wer welche Organisation sieht. Die Mitgliedschaft darf deshalb keine Sekunde
+ * laenger existieren als der Fall, der sie braucht. Das `finally` raeumt auch
+ * nach einem geworfenen Fehler ab, und die Nachkontrolle glaubt dem DELETE
+ * nicht, sondern sieht nach.
  */
-async function legeMitgliedOhneSchreibrechtAn(): Promise<void> {
-  const client = adminVerbindung();
-  await client.query(
-    `insert into auth.users
-       (instance_id, id, aud, role, email, encrypted_password,
-        email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
-        created_at, updated_at)
-     values ('00000000-0000-0000-0000-000000000000', $1,
-             'authenticated', 'authenticated', 'member-alpha-eyt136@example.test', '',
-             now(), '{"provider":"email","providers":["email"]}', '{}', now(), now())
-     on conflict (id) do nothing`,
-    [USER_MITGLIED_ALPHA],
-  );
-  await client.query(
-    "insert into public.users (id, display_name) values ($1, $2) on conflict (id) do nothing",
-    [USER_MITGLIED_ALPHA, "Mitglied Alpha (EYT-136 Fixture)"],
-  );
-  await client.query(
+async function mitGeliehenerMitgliedschaft<T>(fn: () => Promise<T>): Promise<T> {
+  await adminVerbindung().query(
     `insert into public.memberships (id, org_id, user_id, role, active)
-     values ($1, $2, $3, 'member', true)
-     on conflict (org_id, user_id) do update set role = 'member', active = true`,
-    [MITGLIEDSCHAFT_MITGLIED, ORG_ALPHA, USER_MITGLIED_ALPHA],
+     values ($1, $2, $3, 'member', true)`,
+    [MITGLIEDSCHAFT_GELIEHEN, ORG_ALPHA, USER_B],
   );
+  try {
+    // Die Leihe hat gewirkt — gemessen, nicht angenommen. Ohne diese Kontrolle
+    // koennte eine unwirksame Mitgliedschaft den Fall gruen lassen, waehrend in
+    // Wahrheit die Mandantenbedingung ablehnt statt der Rechtebedingung.
+    const stand = await beobachte<{ role: string; active: boolean }>(
+      "select role, active from public.memberships where id = $1",
+      [MITGLIEDSCHAFT_GELIEHEN],
+    );
+    expect(stand[0]?.role, "die geliehene Mitgliedschaft traegt die falsche Rolle").toBe("member");
+    expect(stand[0]?.active, "die geliehene Mitgliedschaft ist nicht aktiv").toBe(true);
+    return await fn();
+  } finally {
+    await adminVerbindung().query("delete from public.memberships where id = $1", [
+      MITGLIEDSCHAFT_GELIEHEN,
+    ]);
+    const rest = await beobachte<{ n: string }>(
+      "select count(*) as n from public.memberships where id = $1",
+      [MITGLIEDSCHAFT_GELIEHEN],
+    );
+    if (rest[0]?.n !== "0") {
+      throw new Error(
+        "[planning-write] die geliehene Mitgliedschaft ist NICHT entfernt worden — " +
+          "spaetere Mandantengates wuerden auf einem falschen Zustand messen (EYT-136).",
+      );
+    }
+  }
+}
+
+/** Die drei Konjunkte der Insert-Policies aus Migration 0017, einzeln gemessen. */
+type KonjunktSonde = {
+  kanal: boolean;
+  mandant_alpha: boolean;
+  recht_alpha: boolean;
+  recht_beta: boolean;
+};
+
+/**
+ * Misst die Konjunkte EINZELN — im selben Kanal und mit demselben Subjekt wie
+ * die gleich folgende Anweisung (EYT-136).
+ *
+ * Ohne diese Sonde ist ein 42501 mehrdeutig: fehlendes Spaltenrecht, fehlender
+ * Mandant und fehlendes Recht melden denselben Code, und die Meldung nennt nur
+ * die Tabelle, nie den Riegel. Danach ist genau ein Konjunkt falsch, und es ist
+ * benannt.
+ *
+ * `recht_beta` ist die Gegenprobe zur Sonde selbst: `USER_B` ist Owner in BETA
+ * und traegt `planning.write` DORT. Antwortete die Sonde schlicht auf alles mit
+ * `false`, faellt genau diese Zusicherung — und nebenbei ist bewiesen, dass das
+ * Recht je Organisation ausgewertet wird und nicht ueber Mandanten hinweg blutet.
+ */
+async function konjunkteAlsMitglied(client: Client, ziel: string): Promise<void> {
+  const ergebnis = await runnerAuf(client).run({ userId: USER_B }, (tx) =>
+    tx.query<KonjunktSonde>(
+      `select app.is_runtime_channel()                      as kanal,
+              $1::uuid in (select app.user_org_ids())       as mandant_alpha,
+              app.has_permission($1::uuid, 'planning.write') as recht_alpha,
+              app.has_permission($2::uuid, 'planning.write') as recht_beta`,
+      [ORG_ALPHA, ORG_BETA],
+    ),
+  );
+  const sonde = ergebnis.rows[0];
+  if (sonde === undefined) {
+    throw new Error("[planning-write] Konjunktsonde lieferte keine Zeile (EYT-136).");
+  }
+
+  process.stdout.write(
+    `[planning-write] member-probe ziel=${ziel} kanal=${String(sonde.kanal)} ` +
+      `mandant_alpha=${String(sonde.mandant_alpha)} recht_alpha=${String(sonde.recht_alpha)} ` +
+      `recht_beta=${String(sonde.recht_beta)}\n`,
+  );
+
+  expect(sonde.kanal, "kein Laufzeitkanal — gemessen wuerde der falsche Riegel").toBe(true);
+  expect(sonde.mandant_alpha, "die geliehene Mitgliedschaft wirkt nicht in Alpha").toBe(true);
+  expect(sonde.recht_alpha, "das Subjekt traegt planning.write in Alpha").toBe(false);
+  expect(sonde.recht_beta, "die Sonde antwortet auf alles mit false und misst nichts").toBe(true);
 }
 
 function dbIt(name: string, fn: () => Promise<void>): void {
@@ -381,21 +471,24 @@ beforeAll(async () => {
   }
 
   await neueAdminVerbindung();
-  await legeMitgliedOhneSchreibrechtAn();
   await raeumeWoche();
 });
 
 afterAll(async () => {
   if (dbAvailable && admin !== undefined) {
-    for (const woche of [WOCHE, WOCHE_BASELINE, WOCHE_BASELINE_PARALLEL, WOCHE_BASELINE_DEFINER]) {
+    for (const woche of [
+      WOCHE,
+      WOCHE_BASELINE,
+      WOCHE_BASELINE_PARALLEL,
+      WOCHE_BASELINE_DEFINER,
+      WOCHE_RECHT_VERSION,
+      WOCHE_RECHT_ZUWEISUNG,
+    ]) {
       await raeumeWoche(woche);
     }
-    // Dieselbe Begruendung wie unten: was diese Suite angelegt hat, raeumt sie
-    // wieder ab. Die Reihenfolge folgt den Fremdschluesseln von innen nach
-    // aussen — `auth.users` zuletzt, weil `public.users` daran haengt.
-    await admin.query("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_MITGLIED]);
-    await admin.query("delete from public.users where id = $1", [USER_MITGLIED_ALPHA]);
-    await admin.query("delete from auth.users where id = $1", [USER_MITGLIED_ALPHA]);
+    // Die geliehene Mitgliedschaft wird NICHT hier abgeraeumt: sie lebt und
+    // stirbt innerhalb ihres Falls (siehe mitGeliehenerMitgliedschaft). Ein
+    // Aufraeumen erst hier waere zu spaet — dazwischen laufen weitere Faelle.
     // Die selbst angelegte Person wieder entfernen — sonst waechst der
     // Bestand mit jedem Lauf, und die naechste Suite zaehlt anders.
     await admin.query("delete from public.employees where id = $1", [EMPLOYEE_ALPHA_2]);
@@ -935,68 +1028,151 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
     expect(zeile?.runtime).toBe(true);
   });
 
+  // =========================================================================
+  // Die Rechtegrenze aus Migration 0017 — behavioural, nicht als Textvergleich
+  // =========================================================================
+  // Beide Faelle schreiben ROH statt ueber `createAssignment`, und das ist
+  // keine Bequemlichkeit, sondern die einzige Moeglichkeit:
+  //
+  // 1. `createAssignment` bricht bei mehr als einer sichtbaren Organisation mit
+  //    `AMBIGUOUS_ORGANISATION` ab (planning-write.repository.ts, direkt nach
+  //    `select id, time_zone from public.organizations`). `USER_B` ist Owner in
+  //    BETA und waehrend der Leihe zusaetzlich Mitglied in ALPHA — der Command
+  //    kaeme also nie bis zur Datenbankregel. Ueber den Command ist die
+  //    Rechtegrenze mit diesem Subjekt schlicht nicht erreichbar.
+  // 2. Der Command legt IMMER zuerst die Planversion an. Die Zuweisungs-Policy
+  //    aus 0017 wuerde er nie erreichen — sie ist deshalb nur roh messbar.
+  //
+  // Was dadurch NICHT gemessen wird: dass der Command selbst ablehnt. Das ist
+  // Aufgabe der Anwendungsschicht und liegt ausserhalb dieses Tickets; hier
+  // steht die Datenbank als zweiter, unabhaengiger Riegel im Beweis.
+
   /**
-   * Recht UND Kanal — hier faellt allein das Recht (EYT-136).
+   * Die Planversion: Kanal ja, Mandant ja, Recht nein (EYT-136).
    *
-   * Nicht-Vakuositaet zuerst: dieselbe Verbindung, derselbe Runner, derselbe
-   * Command sind fuer USER_A gruen (Faelle oben). Was sich unterscheidet, ist
-   * ausschliesslich die Rolle des Subjekts. Die Mitgliedschaft ist AKTIV und
-   * dieselbe Organisation — sonst schluege die Tenant-Bedingung zu, nicht die
-   * Rechtebedingung, und der Test bewiese den falschen Riegel.
-   *
-   * Ueber PostgREST ist diese Aussage nicht messbar: dort greift der
-   * Kanalriegel zuerst, und welches Recht gefehlt haette, bliebe offen.
+   * Gegenmutation: streicht man `app.has_permission(org_id, 'planning.write')`
+   * aus `plan_versions_insert_in_org` in Migration 0017, gelingt dieses Insert
+   * und der Fall wird rot. Die Konjunktsonde davor sagt zusaetzlich, WELCHE
+   * Bedingung gefallen ist — ohne sie waere 42501 nicht von einem fehlenden
+   * Spaltenrecht oder einer fehlenden Mitgliedschaft zu unterscheiden.
    */
   dbIt(
-    "ein aktives Mitglied ohne planning.write legt auch ueber den Laufzeitkanal nichts an",
+    "ein aktives Mitglied ohne planning.write legt ueber den Laufzeitkanal keine Planversion an",
     async () => {
-      const belegRecht = await beobachte<{ n: string }>(
-        `select count(*) as n from public.role_permissions
-          where role = 'member' and permission = 'planning.write'`,
-      );
-      expect(belegRecht[0]?.n, "member traegt planning.write — die Praemisse stimmt nicht").toBe(
-        "0",
-      );
+      await mitGeliehenerMitgliedschaft(async () => {
+        // Gegenprobe zum Spaltenrecht, in derselben Bauart wie A3 in
+        // supabase/tests/0012_planning_data_api_boundary.sql: waere das
+        // Insert-Recht entzogen, meldete PostgreSQL denselben Code 42501, und
+        // die Ablehnung sagte nichts ueber die Policy aus.
+        const rechte = await beobachte<{ v1: boolean }>(
+          `select has_column_privilege('authenticated','public.plan_versions','week_key','INSERT') as v1`,
+        );
+        expect(rechte[0]?.v1, "ohne Insert-Spaltenrecht waere 42501 mehrdeutig").toBe(true);
 
-      const client = await neueVerbindung();
-      await raeumeWoche();
-      const repo = new PlanningWriteRepository(
-        runnerAuf(client),
-        USER_MITGLIED_ALPHA,
-        wochenschluessel,
-        idempotenzSpeicher,
-      );
+        const client = await neueVerbindung();
+        await konjunkteAlsMitglied(client, "plan_versions");
 
-      let fehler: DatabaseError | null = null;
-      try {
-        await repo.createAssignment({
-          weekKey: WOCHE,
-          employeeId: EMPLOYEE_ALPHA,
-          worksiteId: WORKSITE_ALPHA,
-          startsAtUtc: START,
-          endsAtUtc: ENDE,
-          // Eigener Schluessel, damit kein Replay eines frueheren Falls
-          // antwortet und die Ablehnung ueberdeckt.
-          idempotencyKey: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-        });
-      } catch (e) {
-        fehler = e as DatabaseError;
+        let fehler: DatabaseError | null = null;
+        try {
+          await runnerAuf(client).run({ userId: USER_B }, async (tx) => {
+            await tx.query("insert into public.plan_versions (org_id, week_key) values ($1, $2)", [
+              ORG_ALPHA,
+              WOCHE_RECHT_VERSION,
+            ]);
+          });
+        } catch (e) {
+          fehler = e as DatabaseError;
+        }
+
+        expect(fehler, "das Mitglied konnte eine Planversion anlegen").not.toBeNull();
+        expect(fehler?.code).toBe("42501");
+
+        const danach = await beobachte<{ n: string }>(
+          "select count(*) as n from public.plan_versions where org_id = $1 and week_key = $2",
+          [ORG_ALPHA, WOCHE_RECHT_VERSION],
+        );
+        expect(danach[0]?.n, "trotz Fehler ist eine Planversion entstanden").toBe("0");
+      });
+    },
+  );
+
+  /**
+   * Die Zuweisung in einen ENTWURF: der Riegel, den sonst nichts prueft
+   * (EYT-136).
+   *
+   * `createAssignment` legt immer zuerst die Planversion an und scheitert dort
+   * schon — kein Test dieses Repositories erreicht die Zuweisungs-Policy je
+   * ueber den Command. Bliebe es dabei, wuerde das Streichen von
+   * `app.has_permission(org_id, 'planning.write')` aus
+   * `assignments_insert_in_org` NIRGENDS rot: der einzige weitere Waechter ist
+   * die Textprobe ueber `pg_policies` in
+   * `supabase/tests/0012_planning_data_api_boundary.sql` (B3), und ein
+   * Textvergleich bleibt auch gegen `… or true` und gegen eine kaputte
+   * `app.has_permission` gruen.
+   *
+   * Gegenmutation: streicht man den `has_permission`-Konjunkt aus
+   * `assignments_insert_in_org` in Migration 0017, gelingt dieses Insert und
+   * der Fall wird rot.
+   *
+   * Die Elternzeile ist ein ENTWURF und keine veroeffentlichte Version: sonst
+   * fiele `app.reject_assignment_in_published_plan()` zuerst (23514) und
+   * verdeckte die Policy — genau der Fall, den der Nachbarfall oben misst.
+   */
+  dbIt(
+    "ein aktives Mitglied ohne planning.write haengt auch in einen Entwurf keine Zuweisung",
+    async () => {
+      await raeumeWoche(WOCHE_RECHT_ZUWEISUNG);
+      const entwurf = await adminVerbindung().query<{ id: string }>(
+        "insert into public.plan_versions (org_id, week_key) values ($1, $2) returning id",
+        [ORG_ALPHA, WOCHE_RECHT_ZUWEISUNG],
+      );
+      const versionId = entwurf.rows[0]?.id;
+      if (versionId === undefined) {
+        throw new Error("[planning-write] Entwurfsversion liess sich nicht anlegen.");
       }
 
-      // 42501 und nicht irgendein Fehler: die Insert-Policy aus 0017 lehnt den
-      // neuen Zeilenzustand ab. Der Tabellenname im Text unterscheidet diesen
-      // Riegel von einem fehlenden Spaltenrecht anderswo im Pfad.
-      expect(fehler, "das Mitglied konnte einen Entwurf anlegen").not.toBeNull();
-      expect(fehler?.code).toBe("42501");
-      expect(fehler?.message).toContain("plan_versions");
+      await mitGeliehenerMitgliedschaft(async () => {
+        const rechte = await beobachte<{ v1: boolean }>(
+          `select has_column_privilege('authenticated','public.assignments','starts_at_utc','INSERT') as v1`,
+        );
+        expect(rechte[0]?.v1, "ohne Insert-Spaltenrecht waere 42501 mehrdeutig").toBe(true);
 
-      const danach = await beobachte<{ n: string }>(
-        `select count(*) as n from public.assignments
-          where plan_version_id in (select id from public.plan_versions
-                                     where org_id = $1 and week_key = $2)`,
-        [ORG_ALPHA, WOCHE],
-      );
-      expect(danach[0]?.n, "trotz Fehler ist eine Zuweisung entstanden").toBe("0");
+        const client = await neueVerbindung();
+        await konjunkteAlsMitglied(client, "assignments");
+
+        let fehler: DatabaseError | null = null;
+        try {
+          await runnerAuf(client).run({ userId: USER_B }, async (tx) => {
+            await tx.query(
+              `insert into public.assignments
+                 (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+               values ($1, $2, $3, $4, $5, $6)`,
+              [
+                ORG_ALPHA,
+                versionId,
+                EMPLOYEE_ALPHA,
+                WORKSITE_ALPHA,
+                new Date("2026-12-08T07:00:00Z"),
+                new Date("2026-12-08T15:00:00Z"),
+              ],
+            );
+          });
+        } catch (e) {
+          fehler = e as DatabaseError;
+        }
+
+        // 42501 und nicht 23514: bei 23514 haette der Trigger aus 0010
+        // abgelehnt, die Elternzeile waere entgegen der Absicht veroeffentlicht
+        // gewesen, und die Policy bliebe ungemessen.
+        expect(fehler, "das Mitglied konnte eine Zuweisung anlegen").not.toBeNull();
+        expect(fehler?.code).toBe("42501");
+
+        const danach = await beobachte<{ n: string }>(
+          "select count(*) as n from public.assignments where plan_version_id = $1",
+          [versionId],
+        );
+        expect(danach[0]?.n, "trotz Fehler ist eine Zuweisung entstanden").toBe("0");
+      });
     },
   );
 });
