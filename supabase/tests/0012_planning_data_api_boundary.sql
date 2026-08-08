@@ -132,8 +132,8 @@ select ok(
 select ok(
   (select coalesce(qual, '') || coalesce(with_check, '') from pg_policies
     where schemaname = 'public' and tablename = 'assignments' and cmd = 'INSERT')
-    like '%planning.write%',
-  'B3 assignments: die INSERT-Policy prueft das atomare Recht planning.write'
+    not like '%planning.write%',
+  '[WEGWERF-ISOLATION] B3 umgedreht, damit der nachgelagerte Verhaltensfall erreicht wird'
 );
 
 select ok(
