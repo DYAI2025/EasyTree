@@ -362,6 +362,14 @@ async function mitGeliehenerMitgliedschaft<T>(fn: () => Promise<T>): Promise<T> 
      values ($1, $2, $3, 'member', true)`,
     [MITGLIEDSCHAFT_GELIEHEN, ORG_ALPHA, USER_B],
   );
+  // `catch` statt `finally`, und das ist kein Stilentscheid: ein `throw` im
+  // `finally` verwirft einen bereits laufenden Fehler aus dem Fall — genau
+  // deshalb verbietet `no-unsafe-finally` ihn, und genau daran ist die erste
+  // Fassung im Lauf 31230613284 gescheitert. Eingefangen statt durchgereicht
+  // laeuft das Aufraeumen auf JEDEM Weg, die Nachkontrolle ebenso, und beide
+  // Fehler bleiben unterscheidbar.
+  let fehlerAusFall: [unknown] | null = null;
+  let ergebnis: T | undefined;
   try {
     // Die Leihe hat gewirkt — gemessen, nicht angenommen. Ohne diese Kontrolle
     // koennte eine unwirksame Mitgliedschaft den Fall gruen lassen, waehrend in
@@ -372,22 +380,29 @@ async function mitGeliehenerMitgliedschaft<T>(fn: () => Promise<T>): Promise<T> 
     );
     expect(stand[0]?.role, "die geliehene Mitgliedschaft traegt die falsche Rolle").toBe("member");
     expect(stand[0]?.active, "die geliehene Mitgliedschaft ist nicht aktiv").toBe(true);
-    return await fn();
-  } finally {
-    await adminVerbindung().query("delete from public.memberships where id = $1", [
-      MITGLIEDSCHAFT_GELIEHEN,
-    ]);
-    const rest = await beobachte<{ n: string }>(
-      "select count(*) as n from public.memberships where id = $1",
-      [MITGLIEDSCHAFT_GELIEHEN],
-    );
-    if (rest[0]?.n !== "0") {
-      throw new Error(
-        "[planning-write] die geliehene Mitgliedschaft ist NICHT entfernt worden — " +
-          "spaetere Mandantengates wuerden auf einem falschen Zustand messen (EYT-136).",
-      );
-    }
+    ergebnis = await fn();
+  } catch (e) {
+    fehlerAusFall = [e];
   }
+
+  await adminVerbindung().query("delete from public.memberships where id = $1", [
+    MITGLIEDSCHAFT_GELIEHEN,
+  ]);
+  const rest = await beobachte<{ n: string }>(
+    "select count(*) as n from public.memberships where id = $1",
+    [MITGLIEDSCHAFT_GELIEHEN],
+  );
+  // Vorrang fuer den gefaehrlicheren Befund: ein fehlgeschlagener Fall kostet
+  // diesen Lauf, eine ueberlebende Mitgliedschaft verfaelscht spaetere
+  // Mandantengates im selben Job.
+  if (rest[0]?.n !== "0") {
+    throw new Error(
+      "[planning-write] die geliehene Mitgliedschaft ist NICHT entfernt worden — " +
+        "spaetere Mandantengates wuerden auf einem falschen Zustand messen (EYT-136).",
+    );
+  }
+  if (fehlerAusFall !== null) throw fehlerAusFall[0];
+  return ergebnis as T;
 }
 
 /** Die drei Konjunkte der Insert-Policies aus Migration 0017, einzeln gemessen. */
