@@ -292,4 +292,222 @@ describe("assembleCostSnapshotPositions", () => {
       spaet.assignmentId,
     ]);
   });
+
+  /**
+   * Der zweite Ordnungsschluessel. Gemessen: ohne diesen Fall bleibt die Suite
+   * gruen, wenn man `worksiteId` aus dem Vergleich streicht — der Schluessel
+   * waere dann unbelegt.
+   */
+  it("ordnet bei gleichem Tag nach worksiteId", () => {
+    const b: PlannedWorkFact = {
+      ...EINSATZ,
+      assignmentId: unsafeIdentifier<AssignmentId>("00000000-0000-4000-8000-00000000000b"),
+      worksiteId: unsafeIdentifier<WorksiteId>("bbbbbbbb-3333-4333-8333-333333333333"),
+    };
+    const a: PlannedWorkFact = {
+      ...EINSATZ,
+      // Groessere assignmentId, kleinere worksiteId: nur wenn `worksiteId`
+      // VOR `assignmentId` verglichen wird, kommt dieser Einsatz zuerst.
+      assignmentId: unsafeIdentifier<AssignmentId>("ffffffff-ffff-4fff-8fff-fffffffffffa"),
+      worksiteId: unsafeIdentifier<WorksiteId>("aaaaaaaa-3333-4333-8333-333333333333"),
+    };
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({
+        facts: fakten({ work: [b, a] }),
+        worksiteLabels: new Map<string, string>([
+          [a.worksiteId, "Baustelle A"],
+          [b.worksiteId, "Baustelle B"],
+        ]),
+      }),
+    );
+    expect(ergebnis.ok).toBe(true);
+    if (!ergebnis.ok) return;
+    expect(ergebnis.positions.map((p) => p.worksiteId)).toEqual([a.worksiteId, b.worksiteId]);
+  });
+
+  /**
+   * Der dritte Ordnungsschluessel — und zugleich der Fall, der den Vergleicher
+   * auf Codepoint-Ordnung festnagelt.
+   *
+   * Die Namen sind mit Absicht kollationsunterscheidend gewaehlt:
+   * `Z` ist U+005A, `Ä` ist U+00C4, also steht `Zimmermann` in
+   * Codepoint-Ordnung VOR `Ärgel`. Deutsche Kollation dreht das um
+   * (`localeCompare` liest `Ä` als `A`), schwedische und daenische ebenfalls,
+   * jeweils andersherum. Dieser Test ist deshalb der Waechter ueber
+   * `vergleiche()`: wer dort auf `localeCompare` zurueckgeht, faellt hier —
+   * gemessen am 09.08.2026 (`de` = +1, `sv` = -1, Codepoint = -1).
+   */
+  it("ordnet bei gleicher Baustelle nach employeeLabel in Codepoint-Ordnung", () => {
+    // Die `assignmentId`s stehen mit Absicht GEGEN die erwartete Reihenfolge:
+    // Zimmermann traegt die groessere. Nur so unterscheidet der Fall den
+    // `employeeLabel`-Schluessel vom nachgelagerten `assignmentId`-Schluessel —
+    // gemessen: mit gleichlaufenden Ids blieb die Suite gruen, als der
+    // `employeeLabel`-Vergleich entfernt wurde, und der Test mass nichts.
+    const zimmermann: PlannedWorkFact = {
+      ...EINSATZ,
+      assignmentId: unsafeIdentifier<AssignmentId>("00000000-0000-4000-8000-000000000002"),
+      employeeId: unsafeIdentifier<EmployeeId>("11111111-2222-4222-8222-222222222222"),
+    };
+    const aergel: PlannedWorkFact = {
+      ...EINSATZ,
+      assignmentId: unsafeIdentifier<AssignmentId>("00000000-0000-4000-8000-000000000001"),
+      employeeId: unsafeIdentifier<EmployeeId>("22222222-2222-4222-8222-222222222222"),
+    };
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({
+        facts: fakten({ work: [aergel, zimmermann] }),
+        employeeLabels: new Map<string, string>([
+          [zimmermann.employeeId, "Zimmermann"],
+          [aergel.employeeId, "Ärgel"],
+        ]),
+        ratesByEmployee: new Map<string, readonly RateVersion[]>([
+          [zimmermann.employeeId, [satz({ employeeId: zimmermann.employeeId })]],
+          [aergel.employeeId, [satz({ employeeId: aergel.employeeId })]],
+        ]),
+      }),
+    );
+    expect(ergebnis.ok).toBe(true);
+    if (!ergebnis.ok) return;
+    // Codepoint: "Zimmermann" (0x5A) vor "Ärgel" (0xC4). Unter `localeCompare`
+    // in de-DE waere die Reihenfolge genau umgekehrt.
+    expect(ergebnis.positions.map((p) => p.employeeLabel)).toEqual(["Zimmermann", "Ärgel"]);
+  });
+
+  /**
+   * Die Naht, fuer die diese Datei existiert: der Satz wird PRO ORTSTAG
+   * gewaehlt, nicht einmal je Einsatz.
+   *
+   * Ein Einsatz ueber Mitternacht, der zugleich einen Satzwechsel kreuzt. Eine
+   * Umsetzung, die den Satz einmal am Startdatum nachschlaegt und fuer alle
+   * Anteile wiederverwendet, kaeme hier auf zweimal 25,00 und faellt.
+   */
+  it("waehlt den Satz je Ortstag, nicht einmal je Einsatz", () => {
+    const a = satz({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      validFrom: "2026-06-01",
+      validTo: "2026-06-16",
+    });
+    const b = satz({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      validFrom: "2026-06-16",
+      validTo: null,
+      amountMinorUnits: "3000",
+    });
+    // 22:00–02:00 Berlin, 15.06. -> 16.06. Je zwei Stunden pro Ortstag.
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({
+        facts: fakten({
+          work: [
+            {
+              ...EINSATZ,
+              startsAtUtc: new Date("2026-06-15T20:00:00.000Z"),
+              endsAtUtc: new Date("2026-06-16T00:00:00.000Z"),
+            },
+          ],
+        }),
+        ratesByEmployee: new Map<string, readonly RateVersion[]>([[EINSATZ.employeeId, [a, b]]]),
+      }),
+    );
+    expect(ergebnis.ok).toBe(true);
+    if (!ergebnis.ok) return;
+    expect(ergebnis.positions.map((p) => p.localDate)).toEqual(["2026-06-15", "2026-06-16"]);
+    expect(ergebnis.positions.map((p) => p.rateVersionId)).toEqual([a.id, b.id]);
+    // 2 h * 25,00 am 15.06., 2 h * 30,00 am 16.06.
+    expect(ergebnis.positions.map((p) => p.amountMinorUnits)).toEqual([5000n, 6000n]);
+  });
+
+  it("blockiert bei unbekannter Zeitzone, bevor irgendein Tag entsteht", () => {
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({ facts: fakten({ timeZone: "Europa/Buxtehude" }) }),
+    );
+    expect(ergebnis).toEqual({
+      ok: false,
+      problem: "TIME_ZONE_UNKNOWN",
+      assignmentId: null,
+      employeeId: null,
+      localDate: null,
+    });
+  });
+
+  /**
+   * Die kaputte Mitternacht — beide Richtungen, an echten Zonen gemessen.
+   *
+   * Gemessen am 09.08.2026 gegen die tz-Datenbank dieser Node-Version:
+   * in `America/Santiago` existiert die lokale Mitternacht des 2026-09-06
+   * nicht (Sprung 00:00 -> 01:00), in `America/Havana` existiert die des
+   * 2026-11-01 zweimal. Gegenprobe: derselbe Santiago-Kalender an einem
+   * gewoehnlichen Tag liefert klaglos zwei Anteile — die Zone allein ist also
+   * nicht der Grund.
+   *
+   * Fuer den Pilotbetrieb (`Europe/Berlin`, Umstellung 02:00) unerreichbar;
+   * der Zweig steht trotzdem unter Test, weil die Totalblockade sonst nur fuer
+   * Satz und Label belegt waere.
+   */
+  it.each([
+    [
+      "America/Santiago",
+      "2026-09-06T02:00:00.000Z",
+      "2026-09-06T08:00:00.000Z",
+      "DAY_BOUNDARY_NONEXISTENT",
+    ],
+    [
+      "America/Havana",
+      "2026-11-01T02:00:00.000Z",
+      "2026-11-01T08:00:00.000Z",
+      "DAY_BOUNDARY_AMBIGUOUS",
+    ],
+  ])("blockiert total an der kaputten Mitternacht (%s -> %s)", (zone, start, ende, erwartet) => {
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({
+        facts: fakten({
+          timeZone: zone,
+          work: [{ ...EINSATZ, startsAtUtc: new Date(start), endsAtUtc: new Date(ende) }],
+        }),
+      }),
+    );
+    expect(ergebnis.ok).toBe(false);
+    if (ergebnis.ok) return;
+    expect(ergebnis.problem).toBe(erwartet);
+    // Der Verursacher wird benannt, und es ueberlebt keine Teilposition.
+    expect(ergebnis.assignmentId).toBe(EINSATZ.assignmentId);
+  });
+
+  it("nimmt nur die Baustelle des Filters auf", () => {
+    const fremd: PlannedWorkFact = {
+      ...EINSATZ,
+      assignmentId: unsafeIdentifier<AssignmentId>("00000000-0000-4000-8000-0000000000ff"),
+      worksiteId: unsafeIdentifier<WorksiteId>("77777777-3333-4333-8333-333333333333"),
+    };
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({
+        facts: fakten({ work: [EINSATZ, fremd] }),
+        worksiteFilter: EINSATZ.worksiteId,
+        // Fuer `fremd` gibt es bewusst KEIN Label: wuerde der Filter ihn nicht
+        // aussortieren, faellt der Lauf mit LABEL_MISSING statt still zu passen.
+      }),
+    );
+    expect(ergebnis.ok).toBe(true);
+    if (!ergebnis.ok) return;
+    expect(ergebnis.positions).toHaveLength(1);
+    expect(ergebnis.positions[0]?.worksiteId).toBe(EINSATZ.worksiteId);
+  });
+
+  /**
+   * Ein Filter, der nichts trifft, ergibt einen LEEREN Snapshot — kein Fehler.
+   *
+   * Dass die Baustelle ueberhaupt zur Organisation gehoert, prueft diese
+   * Funktion NICHT; das ist Aufgabe des Use-Case (Task 10,
+   * `WORKSITE_NOT_IN_ORG`), der die Baustelle gegen den Mandanten aufloest.
+   * Das leere Ergebnis ist hier also Zuschnitt und keine Luecke — wer es in
+   * dieser Schicht "repariert", baut die Mandantenpruefung an der falschen
+   * Stelle nach.
+   */
+  it("liefert einen leeren Snapshot, wenn der Baustellenfilter nichts trifft", () => {
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({ worksiteFilter: "99999999-3333-4333-8333-333333333333" }),
+    );
+    expect(ergebnis.ok).toBe(true);
+    if (!ergebnis.ok) return;
+    expect(ergebnis.positions).toEqual([]);
+  });
 });

@@ -191,13 +191,41 @@ export function assembleCostSnapshotPositions(
   // `ordinal` eingefroren.
   positionen.sort(
     (a, b) =>
-      a.localDate.localeCompare(b.localDate) ||
-      a.worksiteId.localeCompare(b.worksiteId) ||
-      a.employeeLabel.localeCompare(b.employeeLabel) ||
-      a.assignmentId.localeCompare(b.assignmentId),
+      vergleiche(a.localDate, b.localDate) ||
+      vergleiche(a.worksiteId, b.worksiteId) ||
+      vergleiche(a.employeeLabel, b.employeeLabel) ||
+      vergleiche(a.assignmentId, b.assignmentId),
   );
 
   return { ok: true, positions: positionen };
+}
+
+/**
+ * Codepoint-Ordnung — absichtlich NICHT `localeCompare`.
+ *
+ * `localeCompare` ohne Locale loest gegen die Umgebung auf (`LANG`), und weder
+ * `.github/workflows/ci.yml` noch die Railway-Laufzeit legen die fest. Diese
+ * Reihenfolge wird in Task 11 als `ordinal` in der Datenbank eingefroren und
+ * muss fuer den Export (EYT-110) byteweise reproduzierbar sein — eine Ordnung,
+ * die von einer Umgebungsvariable abhaengt, kann das nicht.
+ *
+ * Gemessen am 09.08.2026 auf dieser Maschine (`de-DE`):
+ *
+ * | Paar                    | de  | sv  | da  | Codepoint |
+ * | ----------------------- | --- | --- | --- | --------- |
+ * | `Zimmermann` / `Ärgel`  | +1  | -1  | -1  | -1        |
+ * | `a` / `A`               | -1  | -1  | +1  | +1        |
+ * | `aaaaaaaa…` / `ffffff…` | -1  | -1  | +1  | -1        |
+ *
+ * Schon `a` gegen `A` geht zwischen zwei Locales auseinander; die letzte Zeile
+ * ist die gefaehrlichste, weil sie UUIDs betrifft: daenische Sortierung liest
+ * `aa` als `å` und stellt eine `aaaa…`-Id HINTER eine `ffff…`-Id.
+ *
+ * Codepoint-Ordnung stimmt ausserdem mit `ORDER BY … COLLATE "C"` in
+ * PostgreSQL ueberein — `localeCompare` stimmt mit keiner Collation ueberein.
+ */
+function vergleiche(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /**
