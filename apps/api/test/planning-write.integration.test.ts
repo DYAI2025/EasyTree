@@ -280,8 +280,12 @@ async function verwalte<TRow extends QueryResultRow = QueryResultRow>(
  * etwa `insert (org_id)` entzogen, meldete PostgreSQL dasselbe 42501, und der
  * Fall bliebe gruen, obwohl seine Begruendung nicht mehr traegt. Dieselbe
  * Luecke steckt in `supabase/tests/0012_planning_data_api_boundary.sql`
- * (:59, :69) — hier wiegt sie schwerer, weil die Faelle darauf ihre ganze
+ * in A3 und A4 — hier wiegt sie schwerer, weil die Faelle darauf ihre ganze
  * Aussage stuetzen.
+ *
+ * Statt Zeilennummern stehen jetzt die Kennungen der Zusicherungen da: die
+ * Nummern (frueher `:59, :69`) trafen schon vorher nicht genau und verrutschten
+ * bei jeder Ergaenzung in jener Datei — zuletzt am 08.08.2026 um 25 Zeilen.
  */
 async function alleSpaltenrechteVorhanden(
   tabelle: string,

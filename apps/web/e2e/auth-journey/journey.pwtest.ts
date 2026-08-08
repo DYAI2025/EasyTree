@@ -384,6 +384,68 @@ function cookie(cookies: readonly Cookie[], name: string): Cookie {
 
 test.describe.configure({ mode: "serial" });
 
+/**
+ * Wo die maschinenlesbaren Zusammenfassungen entstehen — und warum NICHT im
+ * Testkoerper.
+ *
+ * Bis EYT-136 schrieb der letzte Schritt jeder Reise ihre Zusammenfassung und
+ * setzte darin `"ergebnis": "PASS"` — als KONSTANTE, im Quelltext. Gemessen im
+ * Basislauf 31237004812: die Datei behauptete `"ergebnis": "PASS"`, waehrend 31
+ * Zusicherungen gefallen waren. Ein Feld namens „Ergebnis", dessen Wert
+ * danebensteht, ist kein Befund — es ist Dekoration in einem Artefakt, das ein
+ * Reviewer oeffnet und fuer einen Befund haelt.
+ *
+ * Berechnen liess es sich im Koerper nicht: `test.info().status` ist dort noch
+ * NICHT final (Playwright setzt ihn, wenn der Koerper durch ist), und
+ * `test.info().errors` bliebe in dieser Datei immer leer, weil hier keine
+ * einzige weiche Zusicherung steht — eine harte bricht ab, statt zu zaehlen.
+ * Eine im Koerper berechnete Zahl waere also nur die naechste Konstante
+ * gewesen.
+ *
+ * Also wandert das Schreiben dorthin, wo der Ausgang feststeht: `afterEach`.
+ * `ergebnis` ist jetzt gemessen. Zwei Nebenwirkungen, beide erwuenscht:
+ *
+ *  - Die Zusammenfassung entsteht auch bei einem ROTEN Lauf. Vorher brach der
+ *    Koerper vorher ab, die Datei fehlte ganz, und ausgerechnet der
+ *    interessanteste Fall hinterliess das duennste Artefakt. Der CI-Schritt
+ *    „Screenshots, Zusammenfassung und Traces sichern" laeuft mit
+ *    `if: always()` und laedt sie mit hoch.
+ *  - `bericht` wird als Referenz hinterlegt, nicht als Kopie: was die Schritte
+ *    bis zum Abbruch eingetragen haben, steht drin. Wie weit der Lauf kam, ist
+ *    damit ablesbar statt behauptet.
+ *
+ * Schluessel ist `testId` und nicht der Titel: er bleibt ueber Wiederholungen
+ * stabil und geht bei einer Umbenennung nicht still ins Leere.
+ */
+const ZUSAMMENFASSUNGEN = new Map<
+  string,
+  { readonly datei: string; readonly bericht: Record<string, unknown> }
+>();
+
+test.afterEach(() => {
+  const info = test.info();
+  const eintrag = ZUSAMMENFASSUNGEN.get(info.testId);
+  // Kein Eintrag heisst: dieser Fall ist gar nicht erst gelaufen (im
+  // `serial`-Modus faellt jeder Nachfolger eines roten Falles aus). Dann gibt
+  // es auch nichts zu protokollieren.
+  if (eintrag === undefined) return;
+  mkdirSync(ARTEFAKTE, { recursive: true });
+  writeFileSync(
+    join(ARTEFAKTE, eintrag.datei),
+    `${JSON.stringify(
+      {
+        ...eintrag.bericht,
+        ergebnis: info.status ?? "unbekannt",
+        erwartetes_ergebnis: info.expectedStatus,
+        zusicherungsfehler: info.errors.length,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+});
+
 test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
   page,
   context,
@@ -404,9 +466,12 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     ticket: "EYT-106",
     paket: "B",
     zusatz: "EYT-107 Publish-Durchstich",
+    // Lebende Referenz: `afterEach` serialisiert, was bis dahin aufgelaufen ist.
+    api_aufrufe: apiAufrufe,
     schritte: {},
   };
   const schritte = bericht["schritte"] as Record<string, unknown>;
+  ZUSAMMENFASSUNGEN.set(test.info().testId, { datei: "zusammenfassung.json", bericht });
 
   /** Serverseitige Ids der Planversion — in 9c gelesen, in 9d verglichen. */
   let entwurfsVersionId = "";
@@ -916,6 +981,35 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       `${ANGRIFFSWOCHE_OWNER} ist vor dem Angriff nicht leer`,
     ).toHaveLength(0);
 
+    /**
+     * Beide Wirkungen nach JEDEM Angriff, nicht einmal netto am Ende.
+     *
+     * Der Grund ist in 9c5 GEMESSEN worden (Basislauf 31237004812): dort stand
+     * genau eine Netto-Bestandskontrolle am Ende, sie meldete
+     * `bestand_vorher: 2, bestand_danach: 2` und blieb gruen — waehrend ein
+     * INSERT eine Zeile anlegte (+1) und ein DELETE die Zielzeile entfernte
+     * (-1). Wirkungen, die sich aufheben, besiegen jede Netto-Zahl.
+     *
+     * 9c4 pruefte schon vorher nach jedem Angriff, aber je nur die EINE
+     * Wirkung, die dieser Angriff plausibel haben konnte. Diese Regel muss ein
+     * Leser jedes Mal neu herleiten und veraltet still, sobald ein Angriff
+     * hinzukommt. Hier gilt jetzt die einfache Regel: nach jedem Angriff steht
+     * BEIDES fest. Wer diese Aufrufe an das Ende verschiebt, stellt genau den
+     * Zustand wieder her, der im Basislauf gruen log.
+     */
+    const wirkungOwner = async (was: string): Promise<number> => {
+      const bestand = (await dataApiLese<{ id: string }>(request, zuweisungenUrl, kopf)).length;
+      expect(
+        bestand,
+        `${was}: der Zuweisungsbestand hat sich veraendert — ein Schreibzugriff ist durchgegangen`,
+      ).toBe(zuweisungenVorher.length);
+      expect(
+        await dataApiLese<{ id: string }>(request, wocheUrlOwner, kopf),
+        `${was}: ${ANGRIFFSWOCHE_OWNER} traegt jetzt eine Planversion — die Woche gehoert niemandem`,
+      ).toHaveLength(0);
+      return bestand;
+    };
+
     // Angriff 1 — eine Entwurfszuweisung in die ECHTE Planversion der Reise.
     // Dienstag derselben Woche, bewusst OHNE Ueberlappung mit der Fixtur: ein
     // Konflikt mit `assignments_no_published_overlap` liesse den Versuch
@@ -953,11 +1047,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       "9c4 INSERT assignments",
     );
 
-    const zuweisungenDanach = await dataApiLese<{ id: string }>(request, zuweisungenUrl, kopf);
-    expect(
-      zuweisungenDanach.length,
-      "PostgREST hat eine Zuweisung angelegt — der Planungscommand ist umgehbar",
-    ).toBe(zuweisungenVorher.length);
+    const bestandNachZuweisung = await wirkungOwner("9c4 nach INSERT assignments");
 
     // Angriff 2 — eine ENTWURFS-Planversion, ganz ohne `published_at`. Genau
     // die Form, die 0016 noch durchliess. Auch hier exakt die gegranteten
@@ -975,15 +1065,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       "9c4 INSERT plan_versions",
     );
 
-    const wocheDanach = await dataApiLese<{ id: string }>(request, wocheUrlOwner, kopf);
-    expect(
-      wocheDanach,
-      "PostgREST hat eine Entwurfs-Planversion angelegt — die Woche gehoert jetzt niemandem",
-    ).toHaveLength(0);
+    const bestandNachVersion = await wirkungOwner("9c4 nach INSERT plan_versions");
 
     schritte["9c4_owner_entwurfsschreiben"] = {
       rolle: "owner",
-      hat_planning_write: true,
+      hat_planning_write: ownerRecht.length === 1,
       lesen_traegt: zuweisungenVorher.length,
       assignments_insert: {
         status: insertZuweisung.status,
@@ -1000,7 +1086,13 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         woche: ANGRIFFSWOCHE_OWNER,
         fehler: insertVersion.fehler,
       },
-      zuweisungen_unveraendert: zuweisungenDanach.length === zuweisungenVorher.length,
+      // Je Angriff eine eigene Momentaufnahme, nicht eine Netto-Zahl am Ende:
+      // siehe die Begruendung an `wirkungOwner` (Basislauf 31237004812).
+      bestand_je_angriff: {
+        nach_assignments_insert: bestandNachZuweisung,
+        nach_plan_versions_insert: bestandNachVersion,
+      },
+      zuweisungen_unveraendert: bestandNachVersion === zuweisungenVorher.length,
       hinweis: "EYT-136 — app.is_runtime_channel() in den Insert-Policies von 0017",
     };
   });
@@ -1096,6 +1188,59 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         `${ANGRIFFSWOCHE_MEMBER} ist vor dem Angriff nicht leer`,
       ).toHaveLength(0);
 
+      /**
+       * Die Wirkung nach JEDEM einzelnen Angriff — der Kern des Befunds vom
+       * 08.08.2026.
+       *
+       * GEMESSEN, nicht befuerchtet. Der Basislauf 31237004812 fuhr genau diese
+       * vier Angriffe gegen den Code OHNE Migration 0017; drei davon gingen
+       * durch. Im Artefakt stand trotzdem
+       *
+       *     "bestand_vorher": 2,
+       *     "bestand_danach": 2
+       *
+       * und die zugehoerige Zusicherung war GRUEN. Der Grund: das INSERT des
+       * members legte eine Zeile an (+1), sein DELETE entfernte die Zielzeile
+       * (-1), und die EINE Netto-Kontrolle am Ende sah eine unveraenderte Zahl.
+       * Rot wurden damals nur `zielDanach` (Zielzeile verschwunden) und der
+       * `starts_at_utc`-Vergleich — die stehen unten unveraendert weiter, sie
+       * sind der Grund, dass der Basislauf ueberhaupt aufflog.
+       *
+       * Mit einer Momentaufnahme nach jedem einzelnen Angriff kann sich keine
+       * Wirkung mehr gegen eine spaetere aufheben: das INSERT faellt auf, BEVOR
+       * das DELETE es maskieren kann.
+       *
+       * Beide Wirkungen werden nach jedem Angriff geprueft, auch wo eine davon
+       * nicht betroffen sein KANN (ein PATCH aendert keine Zeilenzahl). Die
+       * Regel „nach jedem Angriff steht beides fest" ist pruefbar; die Regel
+       * „nach jedem Angriff steht das fest, was er plausibel beruehrt" muesste
+       * ein Leser jedes Mal neu herleiten und veraltet still.
+       */
+      const bestandNach = async (was: string): Promise<number> => {
+        const jetzt = (await dataApiLese<{ id: string }>(request, bestandUrl, kopfB)).length;
+        expect(
+          jetzt,
+          `${was}: der Zuweisungsbestand hat sich veraendert — INSERT oder DELETE ist durchgegangen`,
+        ).toBe(bestandVorher);
+        return jetzt;
+      };
+      const zielNach = async (was: string): Promise<string> => {
+        const zeile = await dataApiLese<{ id: string; starts_at_utc: string }>(
+          request,
+          zielUrl,
+          kopfB,
+        );
+        expect(
+          zeile,
+          `${was}: die Zielzeile ist verschwunden — DELETE ist durchgegangen`,
+        ).toHaveLength(1);
+        expect(
+          zeile[0]?.starts_at_utc,
+          `${was}: die Zielzeile wurde verschoben — PATCH ist durchgegangen`,
+        ).toBe(startVorher);
+        return zeile[0]?.starts_at_utc ?? "";
+      };
+
       // Angriff 1 — anlegen. Spaltenrechte bestehen (dieselben sechs Spalten
       // wie in 9c4, ohne `id`), es scheitert die `with check`-Klausel: hier
       // fehlen Kanal UND Recht.
@@ -1118,6 +1263,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         { art: "policy", tabelle: "assignments" },
         "9c5 INSERT assignments",
       );
+      // HIER, unmittelbar nach dem INSERT, faellt der Basislauf-Fehlbefund auf:
+      // die angelegte Zeile ist jetzt sichtbar, das spaetere DELETE kann sie
+      // nicht mehr maskieren.
+      const bestandNachInsert = await bestandNach("9c5 nach INSERT assignments");
+      const startNachInsert = await zielNach("9c5 nach INSERT assignments");
 
       // Angriff 2 — verschieben. Der neue Beginn liegt VOR dem alten und
       // verletzt keinen Check (`starts_at_utc < ends_at_utc` bleibt wahr): der
@@ -1148,6 +1298,8 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         { art: "tabellenrecht", tabelle: "assignments", recht: "UPDATE" },
         "9c5 PATCH assignments",
       );
+      const bestandNachPatch = await bestandNach("9c5 nach PATCH assignments");
+      const startNachPatch = await zielNach("9c5 nach PATCH assignments");
 
       // Angriff 3 — loeschen. Dieselbe Zeile, dieselbe Begruendung.
       const deleteZuweisung = await dataApiSchreibversuch(
@@ -1161,6 +1313,8 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         { art: "tabellenrecht", tabelle: "assignments", recht: "DELETE" },
         "9c5 DELETE assignments",
       );
+      const bestandNachDelete = await bestandNach("9c5 nach DELETE assignments");
+      const startNachDelete = await zielNach("9c5 nach DELETE assignments");
 
       // Angriff 4 — eine eigene Entwurfs-Planversion, wieder mit exakt den
       // gegranteten Spalten `(org_id, week_key)`.
@@ -1176,18 +1330,19 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         { art: "policy", tabelle: "plan_versions" },
         "9c5 INSERT plan_versions",
       );
+      const bestandDanach = await bestandNach("9c5 nach INSERT plan_versions");
+      const startNachVersion = await zielNach("9c5 nach INSERT plan_versions");
 
       // ------------------------------------------------------------------
       // Die Wirkung, nicht die Antwort: nachgesehen statt geglaubt.
       // ------------------------------------------------------------------
       // Diese Kontrollen sind kanalunabhaengig. Aendert sich ein Statuscode,
       // werden die Zusicherungen darueber angepasst — diese hier NIE.
-      const bestandDanach = (await dataApiLese<{ id: string }>(request, bestandUrl, kopfB)).length;
-      expect(
-        bestandDanach,
-        "der Zuweisungsbestand hat sich veraendert — INSERT oder DELETE ist durchgegangen",
-      ).toBe(bestandVorher);
-
+      //
+      // Sie bleiben ZUSAETZLICH zu den Momentaufnahmen oben stehen: genau sie
+      // haben den Basislauf 31237004812 aufgedeckt, waehrend die Netto-Zahl
+      // gruen log. Was oben dazukam, ist die fruehere Erkennung, nicht ein
+      // Ersatz.
       const zielDanach = await dataApiLese<{
         id: string;
         starts_at_utc: string;
@@ -1211,9 +1366,9 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
 
       schritte["9c5_member_entwurfsschreiben"] = {
         rolle: "member",
-        hat_planning_write: false,
-        mitgliedschaft_geliehen: true,
-        zielzeile_vorher_sichtbar: true,
+        hat_planning_write: memberRecht.length === 1,
+        mitgliedschaft_geliehen: mitgliedschaftB[0]?.active === true,
+        zielzeile_vorher_sichtbar: zielVorher.length === 1,
         assignments_insert: {
           status: insertZuweisung.status,
           koerperLaenge: insertZuweisung.koerperLaenge,
@@ -1244,6 +1399,24 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
           fehler: insertVersion.fehler,
         },
         bestand_vorher: bestandVorher,
+        // Eine Momentaufnahme JE ANGRIFF statt einer Netto-Zahl am Ende. Der
+        // Basislauf 31237004812 protokollierte hier `bestand_vorher: 2,
+        // bestand_danach: 2`, waehrend drei Schreibzugriffe durchgingen — die
+        // Wirkungen hoben sich auf. Wer diese Aufstellung wieder auf zwei
+        // Zahlen eindampft, stellt den Fehlbefund wieder her.
+        bestand_je_angriff: {
+          nach_assignments_insert: bestandNachInsert,
+          nach_assignments_update: bestandNachPatch,
+          nach_assignments_delete: bestandNachDelete,
+          nach_plan_versions_insert: bestandDanach,
+        },
+        zielzeile_start_je_angriff: {
+          vorher: startVorher,
+          nach_assignments_insert: startNachInsert,
+          nach_assignments_update: startNachPatch,
+          nach_assignments_delete: startNachDelete,
+          nach_plan_versions_insert: startNachVersion,
+        },
         bestand_danach: bestandDanach,
         starts_at_utc_unveraendert: zielDanach[0]?.starts_at_utc === startVorher,
         hinweis: "EYT-136 — update/delete entzogen, INSERT an Kanal und planning.write gebunden",
@@ -1431,16 +1604,9 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     };
   });
 
-  await test.step("13 — maschinenlesbare Zusammenfassung ablegen", async () => {
-    bericht["api_aufrufe"] = apiAufrufe;
-    bericht["ergebnis"] = "PASS";
-    mkdirSync(ARTEFAKTE, { recursive: true });
-    writeFileSync(
-      join(ARTEFAKTE, "zusammenfassung.json"),
-      `${JSON.stringify(bericht, null, 2)}\n`,
-      "utf8",
-    );
-  });
+  // Es gibt hier bewusst KEINEN Schritt „Zusammenfassung ablegen" mehr. Das
+  // Schreiben steht im `afterEach` weiter oben, weil der Ausgang des Laufs
+  // erst dort feststeht — die Begruendung samt Messung ist dort notiert.
 });
 
 /**
@@ -1488,7 +1654,8 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
 
   const kontext = await browser.newContext();
   const seite = await kontext.newPage();
-  const bericht: Record<string, unknown> = {};
+  const bericht: Record<string, unknown> = { ticket: "EYT-106", benutzer: "B" };
+  ZUSAMMENFASSUNGEN.set(test.info().testId, { datei: "zusammenfassung-b.json", bericht });
 
   try {
     await test.step("B meldet sich ueber dieselbe echte Loginseite an", async () => {
@@ -1610,13 +1777,11 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
       bericht["publish_verweigert"] = { status: direkt.status(), erwartet: 403 };
     });
 
-    await test.step("Zusammenfassung von B ablegen", async () => {
+    // Nur noch das Bildschirmfoto: es braucht `seite`, die im `finally` unten
+    // geschlossen wird. Die Zusammenfassung schreibt der `afterEach` — dort
+    // steht der Ausgang fest, hier stuende wieder nur eine Konstante.
+    await test.step("Bildschirmfoto von B ablegen", async () => {
       mkdirSync(ARTEFAKTE, { recursive: true });
-      writeFileSync(
-        join(ARTEFAKTE, "zusammenfassung-b.json"),
-        `${JSON.stringify({ ticket: "EYT-106", benutzer: "B", ...bericht, ergebnis: "PASS" }, null, 2)}\n`,
-        "utf8",
-      );
       await seite.screenshot({ path: join(ARTEFAKTE, "03-benutzer-b-ohne-zugang.png") });
     });
   } finally {

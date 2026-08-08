@@ -49,11 +49,38 @@ select plan(18);
 -- A. Rechtelage (Struktur)
 -- ===========================================================================
 
+-- A1 misst ueber ALLE SPALTEN, nicht ueber die Tabelle — und das ist kein
+-- Stilentscheid, sondern die Korrektur eines gemessenen Fehlbefunds.
+--
+-- Im Basislauf 31237004812 lief diese Datei gegen den Code OHNE 0017. A1 war
+-- dort GRUEN, waehrend der PATCH-Angriff auf genau diese Tabelle ueber
+-- PostgREST mit HTTP 200 durchging und die Zielzeile verschob. Die Zusicherung
+-- war also vor UND nach 0017 wahr und unterschied nichts — der Titel behauptete
+-- auf dem Basisstand etwas Falsches, waehrend die Zusicherung gruen blieb.
+--
+-- Ursache: Migration 0010 (Z. 83-86) entzog das TABELLEN-Recht bereits selbst
+-- und vergab es spaltenweise neu — `grant update (plan_version_id, employee_id,
+-- worksite_id, starts_at_utc, ends_at_utc)`. `has_table_privilege` sieht
+-- Spalten-Grants nicht und meldete deshalb schon vor 0017 „kein Recht".
+--
+-- `has_any_column_privilege` ist wahr, sobald IRGENDEINE Spalte das Recht
+-- traegt, und schliesst das Tabellenrecht mit ein (ein Tabellenrecht gilt fuer
+-- alle Spalten) — die Zusicherung ist damit strikt schaerfer als die alte.
+-- Verfuegbar seit PostgreSQL 8.4; hier laeuft 17 (supabase/config.toml,
+-- `major_version = 17`).
 select ok(
-  not has_table_privilege('authenticated', 'public.assignments', 'UPDATE'),
-  'A1 assignments: authenticated hat KEIN update-Recht mehr (kein Verbraucher im Produktionscode)'
+  not has_any_column_privilege('authenticated', 'public.assignments', 'UPDATE'),
+  'A1 assignments: authenticated traegt auf KEINER Spalte mehr ein update-Recht — 0010 vergab es spaltenweise, 0017 entzieht es ganz'
 );
 
+-- A2 bleibt bewusst bei `has_table_privilege` und hat den blinden Fleck von A1
+-- nicht: PostgreSQL kennt Spaltenrechte nur fuer select, insert, update und
+-- references. Ein `delete` ist immer ein Tabellenrecht, es KANN also keinen
+-- Spalten-Grant geben, den diese Zusicherung uebersaehe — `delete` hier auf
+-- `has_any_column_privilege` umzustellen waere kein schaerferer Waechter,
+-- sondern laut Dokumentation ein Fehler („unrecognized privilege type").
+-- Das ist aus der Dokumentation abgeleitet und hier nicht gemessen; gemessen
+-- ist nur, dass A2 in dieser Form durchlaeuft.
 select ok(
   not has_table_privilege('authenticated', 'public.assignments', 'DELETE'),
   'A2 assignments: authenticated hat KEIN delete-Recht mehr — 0007 vergab es, niemand entzog es bis 0017'
