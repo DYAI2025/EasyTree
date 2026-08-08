@@ -164,8 +164,7 @@ drop policy plan_versions_insert_in_org on public.plan_versions;
 create policy plan_versions_insert_in_org on public.plan_versions
   for insert to authenticated
   with check (
-    app.is_runtime_channel()
-    and org_id in (select app.user_org_ids())
+    org_id in (select app.user_org_ids())
     and app.has_permission(org_id, 'planning.write')
     -- Aus 0016 uebernommen: eine Planversion wird als Entwurf geboren.
     and published_at is null
