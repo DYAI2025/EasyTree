@@ -389,20 +389,25 @@ recht_publish=false lesbar=1 sperrlesbar=0 definer=true` zeigt, dass die sperren
 
 ## 8. Ausgeführte Gegenmutationen (08.08.2026)
 
-Sieben benannte Gegenmutationen wurden gegen den Stand `6c793ad` gefahren, jede auf einem eigenen
-Wegwerf-Branch mit Draft-PR; alle Branches und PRs sind danach gelöscht bzw. geschlossen.
+Sieben benannte Gegenmutationen wurden gegen den Stand `6c793ad` gefahren — in **elf** Läufen, weil
+vier davon eine Isolations- bzw. Umstellungsvariante brauchten (Grund: O1). Jeder Lauf lief auf
+einem eigenen Wegwerf-Branch mit Draft-PR; alle Branches und PRs sind danach gelöscht bzw.
+geschlossen. Branch und SHA je Lauf stehen in
+[`2026-08-07-data-api-grant-inventar.md`](2026-08-07-data-api-grant-inventar.md) Abschnitt 10.
 
-| Mutation                                           | Lauf                                    | rot geworden ist                                                          |
-| -------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
-| Kanal-Riegel aus `assignments_insert_in_org`       | 31238564685                             | `auth-journey` 9c4, `POST /rest/v1/assignments` → **201**, Zeile angelegt |
-| `planning.write` aus `plan_versions_insert_in_org` | 31238574199                             | `db-gates`, pgTAP `0012` B4 (Verhaltensfall nicht erreicht)               |
-| `planning.write` aus `assignments_insert_in_org`   | 31238584914                             | `db-gates`, pgTAP `0012` B3 (Verhaltensfall nicht erreicht)               |
-| `assignments` UPDATE wieder geöffnet               | 31238598756                             | `auth-journey` 9c5, `PATCH` → **200**                                     |
-| `assignments` DELETE wieder geöffnet               | 31238658106                             | `auth-journey` 9c5, `DELETE` → **200**                                    |
-| Kanal-Riegel aus `plan_versions_insert_in_org`     | 31238659805                             | `auth-journey` 9c4, `POST /rest/v1/plan_versions` → **201**               |
-| Trigger als `security invoker`                     | 31238661331                             | `db-gates`, pgTAP `0006` `prosecdef`: `have: false / want: true`          |
-| …dieselbe, mit Isolation der pgTAP-Zeile           | 31238802272 / 31238803760 / 31238804687 | die drei nachgelagerten Verhaltensfälle                                   |
-| …dieselbe, nach der Umstellung dieses Falls        | **31239527407**                         | **behavioural**, siehe unten                                              |
+| Mutation                                                                 | Lauf            | rot geworden ist                                                          |
+| ------------------------------------------------------------------------ | --------------- | ------------------------------------------------------------------------- |
+| Kanal-Riegel aus `assignments_insert_in_org`                             | 31238564685     | `auth-journey` 9c4, `POST /rest/v1/assignments` → **201**, Zeile angelegt |
+| `planning.write` aus `plan_versions_insert_in_org`                       | 31238574199     | `db-gates`, pgTAP `0012` B4 (Verhaltensfall nicht erreicht)               |
+| `planning.write` aus `assignments_insert_in_org`                         | 31238584914     | `db-gates`, pgTAP `0012` B3 (Verhaltensfall nicht erreicht)               |
+| `assignments` UPDATE wieder geöffnet                                     | 31238598756     | `auth-journey` 9c5, `PATCH` → **200**                                     |
+| `assignments` DELETE wieder geöffnet                                     | 31238658106     | `auth-journey` 9c5, `DELETE` → **200**                                    |
+| Kanal-Riegel aus `plan_versions_insert_in_org`                           | 31238659805     | `auth-journey` 9c4, `POST /rest/v1/plan_versions` → **201**               |
+| Trigger als `security invoker`                                           | 31238661331     | `db-gates`, pgTAP `0006` `prosecdef`: `have: false / want: true`          |
+| `planning.write` aus `plan_versions_insert_in_org`, pgTAP-Zeile isoliert | 31238802272     | `das Mitglied konnte eine Planversion anlegen`; Sonde `kanal=true`        |
+| `planning.write` aus `assignments_insert_in_org`, pgTAP-Zeile isoliert   | 31238803760     | `das Mitglied konnte eine Zuweisung anlegen`; Sonde `kanal=true`          |
+| Trigger als `security invoker`, pgTAP-Zeile isoliert                     | 31238804687     | weiterhin **strukturell** — `expect(prosecdef)` stand vor dem Insert      |
+| …dieselbe, nach der Umstellung dieses Falls                              | **31239527407** | **behavioural**, siehe unten                                              |
 
 Zwei Beobachtungen gehören hierher, weil sie beim Lesen eines roten Laufs gebraucht werden.
 **Beide sind Beobachtungen, keine Handlungsaufträge — an der Struktur des CI-Jobs wird im Rahmen
