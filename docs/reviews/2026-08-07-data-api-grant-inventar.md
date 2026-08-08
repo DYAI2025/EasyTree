@@ -1,6 +1,6 @@
 # Grant-/Policy-Inventar der Planungs-Data-API (EYT-136, Phase 1)
 
-**Stand:** 07.08.2026, Abschnitte 7-13 nachgetragen am 08.08.2026 · **Baseline:** `origin/master` =
+**Stand:** 07.08.2026, Abschnitte 7-14 nachgetragen am 08.08.2026 · **Baseline:** `origin/master` =
 `aad46ddca12abf1c4862e70248f61978dcce96e7` (Migrationsstand `0016`) · **Zweck:** Pflichtinventar vor
 jeder Rechteänderung (EYT-136 AK1) und Evidenzakte des Slices.
 
@@ -12,7 +12,8 @@ Commit zitieren müsste, wäre bei jedem Schreibvorgang veraltet.
 
 Abschnitte 1-6 sind das Inventar **vor** der Änderung (Messung 07.08.2026). Abschnitte 7-13 sind
 die ausgeführte Evidenz: zwei unabhängige Rotnachweise, elf Gegenmutationen, der Positivpfad und
-die ausdrücklichen Lücken.
+die ausdrücklichen Lücken. **Abschnitt 14 führt alle offenen Punkte beider Reviewdokumente mit
+Schweregrad** — er ist der Einstieg für die Produktverantwortung.
 
 ## Wie gemessen wurde
 
@@ -23,8 +24,16 @@ Zwei unabhängige Quellen, weil eine allein hier in die Irre führt:
    unmöglich, nicht nur unterlassen). Abgefragt wurden `pg_class`, `has_table_privilege`,
    `has_column_privilege` und `pg_policies`.
 2. **Produktionscode.** `rg -e 'insert into public\.' -e 'update public\.' -e 'delete from public\.'`
-   über `apps/api/src`, `packages/*/src` und `scripts/ops`. Testcode ist ausgeschlossen — ein Test
-   begründet kein Produktionsrecht.
+   über `apps/api/src` und `packages/*/src`; die Lesegrep steht bei Abschnitt 3. Testcode ist
+   ausgeschlossen — ein Test begründet kein Produktionsrecht.
+
+   > **Korrektur 08.08.2026.** Hier stand zusätzlich `scripts/ops`. Dieses Verzeichnis ist in
+   > **keinem Commit dieses Repositories** enthalten (`git log --all -- scripts/ops` ist leer); es
+   > existiert nur als unversionierte lokale Datei­sammlung im Arbeitsbaum. Ein Grep darüber ist von
+   > niemandem sonst reproduzierbar und CI sieht diese Dateien nie — als Beleg taugt er deshalb
+   > nicht und wird aus dem Verfahren gestrichen. Am Ergebnis ändert das nichts: die Rechtematrix
+   > misst den Produktivkatalog, und die Verbraucherliste in Abschnitt 3 nennt ausschließlich
+   > Fundstellen unter `apps/api/src`.
 
 > **Messfalle, die hier zuschlug.** `information_schema.role_table_grants` liefert als
 > `supabase_read_only_user` ein **leeres** Ergebnis: die Sicht zeigt nur Grants, an denen die
@@ -88,9 +97,17 @@ Domain-Command gebunden ist. Sie ist das Muster, an dem sich EYT-136 orientiert 
 | `idempotency_records` | Ergebnis merken                              | `pg-idempotency-store.ts:45`               | INSERT                                                                            |
 | `idempotency_records` | **UPDATE/DELETE**                            | —                                          | **kein Verbraucher** (bewusst, 0012)                                              |
 
-Leser: sämtliche Lesepfade laufen über `TenantQueryRunner` (`set local role authenticated` +
-transaktionslokale JWT-Claims) und über die Repositories des Planungs- und Kostenmoduls. Kein
-Produktionscode liest diese Tabellen an der Laufzeitrolle vorbei.
+**Leser — nachgemessen am 08.08.2026, weil die Aussage vorher über ihr Verfahren hinausging.** Die
+Schreibgrep oben (`insert`/`update`/`delete`) kann über Lesepfade nichts sagen; die Behauptung „kein
+Produktionscode liest an der Laufzeitrolle vorbei" stand also ohne Messung da. Nachgeholt mit
+`grep -rnE "from public\.(assignments|plan_versions|idempotency_records|audit_events|outbox_messages)"`
+über `apps/api/src` und `packages/*/src`. Ergebnis: **vier** Dateien lesen diese Tabellen —
+`planning-write.repository.ts`, `planning-window.repository.ts`,
+`costs/infrastructure/planning-facts.adapter.ts` und `platform/idempotency/pg-idempotency-store.ts`.
+Alle vier führen ihre Abfragen über `TenantQuery` aus, **keine** davon hält einen `pg`-Treiber. Die
+Aussage ist damit gemessen statt behauptet — und sie ist über die Architekturregel
+`api-dependency-allowlist` zusätzlich abgesichert, die `pg` nur unter `apps/api/src/platform/`
+zulässt.
 
 **Zentrale Feststellung:** Der Produktionscode enthält **kein einziges**
 `delete from public.<tabelle>` und **kein** `update public.assignments`. Beide Rechte auf
@@ -393,3 +410,40 @@ recht_publish=false lesbar=1 sperrlesbar=0 definer=true` — die gewöhnliche Le
   ein.
 - Kein SQL dieses Reviews lief lokal — auf der Arbeitsmaschine existiert keine Container-Laufzeit.
   `db-gates` ist die erste und einzige Ausführungsstelle. Die PO-Freigabe für „nur CI" liegt vor.
+
+## 14. Offene Punkte mit Schweregrad
+
+Bis zum dritten Reviewgang waren die offenen Punkte über zwei Dokumente verstreut und **keiner**
+trug einen Schweregrad — ein Product Owner konnte daraus nicht ablesen, was vor dem Merge zu
+entscheiden ist und was nur protokolliert bleibt. Hier stehen sie vollständig und bewertet.
+
+**Maßstab.** **P1** = blockiert den Merge oder die Produktion. **P2** = kein akutes Risiko, braucht
+aber ein Ticket und eine Terminierung. **P3** = festgehalten; Handlung nur, wenn sich die
+Voraussetzung ändert.
+
+**Es gibt keinen P1.** Kein offener Punkt berührt die Grenze, die dieser Slice zieht — das ist die
+Aussage, nicht die Abwesenheit einer Aussage.
+
+| #   | Offener Punkt                                                                        | Quelle               | Grad   | Vorgeschlagenes Ticket / Handlung                                                                                  |
+| --- | ------------------------------------------------------------------------------------ | -------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
+| 1   | Supabase-Default-Grants systemisch zu weit (Rechte ohne erteilende Migration)        | § 5                  | **P2** | **NEU: „Default-Grants im Schema `public` inventarisieren und einengen"**                                          |
+| 2   | `audit_events`: selbst-zugeschriebene Zusatzzeilen möglich (Akteurbindung greift)    | § 5, A-7             | **P2** | „Auditspur an den Laufzeitkanal binden"                                                                            |
+| 3   | Der Rechte-Riegel hat genau **einen** Zeugen (die zwei Verhaltensfälle)              | § 11, O2             | **P2** | Zeugen nicht zurückstufen; zweiter Zeuge, falls PostgREST je Kanal wird                                            |
+| 4   | `idempotency_records`: INSERT nicht kanalgebunden                                    | § 5, A-6             | **P2** | „Idempotenzschlüssel an den Laufzeitkanal binden"                                                                  |
+| 5   | `outbox_messages`: Schreibwege offen, Wirkung mangels Zusteller heute nicht belegbar | § 5, A-5             | **P2** | „Outbox-Schreibwege an den Zusteller binden" (mit dem Consumer-Ticket)                                             |
+| 6   | SELECT-Fläche unangetastet                                                           | § 13                 | **P2** | hängt an **EYT-14** (Subjektmodell) — dort entscheiden                                                             |
+| 7   | `db-gates` führt pgTAP vor den Verhaltensgates aus und verdeckt sie im Fehlerfall    | § 11, O1             | **P3** | bewusst nicht geändert; beim Lesen roter Läufe beachten                                                            |
+| 8   | Drei Gegenmutationen erreichten ihr Ziel erst in Isolationsvarianten                 | § 10                 | **P3** | geschlossen; Ursache ist Punkt 7                                                                                   |
+| 9   | `0011_planning_publish.sql` trägt die Definer-Aussage nicht                          | Kanalmatrix B1       | **P3** | in Ordnung — der Fall behauptet sie auch nicht                                                                     |
+| 10  | `0004` #23: `insert … select … limit 1` ohne `order by` (Sprödigkeit)                | Kanalmatrix B4/R1    | **P3** | fällt im Fehlerfall **rot**, nicht falsch grün                                                                     |
+| 11  | `0006:53` ist von der INSERT-Seite impliziert (redundant, nicht vakuos)              | Kanalmatrix B3       | **P3** | keine Änderung                                                                                                     |
+| 12  | `service_role`/`postgres` tragen `BYPASSRLS`                                         | § 13                 | **P3** | Plattformeigenschaft; durch keinen Grant dieses Slices einschränkbar                                               |
+| 13  | Kein lokaler SQL-Lauf möglich (keine Container-Laufzeit)                             | § 13                 | **P3** | PO-Freigabe für „nur CI" liegt vor                                                                                 |
+| 14  | `CLAUDE.md` nennt `read-through` weiterhin als **nicht** blockierenden Check         | Selbstreview 3. Gang | **P3** | gemessen falsch (elf Pflichtchecks); bewusst **außerhalb** dieses Diffs, geht als eigener Doku-Befund ins PO-Paket |
+
+**Zu Punkt 1, der einzige mit echtem Nachholbedarf.** Er war bisher der einzige offene Befund
+**ohne** vorgeschlagenes Folgeticket, obwohl er der breiteste ist: mehrere Tabellen außerhalb dieses
+Slices tragen Rechte, die keine Migration erteilt hat, und `revoke all … from authenticated` kommt
+nur in `0013` vor. Er blockiert EYT-136 nicht — die vier hier geschlossenen Wege sind unabhängig
+davon dicht —, aber er ist die plausibelste Quelle des nächsten gleichartigen Befunds. Deshalb
+bekommt er hier einen Ticketvorschlag statt weiter als Hypothese zu stehen.

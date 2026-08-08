@@ -205,18 +205,35 @@ bestehender Stand und keine Regression von EYT-107.
 ### ⚠️ Die Login-Rolle ist Teil der Sicherheitsgrenze
 
 Seit dem P1-Fix veröffentlicht **nur** eine Verbindung, deren `session_user`
-`easytree_app` lautet. Das betrifft den Betrieb an drei Stellen:
+`easytree_app` lautet. **Seit Migration `0017` (EYT-136) gilt das nicht mehr nur
+für das Veröffentlichen, sondern für die gesamte Planungsschreibfläche** — das
+Anlegen einer Entwurfs-Planversion und das Schreiben von Zuweisungen hängen
+seither an derselben Kanalbedingung. Wer diesen Abschnitt für eine reine
+Publish-Frage hält, unterschätzt die Auswirkung um den Unterschied zwischen
+„der Veröffentlichen-Knopf scheitert" und „keinerlei Planungsschreiben
+funktioniert noch".
 
-| Situation                                                           | `session_user`             | Publish                                               |
+| Situation                                                           | `session_user`             | Planungsschreiben (Entwurf, Zuweisung, Publish)       |
 | ------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------- |
 | Railway → direkter Supabase-Host, `DATABASE_URL` als `easytree_app` | `easytree_app`             | ja                                                    |
-| Supavisor-Transaktionspooler                                        | `postgres.<pooler-tenant>` | **nein**                                              |
+| Supavisor-Transaktionspooler                                        | `postgres.<pooler-tenant>` | **nein — alle drei**                                  |
 | Notfallzugriff als `postgres`                                       | `postgres`                 | nein (RLS wird aber ohnehin per `BYPASSRLS` umgangen) |
 
-Ein Wechsel auf den Pooler bricht das Veröffentlichen also — **laut**, nicht
-still: `planning-write.repository.ts` wirft bei null betroffenen Zeilen eine
-benannte Ausnahme statt Erfolg zu melden. Die Fehlermeldung nennt beide
-möglichen Ursachen (fehlendes Recht oder falscher Kanal).
+Ein Wechsel auf den Pooler bricht damit **jedes** Planungsschreiben — **laut**,
+nicht still. `planning-write.repository.ts` wirft an drei Stellen eine benannte
+Ausnahme statt Erfolg zu melden, und die Datenbank meldet darunter
+SQLSTATE 42501:
+
+| Vorgang                      | Fundstelle                         | Ausnahme                                                   |
+| ---------------------------- | ---------------------------------- | ---------------------------------------------------------- |
+| Entwurfs-Planversion anlegen | `planning-write.repository.ts:490` | `EYT-92: Entwurf der Woche konnte nicht ermittelt werden.` |
+| Zuweisung schreiben          | `planning-write.repository.ts:565` | `EYT-92: Einfuegen lieferte keine Zeile zurueck.`          |
+| Veröffentlichen              | `planning-write.repository.ts:838` | `EYT-107: Veroeffentlichen betraf keine Zeile …`           |
+
+Nur die letzte Meldung nennt heute beide möglichen Ursachen (fehlendes Recht
+oder falscher Kanal). Die beiden EYT-92-Meldungen stammen aus der Zeit vor der
+Kanalbindung und sagen den Kanal **nicht** — wer sie im Betrieb sieht, prüft
+zuerst `select session_user, current_user, app.is_runtime_channel();`.
 
 Wer den Kanal ändern muss, ändert `app.is_runtime_channel()` in einer neuen
 Vorwärtsmigration — nicht die Policy, und schon gar nicht durch Entfernen der

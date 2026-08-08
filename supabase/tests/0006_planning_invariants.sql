@@ -292,21 +292,34 @@ select throws_ok(
 -- weder gebraucht noch gemessen. Der Fall beweist den Trigger, nicht den
 -- Definer.
 --
--- Der behaviourale Nachweis ist damit heute NIRGENDS mehr erreichbar, nicht
--- nur nicht hier. Er braeuchte eine Sitzung, die die Insert-Policy passiert
+-- Im STATISCHEN Rechtemodell ist der behaviourale Nachweis nirgends
+-- erreichbar. Er braeuchte eine Sitzung, die die Insert-Policy passiert
 -- (Laufzeitkanal UND `planning.write`) und zugleich an der using-Klausel der
 -- Update-Policy scheitert (`planning.publish` fehlt). `role_permissions`
 -- vergibt beide Rechte an dieselben zwei Rollen — owner und manager (0015
--- Z. 181-187) —, `member` bekommt keines. Ein solches Subjekt gibt es im
--- Rechtemodell nicht.
+-- Z. 181-187) —, `member` bekommt keines.
 --
--- Was bleibt, ist deshalb ZWEIERLEI, und es wird getrennt benannt statt
+-- Der Schluss „also ist er ueberhaupt nicht messbar" waere aber einer zu
+-- weit, und eine erste Fassung dieses Kommentars zog ihn: ein Test muss das
+-- Subjekt nicht FINDEN, er kann das Modell fuer die Dauer eines Falls
+-- HERSTELLEN. Genau das tut `apps/api/test/planning-write.integration.test.ts`
+-- seit dem 08.08.2026. Die Klammer `ohnePublishRecht` (dort Z. 547) entzieht
+-- die eine Zeile ('owner','planning.publish') aus `role_permissions` und
+-- stellt sie unbedingt wieder her; der Fall „eine veroeffentlichte
+-- Planversion weist die Zuweisung auch ab, wenn die Sitzung sie nicht
+-- sperrend lesen darf" (dort Z. 1553) laeuft im Laufzeitkanal mit
+-- `planning.write`, misst `lesbar=1` bei `sperrlesbar=0` und verlangt
+-- weiterhin 23514 (dort Z. 1710-1712).
+--
+-- Was hier bleibt, ist deshalb ZWEIERLEI, und es wird getrennt benannt statt
 -- vermischt:
 --   (a) eine STRUKTURELLE Zusicherung, direkt hier. Sie ist ein Stolperdraht,
 --       kein Verhaltensbeweis, und wird auch so bezeichnet. Gegenmutation:
---       die Funktion in einer Folgemigration als `security invoker` neu
---       anlegen — dann wird diese Zeile rot. NICHT ausgefuehrt (kein
---       Datenbanklauf auf der Arbeitsmaschine), als offener Punkt gefuehrt.
+--       die Funktion als `security invoker` neu anlegen. AUSGEFUEHRT, in drei
+--       Laeufen: 31238661331 (diese Zeile rot, `have: false / want: true`),
+--       31238804687 (isoliert, fiel weiterhin strukturell) und 31239527407,
+--       in dem der Verhaltensfall oben rot wurde — der Insert lief durch,
+--       `fehler` war null, kein 23514.
 --   (b) die Trigger-Aussage selbst, danach, auf dem Eigentuemerpfad.
 select is(
   (
@@ -317,7 +330,7 @@ select is(
       and p.proname = 'reject_assignment_in_published_plan'
   ),
   true,
-  'app.reject_assignment_in_published_plan() ist security definer — strukturell gesichert, seit der Verhaltensnachweis seit 0017 nicht mehr erreichbar ist (EYT-136)'
+  'app.reject_assignment_in_published_plan() ist security definer — Stolperdraht; den Verhaltensnachweis fuehrt planning-write.integration.test.ts (EYT-136)'
 );
 
 select throws_ok(

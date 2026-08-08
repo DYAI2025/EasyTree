@@ -1,10 +1,22 @@
 # Kanalmatrix der drei mitgeänderten pgTAP-Suiten (EYT-136, zweiter Reviewgang)
 
 **Stand:** 08.08.2026 · **Baseline:** `origin/master` = `aad46ddca12abf1c4862e70248f61978dcce96e7`
-· **Geprüfter Stand:** PR #56, Kopf `2b8cba2a865caf057a7fa0042671124d11ba87bb`
 · **Zweck:** vollständige Ausführungskanal-Karte aller Zusicherungen in
 `0004_core_domain.sql`, `0006_planning_invariants.sql` und `0007_temporal_and_idempotency.sql`,
 nachdem Migration 0017 die Schreibfläche der Planung an den Laufzeitkanal gebunden hat.
+
+> **Wie hier zitiert wird — und warum unterschiedlich.** Die Matrizen in Abschnitt 1-3 sind
+> _Positionskarten_: sie behaupten, **jede** Zusicherung ihrer Datei in Ausführungsreihenfolge zu
+> führen, und dafür ist die Zeilennummer der Gegenstand, nicht nur der Verweis. Sie beziehen sich
+> auf den Dateistand dieses Zweigs und sind zuletzt am 08.08.2026 maschinell gegen die Dateien
+> abgeglichen (Zusicherung für Zusicherung, nicht stichprobenartig).
+>
+> `0012_planning_data_api_boundary.sql` wird dagegen **nur über den Namen** seiner Zusicherungen
+> zitiert (`0012` A1, `0012` C4). Grund, gemessen und nicht befürchtet: die Datei ist in diesem PR
+> mehrfach gewachsen — unter anderem durch Korrekturen, die _dieses_ Dokument angeordnet hat — und
+> jede ihrer Zeilennummern hier war dadurch schon einmal um 25-33 Zeilen falsch. Ein Name wie `A1`
+> ist eindeutig, greppbar **und** stabil; er erfüllt den Prüfsatz unten besser als eine Zahl, die
+> beim nächsten Einschub wieder lügt.
 
 ## Der Prüfsatz, gegen den gemessen wurde
 
@@ -12,7 +24,8 @@ Eine neue Sicherheitsgrenze **darf** einen alten Test zwingen, seinen Ausführun
 wechseln. Sie **darf nicht** dazu benutzt werden, eine alte Aussage zu löschen oder
 abzuschwächen. Für jede geänderte Zusicherung müssen drei Fragen schriftlich beantwortet sein:
 was bewies sie, warum ist diese Form nach 0017 nicht mehr messbar, wo wird dieselbe Invariante
-jetzt bewiesen — mit Datei und Zeile, nicht mit „ist ohnehin abgedeckt".
+jetzt bewiesen — mit einem **nachprüfbaren Anker**, nicht mit „ist ohnehin abgedeckt". Anker heißt:
+der Name der Zusicherung, wo sie einen trägt, sonst Datei und Zeile.
 
 Dies ist der **zweite** Reviewgang über dieselbe Grenzfunktion. Die Hausregel dafür ist
 eindeutig: ab dem zweiten Mal wird nicht mehr bemustert, sondern kartiert. Unten steht deshalb
@@ -127,16 +140,16 @@ Zeilennummern des korrigierten Standes (nach dieser Prüfung). „vorher" = `ori
 | 18  | 247   | —               | `authenticated` | Tabellenrecht UPDATE `assignments` (42501)            | **neu in PR #56** (Rechteteil von #19)       |
 |     | _257_ |                 |                 | `reset role`                                          |                                              |
 | 19  | 259   | `authenticated` | **owner**       | Unveränderlichkeitstrigger `assignments` (23514)      | Kanal verschoben, Aussage intakt             |
-| 20  | 311   | —               | owner (Katalog) | `prosecdef` von `reject_assignment_in_published_plan` | **neu in dieser Prüfung** (Ersatz zu #21)    |
-| 21  | 323   | `authenticated` | **owner**       | Trigger „veröffentlichte Version nimmt nichts auf"    | Kanal verschoben — **Definer-Last VERLOREN** |
-| 22  | 344   | `authenticated` | **owner**       | partieller Unique-Index (Entwurf nach Publish)        | Kanal verschoben, Aussage intakt             |
-| 23  | 351   | `authenticated` | **owner**       | EXCLUDE gilt nur für Veröffentlichtes                 | Kanal verschoben, Aussage intakt             |
-|     | _365_ |                 |                 | `reset role`                                          |                                              |
-| 24  | 367   | owner           | owner           | EXCLUDE bei der zweiten Veröffentlichung (23P01)      | unverändert                                  |
+| 20  | 324   | —               | owner (Katalog) | `prosecdef` von `reject_assignment_in_published_plan` | **neu in dieser Prüfung** (Ersatz zu #21)    |
+| 21  | 336   | `authenticated` | **owner**       | Trigger „veröffentlichte Version nimmt nichts auf"    | Kanal verschoben — **Definer-Last VERLOREN** |
+| 22  | 357   | `authenticated` | **owner**       | partieller Unique-Index (Entwurf nach Publish)        | Kanal verschoben, Aussage intakt             |
+| 23  | 364   | `authenticated` | **owner**       | EXCLUDE gilt nur für Veröffentlichtes                 | Kanal verschoben, Aussage intakt             |
+|     | _378_ |                 |                 | `reset role`                                          |                                              |
+| 24  | 380   | owner           | owner           | EXCLUDE bei der zweiten Veröffentlichung (23P01)      | unverändert                                  |
 |     | _—_   |                 |                 | `set local role authenticated` **entfernt**           |                                              |
-| 25  | 384   | `authenticated` | **owner**       | Halboffenheit `[start, end)`                          | Kanal verschoben, Aussage intakt             |
+| 25  | 397   | `authenticated` | **owner**       | Halboffenheit `[start, end)`                          | Kanal verschoben, Aussage intakt             |
 |     | _—_   |                 |                 | `reset role` **entfernt** (davor ohnehin owner)       |                                              |
-| 26  | 391   | owner           | owner           | Gegenprobe zum EXCLUDE                                | unverändert                                  |
+| 26  | 404   | owner           | owner           | Gegenprobe zum EXCLUDE                                | unverändert                                  |
 
 ## 3. Matrix `supabase/tests/0007_temporal_and_idempotency.sql` — `plan(24)`, unverändert
 
@@ -193,23 +206,29 @@ hier berührten Planversionen. Das ist gelesen, nicht angenommen — ausgeführt
 
 ## 4. Die geänderten Zusicherungen, mit den drei Pflichtspalten
 
-| Ort (vorher)                     | alte Aussage                                                                                                                                     | warum in dieser Form nach 0017 nicht mehr messbar                                                                                                                          | wo dieselbe Invariante jetzt bewiesen wird                                                                                 |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `0004` Z. 203 (alt), heute 211   | CHECK `assignments_interval_ordered` lehnt `start == end` ab, gemessen über den Clientkanal                                                      | `assignments_insert_in_org` lehnt über `authenticated` mit 42501 ab, bevor der Constraint greift                                                                           | Constraintteil: `0004:211` (Eigentümerpfad). Kanalteil: `0012:142` (C1)                                                    |
-| `0006` Z. 53 (alt), heute 71     | Spaltenmodell auf UPDATE ist granular: `starts_at_utc` **ja**, `published_at` **nein**                                                           | 0017 entzieht `update` auf `assignments` vollständig — die Aussage ist nicht unmessbar, sondern **falsch geworden**                                                        | Granularität heute auf der INSERT-Seite: `0006:81` (nein) + `0006:87` (**ja**); zusätzlich `0012:58` (A3) + `0012:63` (A4) |
-| `0006` Z. 89 (alt), heute 126    | (i) EXCLUDE gilt nicht für Entwürfe **und** (ii) ein Mitglied darf über die Data-API Entwürfe anlegen                                            | (ii) ist der Angriffsweg A-1 und wurde absichtlich geschlossen                                                                                                             | (i) `0006:126` + `0012:187` (D1). (ii) als **Ablehnung**: `0012:142` (C1)                                                  |
-| `0006` Z. 105 (alt), heute 142   | (i) der Unveränderlichkeitstrigger greift bei Entwürfen nicht **und** (ii) `authenticated` darf löschen                                          | (ii) ist Angriffsweg A-3, 0017 entzieht das Recht                                                                                                                          | (i) `0006:142` + `0012:198` (D2). (ii) als **Ablehnung**: `0012:51` (A2) + `0012:163` (C3)                                 |
-| `0006` Z. 207 (alt), heute 259   | eine veröffentlichte Zuweisung lässt sich nicht verschieben — gemessen über 23514 unter `authenticated`                                          | `authenticated` hat kein `update` mehr; über den Clientkanal käme 42501 statt 23514, der Trigger bliebe ungemessen                                                         | zerlegt in zwei: Recht `0006:247` (42501, `authenticated`), Trigger `0006:259` (23514, Eigentümer)                         |
-| `0006` Z. 223 (alt), heute 323   | (i) Trigger weist Zuweisungen in veröffentlichte Versionen ab **und** (ii) `security definer` trägt das `for share` außerhalb des Laufzeitkanals | (i) ist unverändert messbar; (ii) braucht eine Sitzung, die die INSERT-Policy passiert **und** an der `using`-Klausel der UPDATE-Policy scheitert — die gibt es nicht mehr | (i) `0006:323`. (ii) **behavioural verloren**, ersetzt durch die strukturelle Zusicherung `0006:311` — Befund B1           |
-| `0006` Z. 244/251 (alt), 344/351 | ein neuer Entwurf derselben Woche und eine kollidierende Entwurfszuweisung sind erlaubt                                                          | beide Inserts fallen über `authenticated` in 42501                                                                                                                         | `0006:344` / `0006:351` (Eigentümerpfad); Kanalteil `0012:171` (C4) und `0012:142` (C1)                                    |
-| `0006` Z. 282 (alt), heute 384   | (i) Halboffenheit `[start, end)` **und** (ii) `authenticated` darf Fachspalten ändern                                                            | (ii) ist entzogen                                                                                                                                                          | (i) `0006:384`. (ii) als **Ablehnung**: `0006:247`, `0012:46` (A1), `0012:155` (C2)                                        |
-| `0007` Z. 111/118/159/166 (alt)  | Fixtures für die Umstellungswoche, angelegt über den Clientkanal                                                                                 | `plan_versions`/`assignments` INSERT verlangen den Laufzeitkanal                                                                                                           | Constraintteil `0007:116/123/169/176`; Kanalteil `0012:142` (C1) und `0012:171` (C4)                                       |
-| `0007` Z. 200 (alt), heute 215   | die unveröffentlichte Schicht lässt sich verschieben                                                                                             | `update` auf `assignments` ist entzogen                                                                                                                                    | `0007:215` (Eigentümerpfad); Rechteteil `0012:46` (A1) + `0012:155` (C2)                                                   |
-| `0007` Z. 222-277 (alt), Outbox  | Idempotenz über `outbox_messages` — **und** dass ein aktives Mitglied Nachrichten anfügen darf                                                   | **entfällt: 0017 fasst `outbox_messages` nicht an.** Der Kanalwechsel war nicht erzwungen                                                                                  | zurückgenommen — `0007:249` setzt `authenticated` wieder, Befund B2                                                        |
+| Ort (vorher)                           | alte Aussage                                                                                                                                     | warum in dieser Form nach 0017 nicht mehr messbar                                                                                                                          | wo dieselbe Invariante jetzt bewiesen wird                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `0004` Z. 203 (alt), heute 211         | CHECK `assignments_interval_ordered` lehnt `start == end` ab, gemessen über den Clientkanal                                                      | `assignments_insert_in_org` lehnt über `authenticated` mit 42501 ab, bevor der Constraint greift                                                                           | Constraintteil: `0004:211` (Eigentümerpfad). Kanalteil: `0012` C1                                                |
+| `0006` Z. 53 (alt), heute 71           | Spaltenmodell auf UPDATE ist granular: `starts_at_utc` **ja**, `published_at` **nein**                                                           | 0017 entzieht `update` auf `assignments` vollständig — die Aussage ist nicht unmessbar, sondern **falsch geworden**                                                        | Granularität heute auf der INSERT-Seite: `0006:81` (nein) + `0006:87` (**ja**); zusätzlich `0012` A3 + `0012` A4 |
+| `0006` Z. 89 (alt), heute 126          | (i) EXCLUDE gilt nicht für Entwürfe **und** (ii) ein Mitglied darf über die Data-API Entwürfe anlegen                                            | (ii) ist der Angriffsweg A-1 und wurde absichtlich geschlossen                                                                                                             | (i) `0006:126` + `0012` D1. (ii) als **Ablehnung**: `0012` C1                                                    |
+| `0006` Z. 105 (alt), heute 142         | (i) der Unveränderlichkeitstrigger greift bei Entwürfen nicht **und** (ii) `authenticated` darf löschen                                          | (ii) ist Angriffsweg A-3, 0017 entzieht das Recht                                                                                                                          | (i) `0006:142` + `0012` D2. (ii) als **Ablehnung**: `0012` A2 + `0012` C3                                        |
+| `0006` Z. 207 (alt), heute 259         | eine veröffentlichte Zuweisung lässt sich nicht verschieben — gemessen über 23514 unter `authenticated`                                          | `authenticated` hat kein `update` mehr; über den Clientkanal käme 42501 statt 23514, der Trigger bliebe ungemessen                                                         | zerlegt in zwei: Recht `0006:247` (42501, `authenticated`), Trigger `0006:259` (23514, Eigentümer)               |
+| `0006` Z. 223 (alt), heute 336         | (i) Trigger weist Zuweisungen in veröffentlichte Versionen ab **und** (ii) `security definer` trägt das `for share` außerhalb des Laufzeitkanals | (i) ist unverändert messbar; (ii) braucht eine Sitzung, die die INSERT-Policy passiert **und** an der `using`-Klausel der UPDATE-Policy scheitert — die gibt es nicht mehr | (i) `0006:336`. (ii) **behavioural verloren**, ersetzt durch die strukturelle Zusicherung `0006:324` — Befund B1 |
+| `0006` Z. 244/251 (alt), heute 357/364 | ein neuer Entwurf derselben Woche und eine kollidierende Entwurfszuweisung sind erlaubt                                                          | beide Inserts fallen über `authenticated` in 42501                                                                                                                         | `0006:357` / `0006:364` (Eigentümerpfad); Kanalteil `0012` C4 und `0012` C1                                      |
+| `0006` Z. 282 (alt), heute 397         | (i) Halboffenheit `[start, end)` **und** (ii) `authenticated` darf Fachspalten ändern                                                            | (ii) ist entzogen                                                                                                                                                          | (i) `0006:397`. (ii) als **Ablehnung**: `0006:247`, `0012` A1, `0012` C2                                         |
+| `0007` Z. 111/118/159/166 (alt)        | Fixtures für die Umstellungswoche, angelegt über den Clientkanal                                                                                 | `plan_versions`/`assignments` INSERT verlangen den Laufzeitkanal                                                                                                           | Constraintteil `0007:116/123/169/176`; Kanalteil `0012` C1 und `0012` C4                                         |
+| `0007` Z. 200 (alt), heute 215         | die unveröffentlichte Schicht lässt sich verschieben                                                                                             | `update` auf `assignments` ist entzogen                                                                                                                                    | `0007:215` (Eigentümerpfad); Rechteteil `0012` A1 + `0012` C2                                                    |
+| `0007` Z. 222-277 (alt), Outbox        | Idempotenz über `outbox_messages` — **und** dass ein aktives Mitglied Nachrichten anfügen darf                                                   | **entfällt: 0017 fasst `outbox_messages` nicht an.** Der Kanalwechsel war nicht erzwungen                                                                                  | zurückgenommen — `0007:249` setzt `authenticated` wieder, Befund B2                                              |
 
 ## 5. Befunde
 
-### B1 — VERLOREN: der Verhaltensnachweis für `security definer`
+### B1 — WAR VERLOREN, ist wiederhergestellt: der Verhaltensnachweis für `security definer`
+
+> **Stand nach der Korrektur (08.08.2026).** Die Überschrift lautete bis zum dritten Reviewgang
+> „VERLOREN". Das war ab dem Zeitpunkt falsch, an dem Teil (b) unten den Nachweis wiederherstellte —
+> und eine Überschrift ist das, was ein Leser mitnimmt. Der Befund ist **geschlossen**: strukturell
+> in `0006` und behavioural in `planning-write.integration.test.ts`, beide Richtungen mit
+> ausgeführter Gegenmutation belegt (Läufe 31238661331 und 31239527407).
 
 `app.reject_assignment_in_published_plan()` liest die Elternzeile mit `select … for share`.
 PostgreSQL zieht bei einer Sperrklausel zusätzlich die `using`-Klausel der UPDATE-Policy heran.
@@ -224,8 +243,9 @@ und der Invoker-Pfad fände die Zeile ebenso. **Die Definer-Aussage ist damit hi
 
 Die Kommentierung in PR #56 behauptete, sie sei nach
 `apps/api/test/planning-write.integration.test.ts` umgezogen, in den Fall „eine veröffentlichte
-Planversion nimmt über den Laufzeitkanal keine Zuweisung mehr auf" (dort Z. 1048-1088). **Das
-trifft nicht zu, und der Grund steht in den Migrationen:**
+Planversion nimmt über den Laufzeitkanal keine Zuweisung mehr auf" (dieser Fall beginnt heute bei
+`planning-write.integration.test.ts:1238`). **Das trifft nicht zu, und der Grund steht in den
+Migrationen:**
 
 - Dieser Fall läuft **im** Laufzeitkanal, mit `USER_A`.
 - `USER_A` ist `owner` in Alpha (`seed.sql` Z. 46), und `role_permissions` gibt `owner` alle drei
@@ -242,7 +262,7 @@ zwei Rollen (`owner`, `manager`), `member` bekommt keine.
 
 **Korrektur, in zwei Teilen.**
 
-_(a) Strukturell._ `supabase/tests/0006_planning_invariants.sql:311` erhält eine strukturelle
+_(a) Strukturell._ `supabase/tests/0006_planning_invariants.sql:324` erhält eine strukturelle
 Zusicherung — `prosecdef` der Funktion ist `true` — im Kommentar ausdrücklich als Stolperdraht und
 **nicht** als Verhaltensbeweis bezeichnet. `plan(25)` → `plan(26)`. Der irreführende Kommentar in
 `0006` ist ersetzt.
@@ -270,9 +290,10 @@ kein FK zeigt darauf, kein Trigger hängt daran); Vorbedingung gemessen, bevor e
 Fehlschlag Vorrang hat und den Fehler aus dem Fall als `cause` mitführt; idempotente
 Vor-Wiederherstellung in `beforeAll` und ein Netz in `afterAll`.
 
-Benannte Gegenmutation für beide Teile: die Funktion in einer Folgemigration als `security invoker`
-neu anlegen — dann wird `0006:311` rot (strukturell) **und** der neue Fall rot (behavioural).
-**Nicht ausgeführt** (Abschnitt 7).
+Benannte Gegenmutation für beide Teile: die Funktion als `security invoker` neu anlegen — dann wird
+die `prosecdef`-Zusicherung in `0006` rot (strukturell) **und** der neue Fall rot (behavioural).
+**Ausgeführt**, beides gemessen: strukturell in Lauf 31238661331, behavioural in Lauf 31239527407
+(Abschnitt 8, O0).
 
 Restpunkt, der offen bleibt: `supabase/tests/0011_planning_publish.sql` Z. 388-418 prüft den
 Zusatzfilter aus 0016 (`auth.uid() is null …`) auf dem Eigentümerpfad. Auch dort ist Invoker ==
@@ -314,7 +335,7 @@ der Gegenprobe ist, den Ausfallmodus „alles ist false, weil `authenticated` ga
 hat" auszuschließen. Diesen Ausfallmodus falsifiziert `0006:87` — `has_column_privilege(…,
 'starts_at_utc', 'insert') = true` — **in derselben Datei, vier Zeilen weiter**, zusammen mit
 `0006:81` als negativem Gegenstück. Das Paar auf der INSERT-Seite ist heute der lebende
-Granularitätsnachweis, und `0012:58` (A3) sowie `0012:63` (A4) wiederholen ihn außerhalb.
+Granularitätsnachweis, und `0012` A3 sowie `0012` A4 wiederholen ihn außerhalb.
 
 Zudem ist `0006:53` nicht vakuos im Wortsinn dieses Repositories („grün aus einem Grund, der
 nichts mit der Eigenschaft zu tun hat"): würde jemand `update (published_at)` erneut vergeben,
@@ -355,16 +376,21 @@ bei 18 Tests die TAP-Ausgabe unlesbar gemacht.
 
 ## 7. Was hier NICHT ausgeführt wurde
 
-Damit niemand Überlegung für Messung hält:
+Damit niemand Überlegung für Messung hält. **Die letzten beiden Punkte sind inzwischen eingelöst**
+und stehen bewusst hier stehen geblieben statt gelöscht zu werden — was einmal als „nicht geprüft"
+behauptet wurde, soll samt seiner Auflösung nachlesbar bleiben:
 
 - **Kein einziges SQL dieser Prüfung ist lokal gelaufen.** Auf der Arbeitsmaschine existiert
   keine Container-Laufzeit; der lokale Supabase-Stack ist nicht startbar. Der CI-Job `db-gates`
   ist die erste und einzige Stelle, an der Migrationen und pgTAP dieses Repositories überhaupt
   ausgeführt werden. Die PO-Freigabe für „nur CI" liegt vor.
-- **Alle Aussagen über Policies, Grants, Trigger und `prosecdef` in diesem Dokument sind aus dem
+- **Die Aussagen über Policies, Grants, Trigger und `prosecdef` in den Abschnitten 1-7 sind aus dem
   Migrationstext gelesen**, nicht aus einem Katalog abgefragt. Wo eine Aussage aus einem
   gemessenen Zustand stammt, ist die Quelle genannt (Abschnitt 2, `BYPASSRLS`: aus dem grünen
-  Bestand auf `origin/master`).
+  Bestand auf `origin/master`). **Für Abschnitt 8 gilt das nicht mehr** — die dort berichteten
+  Werte (`prosecdef`, Statuscodes, SQLSTATE, Sondenzeilen) stammen aus ausgeführten CI-Läufen. Der
+  Satz stand hier ursprünglich ohne diese Einschränkung und war nach dem Nachtrag von Abschnitt 8
+  zu weit.
 - **Der ANLASS von Befund B1 bleibt eine Ableitung.** Dass der bestehende Fall bei
   `planning-write.integration.test.ts` die Definer-Eigenschaft nicht misst, folgt aus dem
   Zusammenspiel von `plan_versions_update_in_org` (0015 Z. 243-255), `role_permissions`
@@ -384,15 +410,32 @@ recht_publish=false lesbar=1 sperrlesbar=0 definer=true` zeigt, dass die sperren
 - **Die Gegenmutation ist inzwischen gefahren.** Dieser Satz stand hier als offener Punkt; er ist
   am 08.08.2026 eingelöst worden. Siehe Abschnitt 8 — samt des Fehlers, den sie in genau diesem
   Fall aufgedeckt hat.
-- **Nicht geprüft:** ob der Angriffsweg über PostgREST nach 0017 tatsächlich 42501 liefert. Das
-  ist eine Aussage über das laufende Produktivsystem und gehört nicht in pgTAP.
+- **Doch geprüft — dieser Punkt ist am 08.08.2026 eingelöst und war in zwei Hinsichten falsch
+  formuliert.** Hier stand: ob der Angriffsweg über PostgREST nach 0017 tatsächlich 42501 liefert,
+  sei „nicht geprüft" und „eine Aussage über das laufende Produktivsystem". Beides trifft nicht zu.
+  Falsch ist erstens die Begründung: `auth-journey` fährt gegen einen **CI-Supabase-Stack**, den der
+  Job selbst startet — nie gegen Produktion. Ein PostgREST-Angriff ist dort also sehr wohl messbar,
+  und nichts daran erforderte einen Produktivzugriff. Falsch ist zweitens die Feststellung selbst:
+  alle sechs Versuche sind gemessen, vorher wie nachher (Rotnachweis Lauf 31237004812, grün im
+  jeweils aktuellen Lauf des Zweigs) — siehe
+  [`2026-08-07-data-api-grant-inventar.md`](2026-08-07-data-api-grant-inventar.md) Abschnitt 8.
+  Richtig bleibt nur der schmale Kern: in **pgTAP** gehört diese Aussage nicht, weil pgTAP kein HTTP
+  spricht. Das ist eine Aussage über das Werkzeug, nicht über die Prüfbarkeit.
 
 ## 8. Ausgeführte Gegenmutationen (08.08.2026)
 
-Sieben benannte Gegenmutationen wurden gegen den Stand `6c793ad` gefahren — in **elf** Läufen, weil
-vier davon eine Isolations- bzw. Umstellungsvariante brauchten (Grund: O1). Jeder Lauf lief auf
-einem eigenen Wegwerf-Branch mit Draft-PR; alle Branches und PRs sind danach gelöscht bzw.
-geschlossen. Branch und SHA je Lauf stehen in
+**Sieben** benannte Gegenmutationen, gefahren in **elf** Läufen: **drei** der sieben (GM2a, GM2b,
+GM6) brauchten zusätzliche Varianten, und diese Varianten sind **vier** Läufe (GM2a-iso, GM2b-iso,
+GM6-iso, GM6b). Grund für die Varianten: O1.
+
+Basis war der Stand `6c793ad` — **mit einer Ausnahme, und ausgerechnet bei dem Lauf, der die
+zentrale Verhaltensaussage trägt:** GM6b (`e0fe81a8`, Lauf 31239527407) sitzt auf `e5a77ed`, also
+auf dem Commit, der den Definer-Fall erst vom strukturellen auf den behaviouralen Zuschnitt
+umgestellt hat. Genau darauf beruht seine Aussagekraft — auf `6c793ad` wäre er wie GM6-iso wieder
+strukturell gefallen. Die Elternschaft ist je Commit über die GitHub-API geprüft, nicht angenommen.
+
+Jeder Lauf lief auf einem eigenen Wegwerf-Branch mit Draft-PR; alle Branches und PRs sind danach
+gelöscht bzw. geschlossen. Branch und SHA je Lauf stehen in
 [`2026-08-07-data-api-grant-inventar.md`](2026-08-07-data-api-grant-inventar.md) Abschnitt 10.
 
 | Mutation                                                                 | Lauf            | rot geworden ist                                                          |

@@ -210,7 +210,7 @@ select throws_ok(
 );
 
 -- ===========================================================================
--- D. Uebernommene Invarianten auf dem Eigentuemerpfad
+-- D. Mitgefuehrte Invarianten auf dem Eigentuemerpfad (Doppelung, kein Umzug)
 -- ===========================================================================
 -- Fixture-Erzeugung darf privilegiert laufen (PO-Vorgabe 07.08.2026). Die
 -- Aussage dieser beiden Zusicherungen betrifft Constraints und Trigger, nicht
@@ -225,14 +225,14 @@ select lives_ok(
             '00000000-0000-4000-8000-0000004010a1',
             '00000000-0000-4000-8000-0000005010a1',
             '2026-08-03T10:00:00Z', '2026-08-03T18:00:00Z')$$,
-  'D1 Zwei ueberlappende ENTWURFS-Zuweisungen derselben Person sind erlaubt (uebernommen aus 0006, Eigentuemerpfad)'
+  'D1 Zwei ueberlappende ENTWURFS-Zuweisungen derselben Person sind erlaubt (mitgefuehrt neben 0006:126, Eigentuemerpfad — Doppelung, kein Umzug)'
 );
 
 select lives_ok(
   $$delete from public.assignments
      where org_id = '00000000-0000-4000-8000-0000000000a1'
        and starts_at_utc = '2026-08-03T10:00:00Z'$$,
-  'D2 Eine unveroeffentlichte Zuweisung laesst sich loeschen (uebernommen aus 0006, Eigentuemerpfad)'
+  'D2 Eine unveroeffentlichte Zuweisung laesst sich loeschen (mitgefuehrt neben 0006:142, Eigentuemerpfad — Doppelung, kein Umzug)'
 );
 
 select * from finish();

@@ -78,10 +78,18 @@ import { psqlMitMarker } from "./global-setup";
  *   wird rot. Das ist der Kern des Nachweises — Reisender A TRAEGT
  *   `planning.write` (in 9c4 ueber sein eigenes Token gemessen), ihn haelt
  *   allein der Kanal ab.
+ *   AUSGEFUEHRT: Lauf 31238564685 (`assignments`, INSERT kam mit **201**
+ *   durch) und Lauf 31238659805 (`plan_versions`, ebenfalls **201**).
  * - Das `update`- bzw. `delete`-Recht auf `assignments` fuer `authenticated`
  *   wiederherstellen UND die zugehoerige Policy neu anlegen (Rollback-Rezept
  *   im Kopf von 0017): Schritt 9c5 wird rot — PATCH bzw. DELETE greifen dann
  *   durch, und die Nachkontrolle sieht eine veraenderte bzw. fehlende Zeile.
+ *   AUSGEFUEHRT: Lauf 31238598756 (PATCH → **200**) und Lauf 31238658106
+ *   (DELETE → **200**).
+ *
+ * Die folgenden drei sind DURCHDACHT, aber NICHT gefahren — sie stehen hier
+ * als Ausfallanalyse, nicht als Nachweis. Wer sie als Beleg zitiert, zitiert
+ * eine Ueberlegung:
  * - NUR den Grant wiederherstellen, die Policy weggelassen: 9c5 wird ebenfalls
  *   rot, aber frueher und aus einem anderen Grund — ohne permissive Policy
  *   waehlt das UPDATE null Zeilen aus, PostgREST antwortet mit 200 und leerer
