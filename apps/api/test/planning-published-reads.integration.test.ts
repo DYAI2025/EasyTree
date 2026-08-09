@@ -524,21 +524,47 @@ describe("Leseoperationen fuer veroeffentlichte Staende gegen echtes PostgreSQL"
   // Fall 5
   // -------------------------------------------------------------------------
   dbIt("listet nur veroeffentlichte Versionen des eigenen Mandanten im Bereich", async () => {
-    // Reihenfolge der Anlage widerspricht der Wochenordnung ABSICHTLICH: die
-    // spaetere Woche entsteht zuerst. Waere die Sortierung versehentlich ueber
-    // `created_at` statt ueber `week_key` gebaut, kaeme genau die umgekehrte
-    // Liste heraus — mit gleichlaufenden Fixtures faende das niemand.
+    // Anlegen und Veroeffentlichen ABWECHSELND, nicht erst alle Entwuerfe.
+    //
+    // Der erste Anlauf legte zwei Entwuerfe derselben Woche an und lief in
+    // `plan_versions_one_draft_per_week` (0007, partieller Unique-Index):
+    // je Organisation und Woche darf es hoechstens EINEN unveroeffentlichten
+    // Stand geben, sonst waere „der" Entwurf nicht bestimmbar. Mehrere
+    // VEROEFFENTLICHTE Versionen pro Woche sind dagegen erlaubt — genau die
+    // Konstellation, die dieser Fall braucht. Der Weg dorthin fuehrt deshalb
+    // ueber Veroeffentlichen, nicht ueber gleichzeitige Entwuerfe.
+    //
+    // Die Reihenfolgen widersprechen einander mit Absicht, sonst maskierte ein
+    // gleichlaufender Nebenschluessel den geprueften:
+    //
+    //   Anlage (created_at):   B  <  A  <  frueh
+    //   Veroeffentlichung:     A  <  B  <  frueh
+    //   Woche (week_key):      frueh (W15)  <  A = B (W17)
+    //
+    // Erwartet ist damit [frueh, A, B]. Eine Sortierung ueber `created_at`
+    // ergaebe [B, A, frueh] — also sowohl der Wochenschluessel als auch die
+    // Sekundaerordnung innerhalb von W17 sind widerlegbar geprueft.
+    //
+    // Die Zeitstempel stehen explizit und nicht als `now()`: sonst waere die
+    // Veroeffentlichungsreihenfolge an die Anlagereihenfolge gekoppelt und der
+    // Widerspruch nicht herstellbar.
     const spaetB = await entwurfMit(admin, W_BEREICH_BIS, []);
-    const spaetA = await entwurfMit(admin, W_BEREICH_BIS, []);
-    const frueh = await entwurfMit(admin, W_BEREICH_VON, []);
-
-    // Und die Veroeffentlichungsreihenfolge innerhalb von W17 widerspricht der
-    // Anlagereihenfolge: A entsteht spaeter, wird aber frueher veroeffentlicht.
-    // Die kanonische Sekundaerordnung ist `published_at` — eine Sortierung ueber
-    // `created_at` ergaebe [B, A] statt [A, B].
-    await veroeffentliche(admin, spaetA, new Date("2026-03-05T08:00:00.000Z"));
     await veroeffentliche(admin, spaetB, new Date("2026-03-05T09:00:00.000Z"));
+    const spaetA = await entwurfMit(admin, W_BEREICH_BIS, []);
+    await veroeffentliche(admin, spaetA, new Date("2026-03-05T08:00:00.000Z"));
+    const frueh = await entwurfMit(admin, W_BEREICH_VON, []);
     await veroeffentliche(admin, frueh, new Date("2026-03-05T10:00:00.000Z"));
+
+    // Zwei veroeffentlichte Versionen derselben Woche — die Voraussetzung des
+    // Sekundaerschluessels. Ohne diese Zeile koennte der Fall unbemerkt zu
+    // einem Test mit nur einer Version je Woche verkommen.
+    expect(spaetA).not.toBe(spaetB);
+    expect((await beobachteVersion(admin, spaetA))?.publishedAt).toEqual(
+      new Date("2026-03-05T08:00:00.000Z"),
+    );
+    expect((await beobachteVersion(admin, spaetB))?.publishedAt).toEqual(
+      new Date("2026-03-05T09:00:00.000Z"),
+    );
 
     // Ein ENTWURF mitten im Bereich — darf nicht erscheinen.
     const entwurfImBereich = await entwurfMit(admin, W_BEREICH_MITTE, []);
