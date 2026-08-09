@@ -979,15 +979,25 @@ billigste Weg, Task 6 von Planungsstand zu Nachweis zu machen, und ein Fehler in
 Zeilen ungetestetem SQL ist nach fünf weiteren Tasks deutlich teurer zu finden.
 Braucht eine PO-Freigabe für den Push; **kein Merge**.
 
-### Offene Entscheidungen für den PO
+### Entscheidungen des Product Owners — getroffen am 09.08.2026
 
-| Kennung                   | Sache                                                                                                                                                                                                       |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PO_DECISION_DAY_PARTIAL` | Totalblockade statt Tagesablehnung. In Santiago/Havanna/Beirut/Azoren macht ein Einsatz über die kaputte Mitternacht die Woche unerzeugbar; Berlin erreicht den Fall nie. Nachrüsten wäre Vertragsänderung. |
-| `SCOPE_OVERLAP_EYT130`    | Tasks 1+2 (Contract/Gateway/OpenAPI) sind laut Jira-Kommentar vom 31.07. fachlich **EYT-130**, liegen aber in diesem Branch.                                                                                |
-| `ASSUMPTION` (D3)         | Mehrere Snapshots je Planversion zulässig.                                                                                                                                                                  |
-| Betriebsfolge             | `on delete restrict` auf `worksites`: eine Baustelle, die ein Snapshot nennt, ist nicht mehr löschbar — und `authenticated` hat dort ein `delete`-Recht (0006).                                             |
-| `SOURCE_NEEDED`           | Confluence `5505026`, `7766017`, `8552449`, `8814623`, `9306113` sind weiterhin ungelesen. Fällig **vor Task 15**.                                                                                          |
+Vier zuvor offene Punkte sind entschieden. Sie sind ab hier **verbindlich** und dürfen
+nicht stillschweigend umgedeutet werden, auch nicht, um einen Test grün zu bekommen.
+
+| Kennung                   | Entscheidung                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PO_DECISION_DAY_PARTIAL` | **TOTALBLOCKADE.** Fehlt für irgendeinen Kostenanteil ein exakt eindeutiger wirksamer Satz, schlägt die gesamte Snapshot-Erzeugung fachlich kontrolliert fehl: kein Teilsnapshot, kein `0,00 €`-Ersatz, kein stilles Überspringen einzelner Tage. Entspricht dem, was Task 5 gebaut hat — siehe B.1.                                             |
+| `SCOPE_OVERLAP_EYT130`    | **Overlap bestätigt, kein Rückbau.** EYT-130 besitzt fachlich die Vertrags-/Transportschicht (Snapshot erzeugen, Snapshot lesen, später der Export von EYT-110). EYT-109 besitzt Kostenberechnung, lokale Tagesallokation, Snapshot- und Positionstabellen, Migration, RLS/Grants und die persistente Snapshotwahrheit.                          |
+| `ASSUMPTION` (D3)         | **Keine implizite „neueste Berechnung gewinnt"-Semantik.** Für denselben fachlichen Berechnungsschlüssel darf ein Reload oder ein zweiter Browserkontext nicht automatisch eine neue Wahrheit erzeugen. Ein bestehender Snapshot bleibt unveränderlich und reproduzierbar. **Keine** Recalculation- oder Versionierungsfunktion in diesem Slice. |
+| Betriebsfolge             | **`on delete restrict` bleibt.** Historische Kostenpositionen dürfen nicht durch physisches Löschen referenzierter Baustellen beschädigt werden. Eine Archivierungs-/Lifecycle-Semantik für Baustellen ist ein eigener Scope — **keine** spontane Soft-Delete-Architektur in EYT-109.                                                            |
+
+> **Tasks 1/2 contribute to EYT-130 acceptance criteria; EYT-130 remains NOT DONE.**
+
+### Weiterhin offen
+
+| Kennung         | Sache                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| `SOURCE_NEEDED` | Confluence `5505026`, `7766017`, `8552449`, `8814623`, `9306113` ungelesen. Fällig **vor Task 15**. |
 
 ### Fallen für die nächste Sitzung
 
