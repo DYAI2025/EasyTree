@@ -131,6 +131,17 @@ export type {
   StoredCostSnapshotPosition,
 } from "./application/cost-snapshot-repository.port";
 
+// EYT-109: der Snapshot-Command. Steht in der oeffentlichen Modul-API, weil ihn
+// die Verdrahtung (Task 13) und der Test von aussen brauchen — ein tiefer Pfad
+// nach `application/` faellt am Waechter `costs-cross-module-public-api-only`.
+export { createCostSnapshot } from "./application/create-cost-snapshot.use-case";
+export type {
+  CreateCostSnapshotCommand,
+  CreateCostSnapshotDependencies,
+  CreateCostSnapshotFailure,
+  CreateCostSnapshotResult,
+} from "./application/create-cost-snapshot.use-case";
+
 export { PgRateRepository } from "./infrastructure/rate-repository.pg";
 
 export { CostsController } from "./interface/http/costs.controller";
