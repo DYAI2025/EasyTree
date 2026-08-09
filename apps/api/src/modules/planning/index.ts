@@ -24,6 +24,22 @@ export type {
   SourceVersionRow,
 } from "./application/planning-queries.port";
 export { PLANNING_QUERIES } from "./application/planning-queries.port";
+// EYT-109: die beiden Leseoperationen fuer VEROEFFENTLICHTE Staende. Getrennt
+// vom Block darueber, weil sie eine andere Frage beantworten als das Fenster:
+// nicht „was ist bearbeitbar", sondern „was ist verbindlich".
+//
+// `PublishedVersionRow` heisst NICHT `PublishedPlanVersionRow`, obwohl der Plan
+// diesen Namen vorschlug: der ist seit EYT-107 vom Schreibport belegt (siehe
+// weiter unten in dieser Datei) und traegt dort eine andere Form. Zwei
+// gleichnamige Typen aus derselben Moduldatei waere ein doppelter Export und
+// kompilierte nicht.
+export type {
+  PublishedAssignmentsResult,
+  PublishedAssignmentsRow,
+  PublishedReadProblem,
+  PublishedVersionRow,
+  PublishedVersionsResult,
+} from "./application/planning-queries.port";
 export type { PlanningQueriesFactory } from "./application/planning-queries.factory";
 export { PLANNING_QUERIES_FACTORY } from "./application/planning-queries.factory";
 export { PlanningWindowRepository } from "./infrastructure/planning-window.repository";

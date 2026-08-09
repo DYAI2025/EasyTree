@@ -366,6 +366,29 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/costs/rate-succession.integration.test.ts 2>&1 | tee /tmp/rate-succession.log
           bash scripts/assert-tenant-report.sh rate-succession /tmp/rate-succession.log
+      # EYT-109: die Leseoperationen fuer veroeffentlichte Staende. Zwei
+      # Verbindungen wie beim Publish-Gate — das Repository laeuft auf dem
+      # Laufzeitkanal (easytree_app), Fixtures und Zaehlungen auf `postgres`.
+      # Eine Beobachtung ueber den Laufzeitkanal saehe genau das nicht, dessen
+      # Abwesenheit sie belegen soll.
+      #
+      # Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer Job: ein neuer
+      # Job waere ein Status-Check, den das Ruleset nicht kennt, und beide
+      # Listen in setup-/verify-branch-protection.sh muessten mitwachsen.
+      #
+      # `assert-tenant-report.sh` statt eines rohen `grep`: das Skript prueft
+      # zusaetzlich `passed == executed`, was sich als regulaerer Ausdruck nicht
+      # formulieren laesst. Ein Lauf mit executed=7 passed=2 skipped=0 waere
+      # unter einem blossen grep gruen.
+      - name: Planungslesungen fuer veroeffentlichte Staende (fail-closed, zwei Verbindungen, EYT-109)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/planning-published-reads.integration.test.ts 2>&1 | tee /tmp/planning-published-reads.log
+          bash scripts/assert-tenant-report.sh planning-published-reads /tmp/planning-published-reads.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |

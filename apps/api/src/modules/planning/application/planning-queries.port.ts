@@ -96,9 +96,103 @@ export type PlanningWindowResult =
   | { readonly ok: true; readonly window: PlanningWindowRow }
   | { readonly ok: false; readonly problem: PlanningQueryProblem };
 
+/**
+ * Eine veroeffentlichte Planversion, wie die LESESEITE sie auflistet (EYT-109).
+ *
+ * Bewusst NICHT `PublishedPlanVersionRow` aus `planning-writes.port`: der Name
+ * ist dort bereits vergeben, und die Form ist eine andere (`versionId`,
+ * `publishedAtUtc`, `assignmentIds`). Das ist keine Doppelung, sondern ein
+ * Bedeutungsunterschied — der Schreibport antwortet auf „was ist gerade
+ * veroeffentlicht worden", der Leseport auf „was ist veroeffentlicht". Beide
+ * ueber einen Typ zu ziehen hiesse, den einen um Felder zu erweitern, die der
+ * andere nie fuellt.
+ */
+export interface PublishedVersionRow {
+  readonly id: string;
+  readonly weekKey: string;
+  /** Nie `null` — eine unveroeffentlichte Version steht nicht in dieser Liste. */
+  readonly publishedAt: Date;
+}
+
+/**
+ * Der veroeffentlichte Stand EINER konkret benannten Planversion (EYT-109).
+ *
+ * Enthaelt `weekKey` und `timeZone`, obwohl der Aufrufer nur eine Id genannt
+ * hat: der Kosten-Snapshot muss UTC-Instants in Kalendertage der
+ * Organisationszone legen, und die Zone aus einer zweiten Abfrage zu holen
+ * hiesse, sie an einem anderen Zeitpunkt zu lesen als die Zuweisungen.
+ *
+ * `resources` traegt dieselben Zeilen wie im Planungsfenster — also die Basis,
+ * aus der EYT-109 spaeter Baustellen- und Personenbezeichnungen bildet. Diese
+ * Abbildung passiert NICHT hier: die Planung liefert Planungsdaten, die
+ * Benennung im Kostenbericht ist eine Entscheidung des Kostenmoduls.
+ */
+export interface PublishedAssignmentsRow {
+  readonly planVersionId: string;
+  readonly weekKey: string;
+  /** IANA-Zone der Organisation aus `organizations.time_zone` (Migration 0004). */
+  readonly timeZone: string;
+  readonly publishedAt: Date;
+  readonly assignments: readonly AssignmentRow[];
+  readonly resources: ResourcesRow;
+}
+
+/**
+ * Warum eine Anfrage nach einem VEROEFFENTLICHTEN Stand nicht beantwortbar ist.
+ *
+ * `PLAN_VERSION_NOT_FOUND` deckt zwei Faelle mit EINER Antwort ab: „gibt es
+ * nicht" und „gehoert einem anderen Mandanten". Die Unterscheidung waere ein
+ * Existenzleck — wer fremde Ids durchprobiert, erfuehre an der Antwort, welche
+ * davon echt sind. RLS macht beide Faelle schon in der Datenbank ununterscheidbar
+ * (null Zeilen); dieser Typ gibt die Ununterscheidbarkeit nach aussen weiter,
+ * statt sie an der Portgrenze wieder aufzutrennen.
+ */
+export type PublishedReadProblem =
+  PlanningQueryProblem | "PLAN_VERSION_NOT_FOUND" | "PLAN_NOT_PUBLISHED";
+
+/**
+ * Ergebnis der Bereichsabfrage.
+ *
+ * Der Fehlertyp ist bewusst der ENGE `PlanningQueryProblem` und nicht
+ * {@link PublishedReadProblem}: eine Liste nennt keine einzelne Planversion,
+ * also kann sie weder „nicht gefunden" noch „nicht veroeffentlicht" ergeben.
+ * Der weite Typ waere hier eine Zusage auf Faelle, die nie eintreten — und
+ * jeder Aufrufer muesste sie trotzdem behandeln.
+ */
+export type PublishedVersionsResult =
+  | { readonly ok: true; readonly versions: readonly PublishedVersionRow[] }
+  | { readonly ok: false; readonly problem: PlanningQueryProblem };
+
+export type PublishedAssignmentsResult =
+  | { readonly ok: true; readonly published: PublishedAssignmentsRow }
+  | { readonly ok: false; readonly problem: PublishedReadProblem };
+
 export interface PlanningQueries {
   /** Liest das Fenster einer ISO-Woche im Mandanten des gesetzten Kontexts. */
   planningWindow(weekKey: string): Promise<PlanningWindowResult>;
+
+  /**
+   * Listet die VEROEFFENTLICHTEN Planversionen eines Wochenbereichs
+   * (einschliesslich beider Grenzen), im Mandanten des gesetzten Kontexts.
+   *
+   * Entwuerfe kommen nicht vor. Das ist der Unterschied zu
+   * {@link PlanningQueries.planningWindow}, das den BEARBEITBAREN Stand liefert
+   * und dafuer den Entwurf bevorzugt.
+   */
+  publishedVersions(fromWeekKey: string, toWeekKey: string): Promise<PublishedVersionsResult>;
+
+  /**
+   * Liest den Stand GENAU DER benannten Planversion.
+   *
+   * Warum nicht `planningWindow(weekKey)` wiederverwenden: dessen Antwort ist
+   * an die Woche gebunden, nicht an die Version. Entsteht nach dem
+   * Veroeffentlichen ein neuer Entwurf derselben Woche, liefert
+   * `planningWindow` dessen Zuweisungen — der veroeffentlichte Stand ist dann
+   * nicht mehr erreichbar. Ein Kosten-Snapshot, der darauf rechnete, fror einen
+   * Personalplan ein, den niemand veroeffentlicht hat, und saehe hinterher
+   * revisionssicher aus. Deshalb adressiert diese Methode die Version.
+   */
+  publishedAssignments(planVersionId: string): Promise<PublishedAssignmentsResult>;
 }
 
 /** DI-Token. Tests ersetzen ihn, genau wie `DATABASE_PING`. */

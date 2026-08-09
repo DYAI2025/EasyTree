@@ -93,6 +93,14 @@ async function httpGatewayHarness(): Promise<PlanningGatewayContractHarness> {
           resources: RESOURCES,
         },
       }),
+    // EYT-109: der Vertrag der Planung kennt fuer diese beiden noch keine Route.
+    // Ein Wurf statt einer leeren Antwort — siehe planning-window.http.test.ts.
+    publishedVersions: () => {
+      throw new Error("publishedVersions ist in diesem Test nicht gestellt (EYT-109).");
+    },
+    publishedAssignments: () => {
+      throw new Error("publishedAssignments ist in diesem Test nicht gestellt (EYT-109).");
+    },
   });
 
   const writes: PlanningWritesFactory = () => ({

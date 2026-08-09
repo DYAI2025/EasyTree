@@ -28,7 +28,10 @@
 import type {
   AssignmentRow,
   PlanningQueries,
+  PlanningQueryProblem,
   PlanningWindowResult,
+  PublishedAssignmentsResult,
+  PublishedVersionsResult,
   ResourceRow,
   ResourcesRow,
 } from "../application/planning-queries.port";
@@ -55,6 +58,29 @@ interface RawAssignmentRow {
   readonly starts_at_utc: Date;
   readonly ends_at_utc: Date;
 }
+
+/**
+ * Zeile der Bereichsabfrage (EYT-109).
+ *
+ * `published_at` ist hier NICHT nullable, obwohl die Spalte es ist: die Abfrage
+ * traegt `published_at is not null`. Der Typ haelt genau diese Zusicherung fest
+ * — waere er `Date | null`, muesste jeder Aufrufer einen Fall behandeln, den
+ * die Abfrage bereits ausgeschlossen hat.
+ */
+interface RawPublishedVersionRow {
+  readonly id: string;
+  readonly week_key: string;
+  readonly published_at: Date;
+}
+
+/** Nur die Existenzfrage — bewusst ohne Nutzdaten. */
+interface RawVersionExistenceRow {
+  readonly id: string;
+}
+
+type OrganisationResult =
+  | { readonly ok: true; readonly org: OrgRow }
+  | { readonly ok: false; readonly problem: PlanningQueryProblem };
 
 export class PlanningWindowRepository implements PlanningQueries {
   constructor(
@@ -131,6 +157,159 @@ export class PlanningWindowRepository implements PlanningQueries {
         },
       };
     });
+  }
+
+  /**
+   * Veroeffentlichte Planversionen eines Wochenbereichs (EYT-109).
+   *
+   * `published_at is not null` ist der ganze Unterschied zur Fensterabfrage:
+   * dort ist der Entwurf der bevorzugte Stand, hier ist er kein Stand.
+   *
+   * ## Warum `collate "C"`
+   *
+   * Sowohl der Bereichsvergleich als auch die Sortierung laufen ueber eine
+   * Textspalte, und Textvergleiche haengen an der Kollation der Datenbank. Eine
+   * deutsche Locale ordnet Interpunktion anders als eine C-Locale — CI und eine
+   * lokale Maschine kaemen dann bei derselben Datenlage zu verschiedenen
+   * Ergebnissen, und zwar leise. Dieselbe Begruendung wie bei `resourcesOf`.
+   *
+   * ## Warum die Sortierung vier Schluessel hat
+   *
+   * `week_key` allein genuegt nicht: pro Woche sind MEHRERE veroeffentlichte
+   * Versionen erlaubt (der Unique-Index aus 0007 ist partiell und begrenzt nur
+   * Entwuerfe). Die nachrangige Ordnung ist bewusst dieselbe wie in
+   * `planningWindow` — `published_at`, dann `created_at`, dann `id` —, damit
+   * nicht zwei Stellen im selben Modul eine andere Reihenfolge fuer dasselbe
+   * Ding behaupten. `published_at` allein reicht dort wie hier nicht, weil zwei
+   * Veroeffentlichungen derselben Transaktion denselben `now()`-Wert tragen.
+   */
+  async publishedVersions(
+    fromWeekKey: string,
+    toWeekKey: string,
+  ): Promise<PublishedVersionsResult> {
+    return this.runner.run({ userId: this.subjectUserId }, async (tx) => {
+      const organisation = await this.organisationOf(tx);
+      if (!organisation.ok) return { ok: false as const, problem: organisation.problem };
+
+      // Kein `where org_id = …`. Die Mandantengrenze ist RLS — siehe Kopf.
+      const rows = await tx.query<RawPublishedVersionRow>(
+        `select id, week_key, published_at
+           from public.plan_versions
+          where published_at is not null
+            and week_key collate "C" >= $1
+            and week_key collate "C" <= $2
+          order by week_key collate "C" asc, published_at asc, created_at asc, id asc`,
+        [fromWeekKey, toWeekKey],
+      );
+
+      return {
+        ok: true as const,
+        versions: rows.rows.map((row) => ({
+          id: row.id,
+          weekKey: row.week_key,
+          publishedAt: row.published_at,
+        })),
+      };
+    });
+  }
+
+  /**
+   * Der veroeffentlichte Stand GENAU DER benannten Planversion (EYT-109).
+   *
+   * ## Warum zwei Abfragen auf dieselbe Tabelle
+   *
+   * Weil zwei verschiedene Fragen beantwortet werden, die verschieden ausgehen
+   * duerfen: „ist diese Version fuer mich ueberhaupt sichtbar" und „ist sie
+   * veroeffentlicht". Eine einzige Abfrage mit `published_at is not null`
+   * lieferte fuer einen Entwurf null Zeilen und waere damit von „gibt es nicht"
+   * nicht mehr zu unterscheiden — der Aufrufer bekaeme `PLAN_VERSION_NOT_FOUND`
+   * fuer eine Version, die er selbst angelegt hat.
+   *
+   * Umgekehrt steht die Veroeffentlichungspruefung bewusst im SQL und nicht als
+   * `if` hinter einer gelesenen Zeile: die Bedingung ist die Regel, und eine
+   * Regel, die in der Abfrage steht, laesst sich durch Streichen genau dieser
+   * Bedingung widerlegen (Gegenmutation GM1 des Plans). Ein TypeScript-`if`
+   * waere dieselbe Wirkung an einer Stelle, die die benannte Mutation nicht
+   * trifft.
+   *
+   * Beide Abfragen laufen im SELBEN `runner.run`, also in EINER Transaktion,
+   * gemeinsam mit Zuweisungen, Stammdaten und Zeitzone. Eine Folge unabhaengiger
+   * Aufrufe koennte vier Zeitpunkte sehen — und ein Kostenschnappschuss aus vier
+   * Zeitpunkten ist kein Stand, sondern eine Collage.
+   *
+   * ## Warum die Zuweisungen NICHT zusaetzlich auf `published_at` gefiltert sind
+   *
+   * Sie koennen gar nicht unveroeffentlicht sein. Migration 0010 stempelt beim
+   * Veroeffentlichen jede Zuweisung der Version mit (Punkt 3) und weist danach
+   * jede weitere Zuweisung in dieselbe Version ab (Punkt 5, SQLSTATE 23514).
+   * Ein Filter waere hier also eine Bedingung, die keine Datenlage je verletzt —
+   * also keine Pruefung, sondern Dekoration. Statt ihn zu schreiben, misst der
+   * Integrationstest die Invariante gegen die echte Datenbank.
+   */
+  async publishedAssignments(planVersionId: string): Promise<PublishedAssignmentsResult> {
+    return this.runner.run({ userId: this.subjectUserId }, async (tx) => {
+      const organisation = await this.organisationOf(tx);
+      if (!organisation.ok) return { ok: false as const, problem: organisation.problem };
+
+      // 1. Sichtbarkeit. RLS entscheidet — ein fremder Mandant liefert null
+      //    Zeilen, genau wie eine erfundene Id. Diese Ununterscheidbarkeit ist
+      //    der Zweck, nicht ein Nebeneffekt.
+      const vorhanden = await tx.query<RawVersionExistenceRow>(
+        "select id from public.plan_versions where id = $1",
+        [planVersionId],
+      );
+      if (vorhanden.rows.length === 0) {
+        return { ok: false as const, problem: "PLAN_VERSION_NOT_FOUND" as const };
+      }
+
+      // 2. Verbindlichkeit. Kosten entstehen ausschliesslich aus einem
+      //    veroeffentlichten Stand (FMC-001).
+      const veroeffentlicht = await tx.query<RawPublishedVersionRow>(
+        `select id, week_key, published_at
+           from public.plan_versions
+          where id = $1
+            and published_at is not null`,
+        [planVersionId],
+      );
+      const version = veroeffentlicht.rows[0];
+      if (version === undefined) {
+        return { ok: false as const, problem: "PLAN_NOT_PUBLISHED" as const };
+      }
+
+      const assignments = await this.assignmentsOf(tx, version.id);
+      const resources = await this.resourcesOf(tx);
+
+      return {
+        ok: true as const,
+        published: {
+          planVersionId: version.id,
+          weekKey: version.week_key,
+          timeZone: organisation.org.time_zone,
+          publishedAt: version.published_at,
+          assignments,
+          resources,
+        },
+      };
+    });
+  }
+
+  /**
+   * Die EINE Organisation des gesetzten Kontexts.
+   *
+   * Bewusst nur von den beiden neuen Methoden benutzt und NICHT nachtraeglich in
+   * `planningWindow` eingezogen: dessen Fassung ist durch den `read-through`-Lauf
+   * gedeckt, diese hier noch nicht. Denselben Block zu teilen waere richtig,
+   * sobald ein Test beide Wege deckt — das ist ein eigener Schritt und nicht
+   * einer, der sich in dieser Aenderung versteckt.
+   */
+  private async organisationOf(tx: TenantQuery): Promise<OrganisationResult> {
+    // RLS liefert genau die Organisationen der aktiven Mitgliedschaften.
+    const orgs = await tx.query<OrgRow>("select id, time_zone from public.organizations");
+    if (orgs.rows.length === 0) return { ok: false, problem: "NO_ORGANISATION" };
+    if (orgs.rows.length > 1) return { ok: false, problem: "AMBIGUOUS_ORGANISATION" };
+    const org = orgs.rows[0];
+    if (org === undefined) return { ok: false, problem: "NO_ORGANISATION" };
+    return { ok: true, org };
   }
 
   /**

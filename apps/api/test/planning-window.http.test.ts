@@ -59,6 +59,16 @@ async function boot(options: {
     return {
       planningWindow: (): Promise<PlanningWindowResult> =>
         Promise.resolve(options.result ?? EMPTY_WINDOW),
+      // EYT-109: nicht Gegenstand dieser Naht — /planung/fenster ruft sie nicht.
+      // Bewusst ein Wurf und keine leere Antwort: eine Attrappe, die `[]`
+      // liefert, faerbt einen kuenftigen Test gruen, der diese Route versehentlich
+      // ueber den Leseport fuehrt.
+      publishedVersions: () => {
+        throw new Error("publishedVersions ist in diesem Test nicht gestellt (EYT-109).");
+      },
+      publishedAssignments: () => {
+        throw new Error("publishedAssignments ist in diesem Test nicht gestellt (EYT-109).");
+      },
     } satisfies PlanningQueries;
   };
 
