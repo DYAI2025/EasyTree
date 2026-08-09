@@ -549,6 +549,25 @@ select throws_ok(
 -- Unabhaengigkeit, um derentwillen die Bindung zusammengesetzt ist.
 reset role;
 
+-- `ordinal` ist hier 99 und NICHT 0, und das ist keine Kosmetik.
+--
+-- Gemessen im ersten echten db-gates-Lauf (09.08.2026, Run 31286864590): mit
+-- `ordinal = 0` schlug E1 mit 23505 statt 23503 fehl. Der Grund ist die
+-- Reihenfolge, in der PostgreSQL prueft — der Eintrag im Unique-Index entsteht
+-- beim Schreiben des Tupels, die FK-Trigger feuern erst danach. Auf dem
+-- Alpha-Snapshot liegt aus den Fixtures bereits eine Position mit `ordinal = 0`
+-- (genau die, auf der E3 unten seinen 23505 aufbaut), also gewann die
+-- Unique-Verletzung das Rennen und der Fremdschluessel kam nie zum Zug.
+--
+-- E1 hat damit NICHT gemessen, was der Testtitel behauptet. Wer die 99 wieder
+-- auf 0 setzt, stellt genau diesen blinden Zustand her — und db-gates faellt
+-- dann mit „caught 23505 / wanted 23503" zurueck, was der ausgefuehrte
+-- Gegenbeweis zu dieser Zeile ist.
+--
+-- E1 und E2 tragen bewusst DENSELBEN `ordinal` und unterscheiden sich in genau
+-- einer Spalte: `snapshot_id`. Nur deshalb ist der 23503 aus E1 dem
+-- zusammengesetzten FK zurechenbar und keiner der uebrigen Bindungen — E2
+-- beweist mit derselben Zeile, dass alle anderen Spalten einfuegbar sind.
 select throws_ok(
   $$insert into public.cost_snapshot_positions
       (org_id, snapshot_id, assignment_id, worksite_id, worksite_label,
@@ -560,7 +579,7 @@ select throws_ok(
             '00000000-0000-4000-8000-0000005020b2', 'Beta Baustelle',
             '00000000-0000-4000-8000-0000004020b2', 'Beta Planer',
             date '2026-08-03', 28800000,
-            '00000000-0000-4000-8000-00000053c002', 32800, 0)$$,
+            '00000000-0000-4000-8000-00000053c002', 32800, 99)$$,
   '23503',
   NULL,
   'E1 eine Beta-Position kann sich nicht an einen Alpha-Snapshot haengen — der zusammengesetzte FK weist sie ab, ohne dass eine Policy beteiligt waere'
@@ -577,7 +596,7 @@ select lives_ok(
             '00000000-0000-4000-8000-0000005020b2', 'Beta Baustelle',
             '00000000-0000-4000-8000-0000004020b2', 'Beta Planer',
             date '2026-08-03', 28800000,
-            '00000000-0000-4000-8000-00000053c002', 32800, 0)$$,
+            '00000000-0000-4000-8000-00000053c002', 32800, 99)$$,
   'E2 dieselbe Zeile am EIGENEN Snapshot geht durch — ohne sie waere E1 auch dann gruen, wenn gar nichts einfuegbar waere'
 );
 
