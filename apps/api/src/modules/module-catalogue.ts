@@ -235,12 +235,27 @@ export const TABLE_OWNERSHIP: readonly TableOwnership[] = [
     table: "public.cost_snapshots",
     owner: "costs",
     tenantOwned: true,
-    note: "MIGRATION FEHLT NOCH — Besitz von ADR-003 §2 entschieden, Schema gehoert zu EYT-109. Unveraenderlicher Tageskosten-Snapshot je veroeffentlichter Planversion.",
+    note:
+      "Unveraenderlicher Kopf des Tageskosten-Snapshots je veroeffentlichter Planversion (0018, EYT-109). " +
+      "Besitz von ADR-003 §2 entschieden. Unveraenderlichkeit ist ein FEHLENDES RECHT: kein update-, kein " +
+      "delete-Grant und keine solche Policy; Anlegen nur ueber den Laufzeitkanal (app.is_runtime_channel) " +
+      "mit costs.calculate und auf die eigene Identitaet.",
   },
   {
-    table: "public.cost_snapshot_items",
+    // Hiess in diesem Register bis 0018 `cost_snapshot_items`. Diesen Namen hat
+    // es nie gegeben: die Tabelle heisst `cost_snapshot_positions`, weil die
+    // Domaenenmontage (costs/domain/cost-snapshot-assembly.ts) von Positionen
+    // spricht. Der Eintrag stammt aus der Zeit vor der Migration und ist mit
+    // ihr berichtigt worden — ein Register, das die Tabelle falsch benennt,
+    // haette bei der ersten Repository-Anbindung `costs-cross-module-public-api-only`
+    // rot gemacht.
+    table: "public.cost_snapshot_positions",
     owner: "costs",
     tenantOwned: true,
-    note: "MIGRATION FEHLT NOCH — Besitz von ADR-003 §2 entschieden, Schema gehoert zu EYT-109. Einzelpositionen des Snapshots mit Satzversion, Regelversion und gerundetem Betrag.",
+    note:
+      "Einzelpositionen des Snapshots mit Satzversion, Regelversion und gerundetem Betrag (0018, EYT-109). " +
+      "Besitz von ADR-003 §2 entschieden. Ebenfalls unveraenderlich; die Anzeigereihenfolge ist ueber " +
+      "`ordinal` mit `unique (snapshot_id, ordinal)` eingefroren, und die Bindung an den Kopf laeuft ueber " +
+      "den mandantengebundenen FK (snapshot_id, org_id).",
   },
 ];
