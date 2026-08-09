@@ -109,6 +109,28 @@ export type {
   SnapshotAssemblyResult,
 } from "./domain/cost-snapshot-assembly";
 
+// EYT-109: der Persistenzvertrag des Snapshots. Reiner Port — die
+// PostgreSQL-Umsetzung folgt in Task 11. Kein `update`, kein `delete`, kein
+// `recalculate`: die Datenbank verweigert sie (Migration 0018, keine Grants),
+// und ein Vertrag, der sie anboete, waere eine Zusage ohne Deckung.
+export {
+  COST_SNAPSHOT_REPOSITORY_FACTORY,
+  SNAPSHOT_READ_PROBLEMS,
+  SNAPSHOT_WRITE_PROBLEMS,
+} from "./application/cost-snapshot-repository.port";
+export type {
+  CostRuleVersion,
+  CostSnapshotRepository,
+  CostSnapshotRepositoryFactory,
+  NewCostSnapshot,
+  SnapshotReadProblem,
+  SnapshotReadResult,
+  SnapshotWriteProblem,
+  SnapshotWriteResult,
+  StoredCostSnapshot,
+  StoredCostSnapshotPosition,
+} from "./application/cost-snapshot-repository.port";
+
 export { PgRateRepository } from "./infrastructure/rate-repository.pg";
 
 export { CostsController } from "./interface/http/costs.controller";
