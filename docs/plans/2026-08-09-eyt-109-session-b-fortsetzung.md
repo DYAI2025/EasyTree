@@ -934,3 +934,73 @@ Anhalten und melden statt weiterzubauen, wenn:
   ein Durchlauf bis Task 20.
 
 **Nicht** mergen. **Nicht** EYT-109 auf _Fertig_ setzen. **Nicht** EYT-110 beginnen.
+
+---
+
+## G. Stand am Ende von Session B — Handoff
+
+Gemessen 09.08.2026. Tasks 5 und 6 sind fertig und geprüft; Tasks 7–11 sind offen und
+gehören zusammen.
+
+### Commits dieser Sitzung
+
+| SHA       | Inhalt                                                                    |
+| --------- | ------------------------------------------------------------------------- |
+| `3ee1477` | Dieser Plan — verifizierte Rekonstruktion, fünf Divergenzen               |
+| `fe626d9` | Task 5 — `cost-snapshot-assembly.ts`, Test, Re-Export im Modulindex       |
+| `1809ecd` | Plan — fünf gemessene Korrekturen aus der Task-5-Ausführung               |
+| `3dec347` | Task 5 Fix — Ordnung von der Umgebung gelöst, vier Messlücken geschlossen |
+| `788807a` | Task 6 — Migration `0018`, pgTAP `0013`, Metagate, Besitzregister         |
+
+### Was belegt ist und was nicht
+
+**Belegt (lokal ausgeführt):** 18 Montagetests grün, zusätzlich grün unter
+`LC_ALL=da_DK.UTF-8` und `sv_SE.UTF-8` — das ist der eigentliche Nachweis, dass die
+Positionsordnung nicht mehr an `LANG` hängt. Volle `apps/api`-Suite 535 grün / 60
+übersprungen, `turbo typecheck --force` 10/10 mit `Cached: 0`.
+
+**Vier Gegenmutationen ausgeführt und rot gemessen:** `worksiteId`-Schlüssel entfernt,
+`employeeLabel`-Schlüssel entfernt, Komparator auf `localeCompare` zurück, Satz nur
+einmal je Einsatz statt je Ortstag.
+
+**NICHT belegt:** kein SQL aus `788807a` ist je gelaufen. Auf dieser Maschine ist der
+Docker-Daemon nicht erreichbar, also lief weder `supabase db reset` noch
+`supabase test db`. Die Migration ist nicht angewandt, die pgTAP-Datei nicht geparst,
+`plan(34)` nicht gegen einen echten Lauf geprüft. **Erster echter Lauf ist `db-gates`
+in CI.** Bis dahin ist Task 6 Planungsstand.
+
+Ebenfalls nicht belegt: die neun Gegenmutationen GM1–GM9 der Plan-Matrix (Task 19),
+und die Behauptung der Vorsession über „30 Gegenmutationen".
+
+### Nächster Schritt, empfohlen
+
+**Branch pushen und `db-gates` laufen lassen, bevor Task 7 beginnt.** Das ist der
+billigste Weg, Task 6 von Planungsstand zu Nachweis zu machen, und ein Fehler in 293
+Zeilen ungetestetem SQL ist nach fünf weiteren Tasks deutlich teurer zu finden.
+Braucht eine PO-Freigabe für den Push; **kein Merge**.
+
+### Offene Entscheidungen für den PO
+
+| Kennung                   | Sache                                                                                                                                                                                                       |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PO_DECISION_DAY_PARTIAL` | Totalblockade statt Tagesablehnung. In Santiago/Havanna/Beirut/Azoren macht ein Einsatz über die kaputte Mitternacht die Woche unerzeugbar; Berlin erreicht den Fall nie. Nachrüsten wäre Vertragsänderung. |
+| `SCOPE_OVERLAP_EYT130`    | Tasks 1+2 (Contract/Gateway/OpenAPI) sind laut Jira-Kommentar vom 31.07. fachlich **EYT-130**, liegen aber in diesem Branch.                                                                                |
+| `ASSUMPTION` (D3)         | Mehrere Snapshots je Planversion zulässig.                                                                                                                                                                  |
+| Betriebsfolge             | `on delete restrict` auf `worksites`: eine Baustelle, die ein Snapshot nennt, ist nicht mehr löschbar — und `authenticated` hat dort ein `delete`-Recht (0006).                                             |
+| `SOURCE_NEEDED`           | Confluence `5505026`, `7766017`, `8552449`, `8814623`, `9306113` sind weiterhin ungelesen. Fällig **vor Task 15**.                                                                                          |
+
+### Fallen für die nächste Sitzung
+
+1. **`apps/api` liest `@easytree/domain` aus `dist/`.** `noEmitOnError` ist nirgends
+   gesetzt — vor jedem Einzeltest `pnpm --filter @easytree/domain build`, sonst misst
+   ein grüner Test einen alten Stand.
+2. **Turbo meldet grün, ohne zu laufen.** Jede Zahl, die als Nachweis gilt, mit
+   `--force` oder per Paketaufruf messen.
+3. **Der Hauptarbeitsbaum ist nicht dieser.** EYT-109 lebt im Worktree
+   `…/53a83129-…/scratchpad/eyt109-wt`; `/Users/benjaminpoersch/EasyTree` steht auf dem
+   EYT-136-Branch und trägt fremde uncommittete Arbeit. Dort nichts aufräumen.
+4. **Ein Komparator-Schlüssel ist erst geprüft, wenn die Fixtures den nachrangigen
+   Schlüsseln widersprechen.** Diese Falle hat in derselben Datei zweimal zugeschlagen —
+   einmal im Original, einmal in der Korrektur.
+5. **Node v24.16.0 statt der geforderten 22.** Lokale Läufe bleiben eine Stufe unter dem
+   CI-Nachweis.
