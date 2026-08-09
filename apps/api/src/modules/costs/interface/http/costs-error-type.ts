@@ -36,6 +36,7 @@ export const COSTS_ERROR_TYPE = {
   NO_ORGANISATION: "urn:easytree:costs:no-organisation",
   AMBIGUOUS_ORGANISATION: "urn:easytree:costs:ambiguous-organisation",
   PLAN_NOT_PUBLISHED: "urn:easytree:costs:plan-not-published",
+  PLAN_VERSION_NOT_FOUND: "urn:easytree:costs:plan-version-not-found",
 } as const satisfies Record<PlanCostFactsProblem, string>;
 
 export type CostsErrorType = (typeof COSTS_ERROR_TYPE)[keyof typeof COSTS_ERROR_TYPE];

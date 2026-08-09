@@ -40,6 +40,16 @@ function fakten(ueberschreibung: Partial<PublishedPlanFacts> = {}): PublishedPla
     planVersionId: unsafeIdentifier<PlanVersionId>("44444444-4444-4444-8444-444444444444"),
     weekKey: "2026-W25",
     timeZone: "Europe/Berlin",
+    // EYT-109 Task 8: `PublishedPlanFacts` traegt seither auch den
+    // Veroeffentlichungszeitpunkt und die Bezeichnungen. Die Montage liest
+    // beides NICHT — sie bekommt die Labels weiterhin als eigene Eingabe
+    // (`SnapshotAssemblyInput.employeeLabels`). Diese Werte stehen hier
+    // deshalb nur, damit der Typ vollstaendig ist, und sind absichtlich
+    // ANDERE als die der Eingabe: laese die Montage sie doch aus den Fakten,
+    // faende dieser Test es.
+    publishedAt: new Date("2026-06-10T09:15:00.000Z"),
+    employeeLabels: new Map<string, string>([[EINSATZ.employeeId, "NICHT AUS DEN FAKTEN"]]),
+    worksiteLabels: new Map<string, string>([[EINSATZ.worksiteId, "NICHT AUS DEN FAKTEN"]]),
     work: [EINSATZ],
     ...ueberschreibung,
   };

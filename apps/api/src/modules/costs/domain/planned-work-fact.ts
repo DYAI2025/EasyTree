@@ -63,5 +63,51 @@ export interface PublishedPlanFacts {
   readonly weekKey: string;
   /** IANA-Zone der Organisation, wie die Planung sie fuehrt. */
   readonly timeZone: string;
+  /**
+   * Wann diese Planversion veroeffentlicht wurde — unveraendert aus der
+   * Planung uebernommen (EYT-109, Task 8).
+   *
+   * Bewusst KEIN Default und kein `new Date()` in der Abbildung: der Snapshot
+   * traegt diesen Wert spaeter in ein Dokument, das revisionssicher aussieht.
+   * Ein erfundener Zeitpunkt waere dort nicht als Erfindung erkennbar. Wenn die
+   * Quelle ihn nicht kennt, ist die richtige Antwort eine Ablehnung, kein Wert.
+   */
+  readonly publishedAt: Date;
   readonly work: readonly PlannedWorkFact[];
+  /**
+   * Bezeichnungen der Beschaeftigten, nach Id.
+   *
+   * Eine Map und keine parallele Liste: eine Liste koppelte das Label an die
+   * Position, und ein vertauschtes Paar faende niemand — der Bericht saehe
+   * vollstaendig aus und naennte die falsche Person.
+   *
+   * Enthaelt AUCH inaktive Eintraege, weil ein historischer Einsatz auf eine
+   * inzwischen deaktivierte Person ihren Namen behalten muss (dieselbe
+   * Begruendung wie bei `ResourcesRow` im Planungs-Leseport).
+   */
+  readonly employeeLabels: ReadonlyMap<string, string>;
+  /** Bezeichnungen der Baustellen, nach Id. Gleiche Begruendung wie oben. */
+  readonly worksiteLabels: ReadonlyMap<string, string>;
+}
+
+/**
+ * Eine veroeffentlichte Planversion, so wie die Auswahlliste von `/kosten` sie
+ * braucht (EYT-109, Task 8).
+ *
+ * Eigener Typ statt `PublishedVersionRow` der Planung: dort heisst das Feld
+ * `id`. Welche Id gemeint ist, gehoert in den Namen — `id` neben
+ * `assignmentId` und `worksiteId` ist genau das Feld, das man beim Lesen
+ * falsch belegt. Reichte das Kostenmodul den Planungstyp durch, waere jede
+ * Aenderung an dessen Form zugleich eine Aenderung am Kostenmodell; die
+ * Modulgrenze waere dann eine Verzeichnisgrenze und kein Vertrag.
+ *
+ * Bewusst OHNE `timeZone` und ohne Zuweisungen: eine Auswahlliste beantwortet
+ * „welche Versionen gibt es", nicht „was steht darin". Wer rechnen will, holt
+ * die Fakten ueber `publishedFactsForVersion`.
+ */
+export interface PublishedPlanVersionSummary {
+  readonly planVersionId: PlanVersionId;
+  readonly weekKey: string;
+  /** Nie `null` — eine unveroeffentlichte Version steht nicht in dieser Liste. */
+  readonly publishedAt: Date;
 }

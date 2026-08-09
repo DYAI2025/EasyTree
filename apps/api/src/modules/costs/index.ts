@@ -14,12 +14,18 @@
  * (EYT-108), Snapshot und Route (EYT-109), XLSX-Adapter (EYT-110) und
  * Autorisierung (EYT-106) sind eigene Tickets mit eigenen Nachweisen.
  */
-export type { PlannedWorkFact, PublishedPlanFacts } from "./domain/planned-work-fact";
+export type {
+  PlannedWorkFact,
+  PublishedPlanFacts,
+  PublishedPlanVersionSummary,
+} from "./domain/planned-work-fact";
 
 export type {
   PlanCostFactsPort,
   PlanCostFactsProblem,
   PlanCostFactsResult,
+  PlanVersionListProblem,
+  PublishedVersionsListResult,
 } from "./application/plan-cost-facts.port";
 export { PLAN_COST_FACTS, PLAN_COST_FACTS_PROBLEMS } from "./application/plan-cost-facts.port";
 
