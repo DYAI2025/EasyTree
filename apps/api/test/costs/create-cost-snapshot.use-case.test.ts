@@ -138,6 +138,15 @@ interface Zeuge {
   readonly readAufrufe: string[];
   readonly versionsForAufrufe: string[];
   /**
+   * Womit die Buendellesung angefragt wurde — je Aufruf ein Feld.
+   *
+   * Zwei Zeugen statt eines: `versionsForAufrufe` muss dabei LEER bleiben. Eine
+   * Zusicherung ueber die Anzahl der Lesevorgaenge braucht beide Seiten, sonst
+   * bliebe ein Rueckfall auf den Einzelaufruf ungemessen — die Montage bekaeme
+   * dieselben Saetze, und jeder inhaltliche Fall bliebe gruen.
+   */
+  readonly versionsForManyAufrufe: string[][];
+  /**
    * Womit die Fakten angefragt wurden.
    *
    * Ohne diesen Zeugen ist die Weiterleitung des Arguments ungemessen: ein Stub,
@@ -160,6 +169,7 @@ function zeuge(
   const createAufrufe: NewCostSnapshot[] = [];
   const readAufrufe: string[] = [];
   const versionsForAufrufe: string[] = [];
+  const versionsForManyAufrufe: string[][] = [];
   const faktenAufrufe: string[] = [];
   const saetze =
     optionen.saetze ??
@@ -186,6 +196,16 @@ function zeuge(
       versionsForAufrufe.push(employeeId);
       return saetze.get(employeeId) ?? [];
     },
+    versionsForMany: async (employeeIds) => {
+      versionsForManyAufrufe.push([...employeeIds]);
+      // Wie die echte Umsetzung: JEDE angefragte Id bekommt einen Eintrag,
+      // notfalls ein leeres Feld. Eine Attrappe, die nur Treffer zurueckgibt,
+      // verschoebe den Unterschied zwischen „nichts vorhanden" und „nie
+      // gefragt" — genau den, den der Port zusichert.
+      const abbildung = new Map<string, readonly RateVersionRecord[]>();
+      for (const id of new Set(employeeIds)) abbildung.set(id, saetze.get(id) ?? []);
+      return abbildung;
+    },
     append: () => {
       throw new Error("Task 10 schreibt keine Saetze.");
     },
@@ -207,6 +227,7 @@ function zeuge(
     createAufrufe,
     readAufrufe,
     versionsForAufrufe,
+    versionsForManyAufrufe,
     faktenAufrufe,
   };
 }
@@ -280,6 +301,7 @@ describe("createCostSnapshot", () => {
     const z = zeuge({ faktenErgebnis: { ok: false, problem: "PLAN_NOT_PUBLISHED" } });
     const ergebnis = await createCostSnapshot(z.deps, kommando());
 
+    expect(z.versionsForManyAufrufe).toEqual([]);
     expect(z.versionsForAufrufe).toEqual([]);
     expect(z.createAufrufe).toEqual([]);
     expect(z.readAufrufe).toEqual([]);
@@ -290,6 +312,7 @@ describe("createCostSnapshot", () => {
     const z = zeuge({ faktenErgebnis: { ok: false, problem: "PLAN_VERSION_NOT_FOUND" } });
     const ergebnis = await createCostSnapshot(z.deps, kommando());
 
+    expect(z.versionsForManyAufrufe).toEqual([]);
     expect(z.versionsForAufrufe).toEqual([]);
     expect(z.createAufrufe).toEqual([]);
     expect(z.readAufrufe).toEqual([]);
@@ -339,6 +362,7 @@ describe("createCostSnapshot", () => {
     const z = zeuge();
     const ergebnis = await createCostSnapshot(z.deps, kommando({ worksiteId: FREMD }));
 
+    expect(z.versionsForManyAufrufe).toEqual([]);
     expect(z.versionsForAufrufe).toEqual([]);
     expect(z.createAufrufe).toEqual([]);
     expect(z.readAufrufe).toEqual([]);
@@ -350,7 +374,8 @@ describe("createCostSnapshot", () => {
     const ergebnis = await createCostSnapshot(z.deps, kommando({ worksiteId: SUED }));
 
     // Anna arbeitet nur auf Nord — ihre Satzhistorie wird gar nicht erst geholt.
-    expect(z.versionsForAufrufe).toEqual([BERND]);
+    expect(z.versionsForManyAufrufe).toEqual([[BERND]]);
+    expect(z.versionsForAufrufe).toEqual([]);
     expect(z.createAufrufe).toHaveLength(1);
     expect(z.createAufrufe[0]?.positions).toHaveLength(1);
     expect(z.createAufrufe[0]?.positions[0]?.employeeId).toBe(BERND);
@@ -375,7 +400,12 @@ describe("createCostSnapshot", () => {
     });
     const ergebnis = await createCostSnapshot(z.deps, kommando({ worksiteId: SUED }));
 
-    expect(z.versionsForAufrufe).toEqual([]); // niemand ist beteiligt
+    // Gefragt wird trotzdem — mit einer leeren Beteiligtenliste. Das ist der
+    // Unterschied zu „gar nicht gefragt": die Buendellesung kuerzt selbst ab
+    // (keine Transaktion bei leerer Eingabe), und diese Entscheidung gehoert
+    // ins Repository, nicht in den Use-Case.
+    expect(z.versionsForManyAufrufe).toEqual([[]]);
+    expect(z.versionsForAufrufe).toEqual([]);
     expect(z.createAufrufe).toHaveLength(1);
     expect(z.createAufrufe[0]?.positions).toEqual([]);
     expect(z.createAufrufe[0]?.totalMinorUnits).toBe(0n);
@@ -452,7 +482,8 @@ describe("createCostSnapshot", () => {
     // Auf dem Array, nicht auf der Laenge: `[ANNA, ANNA]` haette dieselbe
     // Laenge wie ein Aufruf plus ein fremder — die Identitaet muss mitgeprueft
     // werden.
-    expect(z.versionsForAufrufe).toEqual([ANNA]);
+    expect(z.versionsForManyAufrufe).toEqual([[ANNA]]);
+    expect(z.versionsForAufrufe).toEqual([]);
     expect(z.createAufrufe[0]?.positions).toHaveLength(2); // zwei Tage, eine Person
     expect(z.createAufrufe[0]?.totalMinorUnits).toBe(40000n); // 2 * 8 h * 25,00
     expect(ergebnis.ok).toBe(true);
@@ -513,6 +544,61 @@ describe("createCostSnapshot", () => {
       1n,
     ]);
     expect(z.createAufrufe[0]?.totalMinorUnits).toBe(9007199254740993n);
+    expect(ergebnis.ok).toBe(true);
+  });
+
+  it("Fall 15 — holt ALLE Satzhistorien in genau EINEM Lesevorgang (EYT-138)", async () => {
+    // Drei Personen auf zwei Baustellen, eine davon mit zwei Einsaetzen: der
+    // Faecher haette hier drei Transaktionen geoeffnet.
+    const CARLA = unsafeIdentifier<EmployeeId>("2ccccccc-2ccc-4ccc-8ccc-2ccccccccccc");
+    const EINSATZ_CARLA: PlannedWorkFact = {
+      assignmentId: unsafeIdentifier<AssignmentId>("1ccccccc-1ccc-4ccc-8ccc-1ccccccccccc"),
+      employeeId: CARLA,
+      worksiteId: NORD,
+      startsAtUtc: new Date("2026-06-17T06:00:00.000Z"),
+      endsAtUtc: new Date("2026-06-17T10:00:00.000Z"),
+    };
+    // Zweiter Einsatz derselben Person — die Id darf im Argument nur EINMAL
+    // stehen, sonst laese die Datenbank dieselbe Historie doppelt.
+    const ZWEITER_EINSATZ_ANNA: PlannedWorkFact = {
+      assignmentId: unsafeIdentifier<AssignmentId>("1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"),
+      employeeId: ANNA,
+      worksiteId: SUED,
+      startsAtUtc: new Date("2026-06-18T06:00:00.000Z"),
+      endsAtUtc: new Date("2026-06-18T10:00:00.000Z"),
+    };
+    const z = zeuge({
+      faktenErgebnis: {
+        ok: true,
+        facts: fakten({
+          work: [EINSATZ_NORD, EINSATZ_SUED, EINSATZ_CARLA, ZWEITER_EINSATZ_ANNA],
+          employeeLabels: new Map<string, string>([
+            [ANNA, "Anna Bauer"],
+            [BERND, "Bernd Christ"],
+            [CARLA, "Carla Diaz"],
+          ]),
+        }),
+      },
+      saetze: new Map<string, readonly RateVersionRecord[]>([
+        [ANNA, [satz()]],
+        [BERND, [satz({ id: "55555555-5555-4555-8555-55555555bbbb", employeeId: BERND })]],
+        [CARLA, [satz({ id: "55555555-5555-4555-8555-55555555cccc", employeeId: CARLA })]],
+      ]),
+    });
+
+    const ergebnis = await createCostSnapshot(z.deps, kommando());
+
+    // EIN Lesevorgang — nicht drei. Das ist die ganze Zusicherung von EYT-138
+    // auf dieser Ebene; dass ein Lesevorgang auch EINE Transaktion und EINE
+    // Anweisung ist, misst `test/costs/rate-batch-read.test.ts`.
+    expect(z.versionsForManyAufrufe).toHaveLength(1);
+    // Auf dem Feld, nicht auf der Laenge: dedupliziert, in der Reihenfolge des
+    // ersten Auftretens. `[ANNA, BERND, CARLA, ANNA]` haette dieselbe Laenge
+    // wie drei Ids plus eine fremde.
+    expect(z.versionsForManyAufrufe[0]).toEqual([ANNA, BERND, CARLA]);
+    // Der Einzelaufruf bleibt unberuehrt — sonst waere die Buendellesung nur
+    // eine zusaetzliche Lesung und keine Ersetzung.
+    expect(z.versionsForAufrufe).toEqual([]);
     expect(ergebnis.ok).toBe(true);
   });
 });

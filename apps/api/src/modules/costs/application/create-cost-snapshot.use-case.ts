@@ -33,19 +33,26 @@
  * keine Autorisierung, kein Audit, kein `subjectUserId` — die uebergebenen Ports
  * sind bereits an das Subjekt der Anfrage gebunden (Factory-Muster).
  *
- * Und keine gemeinsame Lesetransaktion ueber die Satzhistorien. Das ist eine
- * bekannte Einschraenkung, keine Auslassung: `RateRepository.versionsFor` nimmt
- * genau eine Mitarbeitenden-Id, jeder Aufruf oeffnet in der PostgreSQL-Umsetzung
- * seine eigene Verbindung mit eigenem `begin`/`commit`, und die Historien werden
- * daher in N VERSCHIEDENEN Transaktionen gelesen. Wird waehrend des Faechers
- * eine Satzversion committet, kann sie fuer einen Teil der Mitarbeitenden schon
- * sichtbar sein und fuer den Rest noch nicht — der Snapshot mischt dann zwei
- * Datenbankzustaende. Das widerspricht der Zusage „unveraenderliches Dokument"
- * weiter oben, und der Widerspruch steht hier ausdruecklich, statt still zu
- * bleiben. Der Faecher ist ausserdem unbegrenzt: bei vielen Mitarbeitenden
- * laufen die Aufrufe gegen die Standardgroesse des Pools (10). Die Reparatur
- * gehoert nach Task 11 und heisst `versionsForMany(employeeIds)` — eine Lesung,
- * eine Transaktion, ein konsistenter Zeitpunkt.
+ * ## Ein Lesezeitpunkt fuer alle Satzhistorien (EYT-138)
+ *
+ * Die Historien kommen aus EINER Lesung (`versionsForMany`): eine Anweisung,
+ * eine Transaktion, ein Lesezeitpunkt. Die frueher hier dokumentierte
+ * Einschraenkung ist damit erledigt, und der Absatz bleibt stehen, damit ihre
+ * Aufloesung sichtbar ist statt bloss ihre Abwesenheit.
+ *
+ * Der alte Weg rief `versionsFor` je Mitarbeitendem auf; jeder Aufruf oeffnete
+ * in der PostgreSQL-Umsetzung seine eigene Verbindung mit eigenem
+ * `begin`/`commit`. Eine waehrend des Faechers committete Satzversion konnte
+ * fuer einen Teil der Mitarbeitenden schon sichtbar sein und fuer den Rest noch
+ * nicht — der Snapshot mischte zwei Datenbankzustaende und widersprach damit
+ * der Zusage „unveraenderliches Dokument" weiter oben. Der Faecher lief
+ * ausserdem unbegrenzt gegen die Standardgroesse des Pools (10).
+ *
+ * Die Eigenschaft haengt an der ANWEISUNGSZAHL, nicht an einem Isolationslevel:
+ * PostgreSQL wertet jede Anweisung gegen genau einen MVCC-Snapshot aus, auch
+ * unter `read committed`. Gemessen wird sie deshalb als Transaktions- und
+ * Anweisungszaehlung — hier in `test/costs/create-cost-snapshot.use-case.test.ts`,
+ * an der Datenbankgrenze in `test/costs/rate-batch-read.test.ts`.
  */
 import { COST_RULE_VERSION } from "@easytree/domain";
 import { assembleCostSnapshotPositions } from "../domain/cost-snapshot-assembly";
@@ -174,12 +181,10 @@ export async function createCostSnapshot(
       ? facts.work
       : facts.work.filter((einsatz) => einsatz.worksiteId === command.worksiteId);
   const employeeIds = [...new Set<string>(relevant.map((einsatz) => einsatz.employeeId))];
-  const historien = await Promise.all(
-    employeeIds.map(
-      async (employeeId) => [employeeId, await deps.rates.versionsFor(employeeId)] as const,
-    ),
-  );
-  const ratesByEmployee: ReadonlyMap<string, readonly RateVersionRecord[]> = new Map(historien);
+  // EINE Lesung, ein Lesezeitpunkt (EYT-138). Ein Faecher aus N Einzelaufrufen
+  // koennte zwei Datenbankzustaende in EINEN unveraenderlichen Snapshot mischen.
+  const ratesByEmployee: ReadonlyMap<string, readonly RateVersionRecord[]> =
+    await deps.rates.versionsForMany(employeeIds);
 
   // 4. Montage. Die Auswahl des Satzes je lokalem Leistungstag passiert
   //    ausschliesslich dort.

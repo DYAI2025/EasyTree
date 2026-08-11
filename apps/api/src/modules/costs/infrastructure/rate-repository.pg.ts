@@ -144,6 +144,52 @@ export class PgRateRepository implements RateRepository {
     return rows.map(toRecord);
   }
 
+  /**
+   * Die Historien mehrerer Beschaeftigter — eine Anweisung, eine Transaktion,
+   * ein Lesezeitpunkt (EYT-138). Begruendung im Port.
+   */
+  async versionsForMany(
+    employeeIds: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly RateVersionRecord[]>> {
+    // Leere Eingabe oeffnet KEINE Transaktion. Eine veroeffentlichte
+    // Planversion ohne Zuweisungen ist ein gueltiger Fall (leerer Snapshot,
+    // Summe 0); eine Verbindung fuer eine Abfrage ohne Kandidaten waere
+    // Poolzeit ohne Gegenwert.
+    if (employeeIds.length === 0) return new Map();
+    const eindeutig = [...new Set(employeeIds)];
+
+    const rows = await this.run(async (tx) => {
+      // `= any($1::uuid[])` statt `in (...)`: EIN Parameter, EINE Anweisung,
+      // unabhaengig von der Anzahl der Beschaeftigten. Eine dynamisch
+      // zusammengesetzte IN-Liste waere je Aufruf ein anderer Anweisungstext
+      // und damit ein anderer Plan-Cache-Eintrag.
+      //
+      // `order by valid_from desc` ist DIESELBE Ordnung wie in `versionsFor` —
+      // bewusst, damit nicht zwei Methoden desselben Ports eine andere
+      // Reihenfolge fuer dasselbe Ding behaupten. Ein zusaetzlicher Tiebreak
+      // ist unerreichbar: der EXCLUDE-Constraint aus Migration 0013 verbietet
+      // zwei Versionen derselben Person mit ueberlappendem Intervall, also
+      // auch zwei mit demselben valid_from. `employee_id` ist eine uuid und
+      // haengt nicht an der Kollation der Datenbank.
+      const ergebnis = await tx.query<RateRow>(
+        `select ${SATZ_SPALTEN}
+           from public.employee_rate_versions
+          where employee_id = any($1::uuid[])
+          order by employee_id, valid_from desc`,
+        [eindeutig],
+      );
+      return ergebnis.rows;
+    });
+
+    // Erst ALLE angefragten Ids anlegen, dann fuellen. Andersherum fehlte die
+    // Person ohne Satz in der Abbildung, und „gefragt, nichts vorhanden" waere
+    // von „nie gefragt" nicht zu unterscheiden.
+    const nachMitarbeiter = new Map<string, RateVersionRecord[]>();
+    for (const id of eindeutig) nachMitarbeiter.set(id, []);
+    for (const row of rows) nachMitarbeiter.get(row.employee_id)?.push(toRecord(row));
+    return nachMitarbeiter;
+  }
+
   async append(version: NewRateVersion): Promise<RateWriteResult> {
     const fingerabdruck = anfrageFingerabdruck(version);
     try {

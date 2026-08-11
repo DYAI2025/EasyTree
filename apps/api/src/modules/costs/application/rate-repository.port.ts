@@ -64,6 +64,39 @@ export interface NewRateVersion {
 
 export interface RateRepository {
   versionsFor(employeeId: string): Promise<readonly RateVersionRecord[]>;
+  /**
+   * Die Historien MEHRERER Beschaeftigter aus EINEM Lesezeitpunkt (EYT-138).
+   *
+   * ## Woher die Zusicherung kommt
+   *
+   * Aus EINER Anweisung in EINER Transaktion. PostgreSQL wertet jede Anweisung
+   * gegen genau einen MVCC-Snapshot aus, auch unter `read committed`. Ein
+   * hoeheres Isolationslevel waere weder noetig noch ausreichend: noetig erst
+   * bei zwei Anweisungen — und dort loeste es das Problem nur scheinbar, weil
+   * eine zweite Anweisung eine zweite Fehlerquelle bleibt.
+   *
+   * ## Warum nicht `versionsFor` in einer Schleife
+   *
+   * Jeder Aufruf oeffnet in der PostgreSQL-Umsetzung seine eigene Transaktion
+   * mit eigener Verbindung. Ein waehrend des Faechers committeter Satz waere
+   * fuer einen Teil der Beschaeftigten schon sichtbar und fuer den Rest noch
+   * nicht — der Snapshot mischte zwei Datenbankzustaende und widerspraeche der
+   * Zusage „unveraenderliches Dokument". Der Faecher lief ausserdem unbegrenzt
+   * gegen die Standardgroesse des Pools (10).
+   *
+   * ## Warum eine Abbildung und keine Liste
+   *
+   * Sie traegt fuer JEDE angefragte Id einen Eintrag, notfalls ein leeres Feld.
+   * „Gefragt, nichts vorhanden" und „nie gefragt" sind damit unterscheidbar;
+   * mit `undefined` waeren sie es nicht, und die Montage koennte einen
+   * Auslassungsfehler nicht von einem fehlenden Satz trennen.
+   *
+   * Doppelte Ids sind erlaubt und werden zusammengefasst — die Aufruferin
+   * soll nicht deduplizieren muessen, um eine Zusicherung zu bekommen.
+   */
+  versionsForMany(
+    employeeIds: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly RateVersionRecord[]>>;
   append(version: NewRateVersion): Promise<RateWriteResult>;
 }
 
