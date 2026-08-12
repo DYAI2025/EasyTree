@@ -44,6 +44,18 @@
  *   -> H5, H6, H5b und H12 rot.
  * - Im GET die angefragte Id in `detail` aufnehmen -> H9 rot.
  * - `WRITE_CHANNEL_REJECTED` auf 403 statt 500 abbilden -> H12 rot.
+ *
+ * Drei weitere aus der Spec-Pruefung (12.08.2026). Alle drei liefen zuerst
+ * GRUEN — die Datei mass das Verhalten nicht, obwohl es stimmte; die Zeugen
+ * `faktenaufrufe`/`subjektaufrufe` und der Fall „Rumpf UND Schluessel kaputt"
+ * sind die Nachbesserung:
+ *
+ * - `publishedPlanVersionId: "…dead"` an den Faktenport statt der Id aus dem
+ *   Rumpf -> vorher 20/20 gruen, jetzt H1 rot.
+ * - Snapshot-Repository mit fest verdrahtetem Subjekt statt `identitaet.userId`
+ *   -> vorher 20/20 gruen, jetzt H1 und H8 rot.
+ * - Rumpfpruefung vor die Idempotenzpruefung ziehen -> vorher 20/20 gruen,
+ *   jetzt H10 („Rumpf UND Schluessel") und H12 rot.
  */
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
@@ -306,6 +318,27 @@ interface Aufbau {
 interface Zeugen {
   /** Je Aufruf der Faktenfabrik ein Eintrag — daran haengt H11. */
   readonly fabrikaufrufe: { subject: string; organisation: string }[];
+  /**
+   * Je Aufruf der Snapshot-Fabrik das uebergebene Subjekt.
+   *
+   * Ohne diesen Zeugen war „Fabrik je Subjekt" fuer das Snapshot-Repository
+   * unbelegt: der Stub verwarf sein Argument, und ein fest verdrahtetes Subjekt
+   * im Controller blieb gruen (gemessen, 12.08.2026). Fuer die Faktenfabrik
+   * stand der Nachweis von Anfang an, fuer diese nicht — und genau diese Fabrik
+   * reicht das Subjekt an `PgCostSnapshotRepository` und damit an den
+   * Mandantenkontext weiter.
+   */
+  readonly subjektaufrufe: string[];
+  /**
+   * Die `planVersionId`, mit der der Faktenport WIRKLICH befragt wurde.
+   *
+   * Ohne diesen Zeugen antwortet der Stub auf jede Id gleich, und der Controller
+   * koennte eine beliebige andere Planversion einfrieren, ohne dass die
+   * HTTP-Naht es bemerkt (gemessen: `publishedPlanVersionId: "…dead"` liess alle
+   * 20 Faelle gruen). Der Use-Case-Test misst die Weiterleitung, der
+   * Controller-Hop bis EYT-139 nicht.
+   */
+  readonly faktenaufrufe: string[];
   readonly createAufrufe: NewCostSnapshot[];
   readonly readAufrufe: string[];
   readonly sammler: Sammler;
@@ -316,10 +349,16 @@ interface Gestartet {
   readonly zeugen: Zeugen;
 }
 
-function faktenPort(ergebnis: PlanCostFactsResult): PlanCostFactsPort {
+function faktenPort(
+  ergebnis: PlanCostFactsResult,
+  aufzeichnen: (planVersionId: string) => void,
+): PlanCostFactsPort {
   return {
     publishedFacts: () => Promise.resolve(ergebnis),
-    publishedFactsForVersion: () => Promise.resolve(ergebnis),
+    publishedFactsForVersion: (planVersionId) => {
+      aufzeichnen(planVersionId);
+      return Promise.resolve(ergebnis);
+    },
     publishedVersions: () => Promise.reject(new Error("in dieser Suite nicht benutzt")),
   };
 }
@@ -330,15 +369,21 @@ async function starte(aufbau: Aufbau = {}): Promise<Gestartet> {
   ];
   const zeugen: Zeugen = {
     fabrikaufrufe: [],
+    subjektaufrufe: [],
+    faktenaufrufe: [],
     createAufrufe: [],
     readAufrufe: [],
     sammler: new Sammler(),
   };
 
+  const aufzeichnen = (planVersionId: string): void => {
+    zeugen.faktenaufrufe.push(planVersionId);
+  };
   const faktenPortAlpha = faktenPort(
     aufbau.faktenAlphaErgebnis ?? { ok: true, facts: faktenAlpha() },
+    aufzeichnen,
   );
-  const faktenPortBeta = faktenPort({ ok: true, facts: faktenBeta() });
+  const faktenPortBeta = faktenPort({ ok: true, facts: faktenBeta() }, aufzeichnen);
 
   const saetze =
     aufbau.saetze ??
@@ -406,7 +451,12 @@ async function starte(aufbau: Aufbau = {}): Promise<Gestartet> {
       return organisationId === ORG_BETA ? faktenPortBeta : faktenPortAlpha;
     })
     .overrideProvider(COST_SNAPSHOT_REPOSITORY_FACTORY)
-    .useValue(() => snapshotRepository)
+    .useValue((subjectUserId: string) => {
+      // Das Argument wird AUFGEZEICHNET und nicht verworfen: sonst bliebe ein
+      // fest verdrahtetes Subjekt im Controller unbemerkt — siehe `subjektaufrufe`.
+      zeugen.subjektaufrufe.push(subjectUserId);
+      return snapshotRepository;
+    })
     .overrideProvider(COST_ACCESS_AUDIT)
     .useValue(zeugen.sammler)
     .compile();
@@ -502,6 +552,12 @@ describe("POST /kosten/snapshots (EYT-139)", () => {
     // Die Organisation der Faktenfabrik ist die AUFGELOESTE, nicht der Header:
     // hier wurde gar kein Header gesendet, und trotzdem steht ORG_ALPHA da.
     expect(gestartet.zeugen.fabrikaufrufe).toEqual([{ subject: USER, organisation: ORG_ALPHA }]);
+    // Gefragt wurde nach GENAU der Planversion aus dem Rumpf. Ohne diese Zeile
+    // koennte der Controller eine beliebige andere einfrieren — die Fakten
+    // saehen gleich aus, weil der Stub auf jede Id dasselbe antwortet.
+    expect(gestartet.zeugen.faktenaufrufe).toEqual([PLANVERSION_ANGEFRAGT]);
+    // Und das Snapshot-Repository wurde mit dem Subjekt DIESER Anfrage gebaut.
+    expect(gestartet.zeugen.subjektaufrufe).toEqual([USER]);
   });
 
   it("H2 — Retry mit gleichem Schluessel liefert dieselbe gespeicherte Wahrheit", async () => {
@@ -736,6 +792,7 @@ describe("GET /kosten/snapshots/{snapshotId} (EYT-139)", () => {
 
     const erzeugt = await postSnapshot(gestartet.app).expect(201);
     const fabrikaufrufeNachPost = gestartet.zeugen.fabrikaufrufe.length;
+    const faktenaufrufeNachPost = [...gestartet.zeugen.faktenaufrufe];
 
     const gelesen = await getSnapshot(gestartet.app).expect(200);
 
@@ -747,7 +804,13 @@ describe("GET /kosten/snapshots/{snapshotId} (EYT-139)", () => {
     // Die Faktenfabrik wird auf dem Lesepfad NIE gerufen. Was nicht gebaut
     // wird, kann auch nicht heimlich in die Antwort einfliessen.
     expect(gestartet.zeugen.fabrikaufrufe).toHaveLength(fabrikaufrufeNachPost);
+    // Und auch kein bereits gebauter Port wird noch einmal befragt.
+    expect(gestartet.zeugen.faktenaufrufe).toEqual(faktenaufrufeNachPost);
     expect(gestartet.zeugen.readAufrufe).toEqual([SNAPSHOT_ID, SNAPSHOT_ID]);
+    // Die Snapshot-Fabrik lief auf BEIDEN Routen mit dem Subjekt der Anfrage —
+    // der zweite Eintrag stammt vom GET. Ein Repository je Anfrage, nie ein
+    // Singleton mit der Identitaet der ersten.
+    expect(gestartet.zeugen.subjektaufrufe).toEqual([USER, USER]);
   });
 
   it("H9 — unbekannte, fremde und unlesbare Snapshot-Id sind ununterscheidbar", async () => {
@@ -766,10 +829,21 @@ describe("GET /kosten/snapshots/{snapshotId} (EYT-139)", () => {
       detail: LESE_DETAIL,
     };
     expect(antworten).toEqual([erwartung, erwartung, erwartung]);
-    // Und der Text nennt KEINE der drei Ids — sonst waere die Antwort ein
-    // Existenzorakel fuer alle, die Ids durchprobieren.
-    for (const id of [ID_UNBEKANNT, ID_FREMD, ID_UNLESBAR]) {
-      expect(LESE_DETAIL).not.toContain(id);
+    // Und KEINE der drei Antworten nennt eine der drei Ids — geprueft am
+    // ANTWORTRUMPF, nicht an `LESE_DETAIL`.
+    //
+    // Diese Schleife verglich bis 12.08.2026 zwei Testkonstanten miteinander und
+    // konnte durch keine Produktionsaenderung rot werden. Sie bleibt trotzdem
+    // stehen statt gestrichen zu werden, und zwar aus einem Grund, den das
+    // `toEqual` daruber nicht abdeckt: jenes friert EINEN Wortlaut ein. Wird der
+    // Text spaeter absichtlich umformuliert, zieht jemand `LESE_DETAIL` nach —
+    // und die Aussage „die Antwort nennt die angefragte Id nicht" haenge dann
+    // allein an der Sorgfalt dieser Person. Als Zusicherung ueber den Rumpf ist
+    // sie vom Wortlaut unabhaengig und wird von GM-H4 (Id in `detail`) rot.
+    for (const antwort of antworten) {
+      for (const id of [ID_UNBEKANNT, ID_FREMD, ID_UNLESBAR]) {
+        expect(String(antwort.detail)).not.toContain(id);
+      }
     }
     // Die Leseabsicht wurde dreimal wirklich ausgefuehrt.
     expect(gestartet.zeugen.readAufrufe).toEqual([ID_UNBEKANNT, ID_FREMD, ID_UNLESBAR]);
@@ -819,6 +893,28 @@ describe("Zugang zu den Snapshot-Routen (EYT-139)", () => {
     expect(typVon(antwort.body)).toBe("urn:easytree:costs:missing-idempotency-key");
     // Ohne Wiederholungsschutz kommt die Anfrage gar nicht erst in die
     // Transaktion — und beruehrt auch den Faktenport nicht.
+    expect(gestartet.zeugen.fabrikaufrufe).toEqual([]);
+    expect(gestartet.zeugen.createAufrufe).toEqual([]);
+  });
+
+  it("H10 — bei kaputtem Rumpf UND fehlendem Schluessel gewinnt der Schluessel", async () => {
+    // Der einzige Fall, der die REIHENFOLGE der beiden Vorpruefungen misst.
+    // Solange ein Fall nur je eine der beiden verletzt, ist ein Tausch der
+    // Pruefungen unsichtbar (gemessen: alle 20 Faelle blieben gruen).
+    //
+    // Die Reihenfolge ist keine Kosmetik: stuende die Rumpfpruefung vorn, meldete
+    // der Server 400 und verschwiege, dass zusaetzlich der Wiederholungsschutz
+    // fehlt. Die Aufruferin repariert den Rumpf, schickt erneut ohne Schluessel —
+    // und ein Verbindungsabriss legt dann zwei Snapshots an, von denen sich
+    // keiner loeschen laesst.
+    gestartet = await starte();
+
+    const antwort = await postSnapshot(gestartet.app, {
+      schluessel: null,
+      rumpf: { publishedPlanVersionId: "keine-uuid", worksiteId: 42 },
+    }).expect(409);
+
+    expect(typVon(antwort.body)).toBe("urn:easytree:costs:missing-idempotency-key");
     expect(gestartet.zeugen.fabrikaufrufe).toEqual([]);
     expect(gestartet.zeugen.createAufrufe).toEqual([]);
   });
@@ -942,6 +1038,21 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
     status: 400,
     type: "about:blank",
     urnErwartet: false,
+  },
+  {
+    // Beides kaputt — der fehlende Wiederholungsschutz gewinnt. Diese Zeile
+    // misst die Reihenfolge der beiden Vorpruefungen; die zwei Zeilen darueber
+    // verletzen je nur eine davon und lassen einen Tausch durchgehen.
+    name: "RUMPF_UNGUELTIG UND SCHLUESSEL FEHLT",
+    aufbau: {},
+    ausfuehren: (app) =>
+      postSnapshot(app, {
+        schluessel: null,
+        rumpf: { publishedPlanVersionId: "keine-uuid", worksiteId: 42 },
+      }),
+    status: 409,
+    type: "urn:easytree:costs:missing-idempotency-key",
+    urnErwartet: true,
   },
   {
     name: "FACTS/NO_ORGANISATION",
