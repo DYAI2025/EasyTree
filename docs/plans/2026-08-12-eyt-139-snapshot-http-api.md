@@ -23,13 +23,13 @@ Positionen gruppiert. Beträge und Dauern reisen durchgehend als `bigint` → `S
 
 ## 0. Verifizierter Ausgangsstand (gemessen 12.08.2026)
 
-| Größe | Wert |
-| --- | --- |
-| PR | `#69 — EYT-109: daily personnel cost snapshot`, **Draft**, `mergeable: MERGEABLE` |
-| Branch | `feat/eyt-109-daily-plan-cost-snapshot` |
-| Head (lokal == `origin`) | `b8a96a944363eff47418417f94605385dc44ebf0` — **entspricht exakt dem erwarteten Head, kein `HEAD_DRIFT`** |
-| Base (merge-base gegen `origin/master`) | `b44e38c6bf7e08a2996c2263309001a1304050f2` |
-| ahead/behind gegen `origin/master` | `0 behind / 44 ahead` |
+| Größe                                   | Wert                                                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| PR                                      | `#69 — EYT-109: daily personnel cost snapshot`, **Draft**, `mergeable: MERGEABLE`                        |
+| Branch                                  | `feat/eyt-109-daily-plan-cost-snapshot`                                                                  |
+| Head (lokal == `origin`)                | `b8a96a944363eff47418417f94605385dc44ebf0` — **entspricht exakt dem erwarteten Head, kein `HEAD_DRIFT`** |
+| Base (merge-base gegen `origin/master`) | `b44e38c6bf7e08a2996c2263309001a1304050f2`                                                               |
+| ahead/behind gegen `origin/master`      | `0 behind / 44 ahead`                                                                                    |
 
 Reproduktion (der erste Schritt jeder Session, siehe Task 0):
 
@@ -45,17 +45,17 @@ git rev-list --left-right --count origin/master...origin/feat/eyt-109-daily-plan
 
 ### Was bereits steht und NICHT neu gebaut wird
 
-| Baustein | Datei | Zustand |
-| --- | --- | --- |
-| Vertrag Request/Response | `packages/contracts/src/costs/schemas.ts` | `CreateCostSnapshotCommandSchema`, `CostSnapshotSchema`, `CostPositionDtoSchema`, `CostDayTotalDtoSchema` — **fertig** |
-| OpenAPI-Operationen | `packages/contracts/src/openapi/document.ts`, `packages/contracts/openapi/v1.json` | `createCostSnapshot` (201) und `getCostSnapshot` (200), je `...problemResponses` — **fertig, nicht anfassen** |
-| HTTP-Client | `packages/contracts/src/http/costs-gateway.ts` | `createSnapshot` / `snapshot`, 409 → `REJECTED` — **fertig** |
-| Autorisierung | `apps/api/src/modules/costs/application/cost-access.policy.ts` | `MembershipCostAccessPolicy`, Rechte `costs.read` / `costs.calculate` — **fertig** |
-| Zugangskette + Protokoll | `apps/api/src/modules/costs/interface/http/costs.controller.ts` (`private zugang`) | **fertig, wird erweitert** |
-| Faktenport-Fabrik | `apps/api/src/modules/costs/infrastructure/plan-cost-facts.factory.ts` | `planCostFactsFactory(queriesFor)`, Organisation **pflichtig** — **fertig, in `AppModule` registriert** |
-| Use-Case | `apps/api/src/modules/costs/application/create-cost-snapshot.use-case.ts` | `createCostSnapshot(deps, command)` mit `stage`-getaggter Fehlerunion — **fertig** |
-| Persistenz | `apps/api/src/modules/costs/infrastructure/cost-snapshot-repository.pg.ts` | `PgCostSnapshotRepository(runner, subjectUserId, idempotenz)` — **fertig, aber NIRGENDS registriert** |
-| Migration | `supabase/migrations/20260809120000_0018_cost_snapshots.sql` | **fertig — keine neue Migration in diesem Slice** |
+| Baustein                 | Datei                                                                              | Zustand                                                                                                                |
+| ------------------------ | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Vertrag Request/Response | `packages/contracts/src/costs/schemas.ts`                                          | `CreateCostSnapshotCommandSchema`, `CostSnapshotSchema`, `CostPositionDtoSchema`, `CostDayTotalDtoSchema` — **fertig** |
+| OpenAPI-Operationen      | `packages/contracts/src/openapi/document.ts`, `packages/contracts/openapi/v1.json` | `createCostSnapshot` (201) und `getCostSnapshot` (200), je `...problemResponses` — **fertig, nicht anfassen**          |
+| HTTP-Client              | `packages/contracts/src/http/costs-gateway.ts`                                     | `createSnapshot` / `snapshot`, 409 → `REJECTED` — **fertig**                                                           |
+| Autorisierung            | `apps/api/src/modules/costs/application/cost-access.policy.ts`                     | `MembershipCostAccessPolicy`, Rechte `costs.read` / `costs.calculate` — **fertig**                                     |
+| Zugangskette + Protokoll | `apps/api/src/modules/costs/interface/http/costs.controller.ts` (`private zugang`) | **fertig, wird erweitert**                                                                                             |
+| Faktenport-Fabrik        | `apps/api/src/modules/costs/infrastructure/plan-cost-facts.factory.ts`             | `planCostFactsFactory(queriesFor)`, Organisation **pflichtig** — **fertig, in `AppModule` registriert**                |
+| Use-Case                 | `apps/api/src/modules/costs/application/create-cost-snapshot.use-case.ts`          | `createCostSnapshot(deps, command)` mit `stage`-getaggter Fehlerunion — **fertig**                                     |
+| Persistenz               | `apps/api/src/modules/costs/infrastructure/cost-snapshot-repository.pg.ts`         | `PgCostSnapshotRepository(runner, subjectUserId, idempotenz)` — **fertig, aber NIRGENDS registriert**                  |
+| Migration                | `supabase/migrations/20260809120000_0018_cost_snapshots.sql`                       | **fertig — keine neue Migration in diesem Slice**                                                                      |
 
 ### Sechs gemessene Randbedingungen, die den Entwurf festlegen
 
@@ -411,7 +411,10 @@ function toPositionDto(position: StoredCostSnapshotPosition): CostPositionDto {
 function tagessummen(positions: readonly StoredCostSnapshotPosition[]): CostDayTotalDto[] {
   const summen = new Map<string, bigint>();
   for (const position of positions) {
-    summen.set(position.localDate, (summen.get(position.localDate) ?? 0n) + position.amountMinorUnits);
+    summen.set(
+      position.localDate,
+      (summen.get(position.localDate) ?? 0n) + position.amountMinorUnits,
+    );
   }
   return [...summen.entries()]
     .sort(([links], [rechts]) => (links < rechts ? -1 : links > rechts ? 1 : 0))
@@ -735,35 +738,35 @@ Bestehende Contracts sind die Autorität. **Kein Fall bleibt offen, kein `as`-Ca
 
 **`POST /api/v1/kosten/snapshots`**
 
-| Application-Problem | HTTP | `type` | Begründung |
-| --- | --- | --- | --- |
-| Identität ungültig | **401** | (AuthProblemFilter) | unverändert |
-| `ORG_CONTEXT_REQUIRED` | **400** | `…:no-organisation` | unverändert (Zugangskette) |
-| `ORG_NOT_A_MEMBER` / `PERMISSION_MISSING` (`costs.calculate`) | **403** | `…:no-organisation` | unverändert; beide antworten absichtlich gleich |
-| Idempotenzschlüssel fehlt/ungültig | **409** | `…:missing-idempotency-key` | wie `POST /kosten/stundensaetze` (`ConflictProblem`) |
-| Rumpf verletzt `CreateCostSnapshotCommandSchema` (inkl. `organisationId` im Body) | **400** | `about:blank` | `strictObject`; wie `createRateVersion` |
-| `FACTS` / `NO_ORGANISATION` | **400** | `…:no-organisation` | |
-| `FACTS` / `AMBIGUOUS_ORGANISATION` | **400** | `…:ambiguous-organisation` | auf diesem Pfad unerreichbar (die Fabrik bindet eine aufgelöste Organisation) — Zweig steht trotzdem, ein `!` behauptete eine Prüfung, die niemand ausführt |
-| `FACTS` / `PLAN_NOT_PUBLISHED` | **409** | `…:plan-not-published` | Der Aufrufer hat nichts falsch formuliert; sein Stand passt nicht zum Server — dieselbe Begründung wie bei `STALE_ACTIVE_VERSION` in EYT-108 |
-| `FACTS` / `PLAN_VERSION_NOT_FOUND` | **400** | `…:plan-version-not-found` | Der Aufrufer nannte eine Id, die es im Mandanten nicht gibt. Kein Existenzleck: „unbekannt" und „fremd" sind bereits im Port EIN Grund |
-| `ASSEMBLY` / `RATE_NOT_FOUND` | **409** | `…:rate-not-found` | `detail` nennt Person und Tag |
-| `ASSEMBLY` / `RATE_AMBIGUOUS` | **409** | `…:rate-ambiguous` | `detail` nennt Person und Tag |
-| `ASSEMBLY` / `RATE_INVALID`, `LABEL_MISSING`, `DAY_BOUNDARY_NONEXISTENT`, `DAY_BOUNDARY_AMBIGUOUS`, `TIME_ZONE_UNKNOWN`, `INTERVAL_INVALID` | **409** | je eigener URN | Serverzustand blockiert den Vorgang |
-| `WRITE` / `IDEMPOTENCY_KEY_REUSED` | **409** | `…:idempotency-key-reused` | Aufruferfehler, mit frischem Schlüssel behoben |
-| `WRITE` / `WORKSITE_NOT_IN_ORG` | **400** | `…:worksite-not-in-org` | wie `PLAN_VERSION_NOT_FOUND`: eine vom Aufrufer genannte Id ist im Mandanten nicht sichtbar |
-| `WRITE` / `WRITE_CHANNEL_REJECTED` | **500** | `…:write-channel-rejected` | Betriebsfehler, kein Rechteproblem. `detail` verweist auf den Laufzeitkanal, **nennt keine Verbindungsdaten** |
-| `READ` / `SNAPSHOT_NOT_FOUND` (nach erfolgreichem Schreiben) | **500** | `…:snapshot-not-found` | Der eben geschriebene Stand war nicht lesbar — Serverfehler, kein Aufruferfehler |
-| Erfolg | **201** | — | Rumpf = `toCostSnapshotDto(stored)` |
+| Application-Problem                                                                                                                         | HTTP    | `type`                      | Begründung                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identität ungültig                                                                                                                          | **401** | (AuthProblemFilter)         | unverändert                                                                                                                                                 |
+| `ORG_CONTEXT_REQUIRED`                                                                                                                      | **400** | `…:no-organisation`         | unverändert (Zugangskette)                                                                                                                                  |
+| `ORG_NOT_A_MEMBER` / `PERMISSION_MISSING` (`costs.calculate`)                                                                               | **403** | `…:no-organisation`         | unverändert; beide antworten absichtlich gleich                                                                                                             |
+| Idempotenzschlüssel fehlt/ungültig                                                                                                          | **409** | `…:missing-idempotency-key` | wie `POST /kosten/stundensaetze` (`ConflictProblem`)                                                                                                        |
+| Rumpf verletzt `CreateCostSnapshotCommandSchema` (inkl. `organisationId` im Body)                                                           | **400** | `about:blank`               | `strictObject`; wie `createRateVersion`                                                                                                                     |
+| `FACTS` / `NO_ORGANISATION`                                                                                                                 | **400** | `…:no-organisation`         |                                                                                                                                                             |
+| `FACTS` / `AMBIGUOUS_ORGANISATION`                                                                                                          | **400** | `…:ambiguous-organisation`  | auf diesem Pfad unerreichbar (die Fabrik bindet eine aufgelöste Organisation) — Zweig steht trotzdem, ein `!` behauptete eine Prüfung, die niemand ausführt |
+| `FACTS` / `PLAN_NOT_PUBLISHED`                                                                                                              | **409** | `…:plan-not-published`      | Der Aufrufer hat nichts falsch formuliert; sein Stand passt nicht zum Server — dieselbe Begründung wie bei `STALE_ACTIVE_VERSION` in EYT-108                |
+| `FACTS` / `PLAN_VERSION_NOT_FOUND`                                                                                                          | **400** | `…:plan-version-not-found`  | Der Aufrufer nannte eine Id, die es im Mandanten nicht gibt. Kein Existenzleck: „unbekannt" und „fremd" sind bereits im Port EIN Grund                      |
+| `ASSEMBLY` / `RATE_NOT_FOUND`                                                                                                               | **409** | `…:rate-not-found`          | `detail` nennt Person und Tag                                                                                                                               |
+| `ASSEMBLY` / `RATE_AMBIGUOUS`                                                                                                               | **409** | `…:rate-ambiguous`          | `detail` nennt Person und Tag                                                                                                                               |
+| `ASSEMBLY` / `RATE_INVALID`, `LABEL_MISSING`, `DAY_BOUNDARY_NONEXISTENT`, `DAY_BOUNDARY_AMBIGUOUS`, `TIME_ZONE_UNKNOWN`, `INTERVAL_INVALID` | **409** | je eigener URN              | Serverzustand blockiert den Vorgang                                                                                                                         |
+| `WRITE` / `IDEMPOTENCY_KEY_REUSED`                                                                                                          | **409** | `…:idempotency-key-reused`  | Aufruferfehler, mit frischem Schlüssel behoben                                                                                                              |
+| `WRITE` / `WORKSITE_NOT_IN_ORG`                                                                                                             | **400** | `…:worksite-not-in-org`     | wie `PLAN_VERSION_NOT_FOUND`: eine vom Aufrufer genannte Id ist im Mandanten nicht sichtbar                                                                 |
+| `WRITE` / `WRITE_CHANNEL_REJECTED`                                                                                                          | **500** | `…:write-channel-rejected`  | Betriebsfehler, kein Rechteproblem. `detail` verweist auf den Laufzeitkanal, **nennt keine Verbindungsdaten**                                               |
+| `READ` / `SNAPSHOT_NOT_FOUND` (nach erfolgreichem Schreiben)                                                                                | **500** | `…:snapshot-not-found`      | Der eben geschriebene Stand war nicht lesbar — Serverfehler, kein Aufruferfehler                                                                            |
+| Erfolg                                                                                                                                      | **201** | —                           | Rumpf = `toCostSnapshotDto(stored)`                                                                                                                         |
 
 **`GET /api/v1/kosten/snapshots/{snapshotId}`**
 
-| Fall | HTTP | `type` |
-| --- | --- | --- |
-| Identität ungültig | **401** | (AuthProblemFilter) |
-| Zugangskette lehnt ab (`costs.read` fehlt / fremde Organisation) | **403** | `…:no-organisation` |
-| `snapshotId` verletzt `IdSchema` | **400** | `about:blank` |
+| Fall                                                                  | HTTP    | `type`                 |
+| --------------------------------------------------------------------- | ------- | ---------------------- |
+| Identität ungültig                                                    | **401** | (AuthProblemFilter)    |
+| Zugangskette lehnt ab (`costs.read` fehlt / fremde Organisation)      | **403** | `…:no-organisation`    |
+| `snapshotId` verletzt `IdSchema`                                      | **400** | `about:blank`          |
 | `SNAPSHOT_NOT_FOUND` (unbekannt **oder** fremd **oder** nicht lesbar) | **403** | `…:snapshot-not-found` |
-| Erfolg | **200** | — |
+| Erfolg                                                                | **200** | —                      |
 
 > **Warum 403 und nicht 404 für den Lesefall.** Der Vertrag führt kein 404 — `problemResponses`
 > ist repoweit `{400,401,403,409}`. 403 ist unter den verfügbaren Codes die wahrheitsgemässe
@@ -795,25 +798,25 @@ const fabrikaufrufe: { subject: string; organisation: string }[] = [];
 
 Zu schreibende Fälle (jeder mit sprechendem `it`-Titel, weil Task 4/6 sie namentlich zitieren):
 
-| ID | `it`-Titel (verbatim) | Aussage |
-| --- | --- | --- |
-| H1 | `H1 — POST liefert 201 und den gespeicherten Snapshot` | Rumpf durch `CostSnapshotSchema.parse`; `id`, `planVersionId`, `createdAt`, `ruleVersion`, `currency`, `positions`, `days`, `totalMinorUnits` stammen aus dem gestellten Repository-Rückgabewert, **nicht** aus dem Request |
-| H2 | `H2 — Retry mit gleichem Schluessel liefert dieselbe gespeicherte Wahrheit` | zweiter POST, gleicher Key, gleiche Nutzlast → identischer Rumpf (`toEqual`), `create` genau **zweimal** gerufen, Repository meldet beide Male dieselbe `snapshotId` |
-| H3 | `H3 — gleicher Schluessel mit anderer Nutzlast wird fail-closed abgelehnt` | Repository liefert `IDEMPOTENCY_KEY_REUSED` → **409**, `type` = `…:idempotency-key-reused` |
-| H4 | `H4 — nicht veroeffentlichte Planversion schreibt keinen Snapshot` | Faktenport liefert `PLAN_NOT_PUBLISHED` → **409**, `create` **nie** gerufen |
-| H4b | `H4b — unbekannte oder fremde Planversion antwortet mit einem Grund` | `PLAN_VERSION_NOT_FOUND` → **400**, `create` nie gerufen |
-| H5 | `H5 — fehlender Satz nennt Person und Tag und erzeugt keinen 0-EUR-Snapshot` | Montage scheitert mit `RATE_NOT_FOUND` → **409**, `detail` enthält `employeeId` und `localDate`, `create` **nie** gerufen, `totalMinorUnits` kommt im Rumpf **nicht** vor |
-| H6 | `H6 — mehrdeutiger Satz erzeugt keinen Snapshot` | `RATE_AMBIGUOUS` → **409**, `create` nie gerufen |
-| H7 | `H7 — fremde Baustelle wird fail-closed abgelehnt` | `worksiteId` nicht in `facts.worksiteLabels` → **400** `…:worksite-not-in-org`, `create` nie gerufen |
-| H8 | `H8 — GET liefert den gespeicherten Stand, nicht eine Neuberechnung` | Repository-`read` liefert andere Werte als die Montage-Fakten; die Antwort zeigt die Repository-Werte. Faktenport-Fabrik wird auf dem GET-Pfad **nie** gerufen (`fabrikaufrufe.length` unverändert) |
-| H9 | `H9 — unbekannte, fremde und unlesbare Snapshot-Id sind ununterscheidbar` | drei Ids, alle → `SNAPSHOT_NOT_FOUND`; Status, `type` **und** `detail` sind byteweise gleich (`toEqual` über `{status,type,detail}`) |
-| H10a | `H10 — POST ohne costs.calculate wird abgelehnt, auch mit costs.read` | Mitgliedschaft nur mit `costs.read` → **403**, Use-Case **nie** erreicht (`create` und Faktenport nie gerufen) |
-| H10b | `H10 — GET ohne costs.read wird abgelehnt, auch mit costs.calculate` | → **403** |
-| H10c | `H10 — POST ohne Idempotenzschluessel wird abgelehnt` | → **409** `…:missing-idempotency-key`, nichts ausgeführt |
-| H10d | `H10 — organisationId im Rumpf wird abgelehnt` | `strictObject` → **400** |
-| H11 | `H11 — POST verarbeitet ausschliesslich die von der Policy aufgeloeste Organisation` | Subjekt Mitglied in A **und** B, Header wählt B → `fabrikaufrufe` enthält genau `{subject: USER, organisation: ORG_BETA}`, **kein** Aufruf mit `ORG_ALPHA`; der Snapshot enthält keine Position aus A |
-| H12a | `H12 — jede Antwort dieser Routen erfuellt ProblemDocumentSchema oder CostSnapshotSchema` | tabellengetrieben über alle obigen Fälle |
-| H12b | `H12 — beide Routen erzeugen genau ein cost.access.decision-Ereignis` | erlaubt wie abgelehnt, mit Korrelations-Id, ohne Beträge/Namen |
+| ID   | `it`-Titel (verbatim)                                                                     | Aussage                                                                                                                                                                                                                     |
+| ---- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H1   | `H1 — POST liefert 201 und den gespeicherten Snapshot`                                    | Rumpf durch `CostSnapshotSchema.parse`; `id`, `planVersionId`, `createdAt`, `ruleVersion`, `currency`, `positions`, `days`, `totalMinorUnits` stammen aus dem gestellten Repository-Rückgabewert, **nicht** aus dem Request |
+| H2   | `H2 — Retry mit gleichem Schluessel liefert dieselbe gespeicherte Wahrheit`               | zweiter POST, gleicher Key, gleiche Nutzlast → identischer Rumpf (`toEqual`), `create` genau **zweimal** gerufen, Repository meldet beide Male dieselbe `snapshotId`                                                        |
+| H3   | `H3 — gleicher Schluessel mit anderer Nutzlast wird fail-closed abgelehnt`                | Repository liefert `IDEMPOTENCY_KEY_REUSED` → **409**, `type` = `…:idempotency-key-reused`                                                                                                                                  |
+| H4   | `H4 — nicht veroeffentlichte Planversion schreibt keinen Snapshot`                        | Faktenport liefert `PLAN_NOT_PUBLISHED` → **409**, `create` **nie** gerufen                                                                                                                                                 |
+| H4b  | `H4b — unbekannte oder fremde Planversion antwortet mit einem Grund`                      | `PLAN_VERSION_NOT_FOUND` → **400**, `create` nie gerufen                                                                                                                                                                    |
+| H5   | `H5 — fehlender Satz nennt Person und Tag und erzeugt keinen 0-EUR-Snapshot`              | Montage scheitert mit `RATE_NOT_FOUND` → **409**, `detail` enthält `employeeId` und `localDate`, `create` **nie** gerufen, `totalMinorUnits` kommt im Rumpf **nicht** vor                                                   |
+| H6   | `H6 — mehrdeutiger Satz erzeugt keinen Snapshot`                                          | `RATE_AMBIGUOUS` → **409**, `create` nie gerufen                                                                                                                                                                            |
+| H7   | `H7 — fremde Baustelle wird fail-closed abgelehnt`                                        | `worksiteId` nicht in `facts.worksiteLabels` → **400** `…:worksite-not-in-org`, `create` nie gerufen                                                                                                                        |
+| H8   | `H8 — GET liefert den gespeicherten Stand, nicht eine Neuberechnung`                      | Repository-`read` liefert andere Werte als die Montage-Fakten; die Antwort zeigt die Repository-Werte. Faktenport-Fabrik wird auf dem GET-Pfad **nie** gerufen (`fabrikaufrufe.length` unverändert)                         |
+| H9   | `H9 — unbekannte, fremde und unlesbare Snapshot-Id sind ununterscheidbar`                 | drei Ids, alle → `SNAPSHOT_NOT_FOUND`; Status, `type` **und** `detail` sind byteweise gleich (`toEqual` über `{status,type,detail}`)                                                                                        |
+| H10a | `H10 — POST ohne costs.calculate wird abgelehnt, auch mit costs.read`                     | Mitgliedschaft nur mit `costs.read` → **403**, Use-Case **nie** erreicht (`create` und Faktenport nie gerufen)                                                                                                              |
+| H10b | `H10 — GET ohne costs.read wird abgelehnt, auch mit costs.calculate`                      | → **403**                                                                                                                                                                                                                   |
+| H10c | `H10 — POST ohne Idempotenzschluessel wird abgelehnt`                                     | → **409** `…:missing-idempotency-key`, nichts ausgeführt                                                                                                                                                                    |
+| H10d | `H10 — organisationId im Rumpf wird abgelehnt`                                            | `strictObject` → **400**                                                                                                                                                                                                    |
+| H11  | `H11 — POST verarbeitet ausschliesslich die von der Policy aufgeloeste Organisation`      | Subjekt Mitglied in A **und** B, Header wählt B → `fabrikaufrufe` enthält genau `{subject: USER, organisation: ORG_BETA}`, **kein** Aufruf mit `ORG_ALPHA`; der Snapshot enthält keine Position aus A                       |
+| H12a | `H12 — jede Antwort dieser Routen erfuellt ProblemDocumentSchema oder CostSnapshotSchema` | tabellengetrieben über alle obigen Fälle                                                                                                                                                                                    |
+| H12b | `H12 — beide Routen erzeugen genau ein cost.access.decision-Ereignis`                     | erlaubt wie abgelehnt, mit Korrelations-Id, ohne Beträge/Namen                                                                                                                                                              |
 
 > **Zu H5, gemessen:** `ProblemDocumentSchema` ist ein `z.strictObject`. `employeeId` und
 > `localDate` dürfen **nicht** als eigene Felder auftauchen — der Client verwürfe das ganze
@@ -1068,7 +1071,7 @@ Kommentar ist eine Falschaussage, die später als Evidenz gelesen wird.
 
 **Schritt 5: `costs/index.ts` ehrlich machen**
 
-Der Kopfkommentar behauptet heute wörtlich: „der Kosten-Snapshot hat noch KEINE Route … 
+Der Kopfkommentar behauptet heute wörtlich: „der Kosten-Snapshot hat noch KEINE Route …
 `COST_SNAPSHOT_REPOSITORY_FACTORY` ist nirgends registriert und der Endpunkt folgt in Task 13".
 Beides ist ab Task 3 falsch. Umschreiben auf den gemessenen Stand: fünf Routen unter `/kosten`,
 `COST_SNAPSHOT_REPOSITORY_FACTORY` in `AppModule` registriert, offen bleiben
@@ -1122,14 +1125,14 @@ const gate = new FailClosedGate("snapshot-http", TENANT_TESTS_MODE, "EYT-139");
 Fälle (jeder mit einer Zählung **unmittelbar nach** dem jeweiligen Versuch — Netto-Zählungen am
 Ende heben sich auf):
 
-| ID | `it`-Titel (verbatim) | Messung |
-| --- | --- | --- |
-| I1 | `H1/DB — POST schreibt genau einen Snapshot mit seinen Positionen` | `select count(*) from cost_snapshots where correlation_id = …` = 1; Positionszahl = erwartete Zahl |
-| I2 | `H2/DB — Retry mit gleichem Schluessel legt keinen zweiten Snapshot an` | nach dem zweiten POST: Zeilenzahl **weiterhin 1**, gleiche `id` im Rumpf |
-| I5 | `H5/DB — fehlender Satz hinterlaesst keine Zeile` | Satz für eine beteiligte Person löschen → POST → 409, `count(*)` = **0** |
-| I8 | `H8/DB — eine spaetere Satzversion laesst den gespeicherten Snapshot unveraendert` | Snapshot anlegen, danach über den regulären EYT-108-Ablösungspfad V2 anlegen, dann **GET** über HTTP: `id`, Positions-Ids in gleicher Reihenfolge, `rateVersionId`, `amountMinorUnits`, `totalMinorUnits`, `createdAt` **feldweise** identisch |
-| I11 | `H11/DB — ein Snapshot in Organisation B enthaelt keine Zeile aus Organisation A` | Subjekt in A **und** B, in beiden ein veröffentlichter Plan mit Einsätzen; Header wählt B → jede Position trägt eine `worksiteId`/`employeeId` aus B, `org_id` der Zeile = B |
-| I9 | `H9/DB — die Id eines fremden Snapshots antwortet wie eine unbekannte` | echten Snapshot in A anlegen, als Nutzer von B lesen → gleicher Status, `type` und `detail` wie bei einer frei erfundenen Id |
+| ID  | `it`-Titel (verbatim)                                                              | Messung                                                                                                                                                                                                                                        |
+| --- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I1  | `H1/DB — POST schreibt genau einen Snapshot mit seinen Positionen`                 | `select count(*) from cost_snapshots where correlation_id = …` = 1; Positionszahl = erwartete Zahl                                                                                                                                             |
+| I2  | `H2/DB — Retry mit gleichem Schluessel legt keinen zweiten Snapshot an`            | nach dem zweiten POST: Zeilenzahl **weiterhin 1**, gleiche `id` im Rumpf                                                                                                                                                                       |
+| I5  | `H5/DB — fehlender Satz hinterlaesst keine Zeile`                                  | Satz für eine beteiligte Person löschen → POST → 409, `count(*)` = **0**                                                                                                                                                                       |
+| I8  | `H8/DB — eine spaetere Satzversion laesst den gespeicherten Snapshot unveraendert` | Snapshot anlegen, danach über den regulären EYT-108-Ablösungspfad V2 anlegen, dann **GET** über HTTP: `id`, Positions-Ids in gleicher Reihenfolge, `rateVersionId`, `amountMinorUnits`, `totalMinorUnits`, `createdAt` **feldweise** identisch |
+| I11 | `H11/DB — ein Snapshot in Organisation B enthaelt keine Zeile aus Organisation A`  | Subjekt in A **und** B, in beiden ein veröffentlichter Plan mit Einsätzen; Header wählt B → jede Position trägt eine `worksiteId`/`employeeId` aus B, `org_id` der Zeile = B                                                                   |
+| I9  | `H9/DB — die Id eines fremden Snapshots antwortet wie eine unbekannte`             | echten Snapshot in A anlegen, als Nutzer von B lesen → gleicher Status, `type` und `detail` wie bei einer frei erfundenen Id                                                                                                                   |
 
 > **Warnung aus früheren Läufen (`planning-fixtures-collide-with-real-invariants`):** ein Entwurf je
 > Woche/Organisation, veröffentlichte Wochen sind unlöschbar, jede Suite braucht **eigene**
@@ -1156,25 +1159,25 @@ In `.github/workflows/ci.yml`, im **bestehenden** Job `db-gates`, direkt **nach*
 (ca. Zeile 404):
 
 ```yaml
-      # EYT-139: die HTTP-Naht des Snapshots gegen echtes PostgreSQL. Was hier
-      # gemessen wird, kann der Nahttest mit gestellten Repositories
-      # (test/costs/snapshot-http.test.ts) strukturell nicht: dass RLS die
-      # fremde Organisation wirklich ausblendet, dass ein Montagefehler KEINE
-      # Zeile hinterlaesst, und dass ein gelesener Snapshot eine spaetere
-      # Satzversion nicht sieht.
-      #
-      # Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer Job: ein neuer
-      # Job waere ein Status-Check, den das Ruleset nicht kennt, und beide
-      # Listen in setup-/verify-branch-protection.sh muessten mitwachsen.
-      - name: Snapshot-HTTP-Naht (fail-closed, zwei Verbindungen, EYT-139)
-        env:
-          EASYTREE_TENANT_TESTS: required
-          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
-          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
-        shell: bash
-        run: |
-          pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.integration.test.ts 2>&1 | tee /tmp/snapshot-http.log
-          bash scripts/assert-tenant-report.sh snapshot-http /tmp/snapshot-http.log
+# EYT-139: die HTTP-Naht des Snapshots gegen echtes PostgreSQL. Was hier
+# gemessen wird, kann der Nahttest mit gestellten Repositories
+# (test/costs/snapshot-http.test.ts) strukturell nicht: dass RLS die
+# fremde Organisation wirklich ausblendet, dass ein Montagefehler KEINE
+# Zeile hinterlaesst, und dass ein gelesener Snapshot eine spaetere
+# Satzversion nicht sieht.
+#
+# Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer Job: ein neuer
+# Job waere ein Status-Check, den das Ruleset nicht kennt, und beide
+# Listen in setup-/verify-branch-protection.sh muessten mitwachsen.
+- name: Snapshot-HTTP-Naht (fail-closed, zwei Verbindungen, EYT-139)
+  env:
+    EASYTREE_TENANT_TESTS: required
+    EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+    EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
+  shell: bash
+  run: |
+    pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.integration.test.ts 2>&1 | tee /tmp/snapshot-http.log
+    bash scripts/assert-tenant-report.sh snapshot-http /tmp/snapshot-http.log
 ```
 
 > **Kein neuer Job, keine Änderung an `setup-branch-protection.sh` oder
