@@ -96,14 +96,10 @@ const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
     "GET /kosten/planversionen",
     "Auswahlliste veroeffentlichter Planversionen (EYT-109). Der Vertrag steht seit dem Gateway-Schritt; die Leseroute braucht die Planungs-Leseports, die spaeter in EYT-109 entstehen.",
   ],
-  [
-    "POST /kosten/snapshots",
-    "Erzeugen des Tageskosten-Snapshots (EYT-109). Braucht Tabelle, Repository und Anwendungsfall aus den folgenden Schritten desselben Tickets — bis dahin gibt es nichts, worauf die Route schreiben koennte.",
-  ],
-  [
-    "GET /kosten/snapshots/{snapshotId}",
-    "Lesen eines gespeicherten Snapshots (EYT-109). Haengt an derselben Tabelle wie das Erzeugen.",
-  ],
+  // Die beiden Snapshot-Operationen standen hier bis EYT-139. Sie sind am
+  // `CostsController` registriert; die `stale`-Zusicherung weiter unten hat
+  // ihre Eintraege in genau dem Lauf rot gemeldet, in dem die Routen entstanden
+  // — deshalb sind sie gestrichen und nicht bloss umformuliert.
 ]);
 
 /**

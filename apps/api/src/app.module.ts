@@ -37,13 +37,16 @@ import {
 import {
   COST_ACCESS_AUDIT,
   COST_ACCESS_POLICY,
+  COST_SNAPSHOT_REPOSITORY_FACTORY,
   CostsController,
   MembershipCostAccessPolicy,
   NestCostAccessAuditLog,
   PLAN_COST_FACTS_FACTORY,
+  PgCostSnapshotRepository,
   PgRateRepository,
   RATE_REPOSITORY_FACTORY,
   planCostFactsFactory,
+  type CostSnapshotRepositoryFactory,
   type PlanCostFactsFactory,
   type RateRepositoryFactory,
 } from "./modules/costs";
@@ -133,6 +136,22 @@ import {
         idempotenz: IdempotencyStore,
       ): RateRepositoryFactory => {
         return (subjectUserId: string) => new PgRateRepository(runner, subjectUserId, idempotenz);
+      },
+    },
+    {
+      // EYT-139: Snapshot-Persistenz je Subjekt — NIE ein Singleton. Gleiche
+      // Begruendung wie beim Satzrepository: ein fest eingebautes Subjekt truege
+      // die Identitaet der ERSTEN Anfrage in alle folgenden, und ein Snapshot
+      // traegt `created_by` aus `app.current_user_id()` in ein Dokument, das
+      // sich nicht mehr korrigieren laesst (Migration 0018, kein update).
+      provide: COST_SNAPSHOT_REPOSITORY_FACTORY,
+      inject: [TENANT_QUERY_RUNNER, IDEMPOTENCY_STORE],
+      useFactory: (
+        runner: TenantQueryRunnerProvider,
+        idempotenz: IdempotencyStore,
+      ): CostSnapshotRepositoryFactory => {
+        return (subjectUserId: string) =>
+          new PgCostSnapshotRepository(runner, subjectUserId, idempotenz);
       },
     },
     {
