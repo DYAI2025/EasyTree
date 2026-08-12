@@ -38,6 +38,7 @@ export type { CostExportPort, CostExportRendering } from "./application/cost-exp
 export { COST_EXPORT_PORT } from "./application/cost-export.port";
 
 export { PlanningFactsAdapter } from "./infrastructure/planning-facts.adapter";
+export { planCostFactsFactory } from "./infrastructure/plan-cost-facts.factory";
 
 export type { CostsErrorType, RateErrorType } from "./interface/http/costs-error-type";
 export { COSTS_ERROR_TYPE, RATE_ERROR_TYPE } from "./interface/http/costs-error-type";

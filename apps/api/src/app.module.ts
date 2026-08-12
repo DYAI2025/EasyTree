@@ -40,8 +40,11 @@ import {
   CostsController,
   MembershipCostAccessPolicy,
   NestCostAccessAuditLog,
+  PLAN_COST_FACTS_FACTORY,
   PgRateRepository,
   RATE_REPOSITORY_FACTORY,
+  planCostFactsFactory,
+  type PlanCostFactsFactory,
   type RateRepositoryFactory,
 } from "./modules/costs";
 import {
@@ -181,6 +184,16 @@ import {
         return (subjectUserId: string, organisationId?: string | null) =>
           new PlanningWindowRepository(runner, subjectUserId, organisationId ?? null);
       },
+    },
+    {
+      // EYT-109: Kostenpfad -> Planungsfakten, mit dem BEREITS aufgeloesten
+      // Organisationskontext. Die Fabrik steht in `costs/infrastructure`, damit
+      // Test und Produktion dieselbe Funktion rufen — ein Closure hier waere
+      // eine zweite Baustelle, die kein Test erreichen kann.
+      provide: PLAN_COST_FACTS_FACTORY,
+      inject: [PLANNING_QUERIES_FACTORY],
+      useFactory: (queriesFor: PlanningQueriesFactory): PlanCostFactsFactory =>
+        planCostFactsFactory(queriesFor),
     },
     {
       // Schreibport, gleiche Begruendung wie oben: Subjekt je Anfrage.
