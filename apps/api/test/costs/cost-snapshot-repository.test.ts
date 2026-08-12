@@ -91,7 +91,16 @@ interface Anweisung {
 }
 
 interface RunnerOptionen {
-  /** Betroffene Zeilen des Kopf-Inserts. `0` = Kanalgrenze oder Policy. */
+  /**
+   * Antwort auf `select app.is_runtime_channel()`.
+   *
+   * Gemessen am 12.08.2026: eine verletzte `with check`-Klausel WIRFT bei
+   * INSERT (42501), sie liefert keine null Zeilen — nur `using` filtert.
+   * Deshalb fragt das Repository den Kanal, statt ihn aus einer Zeilenzahl zu
+   * erraten.
+   */
+  readonly laufzeitkanal?: boolean;
+  /** Betroffene Zeilen des Kopf-Inserts. */
   readonly kopfZeilen?: number;
   /** Betroffene Zeilen des Positions-Inserts. */
   readonly positionsZeilen?: number;
@@ -121,6 +130,10 @@ class AufzeichnenderRunner implements TenantQueryRunner {
       query: async <TRow>(sql: string, params: readonly unknown[] = []) => {
         this.anweisungen.push({ sql, params });
         const art = spur(sql);
+        if (art === "frage:kanal") {
+          const ok = this.optionen.laufzeitkanal ?? true;
+          return { rows: [{ ok }] as unknown as TRow[], rowCount: 1 };
+        }
         if (art === "insert:kopf") {
           const zeilen = this.optionen.kopfZeilen ?? 1;
           const rows = zeilen === 0 ? [] : [{ id: SNAPSHOT_ID }];
@@ -148,6 +161,7 @@ class AufzeichnenderRunner implements TenantQueryRunner {
 
 function spur(sql: string): string {
   const normalisiert = sql.replace(/\s+/g, " ").toLowerCase();
+  if (normalisiert.includes("app.is_runtime_channel")) return "frage:kanal";
   if (normalisiert.includes("insert into public.cost_snapshot_positions")) {
     return "insert:positionen";
   }
@@ -331,18 +345,23 @@ describe("PgCostSnapshotRepository.create", () => {
     expect(tage).toEqual(["2026-06-15", "2026-06-16", "2026-06-17"]);
   });
 
-  it("Fall 5 — null betroffene Kopfzeilen bedeuten WRITE_CHANNEL_REJECTED", async () => {
-    const { repository, runner } = repositoryMit({ kopfZeilen: 0 });
+  it("Fall 5 — der fremde Kanal wird VOR dem Schreiben erkannt", async () => {
+    const { repository, runner } = repositoryMit({ laufzeitkanal: false });
 
     const ergebnis = await repository.create(neuerSnapshot());
 
-    // `rowCount === 0` ist hier NICHT "nichts zu tun": die insert-Policy
-    // verlangt `app.is_runtime_channel()`. Ein Auth- oder Mandantenfehler
-    // daraus zu machen schickte die Betreiberin auf die Suche nach einem
-    // Rechteproblem, das es nicht gibt.
     expect(ergebnis).toEqual({ ok: false, problem: "WRITE_CHANNEL_REJECTED" });
-    // Und es wurden KEINE Positionen geschrieben.
-    expect(runner.spuren()).not.toContain("insert:positionen");
+    // Es wurde NICHTS geschrieben — weder Kopf noch Positionen.
+    expect(runner.spuren()).toEqual(["frage:kanal"]);
+  });
+
+  it("Fall 5b — null Kopfzeilen bei bestaetigtem Kanal WIRFT, statt einen Grund zu erfinden", async () => {
+    const { repository } = repositoryMit({ kopfZeilen: 0 });
+
+    // Nach bestaetigtem Kanal ist das unerklaerlich: ein INSERT liefert die
+    // Zeile oder wirft. `WRITE_CHANNEL_REJECTED` waere hier eine Diagnose, die
+    // gerade widerlegt wurde.
+    await expect(repository.create(neuerSnapshot())).rejects.toThrow(/Laufzeitkanal/);
   });
 
   it("Fall 6 — sperrt VOR der Replay-Abfrage und merkt sich erst nach dem Schreiben", async () => {
@@ -464,7 +483,7 @@ describe("PgCostSnapshotRepository.create", () => {
     expect(ergebnis).toEqual({ ok: true, snapshotId: SNAPSHOT_ID });
     // Eine veroeffentlichte Planversion ohne Zuweisungen ist ein gueltiger
     // Fall; die Datenbank laesst `total_minor_units >= 0` ausdruecklich zu.
-    expect(runner.spuren()).toEqual(["insert:kopf"]);
+    expect(runner.spuren()).toEqual(["frage:kanal", "insert:kopf"]);
   });
 });
 

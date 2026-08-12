@@ -488,12 +488,24 @@ describe("Kosten-Snapshot gegen echtes PostgreSQL", () => {
       const gelesen = await repositoryAuf(await neueVerbindung()).read(geschrieben.snapshotId);
       expect(gelesen).toEqual({ ok: false, problem: "SNAPSHOT_NOT_FOUND" });
 
-      // Erzeugen: die insert-Policy verlangt `costs.calculate`. Null betroffene
-      // Zeilen — dieselbe Antwort wie bei der Kanalgrenze, weil das Repository
-      // die beiden an dieser Stelle nicht unterscheiden kann.
+      // Erzeugen: die insert-Policy verlangt `costs.calculate`.
+      //
+      // Gemessen am 12.08.2026 im ersten db-gates-Lauf dieser Suite: eine
+      // verletzte `with check`-Klausel WIRFT bei INSERT (42501, "new row
+      // violates row-level security policy") — sie liefert KEINE null Zeilen.
+      // Nur eine `using`-Klausel filtert. Eine frueher hier stehende Erwartung
+      // „liefert ok: false" war deshalb falsch, und zwar nicht nur im Test: das
+      // Repository hat daraufhin die Kanalfrage vor das Schreiben gezogen,
+      // statt den Kanal aus einer Zeilenzahl zu erraten.
+      //
+      // Der Wurf ist hier das RICHTIGE Verhalten: die `CostAccessPolicy` hat
+      // `costs.calculate` bereits geprueft: kommt der Aufruf trotzdem bis
+      // hierher, widersprechen sich Anwendungsschicht und Datenbank, und das
+      // ist ein Defekt, kein fachlicher Fall.
       const zweiter = neuerSnapshot();
-      const versuch = await repositoryAuf(await neueVerbindung()).create(zweiter);
-      expect(versuch.ok).toBe(false);
+      const schreibVerbindung = await neueVerbindung();
+      const code = await fehlercode(() => repositoryAuf(schreibVerbindung).create(zweiter));
+      expect(code).toBe("42501");
       expect(await koepfeMitKorrelation(zweiter.correlationId)).toBe(0);
 
       // Und derselbe Mitgliedsstatus liest auch roh nichts — das Mitglied ist
@@ -584,6 +596,24 @@ describe("Kosten-Snapshot gegen echtes PostgreSQL", () => {
     const wer = await nichtLaufzeit.query<{ session_user: string }>("select session_user");
     expect(wer.rows[0]?.session_user).not.toBe(LAUFZEITROLLE);
   });
+
+  // -------------------------------------------------------------------------
+  dbIt(
+    "Fall 8b — das Repository selbst erkennt den fremden Kanal und schreibt nichts",
+    async () => {
+      // Fall 8 misst die Datenbank, dieser Fall das Repository auf derselben
+      // Lage: `app.is_runtime_channel()` ist hier falsch, also kommt der
+      // benannte Grund zurueck statt eines Wurfs — und es wird nichts
+      // geschrieben, nicht einmal versucht.
+      const nichtLaufzeit = await neueAdminVerbindung();
+      const eingabe = neuerSnapshot();
+
+      const ergebnis = await repositoryAuf(nichtLaufzeit).create(eingabe);
+
+      expect(ergebnis).toEqual({ ok: false, problem: "WRITE_CHANNEL_REJECTED" });
+      expect(await koepfeMitKorrelation(eingabe.correlationId)).toBe(0);
+    },
+  );
 
   // -------------------------------------------------------------------------
   dbIt(

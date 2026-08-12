@@ -195,7 +195,35 @@ export class PgCostSnapshotRepository implements CostSnapshotRepository {
         return { ok: true, snapshotId: bekannt.subjectId };
       }
 
-      // 3. Der Kopf. Ohne `id` und ohne `created_at` — es gibt kein Recht
+      // 3. Den Kanal VOR dem Schreiben feststellen.
+      //
+      //    Gemessen am 12.08.2026 im ersten db-gates-Lauf dieser Suite, und es
+      //    widerlegt eine naheliegende Annahme: eine verletzte `with check`-
+      //    Klausel liefert bei INSERT NICHT null betroffene Zeilen, sondern
+      //    WIRFT — SQLSTATE 42501, "new row violates row-level security policy".
+      //    Nur eine `using`-Klausel filtert. Die Null-Zeilen-Mechanik aus
+      //    `planning-write.repository.ts` traegt deshalb hier nicht: dort ist
+      //    das Veroeffentlichen ein UPDATE mit `using`, hier ist es ein INSERT
+      //    mit `with check`. Zwei verschiedene Mechanismen, und die Uebertragung
+      //    war falsch.
+      //
+      //    Ein `catch (42501) -> WRITE_CHANNEL_REJECTED` waere die bequeme
+      //    Reparatur und die falsche: 42501 ist mehrdeutig — fehlendes
+      //    Spaltenrecht ODER RLS-Verstoss ODER fehlendes `costs.calculate`. Der
+      //    Port sagt ausdruecklich, dieser Grund bedeute AUSSCHLIESSLICH den
+      //    falschen Kanal und duerfe nicht in einen Auth- oder Mandantenfehler
+      //    umgedeutet werden. Also wird genau das gefragt, was gemeint ist.
+      //
+      //    Ein fehlendes Recht bleibt damit ein WURF und wird nicht zu einer
+      //    fachlichen Antwort geglaettet — die `CostAccessPolicy` hat
+      //    `costs.calculate` bereits geprueft, ein Widerspruch zwischen beiden
+      //    Haelften ist ein Defekt und gehoert laut gemeldet (EYT-106 AK4).
+      const kanal = await tx.query<{ ok: boolean }>("select app.is_runtime_channel() as ok");
+      if (kanal.rows[0]?.ok !== true) {
+        return { ok: false, problem: "WRITE_CHANNEL_REJECTED" };
+      }
+
+      // 4. Der Kopf. Ohne `id` und ohne `created_at` — es gibt kein Recht
       //    darauf (Migration 0018, Abschnitt 5).
       const kopf = await tx.query<{ id: string }>(
         `insert into public.cost_snapshots
@@ -217,12 +245,14 @@ export class PgCostSnapshotRepository implements CostSnapshotRepository {
       );
       const angelegt = kopf.rows[0];
       if (angelegt === undefined) {
-        // Null betroffene Zeilen heisst hier NICHT "nichts zu tun". Die
-        // insert-Policy verlangt `app.is_runtime_channel()` — die Verbindung
-        // war nicht der Laufzeitkanal (PostgREST-Data-API oder
-        // Transaktionspooler). Das Subjekt kann korrekt angemeldet und
-        // berechtigt sein und trotzdem ueber den falschen Kanal kommen.
-        return { ok: false, problem: "WRITE_CHANNEL_REJECTED" };
+        // Nach der Kanalpruefung ist das unerklaerlich: ein INSERT liefert
+        // entweder die Zeile oder wirft. WERFEN statt einen fachlichen Grund
+        // zu erfinden — ein `WRITE_CHANNEL_REJECTED` waere hier eine Diagnose,
+        // die gerade widerlegt wurde, und schickte die Betreiberin auf die
+        // Suche nach einem Kanalproblem, das es nicht gibt.
+        throw new Error(
+          "[costs] Der Snapshot-Kopf lieferte keine Zeile, obwohl der Laufzeitkanal bestaetigt ist. Die Transaktion wird zurueckgerollt.",
+        );
       }
       const snapshotId = angelegt.id;
 
