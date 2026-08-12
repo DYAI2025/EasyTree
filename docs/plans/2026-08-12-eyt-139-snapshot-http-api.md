@@ -473,6 +473,7 @@ git commit -m "feat(costs): EYT-139 — gespeicherten Snapshot an der HTTP-Naht 
 - Ändern: `apps/api/src/modules/costs/interface/http/costs-error-type.ts`
 - Ändern: `apps/api/src/modules/costs/index.ts`
 - Test: `apps/api/test/costs/costs-problem-mapping.test.ts` (neu)
+- Test: `apps/api/test/costs/costs-problem-filter.test.ts` (neu — beide Filterzweige)
 
 **Schritt 1: Roten Test schreiben**
 
@@ -553,12 +554,21 @@ describe("Fehlercodes des Snapshot-Pfades (EYT-139)", () => {
     );
   });
 
-  it("traegt in CostsProblem Status, Titel, Typ und Text", () => {
-    const problem = new CostsProblem(400, "Ungueltige Anfrage", "urn:x", "Text");
+  it("traegt in CostsProblem Status, Titel, Typ und Text — jeden aus SEINEM Feld", () => {
+    // Vier paarweise verschiedene Werte, drei davon `string`: nur so faellt eine
+    // vertauschte Zuweisung auf. Siehe die Begruendung im Kopf von
+    // `costs-problem.ts`, warum der Konstruktor ueberhaupt ein Objekt nimmt.
+    const problem = new CostsProblem({
+      status: 400,
+      title: "Ungueltige Anfrage",
+      type: "urn:easytree:costs:probe",
+      detail: "Beschreibender Text",
+    });
     expect(problem.status).toBe(400);
     expect(problem.title).toBe("Ungueltige Anfrage");
-    expect(problem.type).toBe("urn:x");
-    expect(problem.message).toBe("Text");
+    expect(problem.type).toBe("urn:easytree:costs:probe");
+    expect(problem.message).toBe("Beschreibender Text");
+    expect(problem).toBeInstanceOf(Error);
   });
 });
 ```
@@ -595,16 +605,36 @@ Erwartet: Fehlschlag beim Modulauflösen (`costs-problem`, `SNAPSHOT_ASSEMBLY_ER
  * jede Aenderung daran das Verhalten der EYT-108-Satzrouten mitveraenderte.
  * Zwei Klassen, ein Filter: das Bestehende bleibt Byte fuer Byte, das Neue
  * bekommt seinen eigenen Weg.
+ *
+ * ## Warum ein Objekt und keine vier Positionsparameter
+ *
+ * `title`, `type` und `detail` sind alle `string`. Drei gleichtypige
+ * Positionsparameter lassen sich vertauschen, ohne dass irgendetwas auffaellt —
+ * der Compiler schweigt, und die Antwort traegt dann den URN im Titel. Das ist
+ * dieselbe Begruendung, mit der `PublishedPlanVersionsQuerySchema` in
+ * `packages/contracts/src/costs/schemas.ts` einen Wochenbereich als Objekt statt
+ * als zwei nackte Strings fuehrt, und dieselbe, die `NewCostSnapshot` kein
+ * eigenes `ordinal`-Feld gibt. Benannte Felder machen die Vertauschung
+ * unmoeglich statt bloss unwahrscheinlich.
  */
+export interface CostsProblemInput {
+  readonly status: number;
+  readonly title: string;
+  readonly type: string;
+  readonly detail: string;
+}
+
 export class CostsProblem extends Error {
-  constructor(
-    readonly status: number,
-    readonly title: string,
-    readonly type: string,
-    message: string,
-  ) {
-    super(message);
+  readonly status: number;
+  readonly title: string;
+  readonly type: string;
+
+  constructor(input: CostsProblemInput) {
+    super(input.detail);
     this.name = "CostsProblem";
+    this.status = input.status;
+    this.title = input.title;
+    this.type = input.type;
   }
 }
 ```
@@ -612,7 +642,25 @@ export class CostsProblem extends Error {
 **Schritt 4: Filter erweitern**
 
 `costs-problem.filter.ts` — `@Catch(ConflictProblem, CostsProblem)`, Verzweigung nach Typ. Der
-`ConflictProblem`-Zweig bleibt unverändert (Status 409, Titel „Konflikt"):
+`ConflictProblem`-Zweig bleibt unverändert (Status 409, Titel „Konflikt").
+
+> **Beide Zweige brauchen eine Messung, und zwar in DIESEM Commit.** Sonst schiebt der
+> Filterumbau eine ungetestete Verzweigung vor sich her, bis Task 3 sie zufällig mitnimmt. Der
+> Test treibt `CostsProblemFilter.catch` mit einem gestellten `ArgumentsHost` (Muster: ein
+> Objekt mit `switchToHttp()`, das `getResponse()`/`getRequest()` liefert; `res.status()` gibt
+> `res` zurück, `res.json()` merkt sich den Rumpf) und vergleicht den Rumpf mit **einem
+> `toEqual` über das ganze Objekt** — nicht feldweise, siehe Randbedingung 6.
+>
+> Zwei Fälle:
+>
+> 1. **Der `ConflictProblem`-Zweig ist die Regressionsprobe.** Er muss weiterhin exakt
+>    `{ type, title: "Konflikt", status: 409, detail, correlationId }` liefern. Geht er kaputt,
+>    ändert dieser Commit stillschweigend das Verhalten der EYT-108-Satzrouten.
+> 2. **Der `CostsProblem`-Zweig** muss Status und Titel aus der Ausnahme übernehmen — geprüft
+>    mit einem Status, der **nicht** 409 ist, und einem Titel, der **nicht** „Konflikt" ist.
+>    Sonst wäre der Fall von der Vorbelegung des anderen Zweigs nicht zu unterscheiden.
+>
+> Dritter Fall: fehlende `correlationId` am Request ⇒ `"unknown"`.
 
 ```ts
 @Catch(ConflictProblem, CostsProblem)
