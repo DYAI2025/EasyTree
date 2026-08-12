@@ -221,6 +221,38 @@ function organisationsAbfrage(protokoll: readonly Aufzeichnung[]): Aufzeichnung 
   return treffer[0] as Aufzeichnung;
 }
 
+/**
+ * Alle aufgezeichneten Abfragen auf EINE Tabelle.
+ *
+ * Eine leere Auswahl meldet die Hilfsfunktion selbst rot. Sonst waere jede
+ * darauf gebaute Zusicherung vacuously gruen: eine Schleife ueber null Treffer
+ * prueft nichts und faellt trotzdem nicht auf.
+ */
+function abfragenAuf(protokoll: readonly Aufzeichnung[], tabelle: string): Aufzeichnung[] {
+  const treffer = protokoll.filter((zeile) => zeile.sql.includes(`from ${tabelle}`));
+  expect(treffer, `keine Abfrage auf ${tabelle} aufgezeichnet`).not.toHaveLength(0);
+  return treffer;
+}
+
+/**
+ * Zusichern, dass eine Org-Bedingung an den RICHTIGEN Parameter gebunden ist.
+ *
+ * Nicht nur „irgendwo steht `org_id = $n`": die Attrappe filtert nach WERT und
+ * saehe eine falsche Nummer nicht — `and org_id = $1` mit `[weekKey, org.id]`
+ * verglich die Organisation mit einer Wochenkennung und lieferte still null
+ * Zeilen. Diese Pruefung liest die Nummer aus dem SQL und schaut nach, was an
+ * GENAU DIESER Stelle uebergeben wurde.
+ */
+function orgBedingungBindetAn(zeile: Aufzeichnung, erwartet: string): void {
+  const treffer = /org_id = \$(\d+)/.exec(zeile.sql);
+  expect(treffer, `keine org_id-Bedingung im SQL: ${zeile.sql}`).not.toBeNull();
+  const nummer = Number(treffer?.[1]);
+  expect(
+    zeile.params[nummer - 1],
+    `org_id haengt an $${nummer}, dort steht aber ${String(zeile.params[nummer - 1])}`,
+  ).toBe(erwartet);
+}
+
 describe("PlanningWindowRepository — Organisationsbindung (EYT-109)", () => {
   // M1
   it("liest ohne Bindung unveraendert, wenn genau eine Organisation sichtbar ist", async () => {
@@ -415,6 +447,10 @@ describe("PlanningWindowRepository — Verengung der Nutzdaten (EYT-109)", () =>
     expect(ergebnis.window.resources.employees.map((zeile) => zeile.id)).toEqual([PERSON_B]);
     expect(ergebnis.window.resources.worksites.map((zeile) => zeile.id)).toEqual([BAUSTELLE_B]);
     expect(ergebnis.window.sourceVersion).toEqual({ id: VERSION_B, state: "published" });
+    // Und die Bedingung haengt an der richtigen Parameterstelle (GM-MO-4).
+    for (const tabelle of ["public.plan_versions", "public.employees", "public.worksites"]) {
+      for (const abfrage of abfragenAuf(protokoll, tabelle)) orgBedingungBindetAn(abfrage, ORG_B);
+    }
   });
 
   // MO2
@@ -449,6 +485,11 @@ describe("PlanningWindowRepository — Verengung der Nutzdaten (EYT-109)", () =>
     expect(ergebnis.ok).toBe(true);
     if (!ergebnis.ok) return;
     expect(ergebnis.versions.map((version) => version.id)).toEqual([VERSION_B]);
+    // Die Ergebnisliste allein genuegt nicht: die Attrappe filtert nach WERT
+    // und bliebe bei einer falschen Parameternummer gruen (GM-MO-4).
+    for (const abfrage of abfragenAuf(protokoll, "public.plan_versions")) {
+      orgBedingungBindetAn(abfrage, ORG_B);
+    }
   });
 
   // MO3
@@ -478,5 +519,10 @@ describe("PlanningWindowRepository — Verengung der Nutzdaten (EYT-109)", () =>
     // Nicht `PLAN_NOT_PUBLISHED`: fuer den gebundenen Mandanten existiert die
     // Version schlicht nicht, und genau diese Ununterscheidbarkeit ist gewollt.
     expect(ergebnis.problem).toBe("PLAN_VERSION_NOT_FOUND");
+    // Die Existenzabfrage traegt die Organisation an der richtigen Stelle
+    // — hier $2, denn $1 ist die Planversion (GM-MO-4).
+    for (const abfrage of abfragenAuf(protokoll, "public.plan_versions")) {
+      orgBedingungBindetAn(abfrage, ORG_A);
+    }
   });
 });
