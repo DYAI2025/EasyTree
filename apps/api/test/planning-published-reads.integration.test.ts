@@ -98,8 +98,16 @@ const STAMMDATEN: Record<string, { employeeId: string; worksiteId: string }> = {
 /**
  * Eigene Wochen, ausserhalb aller anderen Suiten.
  *
- * Belegt sind bereits W01 und W20–W34 (planning-publish), W40/W41
- * (planning-invariants), W45–W51 (planning-write) und W32 (seed.sql).
+ * Gemessen ueber alle Suiten, die wirklich `plan_versions` anlegen: belegt sind
+ * W20–W31 und W33/W34 (planning-publish), W32 (seed.sql), W40/W41
+ * (planning-invariants) und W45–W51 (planning-write). W02/W03 belegt seit den
+ * Multi-Org-Faellen diese Suite selbst, zusaetzlich zu W10–W19.
+ *
+ * W01 ist NICHT belegt. Eine fruehere Fassung dieser Aufzaehlung nannte es;
+ * gemessen steht `2026-W01` in `planning-publish.integration.test.ts` nur in
+ * einem Kommentar zur Wochenrechnung, und `2026-W32` faellt dort umgekehrt aus
+ * dem sonst lueckenlosen Block W20–W34 heraus, weil es dem Seed gehoert.
+ *
  * Veroeffentlichte Planversionen sind laut Migration 0010 unveraenderlich UND
  * unloeschbar — der Aufraeumschritt kann sie deshalb nicht entfernen, und das
  * ist Teil der Aussage und kein Mangel. Eigene Wochen sind die Loesung.
@@ -346,6 +354,18 @@ beforeAll(async () => {
 afterAll(async () => {
   if (dbAvailable) {
     await raeumeEntwuerfe(admin).catch(() => undefined);
+    // Netz gegen einen Prozessabbruch zwischen Insert und Delete in
+    // `mitZweiterMitgliedschaft`. Der regulaere Weg raeumt die geliehene
+    // Mitgliedschaft bereits auf; ueberlebt sie den Abbruch dazwischen, misst
+    // ein spaeteres Gate desselben Jobs auf falschem Zustand — `tenant-pooling`
+    // erwartet fuer `USER_A` genau `[ORG_ALPHA]` und ginge rot. Der Ausfall
+    // waere also laut, aber am falschen Ort.
+    //
+    // Defensiv wie `raeumeEntwuerfe` daneben: ein Fehler beim Netz selbst darf
+    // die Berichtszeile und `assertOrThrow()` unten nicht verdraengen.
+    await admin
+      .query("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_ZWEITE])
+      .catch(() => undefined);
   }
   process.stdout.write(gate.reportLine());
   await Promise.all(clients.map((c) => c.end().catch(() => undefined)));
@@ -362,9 +382,10 @@ afterAll(async () => {
  * Schritte um diese Datei herum. Die Zeile lebt deshalb nur so lange wie der
  * Fall, der sie braucht, und ihr Verschwinden wird NACHGESEHEN statt angenommen.
  *
- * Bauart woertlich uebernommen aus `planning-write.integration.test.ts`
- * (`mitGeliehenerMitgliedschaft`), einschliesslich der beiden Punkte, die dort
- * teuer gelernt wurden:
+ * Bauart uebernommen aus `planning-write.integration.test.ts`
+ * (`mitGeliehenerMitgliedschaft`): Struktur und Fehlerbehandlung sind dieselben,
+ * Helfernamen, der Zaehlvergleich und das geliehene Paar unterscheiden sich.
+ * Mit uebernommen sind die beiden Punkte, die dort teuer gelernt wurden:
  *
  * - `catch` statt `finally`. Ein `throw` im `finally` verwuerfe einen bereits
  *   laufenden Fehler aus dem Fall; `no-unsafe-finally` verbietet ihn, und die
@@ -404,20 +425,43 @@ async function mitZweiterMitgliedschaft(fn: () => Promise<void>): Promise<void> 
     fehlerAusFall = [e];
   }
 
-  await admin.query("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_ZWEITE]);
-  const rest = await zaehle(admin, "select count(*) as n from public.memberships where id = $1", [
-    MITGLIEDSCHAFT_ZWEITE,
-  ]);
-  // Vorrang fuer den gefaehrlicheren Befund: ein fehlgeschlagener Fall kostet
-  // diesen Lauf, eine ueberlebende Mitgliedschaft verfaelscht spaetere
-  // Mandantengates im selben Job. `cause` haengt den urspruenglichen Fehler an,
-  // statt ihn zu verschlucken — sonst berichtete ein doppelt gescheiterter Lauf
-  // nur das Aufraeumproblem und verloere den Grund.
-  if (rest !== 0) {
+  // Auch das Aufraeumen liegt in einem eigenen `try`. Ohne das stiege ein
+  // Wurf zwischen `fn` und dem DELETE — etwa eine gestorbene
+  // Verwaltungsverbindung — als roher `DatabaseError` auf: ohne die benannte
+  // Meldung und vor allem ohne `cause`, der Fehler aus dem Fall waere verloren.
+  let aufraeumen: [unknown] | null = null;
+  try {
+    await admin.query("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_ZWEITE]);
+    const rest = await zaehle(admin, "select count(*) as n from public.memberships where id = $1", [
+      MITGLIEDSCHAFT_ZWEITE,
+    ]);
+    if (rest !== 0) {
+      aufraeumen = [
+        new Error(
+          `das delete lief fehlerfrei, die Zeile ist danach trotzdem da (count=${String(rest)}).`,
+        ),
+      ];
+    }
+  } catch (e) {
+    aufraeumen = [e];
+  }
+
+  // Vorrang fuer den gefaehrlicheren Befund, unveraendert: ein fehlgeschlagener
+  // Fall kostet diesen Lauf, eine ueberlebende Mitgliedschaft verfaelscht
+  // spaetere Mandantengates im selben Job. Verloren geht dabei keiner von beiden
+  // — gibt es beide, haengen sie als `AggregateError` an `cause`.
+  if (aufraeumen !== null) {
+    const ursache =
+      fehlerAusFall === null
+        ? aufraeumen[0]
+        : new AggregateError(
+            [aufraeumen[0], fehlerAusFall[0]],
+            "[planning-published-reads] Aufraeumen UND Fall sind gescheitert (EYT-109).",
+          );
     throw new Error(
-      "[planning-published-reads] die geliehene Mitgliedschaft ist NICHT entfernt worden — " +
-        "spaetere Mandantengates wuerden auf einem falschen Zustand messen (EYT-109).",
-      fehlerAusFall === null ? undefined : { cause: fehlerAusFall[0] },
+      "[planning-published-reads] die geliehene Mitgliedschaft ist NICHT nachweislich entfernt " +
+        "worden — spaetere Mandantengates wuerden auf einem falschen Zustand messen (EYT-109).",
+      { cause: ursache },
     );
   }
   if (fehlerAusFall !== null) throw fehlerAusFall[0];
@@ -848,9 +892,32 @@ describe("Leseoperationen fuer veroeffentlichte Staende gegen echtes PostgreSQL"
       expect(gebundenAnBeta).toContain(betaId);
       expect(gebundenAnBeta).not.toContain(alphaId);
 
-      // Und die versionsgenaue Lesung folgt derselben Bindung: die fremde
-      // Version ist unter der Gegenbindung nicht erreichbar — obwohl RLS sie
-      // dem Subjekt in diesem Moment durchliesse.
+      // Der positive Anker zum Querzugriff darunter: an BETA gebunden ist BETAs
+      // Version sehr wohl erreichbar. Ohne ihn hielte die Erwartung
+      // `PLAN_VERSION_NOT_FOUND` auch dann, wenn ein gebundenes
+      // `publishedAssignments` fuer JEDE Eingabe nichts faende.
+      //
+      // Die zugehoerige Gegenmutation ist BENANNT, nicht ausgefuehrt — diese
+      // Datei laeuft nur in db-gates: lautet die Existenzabfrage in
+      // `planning-window.repository.ts::publishedAssignments` statt
+      // `and org_id = $2` versehentlich `and org_id = $1`, findet sie nie eine
+      // Zeile, und dieser Anker wird rot.
+      const eigeneVersion = await repositoryAuf(client, USER_A, ORG_BETA).publishedAssignments(
+        betaId,
+      );
+      expect(eigeneVersion.ok, "BETAs eigene Version muss unter BETA-Bindung lesbar sein").toBe(
+        true,
+      );
+      if (eigeneVersion.ok) {
+        expect(eigeneVersion.published.planVersionId).toBe(betaId);
+        expect(eigeneVersion.published.weekKey).toBe(W_MO_BETA);
+      }
+
+      // Erst zusammen belegen die beiden Lesungen die Bindung der
+      // versionsgenauen Abfrage: DIESELBE Version ist unter BETA erreichbar und
+      // unter der Gegenbindung ALPHA nicht — obwohl RLS sie dem Subjekt in
+      // diesem Moment in beiden Faellen durchliesse. Der Querzugriff allein
+      // belegte nur, dass die Lesung der FREMDEN Version nicht folgt.
       const querzugriff = await repositoryAuf(client, USER_A, ORG_ALPHA).publishedAssignments(
         betaId,
       );
