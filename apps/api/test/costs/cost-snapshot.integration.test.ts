@@ -39,9 +39,11 @@
  * (`position.worksiteLabel` <-> `position.employeeLabel`) -> Fall 1 rot, in
  * Rundlauf UND Spalten. Denselben Tausch zusaetzlich in `zuPosition`
  * einbauen -> der Rundlauf bleibt gruen und NUR die Spaltenzusicherung faellt.
- * Beide Mutationen sind in `db-gates` AUSGEFUEHRT worden, nicht ausgedacht;
- * die Laufnummern stehen im Plan
- * `docs/plans/2026-08-12-eyt-139-snapshot-label-provenance.md`.
+ * Beide Mutationen sind in `db-gates` AUSGEFUEHRT worden, nicht ausgedacht:
+ * im Wegwerf-PR #70, der genau dafuer geoeffnet und danach ungemergt
+ * geschlossen wurde. Der erste Lauf dort belegt die Luecke — mit dem Tausch
+ * im Schreibpfad meldete `[cost-snapshot]` weiterhin
+ * `executed=11 passed=11 skipped=0`.
  */
 import { Client, DatabaseError } from "pg";
 import type { QueryResultRow } from "pg";
@@ -173,11 +175,15 @@ function repositoryAuf(client: Client, subject: string = USER_A): PgCostSnapshot
  * Die beiden Sorten teilen deshalb kein Wort, und die beiden Positionen tragen
  * VERSCHIEDENE Werte: eine je Sorte wiederholte Bezeichnung maskierte
  * zusaetzlich einen Ordnungsfehler.
+ *
+ * Und keiner der vier Werte ist ein Vorgabewert aus `position()` — sonst
+ * bliebe eine weggefallene Ueberschreibung unbemerkt, weil die Vorgabe
+ * denselben String nachliefert.
  */
-const BAUSTELLE_ERSTE = "Baustelle Alpha Nord";
-const BAUSTELLE_ZWEITE = "Baustelle Alpha Sued";
-const PERSON_ERSTE = "Anna Alpha";
-const PERSON_ZWEITE = "Bernd Beispiel";
+const BAUSTELLE_ERSTE = "Baustelle Rosenweg";
+const BAUSTELLE_ZWEITE = "Baustelle Ulmenpfad";
+const PERSON_ERSTE = "Erste Kraft";
+const PERSON_ZWEITE = "Zweite Kraft";
 
 function position(ueberschreibung: Partial<AssembledPosition> = {}): AssembledPosition {
   return {
