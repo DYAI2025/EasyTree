@@ -57,7 +57,7 @@ git rev-list --left-right --count origin/master...origin/feat/eyt-109-daily-plan
 | Persistenz | `apps/api/src/modules/costs/infrastructure/cost-snapshot-repository.pg.ts` | `PgCostSnapshotRepository(runner, subjectUserId, idempotenz)` — **fertig, aber NIRGENDS registriert** |
 | Migration | `supabase/migrations/20260809120000_0018_cost_snapshots.sql` | **fertig — keine neue Migration in diesem Slice** |
 
-### Vier gemessene Randbedingungen, die den Entwurf festlegen
+### Sechs gemessene Randbedingungen, die den Entwurf festlegen
 
 1. **Es gibt im gesamten Vertrag kein 404 und kein 5xx.** `problemResponses` in
    `packages/contracts/src/openapi/document.ts:151` ist repoweit `{400, 401, 403, 409}` und wird in
@@ -85,6 +85,24 @@ git rev-list --left-right --count origin/master...origin/feat/eyt-109-daily-plan
    `WRITE_CHANNEL_REJECTED` (die Verbindung war nicht der Laufzeitkanal) ist ein Betriebsfehler und
    kein Aufruferfehler; er wird deshalb **500** mit stabilem URN. Das ist keine Vertragsänderung —
    das Dokument zählt für **keine** Operation 5xx auf, und der Client behandelt es trotzdem.
+5. **Tests dürfen NICHT tief ins Kostenmodul greifen — auch Tests nicht.** Gemessen bei der
+   Ausführung von Task 1: ein Import auf `src/modules/costs/interface/http/…` aus
+   `apps/api/test/costs/` lässt `costs-module-boundaries.test.ts` rot werden
+   (`[costs-cross-module-public-api-only] … erlaubt ist nur apps/api/src/modules/costs/index.ts`).
+   `moduleOf` in `apps/api/test/architecture/rules.ts` vergibt nur unterhalb von
+   `apps/api/src/modules/<slug>/` einen Slug, für Testdateien also `null` — ein anderer Testort
+   hilft nicht, alle 13 Nachbartests in `test/costs/` importieren über die Modulwurzel.
+   **Jedes neue Symbol, das ein Test braucht, gehört benannt in `costs/index.ts`** — kein
+   `export *`. Innerhalb des Moduls bleiben relative Pfade richtig; der Controller macht das
+   heute schon.
+6. **Ein Vertragsschema beweist keine Herkunft.** Ebenfalls bei Task 1 gemessen: vertauscht man in
+   der Positionsabbildung zwei gleichtypige Felder (`employeeId: position.assignmentId`,
+   `employeeLabel: position.worksiteLabel`), kompiliert das (`TSC_EXIT=0`) und **jeder** Test bleibt
+   grün — `CostSnapshotSchema.safeParse` prüft Anwesenheit und Typ, nicht Herkunft. Genau davor
+   warnt der Kopfkommentar von `PublishedPlanFacts`: „ein vertauschtes Paar faende niemand — der
+   Bericht saehe vollstaendig aus und naennte die falsche Person."
+   **Regel für jeden Abbildungsschritt in diesem Slice:** ein `toEqual` über das GANZE Objekt mit
+   paarweise verschiedenen Werten, nicht drei einzelne Feldprüfungen.
 
 ### Abgrenzung
 
@@ -189,8 +207,7 @@ import { describe, expect, it } from "vitest";
 
 import { CostSnapshotSchema } from "@easytree/contracts";
 
-import { toCostSnapshotDto } from "../../src/modules/costs/interface/http/cost-snapshot.dto";
-import type { StoredCostSnapshot } from "../../src/modules/costs";
+import { toCostSnapshotDto, type StoredCostSnapshot } from "../../src/modules/costs";
 
 const SNAPSHOT = "00000000-0000-4000-8000-00000000d001";
 const ORG = "00000000-0000-4000-8000-00000000a001";
@@ -478,20 +495,21 @@ git commit -m "feat(costs): EYT-139 — gespeicherten Snapshot an der HTTP-Naht 
  */
 import { describe, expect, it } from "vitest";
 
-import {
-  SNAPSHOT_ASSEMBLY_PROBLEMS,
-  SNAPSHOT_READ_PROBLEMS,
-  SNAPSHOT_WRITE_PROBLEMS,
-  PLAN_COST_FACTS_PROBLEMS,
-} from "../../src/modules/costs";
+// AUSSCHLIESSLICH ueber die Modulwurzel — siehe die Regel unterhalb dieses
+// Blocks. Ein tiefer Pfad nach `interface/http/` faellt am Waechter
+// `costs-cross-module-public-api-only`, auch aus einem Test heraus.
 import {
   COSTS_ERROR_TYPE,
+  CostsProblem,
+  PLAN_COST_FACTS_PROBLEMS,
   RATE_ERROR_TYPE,
   SNAPSHOT_ASSEMBLY_ERROR_TYPE,
+  SNAPSHOT_ASSEMBLY_PROBLEMS,
   SNAPSHOT_READ_ERROR_TYPE,
+  SNAPSHOT_READ_PROBLEMS,
   SNAPSHOT_WRITE_ERROR_TYPE,
-} from "../../src/modules/costs/interface/http/costs-error-type";
-import { CostsProblem } from "../../src/modules/costs/interface/http/costs-problem";
+  SNAPSHOT_WRITE_PROBLEMS,
+} from "../../src/modules/costs";
 
 describe("Fehlercodes des Snapshot-Pfades (EYT-139)", () => {
   it("nennt fuer JEDEN Montagegrund einen Code", () => {
