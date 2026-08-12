@@ -28,6 +28,16 @@
  *   vertauscht (Herkunft).
  * - `employeeLabel: "Person 1"` — Quelle durch eine Konstante ersetzt
  *   (Herkunft, und nur ueber Position 2 beobachtbar).
+ * - `worksiteId`, `worksiteLabel` und `rateVersionId` je durch eine Konstante
+ *   ersetzt (Herkunft; erst beobachtbar, seit Position 2 eine zweite Baustelle
+ *   und einen zweiten Satz traegt — vorher blieb genau diese Mutation gruen).
+ *
+ * Fuer den ersten Fall, „erfuellt den Vertrag CostSnapshotSchema", gibt es
+ * bewusst KEINE: gemessen macht ihn keine Mutation des Produktivcodes exklusiv
+ * rot, weil jede solche Mutation zuerst einen der spezifischeren Faelle trifft.
+ * Seine Kraft liegt auf der anderen Achse — eine neue oder verschaerfte Regel in
+ * `packages/contracts/src/costs/schemas.ts` macht ihn rot, waehrend alle uebrigen
+ * gruen bleiben. Er bewacht die Vertragsgrenze, nicht die Abbildung.
  */
 import { describe, expect, it } from "vitest";
 
@@ -43,10 +53,27 @@ import type { StoredCostSnapshot } from "../../src/modules/costs";
 const SNAPSHOT = "00000000-0000-4000-8000-00000000d001";
 const ORG = "00000000-0000-4000-8000-00000000a001";
 const PLAN = "00000000-0000-4000-8000-00000000b001";
-const WORKSITE = "00000000-0000-4000-8000-0000005010a1";
 const EMPLOYEE_1 = "00000000-0000-4000-8000-0000004010a1";
 const EMPLOYEE_2 = "00000000-0000-4000-8000-0000004010a2";
+/**
+ * Zwei Baustellen und zwei Saetze — gemessen noetig, nicht dekorativ.
+ *
+ * Trugen alle drei Positionen dieselbe Baustelle, dasselbe Baustellenlabel und
+ * denselben Satz, war fuer genau diese drei Felder unbeobachtbar, ob sie aus
+ * ihrer Quelle stammen: eine festverdrahtete Konstante an ihrer Stelle
+ * kompilierte und liess die ganze Datei gruen. Ein konstanter Wert ist von
+ * einer korrekt gelesenen Spalte nur zu unterscheiden, wenn mindestens zwei
+ * Zeilen sich in ihr unterscheiden.
+ *
+ * Position 2 traegt deshalb Baustelle und Satz, die sonst nirgends vorkommen.
+ * Fachlich unauffaellig: ein ungefilterter Snapshot (`worksiteId: null` im
+ * Kopf) umfasst ausdruecklich mehrere Baustellen, und zwei Personen an einem
+ * Tag koennen verschiedene Stundensaetze haben.
+ */
+const WORKSITE = "00000000-0000-4000-8000-0000005010a1";
+const WORKSITE_2 = "00000000-0000-4000-8000-0000005010a2";
 const SATZ = "00000000-0000-4000-8000-0000006c5001";
+const SATZ_2 = "00000000-0000-4000-8000-0000006c5002";
 const POS_1 = "00000000-0000-4000-8000-00000000e001";
 const POS_2 = "00000000-0000-4000-8000-00000000e002";
 const POS_3 = "00000000-0000-4000-8000-00000000e003";
@@ -97,13 +124,13 @@ const GESPEICHERT: StoredCostSnapshot = {
     {
       id: POS_2,
       assignmentId: ASSIGNMENT_2,
-      worksiteId: WORKSITE,
-      worksiteLabel: "Baustelle A",
+      worksiteId: WORKSITE_2,
+      worksiteLabel: "Baustelle B",
       employeeId: EMPLOYEE_2,
       employeeLabel: "Person 2",
       localDate: "2026-08-11",
       durationMilliseconds: 14400000n,
-      rateVersionId: SATZ,
+      rateVersionId: SATZ_2,
       amountMinorUnits: 2500n,
     },
     {
@@ -188,9 +215,22 @@ describe("toCostSnapshotDto (EYT-139)", () => {
    * klein: geprueft waere, was jemand aufzuschreiben dachte, und ein Tausch
    * zwischen zwei ungeprueften Feldern bliebe unsichtbar.
    *
-   * Voraussetzung dafuer ist, dass die zehn Werte einer Position paarweise
-   * verschieden sind — siehe die benannten Konstanten oben. Traegen zwei Felder
-   * denselben Wert, ist ihr Tausch nicht beobachtbar.
+   * ## Zwei Voraussetzungen, die die Fixture liefern muss — beide gemessen
+   *
+   * ERSTENS muessen die zehn Werte EINER Position paarweise verschieden sein,
+   * sonst ist ein Tausch zwischen zwei gleichen Werten nicht beobachtbar.
+   *
+   * ZWEITENS muss jedes Feld ueber die Positionen HINWEG variieren, sonst ist
+   * eine festverdrahtete Konstante nicht von einer gelesenen Spalte zu
+   * unterscheiden. Diese zweite Bedingung war zunaechst verletzt: `worksiteId`,
+   * `worksiteLabel` und `rateVersionId` standen in allen drei Positionen gleich,
+   * und eine Konstante an ihrer Stelle liess die ganze Datei gruen — fuer sieben
+   * der zehn Felder trug dieser Fall, fuer drei nicht. Position 2 traegt deshalb
+   * jetzt eine zweite Baustelle und einen zweiten Satz.
+   *
+   * Ohne Deckung bleiben damit nur `id` und `assignmentId`, deren Verschiedenheit
+   * ueber die Positionen die Fixture ohnehin herstellt, sowie `currency` und
+   * `weekKey` — die stehen im Kopf, nicht in der Position.
    *
    * ## Warum ALLE Positionen und nicht nur `positions[0]`
    *
@@ -200,11 +240,11 @@ describe("toCostSnapshotDto (EYT-139)", () => {
    * Quelle — blieben alle sieben vorherigen Faelle gruen, und ein Vergleich nur
    * ueber `positions[0]` waere ebenfalls gruen geblieben, weil Position 1
    * zufaellig genau diesen Wert traegt. Erst Position 2 („Person 2") entlarvt
-   * sie. Die Fixture ist deshalb so gebaut, dass die drei Positionen sich in
-   * Mitarbeiter, Tag, Dauer und Betrag unterscheiden.
+   * sie. Das ist derselbe Mechanismus wie oben, eine Ebene tiefer.
    *
-   * Gemessene Gegenmutationen: der Feldtausch oben und die festverdrahtete
-   * Konstante. Beide kompilieren (`TSC_EXIT=0`) und waren vor diesem Fall gruen.
+   * Gemessene Gegenmutationen: der Feldtausch, die festverdrahtete Konstante auf
+   * `employeeLabel` und die drei Konstanten auf `worksiteId`/`worksiteLabel`/
+   * `rateVersionId`. Alle kompilieren (`TSC_EXIT=0`).
    */
   it("uebernimmt jedes Positionsfeld aus SEINER Quelle, nicht aus einer gleichtypigen Nachbarspalte", () => {
     expect(toCostSnapshotDto(GESPEICHERT).positions).toEqual([
@@ -223,13 +263,13 @@ describe("toCostSnapshotDto (EYT-139)", () => {
       {
         id: POS_2,
         assignmentId: ASSIGNMENT_2,
-        worksiteId: WORKSITE,
-        worksiteLabel: "Baustelle A",
+        worksiteId: WORKSITE_2,
+        worksiteLabel: "Baustelle B",
         employeeId: EMPLOYEE_2,
         employeeLabel: "Person 2",
         localDate: "2026-08-11",
         durationMilliseconds: "14400000",
-        rateVersionId: SATZ,
+        rateVersionId: SATZ_2,
         amountMinorUnits: "2500",
       },
       {
@@ -291,5 +331,50 @@ describe("toCostSnapshotDto (EYT-139)", () => {
     expect(leer.days).toEqual([]);
     expect(leer.positions).toEqual([]);
     expect(leer.totalMinorUnits).toBe("0");
+  });
+
+  /**
+   * Die Regelversionsnaht — der einzige `as`-Cast der Datei, hier eingefroren.
+   *
+   * ## Warum dieser Fall noetig ist
+   *
+   * Alle uebrigen Faelle fuehren `ruleVersion` mit dem Wert, den der Vertrag
+   * ohnehin als Literal verlangt. Quelle und Ziel sind dort zufaellig gleich —
+   * dass die Naht den Wert DURCHREICHT und nicht einfach das Literal
+   * hinschreibt, ist damit unbeobachtbar. Der Cast
+   * `stored.ruleVersion as CostSnapshot["ruleVersion"]` ist zur Laufzeit
+   * nichts; er behauptet nur, was hier gemessen wird.
+   *
+   * ## Warum ein abweichender Wert erlaubt sein MUSS
+   *
+   * `StoredCostSnapshot.ruleVersion` ist bewusst `string` und nicht die
+   * aktuelle Regel: „ein unter v1 entstandener Snapshot bleibt v1"
+   * (`cost-snapshot-repository.port.ts`). Eine Laufzeitpruefung waere deshalb
+   * falsch — sie liesse die Leseroute auf korrekt gespeicherte Daten mit einem
+   * Fehler antworten, sobald v2 existiert. Die Naht deutet nicht um, sie reicht
+   * durch; der Vertrag entscheidet danach allein, was heute zulaessig ist.
+   *
+   * ## Was der Fall am Tag von v2 tut
+   *
+   * Er geht ROT — und zwar genau in der zweiten Zusicherung, weil das
+   * Vertragsliteral dann zu einem `z.enum` wird und v2 annimmt. Das ist
+   * beabsichtigt: er ist der Wecker an der einen Stelle, die dann angefasst
+   * werden muss (der Cast oben faellt weg). Kein Dauerzustand, sondern eine
+   * Verabredung mit der Zukunft.
+   */
+  it("reicht eine abweichende Regelversion unveraendert durch — der Vertrag lehnt sie ab, nicht die Naht", () => {
+    const dto = toCostSnapshotDto({ ...GESPEICHERT, ruleVersion: "personnel-plan-cost-v2" });
+
+    // Bewusst ueber eine `string`-Variable: `dto.ruleVersion` ist statisch auf
+    // das v1-Literal getippt, der Laufzeitwert entkommt diesem Typ genau hier.
+    // Der Umweg macht sichtbar, dass die Aussage eine Laufzeitaussage ist.
+    const durchgereicht: string = dto.ruleVersion;
+    expect(durchgereicht).toBe("personnel-plan-cost-v2");
+
+    const geprueft = CostSnapshotSchema.safeParse(dto);
+    expect(geprueft.success).toBe(false);
+    expect(geprueft.error?.issues.map((problem) => problem.path.join("."))).toContain(
+      "ruleVersion",
+    );
   });
 });
