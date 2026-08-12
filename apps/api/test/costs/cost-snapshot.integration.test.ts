@@ -33,17 +33,32 @@
  * Riegel schuetzen, steht neben dem Verhaltensfall deshalb eine
  * `has_table_privilege`-Aussage; erst beide zusammen sagen, WELCHER Riegel hielt.
  *
- * ## Gegenmutation zur Bezeichnungs-Herkunft (EYT-139)
+ * ## Gegenmutationen zur Bezeichnungs-Herkunft (EYT-139)
  *
- * In `cost-snapshot-repository.pg.ts::create` die Parameter $5 und $7 tauschen
- * (`position.worksiteLabel` <-> `position.employeeLabel`) -> Fall 1 rot, in
- * Rundlauf UND Spalten. Denselben Tausch zusaetzlich in `zuPosition`
- * einbauen -> der Rundlauf bleibt gruen und NUR die Spaltenzusicherung faellt.
- * Beide Mutationen sind in `db-gates` AUSGEFUEHRT worden, nicht ausgedacht:
- * im Wegwerf-PR #70, der genau dafuer geoeffnet und danach ungemergt
- * geschlossen wurde. Der erste Lauf dort belegt die Luecke — mit dem Tausch
- * im Schreibpfad meldete `[cost-snapshot]` weiterhin
- * `executed=11 passed=11 skipped=0`.
+ * Alle drei sind in `db-gates` AUSGEFUEHRT worden, nicht ausgedacht — in den
+ * Wegwerf-PRs #70 und #71, die genau dafuer geoeffnet und danach ungemergt
+ * geschlossen wurden. Jede trifft eine ANDERE der drei Zusicherungen:
+ *
+ * - Nur in `create`: $5 und $7 tauschen (`position.worksiteLabel` <->
+ *   `position.employeeLabel`) -> Fall 1 rot, und zwar am RUNDLAUF
+ *   (Lauf 31645195574). Die Spaltenzusicherung kommt dabei nicht mehr dran:
+ *   vitest bricht beim ersten `expect` ab. Dass auch sie faellt, ist also
+ *   nicht gemessen, sondern folgt daraus, dass die Zeile falsch geschrieben
+ *   wurde.
+ * - In `create` UND `zuPosition`: der Rundlauf hebt den Tausch auf und bleibt
+ *   gruen, allein die SPALTENZUSICHERUNG faellt (Lauf 31645800409). Das ist
+ *   ihre Daseinsberechtigung — ohne sie waere dieser Fall unsichtbar.
+ * - Nur in `zuPosition`: die Spalten stehen richtig, die Antwort luegt. Der
+ *   RUNDLAUF faellt (Lauf 31648148074). Das ist seine Daseinsberechtigung; er
+ *   ist der einzige Waechter ueber dieser Abbildung, der DB-freie Zwilling
+ *   `cost-snapshot-repository.test.ts` prueft von einer gelesenen Zeile nur
+ *   Betrag, Dauer und Ortstag.
+ *
+ * Und der Befund, der die Reparatur ausgeloest hat: gegen den Stand VOR dieser
+ * Aenderung, also OHNE die drei Zusicherungen, meldete `[cost-snapshot]` mit
+ * dem Tausch im Schreibpfad weiterhin `executed=11 passed=11 skipped=0` — alle
+ * elf Pflichtjobs gruen, waehrend jede gespeicherte Zeile den Namen der
+ * beschaeftigten Person in `worksite_label` trug (Lauf 31644316549).
  */
 import { Client, DatabaseError } from "pg";
 import type { QueryResultRow } from "pg";
@@ -165,12 +180,13 @@ function repositoryAuf(client: Client, subject: string = USER_A): PgCostSnapshot
 /**
  * Bezeichnungen, die einander nicht vertreten koennen (EYT-139).
  *
- * `worksite_label` und `employee_label` reisen als zwei BENACHBARTE, gleich
- * getypte `text[]`-Parameter in dieselbe `insert … select … from unnest(...)`-
- * Anweisung ($5 und $7). Ein Tausch der beiden ist typkorrekt, uebersteht
- * `tsc` und verletzt keine Datenbankbedingung — beide Spalten sind
- * `text not null check (length(trim(...)) > 0)` (Migration 0018). Nur ein Test
- * kann ihn sehen.
+ * `worksite_label` und `employee_label` sind die einzigen beiden gleich
+ * getypten `text[]`-Parameter derselben `insert … select … from unnest(...)`-
+ * Anweisung ($5 und $7, getrennt nur durch `$6::uuid[]`). Ein Tausch der beiden
+ * ist typkorrekt, uebersteht `tsc` und verletzt keine Datenbankbedingung —
+ * beide Spalten sind `text not null check (length(trim(...)) > 0)`
+ * (Migration 0018). Die Ids daneben schuetzt ein mandantengebundener
+ * Fremdschluessel, diese beiden schuetzt nichts. Nur ein Test kann sie sehen.
  *
  * Die beiden Sorten teilen deshalb kein Wort, und die beiden Positionen tragen
  * VERSCHIEDENE Werte: eine je Sorte wiederholte Bezeichnung maskierte
@@ -180,10 +196,10 @@ function repositoryAuf(client: Client, subject: string = USER_A): PgCostSnapshot
  * bliebe eine weggefallene Ueberschreibung unbemerkt, weil die Vorgabe
  * denselben String nachliefert.
  */
-const BAUSTELLE_ERSTE = "Baustelle Rosenweg";
-const BAUSTELLE_ZWEITE = "Baustelle Ulmenpfad";
-const PERSON_ERSTE = "Erste Kraft";
-const PERSON_ZWEITE = "Zweite Kraft";
+const WORKSITE_LABEL_ERSTE = "Baustelle Rosenweg";
+const WORKSITE_LABEL_ZWEITE = "Baustelle Ulmenpfad";
+const EMPLOYEE_LABEL_ERSTE = "Erste Kraft";
+const EMPLOYEE_LABEL_ZWEITE = "Zweite Kraft";
 
 function position(ueberschreibung: Partial<AssembledPosition> = {}): AssembledPosition {
   return {
@@ -371,15 +387,15 @@ describe("Kosten-Snapshot gegen echtes PostgreSQL", () => {
         position({
           localDate: "2026-08-24",
           amountMinorUnits: 20_000n,
-          worksiteLabel: BAUSTELLE_ERSTE,
-          employeeLabel: PERSON_ERSTE,
+          worksiteLabel: WORKSITE_LABEL_ERSTE,
+          employeeLabel: EMPLOYEE_LABEL_ERSTE,
         }),
         position({
           localDate: "2026-08-25",
           amountMinorUnits: 10_000n,
           durationMilliseconds: 14_400_000n,
-          worksiteLabel: BAUSTELLE_ZWEITE,
-          employeeLabel: PERSON_ZWEITE,
+          worksiteLabel: WORKSITE_LABEL_ZWEITE,
+          employeeLabel: EMPLOYEE_LABEL_ZWEITE,
         }),
       ],
       totalMinorUnits: 30_000n,
@@ -425,15 +441,19 @@ describe("Kosten-Snapshot gegen echtes PostgreSQL", () => {
 
     // Herkunft beider Bezeichnungen — nicht blosse Anwesenheit (EYT-139).
     //
-    // Der Rundlauf zuerst: er faengt einen Tausch, der NUR beim Schreiben
-    // passiert.
+    // Der Rundlauf zuerst, und er ist NICHT die schwaechere Haelfte der
+    // Spaltenzusicherung: er liest durch `zuPosition`, sie liest daran vorbei.
+    // Eine Mutation allein in `zuPosition` laesst die Spalten richtig stehen
+    // und die Antwort trotzdem luegen — die faengt nur er, und keine andere
+    // Suite prueft diese Abbildung. Wer ihn als redundant streicht, verliert
+    // den einzigen Waechter ueber dem Lesepfad.
     expect(gelesen.snapshot.positions.map((p) => p.worksiteLabel)).toEqual([
-      BAUSTELLE_ERSTE,
-      BAUSTELLE_ZWEITE,
+      WORKSITE_LABEL_ERSTE,
+      WORKSITE_LABEL_ZWEITE,
     ]);
     expect(gelesen.snapshot.positions.map((p) => p.employeeLabel)).toEqual([
-      PERSON_ERSTE,
-      PERSON_ZWEITE,
+      EMPLOYEE_LABEL_ERSTE,
+      EMPLOYEE_LABEL_ZWEITE,
     ]);
 
     // Und dann die GESPEICHERTEN Spalten, ueber die Beobachterverbindung.
@@ -455,8 +475,8 @@ describe("Kosten-Snapshot gegen echtes PostgreSQL", () => {
       [geschrieben.snapshotId],
     );
     expect(gespeicherteBezeichnungen.rows).toEqual([
-      { worksite_label: BAUSTELLE_ERSTE, employee_label: PERSON_ERSTE },
-      { worksite_label: BAUSTELLE_ZWEITE, employee_label: PERSON_ZWEITE },
+      { worksite_label: WORKSITE_LABEL_ERSTE, employee_label: EMPLOYEE_LABEL_ERSTE },
+      { worksite_label: WORKSITE_LABEL_ZWEITE, employee_label: EMPLOYEE_LABEL_ZWEITE },
     ]);
   });
 
