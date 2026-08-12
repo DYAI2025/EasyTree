@@ -173,8 +173,9 @@ export type {
 } from "./application/cost-snapshot-repository.port";
 
 // EYT-109: der Snapshot-Command. Steht in der oeffentlichen Modul-API, weil ihn
-// die Verdrahtung (Task 13) und der Test von aussen brauchen — ein tiefer Pfad
-// nach `application/` faellt am Waechter `costs-cross-module-public-api-only`.
+// seit EYT-139 der `CostsController` ruft und weil der Test ihn von aussen
+// braucht — ein tiefer Pfad nach `application/` faellt am Waechter
+// `costs-cross-module-public-api-only`.
 export { createCostSnapshot } from "./application/create-cost-snapshot.use-case";
 export type {
   CreateCostSnapshotCommand,
