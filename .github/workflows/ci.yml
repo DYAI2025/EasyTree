@@ -389,6 +389,27 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/planning-published-reads.integration.test.ts 2>&1 | tee /tmp/planning-published-reads.log
           bash scripts/assert-tenant-report.sh planning-published-reads /tmp/planning-published-reads.log
+      # EYT-138: der Snapshot-Schreibweg gegen die echte Datenbank. Wieder zwei
+      # Verbindungen — das Repository auf dem Laufzeitkanal (easytree_app),
+      # Fixtures und Zaehlungen auf `postgres`. Eine Zaehlung ueber den
+      # Laufzeitkanal saehe genau das nicht, dessen Abwesenheit sie belegen soll,
+      # und scheiterte ausserdem an fehlenden Rechten.
+      #
+      # Hier entstehen die Aussagen, die der datenbankfreie Zwilling
+      # (test/costs/cost-snapshot-repository.test.ts) strukturell nicht treffen
+      # kann: echte Atomizitaet, RLS, Spaltenrechte, mandantengebundene
+      # Fremdschluessel und die Kanalgrenze aus Migration 0018. Auf der
+      # Entwicklungsmaschine laeuft kein Docker; dieser Schritt ist der einzige
+      # Ort, an dem die Suite je ausgefuehrt wird.
+      - name: Kosten-Snapshot — Persistenz, Atomizitaet, Rechte, Kanal (fail-closed, zwei Verbindungen, EYT-138)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot.integration.test.ts 2>&1 | tee /tmp/cost-snapshot.log
+          bash scripts/assert-tenant-report.sh cost-snapshot /tmp/cost-snapshot.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |
