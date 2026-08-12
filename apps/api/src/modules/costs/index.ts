@@ -143,6 +143,7 @@ export type {
 } from "./application/create-cost-snapshot.use-case";
 
 export { PgRateRepository } from "./infrastructure/rate-repository.pg";
+export { PgCostSnapshotRepository } from "./infrastructure/cost-snapshot-repository.pg";
 
 export { CostsController } from "./interface/http/costs.controller";
 export { CostsProblemFilter } from "./interface/http/costs-problem.filter";

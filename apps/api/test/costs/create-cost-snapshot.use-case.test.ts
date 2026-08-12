@@ -223,7 +223,10 @@ function zeuge(
   };
 
   return {
-    deps: { facts, rates, repository, now: () => UHRZEIT },
+    // Keine Uhr mehr: `created_at` entsteht in der Datenbank (Migration 0018
+    // erteilt kein insert-Recht auf die Spalte), also hat der Use-Case nichts
+    // zu takten (EYT-138).
+    deps: { facts, rates, repository },
     createAufrufe,
     readAufrufe,
     versionsForAufrufe,
@@ -415,11 +418,21 @@ describe("createCostSnapshot", () => {
     expect(ergebnis.ok).toBe(true);
   });
 
-  it("Fall 9 — createdAt ist der injizierte Zeitpunkt, nicht die Systemuhr", async () => {
+  it("Fall 9 — der Schreibvorgang gibt KEINEN Erstellungszeitpunkt mit (EYT-138)", async () => {
     const z = zeuge();
     await createCostSnapshot(z.deps, kommando());
 
-    expect(z.createAufrufe[0]?.createdAt).toBe(UHRZEIT);
+    // Migration 0018 erteilt kein insert-Recht auf `created_at`; der
+    // Serverdefault `now()` ist die einzige Quelle. Ein Feld in der Nutzlast
+    // waere eine Zusage, die die Datenbank mit 42501 ablehnt.
+    //
+    // Auf dem SCHLUESSEL geprueft, nicht auf `undefined`: mit
+    // `exactOptionalPropertyTypes` waere ein `createdAt: undefined` ein
+    // Typfehler, aber ein `as`-Cast irgendwo darueber koennte ihn einschmuggeln.
+    // `in` sieht auch den eingeschmuggelten.
+    const geschrieben = z.createAufrufe[0];
+    expect(geschrieben).toBeDefined();
+    expect(Object.keys(geschrieben ?? {})).not.toContain("createdAt");
   });
 
   it.each([["IDEMPOTENCY_KEY_REUSED"], ["WRITE_CHANNEL_REJECTED"]] as const)(

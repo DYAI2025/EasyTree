@@ -146,14 +146,23 @@ export interface NewCostSnapshot {
    */
   readonly totalMinorUnits: bigint;
   /**
-   * Erstellungszeitpunkt des Kopfes.
+   * KEIN `createdAt`, und das ist gemessen statt entschieden (EYT-138).
    *
-   * Reist herein statt aus `now()` zu entstehen (Plan Session B, „Task 10"):
-   * der Use-Case bekommt seine Uhr als Abhaengigkeit und ist damit ohne
-   * Zeitmanipulation testbar. Der Default `now()` der Migration bleibt als
-   * Schutz des direkten Schreibwegs bestehen; auf diesem Pfad feuert er nicht.
+   * Migration `0018` erteilt `insert` SPALTENWEISE, und `created_at` steht
+   * nicht in der Liste — der Serverdefault `now()` ist die einzige Quelle. Der
+   * Kopfkommentar der Migration sagt das ausdruecklich: „die Serverdefaults
+   * (id, created_at) bleiben ausserhalb der Reichweite des Clients."
+   *
+   * Eine frueherer Fassung dieses Ports fuehrte hier ein Feld und behauptete,
+   * der Default „feuere auf diesem Pfad nicht". Das ist nicht ausfuehrbar: ein
+   * Repository, das die Spalte mitgibt, scheitert mit 42501, und eines, das den
+   * Wert stillschweigend verwirft, machte die injizierte Uhr zur Dekoration.
+   *
+   * Erzeuger und Erzeugungszeitpunkt sind beide Datenbanktatsachen —
+   * `created_by` entsteht aus `app.current_user_id()`, `created_at` aus dem
+   * Default. Der gespeicherte Wert steht in {@link StoredCostSnapshot.createdAt}
+   * und kommt ausschliesslich von dort.
    */
-  readonly createdAt: Date;
   readonly correlationId: string;
   /**
    * Der Wiederholungsschluessel des Aufrufers.

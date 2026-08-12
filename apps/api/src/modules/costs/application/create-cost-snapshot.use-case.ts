@@ -28,7 +28,7 @@
  *
  * ## Was hier bewusst NICHT steht
  *
- * Keine Uhr (`now` reist als Abhaengigkeit herein), keine Id-Erzeugung, keine
+ * Keine Uhr, keine Id-Erzeugung, keine
  * Tagessummen (`days` entsteht an der HTTP-Naht, Task 13), keine Zod-Pruefung,
  * keine Autorisierung, kein Audit, kein `subjectUserId` — die uebergebenen Ports
  * sind bereits an das Subjekt der Anfrage gebunden (Factory-Muster).
@@ -89,14 +89,6 @@ export interface CreateCostSnapshotDependencies {
   readonly facts: PlanCostFactsPort;
   readonly rates: RateRepository;
   readonly repository: CostSnapshotRepository;
-  /**
-   * Die Uhr als kleinste moegliche Abhaengigkeit.
-   *
-   * Kein globaler Clock-Dienst: ein `now: () => Date` ist im Test ein Literal
-   * und in der Verdrahtung ein Einzeiler. Ein `new Date()` im Rumpf machte den
-   * Erstellungszeitpunkt unpruefbar.
-   */
-  readonly now: () => Date;
 }
 
 /**
@@ -219,6 +211,10 @@ export async function createCostSnapshot(
   //    `weekKey` und `timeZone` kommen aus den gelesenen Fakten, nicht aus dem
   //    Kommando; `ruleVersion` aus der kanonischen Konstante, nicht aus
   //    `positions[0]` — den gibt es bei leerer Liste nicht.
+  //
+  //    KEIN `createdAt`: Migration 0018 erteilt kein insert-Recht auf die
+  //    Spalte, der Serverdefault `now()` ist die einzige Quelle. Deshalb hat
+  //    dieser Use-Case auch keine Uhr mehr — sie haette nichts zu tun (EYT-138).
   const schreiben = await deps.repository.create({
     organisationId: command.organisationId,
     planVersionId: facts.planVersionId,
@@ -228,7 +224,6 @@ export async function createCostSnapshot(
     currency: "EUR",
     ruleVersion: COST_RULE_VERSION,
     totalMinorUnits,
-    createdAt: deps.now(),
     correlationId: command.correlationId,
     idempotencyKey: command.idempotencyKey,
     positions: montage.positions,
