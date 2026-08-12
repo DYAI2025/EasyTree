@@ -32,6 +32,16 @@
  * `42501` ist mehrdeutig — fehlendes Spaltenrecht ODER RLS-Verstoss. Wo zwei
  * Riegel schuetzen, steht neben dem Verhaltensfall deshalb eine
  * `has_table_privilege`-Aussage; erst beide zusammen sagen, WELCHER Riegel hielt.
+ *
+ * ## Gegenmutation zur Bezeichnungs-Herkunft (EYT-139)
+ *
+ * In `cost-snapshot-repository.pg.ts::create` die Parameter $5 und $7 tauschen
+ * (`position.worksiteLabel` <-> `position.employeeLabel`) -> Fall 1 rot, in
+ * Rundlauf UND Spalten. Denselben Tausch zusaetzlich in `zuPosition`
+ * einbauen -> der Rundlauf bleibt gruen und NUR die Spaltenzusicherung faellt.
+ * Beide Mutationen sind in `db-gates` AUSGEFUEHRT worden, nicht ausgedacht;
+ * die Laufnummern stehen im Plan
+ * `docs/plans/2026-08-12-eyt-139-snapshot-label-provenance.md`.
  */
 import { Client, DatabaseError } from "pg";
 import type { QueryResultRow } from "pg";
@@ -149,6 +159,25 @@ async function neueAdminVerbindung(): Promise<Client> {
 function repositoryAuf(client: Client, subject: string = USER_A): PgCostSnapshotRepository {
   return new PgCostSnapshotRepository(runnerAuf(client), subject, new PgIdempotencyStore());
 }
+
+/**
+ * Bezeichnungen, die einander nicht vertreten koennen (EYT-139).
+ *
+ * `worksite_label` und `employee_label` reisen als zwei BENACHBARTE, gleich
+ * getypte `text[]`-Parameter in dieselbe `insert … select … from unnest(...)`-
+ * Anweisung ($5 und $7). Ein Tausch der beiden ist typkorrekt, uebersteht
+ * `tsc` und verletzt keine Datenbankbedingung — beide Spalten sind
+ * `text not null check (length(trim(...)) > 0)` (Migration 0018). Nur ein Test
+ * kann ihn sehen.
+ *
+ * Die beiden Sorten teilen deshalb kein Wort, und die beiden Positionen tragen
+ * VERSCHIEDENE Werte: eine je Sorte wiederholte Bezeichnung maskierte
+ * zusaetzlich einen Ordnungsfehler.
+ */
+const BAUSTELLE_ERSTE = "Baustelle Alpha Nord";
+const BAUSTELLE_ZWEITE = "Baustelle Alpha Sued";
+const PERSON_ERSTE = "Anna Alpha";
+const PERSON_ZWEITE = "Bernd Beispiel";
 
 function position(ueberschreibung: Partial<AssembledPosition> = {}): AssembledPosition {
   return {
@@ -333,11 +362,18 @@ describe("Kosten-Snapshot gegen echtes PostgreSQL", () => {
     const client = await neueVerbindung();
     const eingabe = neuerSnapshot({
       positions: [
-        position({ localDate: "2026-08-24", amountMinorUnits: 20_000n }),
+        position({
+          localDate: "2026-08-24",
+          amountMinorUnits: 20_000n,
+          worksiteLabel: BAUSTELLE_ERSTE,
+          employeeLabel: PERSON_ERSTE,
+        }),
         position({
           localDate: "2026-08-25",
           amountMinorUnits: 10_000n,
           durationMilliseconds: 14_400_000n,
+          worksiteLabel: BAUSTELLE_ZWEITE,
+          employeeLabel: PERSON_ZWEITE,
         }),
       ],
       totalMinorUnits: 30_000n,
@@ -380,6 +416,42 @@ describe("Kosten-Snapshot gegen echtes PostgreSQL", () => {
     expect(gelesen.snapshot.positions[0]?.rateVersionId).toBe(SATZ_ALPHA_1);
     // Die Ids der Positionen entstehen in der Datenbank.
     expect(gelesen.snapshot.positions.every((p) => p.id.length === 36)).toBe(true);
+
+    // Herkunft beider Bezeichnungen — nicht blosse Anwesenheit (EYT-139).
+    //
+    // Der Rundlauf zuerst: er faengt einen Tausch, der NUR beim Schreiben
+    // passiert.
+    expect(gelesen.snapshot.positions.map((p) => p.worksiteLabel)).toEqual([
+      BAUSTELLE_ERSTE,
+      BAUSTELLE_ZWEITE,
+    ]);
+    expect(gelesen.snapshot.positions.map((p) => p.employeeLabel)).toEqual([
+      PERSON_ERSTE,
+      PERSON_ZWEITE,
+    ]);
+
+    // Und dann die GESPEICHERTEN Spalten, ueber die Beobachterverbindung.
+    //
+    // Diese Zusicherung ist der eigentliche Herkunftsbeweis: ein Tausch, der in
+    // `create` UND in `zuPosition` gleich falsch ist, hebt sich im Rundlauf auf
+    // — zurueck kaeme das Richtige, waehrend in der Tabelle das Vertauschte
+    // steht. Ein Snapshot laesst sich weder aendern noch loeschen (Migration
+    // 0018 erteilt kein update- und kein delete-Grant); was hier falsch liegt,
+    // bleibt falsch und wandert so in den Export (EYT-110).
+    const gespeicherteBezeichnungen = await admin.query<{
+      worksite_label: string;
+      employee_label: string;
+    }>(
+      `select worksite_label, employee_label
+         from public.cost_snapshot_positions
+        where snapshot_id = $1
+        order by ordinal`,
+      [geschrieben.snapshotId],
+    );
+    expect(gespeicherteBezeichnungen.rows).toEqual([
+      { worksite_label: BAUSTELLE_ERSTE, employee_label: PERSON_ERSTE },
+      { worksite_label: BAUSTELLE_ZWEITE, employee_label: PERSON_ZWEITE },
+    ]);
   });
 
   // -------------------------------------------------------------------------
