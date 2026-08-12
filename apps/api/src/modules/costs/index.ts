@@ -170,6 +170,12 @@ export type {
 export { PgRateRepository } from "./infrastructure/rate-repository.pg";
 export { PgCostSnapshotRepository } from "./infrastructure/cost-snapshot-repository.pg";
 
+// EYT-139: die HTTP-Naht des Snapshots — gespeicherter Stand -> Transportform,
+// die einzige Stelle, an der `days` entsteht. Sie steht hier, weil ihr Test sie
+// von aussen braucht; ein tiefer Pfad nach `interface/http/` faellt am Waechter
+// `costs-cross-module-public-api-only` (gemessen: eine Verletzung, EYT-139).
+export { toCostSnapshotDto } from "./interface/http/cost-snapshot.dto";
+
 export { CostsController } from "./interface/http/costs.controller";
 export { CostsProblemFilter } from "./interface/http/costs-problem.filter";
 export { ConflictProblem } from "./interface/http/conflict-problem";
