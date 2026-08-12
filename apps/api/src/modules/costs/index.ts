@@ -37,7 +37,14 @@ export {
 export type { CostExportPort, CostExportRendering } from "./application/cost-export.port";
 export { COST_EXPORT_PORT } from "./application/cost-export.port";
 
-export { PlanningFactsAdapter } from "./infrastructure/planning-facts.adapter";
+// `PlanningFactsAdapter` steht bewusst NICHT hier (EYT-109). Er hat genau eine
+// Konstruktionsstelle, `plan-cost-facts.factory.ts`, und dort ist die
+// Organisation pflichtig. Oeffentlich waere er eine zweite Tuer mit einstelligem
+// Konstruktor: `new PlanningFactsAdapter(queriesFor(subjectUserId))` kompiliert,
+// verliert die Organisation still und faellt erst als `AMBIGUOUS_ORGANISATION`
+// beim Mehr-Organisations-Benutzer auf. Ohne diesen Export gibt es ausserhalb
+// des Moduls keinen legalen Weg mehr an der Fabrik vorbei — der Waechter
+// `costs-cross-module-public-api-only` verbietet tiefe Pfade, auch aus Tests.
 export { planCostFactsFactory } from "./infrastructure/plan-cost-facts.factory";
 
 export type { CostsErrorType, RateErrorType } from "./interface/http/costs-error-type";

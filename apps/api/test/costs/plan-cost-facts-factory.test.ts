@@ -1,6 +1,6 @@
 /**
  * Weitergabe des serverseitig aufgeloesten Organisationskontexts vom Kostenpfad
- * an die Planungsfakten (EYT-109).
+ * an die Planungsfakten (EYT-109, M6).
  *
  * ## Warum zwei Faelle
  *
@@ -20,8 +20,10 @@ import { DATABASE_PING, type DatabasePing } from "../../src/health/readiness";
 // `costs-cross-module-public-api-only` prueft die Modulgrenze in BEIDE
 // Richtungen und laesst auch Testdateien nur hier hinein. Der Nachweis
 // verliert nichts — `index.ts` re-exportiert dieselbe Bindung aus derselben
-// Datei, und `AppModule` importiert sie ueber genau diesen Pfad. Test und
-// Produktion rufen damit nachweislich dieselbe Funktion.
+// Datei, und `AppModule` importiert sie ueber genau diesen Pfad. Gemessen ist
+// damit VERHALTEN, nicht Funktionsidentitaet: ein verhaltensgleiches Closure in
+// der Wurzel bliebe gruen. Das ist die erreichbare Aussage — ein Spion auf den
+// Re-Export scheitert am nicht-konfigurierbaren Getter, den SWC emittiert.
 import {
   PLAN_COST_FACTS_FACTORY,
   planCostFactsFactory,
@@ -34,6 +36,7 @@ import {
 } from "../../src/modules/planning";
 
 const USER = "00000000-0000-4000-8000-00000000aaa1";
+const ORG_A = "00000000-0000-4000-8000-0000000000a1";
 const ORG_B = "00000000-0000-4000-8000-0000000000b2";
 
 interface Aufruf {
@@ -68,8 +71,9 @@ describe("planCostFactsFactory — Organisationsweitergabe (EYT-109)", () => {
     const aufrufe: Aufruf[] = [];
     const port = planCostFactsFactory(spionierendeFabrik(aufrufe))(USER, ORG_B);
 
-    // Der Bau allein genuegt nicht als Nachweis — erst der Aufruf beweist, dass
-    // der gebaute Port auch der ist, der benutzt wird.
+    // Der Aufruf prueft nicht die Weitergabe — die steht schon nach dem Bau im
+    // Protokoll. Er schliesst die FEHLWEGE aus: nimmt der Port `planningWindow`
+    // oder `publishedAssignments`, wirft die Attrappe.
     const ergebnis = await port.publishedVersions("2026-W02", "2026-W03");
     expect(ergebnis.ok).toBe(true);
 
@@ -94,5 +98,21 @@ describe("planCostFactsFactory — Organisationsweitergabe (EYT-109)", () => {
     expect(aufrufe[0]?.organisationId).toBe(ORG_B);
 
     await moduleRef.close();
+  });
+
+  it("baut je Subjekt und Organisation einen EIGENEN Port", async () => {
+    const aufrufe: Aufruf[] = [];
+    const baue = planCostFactsFactory(spionierendeFabrik(aufrufe));
+
+    const ersterPort = baue(USER, ORG_A);
+    const zweiterPort = baue(USER, ORG_B);
+
+    // Der Kern: kein zwischengespeicherter Port. Truege die Fabrik den ersten
+    // Bau weiter, reichte sie die Organisation der ERSTEN Anfrage an alle
+    // folgenden — genau der Fehler, vor dem planning-queries.factory.ts warnt.
+    expect(zweiterPort).not.toBe(ersterPort);
+    expect(aufrufe).toHaveLength(2);
+    expect(aufrufe[0]?.organisationId).toBe(ORG_A);
+    expect(aufrufe[1]?.organisationId).toBe(ORG_B);
   });
 });

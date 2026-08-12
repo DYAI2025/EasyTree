@@ -152,5 +152,11 @@ export type PlanCostFactsFactory = (
   organisationId: string,
 ) => PlanCostFactsPort;
 
-/** DI-Token der Fabrik. `PLAN_COST_FACTS` bleibt das Token des fertigen Ports. */
+/**
+ * DI-Token der Fabrik — das einzige, das `AppModule` registriert (EYT-109).
+ *
+ * `PLAN_COST_FACTS` daneben ist heute unbenutzt: es gibt keinen fertigen Port
+ * je Prozess, weil es keinen geben DARF. Wer den Port braucht, injiziert diese
+ * Fabrik und ruft sie je Anfrage.
+ */
 export const PLAN_COST_FACTS_FACTORY = "PLAN_COST_FACTS_FACTORY";

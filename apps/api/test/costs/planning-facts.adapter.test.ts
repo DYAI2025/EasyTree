@@ -6,6 +6,13 @@
  * es kann Antworten liefern, die eine echte Datenbank nur unter Aufwand
  * herstellt (Entwurf ueber veroeffentlichter Version), und es kann beweisen,
  * WELCHE Methode der Adapter benutzt hat.
+ *
+ * Der Adapter wird hier ueber `planCostFactsFactory` gebaut, weil die Klasse
+ * nicht mehr oeffentlich ist: sie hat genau eine Konstruktionsstelle, und ein
+ * tiefer Pfad an ihr vorbei faellt am Waechter
+ * `costs-cross-module-public-api-only`. An den Aussagen der Faelle aendert das
+ * nichts — sie messen weiterhin die Abbildung des Adapters, nur ueber die
+ * einzige zulaessige Konstruktionsstelle.
  */
 import { describe, expect, it } from "vitest";
 
@@ -13,7 +20,7 @@ import { unsafeIdentifier } from "@easytree/domain";
 import type { PlanVersionId } from "@easytree/domain";
 
 // Ausschliesslich ueber die oeffentlichen Modul-APIs, wie die Nachbartests.
-import { PlanningFactsAdapter } from "../../src/modules/costs";
+import { planCostFactsFactory } from "../../src/modules/costs";
 import type { PlanCostFactsProblem } from "../../src/modules/costs";
 import type {
   PlanningQueries,
@@ -29,6 +36,13 @@ const BERND = "77777777-7777-4777-8777-777777777777";
 const NORD = "33333333-3333-4333-8333-333333333333";
 const SUED = "88888888-8888-4888-8888-888888888888";
 const EINSATZ_ID = "11111111-1111-4111-8111-111111111111";
+
+// Subjekt und Organisation der Fabrik. Beide sind hier ohne Aussage: die
+// gestellte Planungsfabrik ignoriert sie, weil dieser Test die ABBILDUNG des
+// Adapters misst und nicht die Weitergabe des Kontexts — die steht in
+// `plan-cost-facts-factory.test.ts`.
+const USER = "00000000-0000-4000-8000-00000000aaa1";
+const ORG = "00000000-0000-4000-8000-0000000000b2";
 
 const VEROEFFENTLICHT_AM = new Date("2026-06-10T09:15:00.000Z");
 
@@ -99,9 +113,9 @@ function abgelehnt(problem: PublishedReadProblem): PublishedAssignmentsResult {
 
 describe("PlanningFactsAdapter — publishedFactsForVersion (EYT-109)", () => {
   it("reicht PLAN_NOT_PUBLISHED unveraendert durch", async () => {
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({ publishedAssignments: () => Promise.resolve(abgelehnt("PLAN_NOT_PUBLISHED")) }),
-    );
+    )(USER, ORG);
 
     const ergebnis = await adapter.publishedFactsForVersion(VERSION_ID);
 
@@ -114,9 +128,9 @@ describe("PlanningFactsAdapter — publishedFactsForVersion (EYT-109)", () => {
   });
 
   it("reicht PLAN_VERSION_NOT_FOUND unveraendert durch, ohne Existenzaussage", async () => {
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({ publishedAssignments: () => Promise.resolve(abgelehnt("PLAN_VERSION_NOT_FOUND")) }),
-    );
+    )(USER, ORG);
 
     const ergebnis = await adapter.publishedFactsForVersion(VERSION_ID);
 
@@ -124,7 +138,7 @@ describe("PlanningFactsAdapter — publishedFactsForVersion (EYT-109)", () => {
   });
 
   it("uebernimmt Version, Woche, Zone und Veroeffentlichungszeitpunkt unveraendert", async () => {
-    const adapter = new PlanningFactsAdapter(planung());
+    const adapter = planCostFactsFactory(() => planung())(USER, ORG);
 
     const ergebnis = await adapter.publishedFactsForVersion(VERSION_ID);
 
@@ -138,7 +152,7 @@ describe("PlanningFactsAdapter — publishedFactsForVersion (EYT-109)", () => {
   });
 
   it("bildet die Zuweisungen auf Kostenfakten ab", async () => {
-    const adapter = new PlanningFactsAdapter(planung());
+    const adapter = planCostFactsFactory(() => planung())(USER, ORG);
 
     const ergebnis = await adapter.publishedFactsForVersion(VERSION_ID);
 
@@ -155,7 +169,7 @@ describe("PlanningFactsAdapter — publishedFactsForVersion (EYT-109)", () => {
   });
 
   it("bildet Bezeichnungen ueber Ids ab, nicht ueber die Reihenfolge", async () => {
-    const adapter = new PlanningFactsAdapter(planung());
+    const adapter = planCostFactsFactory(() => planung())(USER, ORG);
 
     const ergebnis = await adapter.publishedFactsForVersion(VERSION_ID);
 
@@ -174,7 +188,7 @@ describe("PlanningFactsAdapter — publishedFactsForVersion (EYT-109)", () => {
 
   it("liest NICHT das Wochenfenster, auch wenn dieses einen abweichenden Entwurf traegt", async () => {
     let fensterGelesen = 0;
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({
         planningWindow: (): Promise<PlanningWindowResult> => {
           fensterGelesen += 1;
@@ -201,7 +215,7 @@ describe("PlanningFactsAdapter — publishedFactsForVersion (EYT-109)", () => {
           });
         },
       }),
-    );
+    )(USER, ORG);
 
     const ergebnis = await adapter.publishedFactsForVersion(VERSION_ID);
 
@@ -216,14 +230,14 @@ describe("PlanningFactsAdapter — publishedFactsForVersion (EYT-109)", () => {
 describe("PlanningFactsAdapter — publishedVersions (EYT-109)", () => {
   it("reicht beide Wochengrenzen unveraendert an die Planung durch", async () => {
     const gesehen: Array<readonly [string, string]> = [];
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({
         publishedVersions: (von: string, bis: string): Promise<PublishedVersionsResult> => {
           gesehen.push([von, bis]);
           return Promise.resolve({ ok: true, versions: [] });
         },
       }),
-    );
+    )(USER, ORG);
 
     await adapter.publishedVersions("2026-W20", "2026-W25");
 
@@ -231,7 +245,7 @@ describe("PlanningFactsAdapter — publishedVersions (EYT-109)", () => {
   });
 
   it("bildet Version, Woche und Zeitpunkt ab, ohne neu zu sortieren", async () => {
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({
         publishedVersions: (): Promise<PublishedVersionsResult> =>
           Promise.resolve({
@@ -246,7 +260,7 @@ describe("PlanningFactsAdapter — publishedVersions (EYT-109)", () => {
             ],
           }),
       }),
-    );
+    )(USER, ORG);
 
     const ergebnis = await adapter.publishedVersions("2026-W20", "2026-W25");
 
@@ -265,12 +279,12 @@ describe("PlanningFactsAdapter — publishedVersions (EYT-109)", () => {
   });
 
   it("reicht AMBIGUOUS_ORGANISATION durch", async () => {
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({
         publishedVersions: (): Promise<PublishedVersionsResult> =>
           Promise.resolve({ ok: false, problem: "AMBIGUOUS_ORGANISATION" }),
       }),
-    );
+    )(USER, ORG);
 
     expect(await adapter.publishedVersions("2026-W20", "2026-W25")).toStrictEqual({
       ok: false,
@@ -281,7 +295,7 @@ describe("PlanningFactsAdapter — publishedVersions (EYT-109)", () => {
 
 describe("PlanningFactsAdapter — publishedFacts(weekKey) bleibt unveraendert (EYT-105)", () => {
   it("meldet PLAN_NOT_PUBLISHED, wenn der Wochenstand ein Entwurf ist", async () => {
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({
         planningWindow: (): Promise<PlanningWindowResult> =>
           Promise.resolve({
@@ -296,7 +310,7 @@ describe("PlanningFactsAdapter — publishedFacts(weekKey) bleibt unveraendert (
             },
           }),
       }),
-    );
+    )(USER, ORG);
 
     expect(await adapter.publishedFacts("2026-W25")).toStrictEqual({
       ok: false,
@@ -306,7 +320,7 @@ describe("PlanningFactsAdapter — publishedFacts(weekKey) bleibt unveraendert (
 
   it("liefert bei veroeffentlichtem Wochenstand die vollstaendigen Fakten dieser Version", async () => {
     let versionsgenauGelesen: string | null = null;
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({
         planningWindow: (): Promise<PlanningWindowResult> =>
           Promise.resolve({
@@ -325,7 +339,7 @@ describe("PlanningFactsAdapter — publishedFacts(weekKey) bleibt unveraendert (
           return Promise.resolve(veroeffentlicht());
         },
       }),
-    );
+    )(USER, ORG);
 
     const ergebnis = await adapter.publishedFacts("2026-W25");
 
@@ -339,12 +353,12 @@ describe("PlanningFactsAdapter — publishedFacts(weekKey) bleibt unveraendert (
   });
 
   it("reicht NO_ORGANISATION unveraendert durch", async () => {
-    const adapter = new PlanningFactsAdapter(
+    const adapter = planCostFactsFactory(() =>
       planung({
         planningWindow: (): Promise<PlanningWindowResult> =>
           Promise.resolve({ ok: false, problem: "NO_ORGANISATION" }),
       }),
-    );
+    )(USER, ORG);
 
     expect(await adapter.publishedFacts("2026-W25")).toStrictEqual({
       ok: false,
