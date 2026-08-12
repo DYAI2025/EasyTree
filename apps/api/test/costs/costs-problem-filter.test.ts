@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from "vitest";
 // `costs-cross-module-public-api-only` — auch aus einem Test, weil `moduleOf`
 // Testdateien keinem Modul zuordnet.
 import { ConflictProblem, CostsProblem, CostsProblemFilter } from "../../src/modules/costs";
+import type { CostsProblemStatus } from "../../src/modules/costs";
 
 /**
  * Minimaler `ArgumentsHost` mit aufzeichnender Antwort.
@@ -68,6 +69,36 @@ function hostMit(korrelation: string | undefined): {
   } as unknown as ArgumentsHost;
   return { host, status, json };
 }
+
+/**
+ * Die Faelle des zweiten Zweigs, mit `CostsProblemStatus` statt `number`.
+ *
+ * Die Annotation ist noetig, nicht dekorativ: aus einem blanken Arrayliteral
+ * folgert TypeScript `status: number`, und der Konstruktor nimmt seit dem
+ * verengten Statusbereich nur noch die vier erlaubten Codes.
+ */
+const EIGENER_STATUS: {
+  status: CostsProblemStatus;
+  title: string;
+  type: string;
+  detail: string;
+  korrelation: string;
+}[] = [
+  {
+    status: 400,
+    title: "Ungueltige Anfrage",
+    type: "urn:easytree:costs:label-missing",
+    detail: "Der Person fehlt ein Anzeigename.",
+    korrelation: "korrelation-vierhundert",
+  },
+  {
+    status: 500,
+    title: "Schreibkanal abgelehnt",
+    type: "urn:easytree:costs:write-channel-rejected",
+    detail: "Die Verbindung war nicht der Laufzeitkanal.",
+    korrelation: "korrelation-fuenfhundert",
+  },
+];
 
 /** Der einzige Aufrufrumpf — mit der Zusicherung, dass es genau einen gibt. */
 function koerperVon(json: ReturnType<typeof vi.fn>): unknown {
@@ -106,22 +137,7 @@ describe("CostsProblemFilter (EYT-139)", () => {
   // eine festverdrahtete Konstante an seiner Stelle bliebe gruen. Beide Werte
   // sind ausserdem NICHT 409 und beide Titel NICHT „Konflikt", sonst waere der
   // Fall von der Vorbelegung des anderen Zweigs nicht zu unterscheiden.
-  it.each([
-    {
-      status: 400,
-      title: "Ungueltige Anfrage",
-      type: "urn:easytree:costs:label-missing",
-      detail: "Der Person fehlt ein Anzeigename.",
-      korrelation: "korrelation-vierhundert",
-    },
-    {
-      status: 500,
-      title: "Schreibkanal abgelehnt",
-      type: "urn:easytree:costs:write-channel-rejected",
-      detail: "Die Verbindung war nicht der Laufzeitkanal.",
-      korrelation: "korrelation-fuenfhundert",
-    },
-  ])("traegt Status $status und Titel aus dem CostsProblem heraus", (fall) => {
+  it.each(EIGENER_STATUS)("traegt Status $status und Titel aus dem CostsProblem heraus", (fall) => {
     const { host, status, json } = hostMit(fall.korrelation);
 
     new CostsProblemFilter().catch(

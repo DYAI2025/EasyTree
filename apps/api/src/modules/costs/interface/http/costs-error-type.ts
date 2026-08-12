@@ -94,6 +94,20 @@ export const SNAPSHOT_ASSEMBLY_ERROR_TYPE = {
 export type SnapshotAssemblyErrorType =
   (typeof SNAPSHOT_ASSEMBLY_ERROR_TYPE)[keyof typeof SNAPSHOT_ASSEMBLY_ERROR_TYPE];
 
+/**
+ * Genau ein Code je Schreibablehnung (EYT-139).
+ *
+ * `IDEMPOTENCY_KEY_REUSED` teilt seinen URN mit der Satzverwaltung: derselbe
+ * Schluessel fuer eine andere Nutzlast heisst hier dasselbe wie dort, und ein
+ * zweiter URN dafuer waere ein Problemname ohne Vertragsdeckung.
+ *
+ * `WRITE_CHANNEL_REJECTED` wird spaeter eine 500 und keine 401/403: der Port
+ * schliesst die Umdeutung in einen Auth- oder Mandantenfehler ausdruecklich aus
+ * — das Subjekt kann korrekt angemeldet und berechtigt sein und trotzdem ueber
+ * den falschen Kanal (PostgREST, Transaktionspooler) kommen. Das ist ein
+ * Betriebsfehler, kein Aufruferfehler, und ein 403 schickte die Betreiberin auf
+ * die Suche nach einem Rechteproblem, das es nicht gibt.
+ */
 export const SNAPSHOT_WRITE_ERROR_TYPE = {
   IDEMPOTENCY_KEY_REUSED: RATE_ERROR_TYPE.IDEMPOTENCY_KEY_REUSED,
   WORKSITE_NOT_IN_ORG: "urn:easytree:costs:worksite-not-in-org",

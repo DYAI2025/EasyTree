@@ -201,4 +201,4 @@ export { ConflictProblem } from "./interface/http/conflict-problem";
 // Verhalten der EYT-108-Satzrouten mit. Oeffentlich, weil Task 3 sie im
 // Controller wirft und ihr Test beide Filterzweige von aussen treibt.
 export { CostsProblem } from "./interface/http/costs-problem";
-export type { CostsProblemInput } from "./interface/http/costs-problem";
+export type { CostsProblemInput, CostsProblemStatus } from "./interface/http/costs-problem";

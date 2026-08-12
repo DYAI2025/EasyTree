@@ -216,7 +216,7 @@ const zuRessource = (row: ResourceRow): { id: string; label: string; active: boo
 // sind damit die Regressionssicherung fuer genau diese Zeile.
 //
 // Der Kostencontroller braucht die Vorsicht nicht: `CostsProblemFilter` ist
-// `@Catch(ConflictProblem)` und damit ohnehin schmal.
+// `@Catch(ConflictProblem, CostsProblem)` und damit ohnehin schmal.
 @UseFilters(PlanningProblemFilter, AuthProblemFilter)
 export class PlanningController {
   constructor(

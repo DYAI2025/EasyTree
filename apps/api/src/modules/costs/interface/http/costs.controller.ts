@@ -350,10 +350,12 @@ function problemFor(problem: RateWriteProblem): Error {
   }
   // Die drei Abloesungsablehnungen (EYT-108). Alle als 409: der Aufrufer hat
   // nichts falsch FORMULIERT, sein Stand passt nur nicht mehr zum Server.
-  // Deshalb ConflictProblem und nicht BadRequestException — nur der
-  // 409-Pfad traegt seinen URN bis in die Antwort, weil ausschliesslich
-  // `CostsProblemFilter` (@Catch(ConflictProblem)) ihn setzt; eine
-  // HttpException faellt in den globalen Filter und wird zu "about:blank".
+  // Deshalb ConflictProblem und nicht BadRequestException: eine HttpException
+  // faellt in den globalen Filter und wird zu "about:blank", ihr URN geht
+  // verloren. Den URN traegt ausschliesslich `CostsProblemFilter`
+  // (@Catch(ConflictProblem, CostsProblem)) in die Antwort — seit EYT-139 fuer
+  // JEDEN Status, nicht mehr nur fuer 409. Die Wahl ist damit inhaltlich:
+  // `ConflictProblem` fuer 409, `CostsProblem` fuer jeden anderen Status.
   if (problem === "VORGAENGER_BEREITS_GESCHLOSSEN") {
     return new ConflictProblem(
       RATE_ERROR_TYPE.RATE_PREDECESSOR_CLOSED,
