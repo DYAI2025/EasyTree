@@ -21,13 +21,18 @@ export type {
 } from "./domain/planned-work-fact";
 
 export type {
+  PlanCostFactsFactory,
   PlanCostFactsPort,
   PlanCostFactsProblem,
   PlanCostFactsResult,
   PlanVersionListProblem,
   PublishedVersionsListResult,
 } from "./application/plan-cost-facts.port";
-export { PLAN_COST_FACTS, PLAN_COST_FACTS_PROBLEMS } from "./application/plan-cost-facts.port";
+export {
+  PLAN_COST_FACTS,
+  PLAN_COST_FACTS_FACTORY,
+  PLAN_COST_FACTS_PROBLEMS,
+} from "./application/plan-cost-facts.port";
 
 export type { CostExportPort, CostExportRendering } from "./application/cost-export.port";
 export { COST_EXPORT_PORT } from "./application/cost-export.port";

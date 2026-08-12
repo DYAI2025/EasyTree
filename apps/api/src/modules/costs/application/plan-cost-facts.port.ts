@@ -135,3 +135,22 @@ export interface PlanCostFactsPort {
 
 /** DI-Token. Tests ersetzen ihn, genau wie `DATABASE_PING` und `PLANNING_QUERIES`. */
 export const PLAN_COST_FACTS = "PLAN_COST_FACTS";
+
+/**
+ * Baut den Faktenport JE SUBJEKT UND ORGANISATION (EYT-109).
+ *
+ * `organisationId` ist PFLICHT und nicht optional. Der Kostenpfad hat die Id in
+ * jedem Erfolgsfall — `CostAccessPolicy.authorize` liefert sie aus
+ * `memberships`. Optional waere sie die Einladung, sie in der ersten Route zu
+ * vergessen; pflichtig laesst der Compiler das nicht zu.
+ *
+ * Sie autorisiert nichts. Die Entscheidung ist zu diesem Zeitpunkt bereits
+ * gefallen; hier wird sie nur nicht mehr verloren.
+ */
+export type PlanCostFactsFactory = (
+  subjectUserId: string,
+  organisationId: string,
+) => PlanCostFactsPort;
+
+/** DI-Token der Fabrik. `PLAN_COST_FACTS` bleibt das Token des fertigen Ports. */
+export const PLAN_COST_FACTS_FACTORY = "PLAN_COST_FACTS_FACTORY";
