@@ -3,7 +3,7 @@
  *
  * ## Was hier gemessen wird
  *
- * Drei Aussagen, die kein anderer Test trifft:
+ * Vier Aussagen, die kein anderer Test trifft:
  *
  * 1. Die Antwort entsteht AUS DEM GESPEICHERTEN STAND. Jedes Feld stammt aus
  *    `StoredCostSnapshot`; nichts wird aus einer Anfrage rekonstruiert.
@@ -11,13 +11,23 @@
  *    Datenquelle — und sie ist deterministisch sortiert.
  * 3. Kein Betrag und keine Dauer laeuft durch `number`. Der Nachweis ist ein
  *    Wert oberhalb von 2^53, den eine `Number()`-Umleitung still verfaelschte.
+ * 4. Jedes Positionsfeld stammt aus SEINER Quelle. Das ist eine eigene Aussage,
+ *    weil der Vertrag sie nicht treffen kann: `strictObject` prueft Anwesenheit
+ *    und Typ, nicht Herkunft. Der Kopfkommentar von `PublishedPlanFacts`
+ *    beschreibt genau diesen Fehler — „ein vertauschtes Paar faende niemand —
+ *    der Bericht saehe vollstaendig aus und naennte die falsche Person."
  *
- * ## Gegenmutationen, die diese Datei rot machen
+ * ## Gegenmutationen, die diese Datei rot machen — alle eingespielt und gemessen
  *
  * - `amountMinorUnits: String(Number(position.amountMinorUnits))` (Praezision).
  * - `days` aus der Reihenfolge der Positionen statt sortiert (Determinismus).
  * - `totalMinorUnits` aus der Summe der Positionen statt aus dem Kopf
  *   (Serverwahrheit).
+ * - `employeeId: position.assignmentId` samt
+ *   `employeeLabel: position.worksiteLabel` — zwei gleichtypige Felder
+ *   vertauscht (Herkunft).
+ * - `employeeLabel: "Person 1"` — Quelle durch eine Konstante ersetzt
+ *   (Herkunft, und nur ueber Position 2 beobachtbar).
  */
 import { describe, expect, it } from "vitest";
 
@@ -40,6 +50,13 @@ const SATZ = "00000000-0000-4000-8000-0000006c5001";
 const POS_1 = "00000000-0000-4000-8000-00000000e001";
 const POS_2 = "00000000-0000-4000-8000-00000000e002";
 const POS_3 = "00000000-0000-4000-8000-00000000e003";
+// Benannt statt inline, damit der feldweise Vergleich weiter unten lesbar ist —
+// und damit sichtbar bleibt, dass KEINE zwei Id-Felder derselben Position
+// denselben Wert tragen. Genau diese Verschiedenheit ist die Voraussetzung
+// dafuer, dass ein vertauschtes Paar auffaellt.
+const ASSIGNMENT_1 = "00000000-0000-4000-8000-00000000c001";
+const ASSIGNMENT_2 = "00000000-0000-4000-8000-00000000c002";
+const ASSIGNMENT_3 = "00000000-0000-4000-8000-00000000c003";
 
 /**
  * Die gespeicherte Reihenfolge WIDERSPRICHT der Datumsreihenfolge — Absicht.
@@ -67,7 +84,7 @@ const GESPEICHERT: StoredCostSnapshot = {
   positions: [
     {
       id: POS_1,
-      assignmentId: "00000000-0000-4000-8000-00000000c001",
+      assignmentId: ASSIGNMENT_1,
       worksiteId: WORKSITE,
       worksiteLabel: "Baustelle A",
       employeeId: EMPLOYEE_1,
@@ -79,7 +96,7 @@ const GESPEICHERT: StoredCostSnapshot = {
     },
     {
       id: POS_2,
-      assignmentId: "00000000-0000-4000-8000-00000000c002",
+      assignmentId: ASSIGNMENT_2,
       worksiteId: WORKSITE,
       worksiteLabel: "Baustelle A",
       employeeId: EMPLOYEE_2,
@@ -91,7 +108,7 @@ const GESPEICHERT: StoredCostSnapshot = {
     },
     {
       id: POS_3,
-      assignmentId: "00000000-0000-4000-8000-00000000c003",
+      assignmentId: ASSIGNMENT_3,
       worksiteId: WORKSITE,
       worksiteLabel: "Baustelle A",
       employeeId: EMPLOYEE_1,
@@ -113,7 +130,7 @@ const GESPEICHERT: StoredCostSnapshot = {
  */
 const POSITION_VORLAGE: StoredCostSnapshot["positions"][number] = {
   id: POS_1,
-  assignmentId: "00000000-0000-4000-8000-00000000c001",
+  assignmentId: ASSIGNMENT_1,
   worksiteId: WORKSITE,
   worksiteLabel: "Baustelle A",
   employeeId: EMPLOYEE_1,
@@ -154,6 +171,80 @@ describe("toCostSnapshotDto (EYT-139)", () => {
     expect(dto.positions.map((p) => p.id)).toEqual([POS_1, POS_2, POS_3]);
     expect(dto.positions[0]?.amountMinorUnits).toBe("7500");
     expect(dto.positions[0]?.durationMilliseconds).toBe("28800000");
+  });
+
+  /**
+   * Die HERKUNFT jedes Positionsfeldes — nicht bloss seine Anwesenheit.
+   *
+   * ## Warum EIN `toEqual` ueber das ganze Objekt und nicht drei `expect`
+   *
+   * Weil der Fehler, den dieser Fall abwehrt, in keinem einzelnen Feld sichtbar
+   * ist. Werden zwei gleichtypige Spalten vertauscht — `employeeId` aus
+   * `assignmentId`, `employeeLabel` aus `worksiteLabel` —, ist danach jedes Feld
+   * einzeln vorhanden, nicht leer und vom richtigen Typ. `CostSnapshotSchema`
+   * winkt das durch: `strictObject` prueft Anwesenheit und Form, niemals
+   * Herkunft. Nur der vollstaendige Vergleich gegen die Fixture bindet jeden
+   * Zielschluessel an SEINE Quelle. Einzelne `expect` haetten dieselbe Luecke in
+   * klein: geprueft waere, was jemand aufzuschreiben dachte, und ein Tausch
+   * zwischen zwei ungeprueften Feldern bliebe unsichtbar.
+   *
+   * Voraussetzung dafuer ist, dass die zehn Werte einer Position paarweise
+   * verschieden sind — siehe die benannten Konstanten oben. Traegen zwei Felder
+   * denselben Wert, ist ihr Tausch nicht beobachtbar.
+   *
+   * ## Warum ALLE Positionen und nicht nur `positions[0]`
+   *
+   * Das Gegenargument war, `toPositionDto` sei eine Funktion ohne
+   * Indexabhaengigkeit, ein Fall genuege also. Gemessen stimmt das nicht: mit
+   * `employeeLabel: "Person 1"` — einer festverdrahteten Konstanten statt der
+   * Quelle — blieben alle sieben vorherigen Faelle gruen, und ein Vergleich nur
+   * ueber `positions[0]` waere ebenfalls gruen geblieben, weil Position 1
+   * zufaellig genau diesen Wert traegt. Erst Position 2 („Person 2") entlarvt
+   * sie. Die Fixture ist deshalb so gebaut, dass die drei Positionen sich in
+   * Mitarbeiter, Tag, Dauer und Betrag unterscheiden.
+   *
+   * Gemessene Gegenmutationen: der Feldtausch oben und die festverdrahtete
+   * Konstante. Beide kompilieren (`TSC_EXIT=0`) und waren vor diesem Fall gruen.
+   */
+  it("uebernimmt jedes Positionsfeld aus SEINER Quelle, nicht aus einer gleichtypigen Nachbarspalte", () => {
+    expect(toCostSnapshotDto(GESPEICHERT).positions).toEqual([
+      {
+        id: POS_1,
+        assignmentId: ASSIGNMENT_1,
+        worksiteId: WORKSITE,
+        worksiteLabel: "Baustelle A",
+        employeeId: EMPLOYEE_1,
+        employeeLabel: "Person 1",
+        localDate: "2026-08-12",
+        durationMilliseconds: "28800000",
+        rateVersionId: SATZ,
+        amountMinorUnits: "7500",
+      },
+      {
+        id: POS_2,
+        assignmentId: ASSIGNMENT_2,
+        worksiteId: WORKSITE,
+        worksiteLabel: "Baustelle A",
+        employeeId: EMPLOYEE_2,
+        employeeLabel: "Person 2",
+        localDate: "2026-08-11",
+        durationMilliseconds: "14400000",
+        rateVersionId: SATZ,
+        amountMinorUnits: "2500",
+      },
+      {
+        id: POS_3,
+        assignmentId: ASSIGNMENT_3,
+        worksiteId: WORKSITE,
+        worksiteLabel: "Baustelle A",
+        employeeId: EMPLOYEE_1,
+        employeeLabel: "Person 1",
+        localDate: "2026-08-11",
+        durationMilliseconds: "3600000",
+        rateVersionId: SATZ,
+        amountMinorUnits: "1000",
+      },
+    ]);
   });
 
   it("gruppiert days aus den gespeicherten Positionen, aufsteigend nach lokalem Tag", () => {
