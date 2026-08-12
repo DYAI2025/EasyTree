@@ -32,16 +32,20 @@
  *
  * Der FAKTENPORT steht bewusst nicht dort, sondern in
  * {@link CostsController.snapshotAbhaengigkeiten} — der einen Konstruktionsstelle
- * der Snapshot-Abhaengigkeiten, die ausschliesslich der Schreibpfad ruft. Zwei
- * Gruende, beide inhaltlich:
+ * der Snapshot-Abhaengigkeiten, die ausschliesslich der Schreibpfad ruft. Der
+ * Grund ist strukturell:
  *
- * 1. `GET /kosten/snapshots/{snapshotId}` liest einen gespeicherten Stand und
- *    rechnet nichts neu. Wuerde die Zugangskette den Planungs-Faktenport auch
- *    dort bauen, waere „rechnet nichts neu" nur noch eine Behauptung ueber den
- *    Rumpf der Methode statt eine Eigenschaft der Verdrahtung. Der Test misst
- *    genau das (`H8`, Zaehler `fabrikaufrufe`).
- * 2. Die drei bestehenden Satzrouten haben mit Planfakten nichts zu tun. Ein
- *    Port, den sie nie benutzen, waere Arbeit je Anfrage ohne Gegenwert.
+ * `GET /kosten/snapshots/{snapshotId}` liest einen gespeicherten Stand und
+ * rechnet nichts neu. Wuerde die Zugangskette den Planungs-Faktenport auch dort
+ * bauen, waere „rechnet nichts neu" nur noch eine Behauptung ueber den Rumpf der
+ * Methode statt eine Eigenschaft der Verdrahtung. Der Test misst genau das
+ * (`H8`, Zaehler `fabrikaufrufe`).
+ *
+ * Eine frueher hier stehende zweite Begruendung — die drei Satzrouten
+ * bezahlten sonst „Arbeit je Anfrage ohne Gegenwert" — ist gestrichen, weil sie
+ * gemessen nicht traegt: `planCostFactsFactory` ist wie `snapshotsFor` nur ein
+ * Feldzuweisungs-Konstruktor, und derselbe Absatz nennt diese Kosten oben
+ * „kostet nichts". Eine zu starke Begruendung ist auch eine falsche.
  */
 import {
   BadRequestException,
@@ -185,13 +189,13 @@ export class CostsController {
     @Param("employeeId") employeeId: string,
     @Headers(ORGANISATION_HEADER) organisationHeader?: string,
   ): Promise<RateHistory> {
-    const { repository } = await this.zugang(
+    const { rates } = await this.zugang(
       req,
       organisationHeader,
       "costs.read",
       "GET /kosten/stundensaetze/{employeeId}",
     );
-    const versionen = await repository.versionsFor(employeeId);
+    const versionen = await rates.versionsFor(employeeId);
     const heute = heutigesGeschaeftsdatum();
     const wirksam = effectiveRateVersion(versionen, heute);
     return {
@@ -210,7 +214,7 @@ export class CostsController {
   ): Promise<RateVersionDto> {
     // Anlegen braucht ein ANDERES Recht als Lesen — atomar, nicht "wer lesen
     // darf, darf auch schreiben".
-    const { repository, organisationId } = await this.zugang(
+    const { rates, organisationId } = await this.zugang(
       req,
       organisationHeader,
       "costs.manage_rates",
@@ -236,7 +240,7 @@ export class CostsController {
       );
     }
 
-    const ergebnis = await repository.append({
+    const ergebnis = await rates.append({
       organisationId,
       employeeId: geprueft.data.employeeId,
       amountMinorUnits: geprueft.data.amountMinorUnits,
@@ -355,14 +359,14 @@ export class CostsController {
    * Mehr-Organisations-Benutzer im falschen Mandanten.
    */
   private snapshotAbhaengigkeiten(zugang: {
-    repository: RateRepository;
+    rates: RateRepository;
     snapshots: CostSnapshotRepository;
     organisationId: string;
     subjectUserId: string;
   }): CreateCostSnapshotDependencies {
     return {
       facts: this.factsFor(zugang.subjectUserId, zugang.organisationId),
-      rates: zugang.repository,
+      rates: zugang.rates,
       repository: zugang.snapshots,
     };
   }
@@ -374,7 +378,16 @@ export class CostsController {
     permission: CostPermission,
     route: string,
   ): Promise<{
-    repository: RateRepository;
+    /**
+     * Die Satzhistorie je Subjekt.
+     *
+     * Heisst `rates` und nicht `repository`: `snapshotAbhaengigkeiten` bildet
+     * daraus `repository: zugang.snapshots` ab, und zwei verschiedene Dinge
+     * unter demselben Namen sind an genau der Naht, die beide zusammenfuehrt,
+     * eine Leseeinladung zum Vertauschen. Die Typen verhindern den Fehler, der
+     * Name soll ihn gar nicht erst nahelegen.
+     */
+    rates: RateRepository;
     /**
      * Das Snapshot-Repository — je Subjekt, hier gebaut und nirgends sonst.
      *
@@ -456,7 +469,7 @@ export class CostsController {
     });
 
     return {
-      repository: this.repositoryFor(identitaet.userId),
+      rates: this.repositoryFor(identitaet.userId),
       snapshots: this.snapshotsFor(identitaet.userId),
       organisationId: entscheidung.organisationId,
       subjectUserId: identitaet.userId,

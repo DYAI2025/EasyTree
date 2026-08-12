@@ -157,6 +157,18 @@ const GESPEICHERTER_NAME = "Gespeicherte Person";
 const BETRAG = "4711";
 const STUNDENSATZ = "2500";
 
+/**
+ * Feste Korrelations-Id fuer den Auditfall — gegen ein echtes Flakerisiko.
+ *
+ * `serialisiereZugriffsereignis` traegt die Korrelations-Id in die Zeile. Ohne
+ * mitgeschickten Header erzeugt `CorrelationIdMiddleware` eine UUID v4; die
+ * Marker `BETRAG` (4711) und `STUNDENSATZ` (2500) sind vier Hexziffern und
+ * koennen darin zufaellig vorkommen — Groessenordnung 1 zu ~1100 Laeufen. Ein
+ * Test, der einmal im Quartal ohne Codeaenderung rot wird, wird abgeschaltet.
+ * Der Wert enthaelt bewusst KEINE Hexziffern.
+ */
+const KORRELATION_FEST = "korrelation-ohne-hexziffern";
+
 // Bewusst NICHT JWT-foermig — eine Markierung, kein echt aussehendes Token.
 const TOKEN = ["kein", "echtes", "token", "nur", "markierung"].join("-");
 const COOKIE = `easytree_access=${TOKEN}`;
@@ -330,6 +342,18 @@ interface Zeugen {
    */
   readonly subjektaufrufe: string[];
   /**
+   * Je Aufruf der SATZ-Fabrik das uebergebene Subjekt.
+   *
+   * Dieselbe Luecke wie bei `subjektaufrufe`, eine Zeile hoeher im Aufbau: der
+   * Stub verwarf sein Argument, und `this.repositoryFor("…dead")` blieb gruen
+   * (gemessen, 12.08.2026). Auf dem neuen Schreibpfad ist genau dieses
+   * Repository der Port, der die Stundensaetze laedt — es unbelegt zu lassen
+   * waere die falsche Haelfte. `rate-http-contract.integration.test.ts` faengt
+   * die Mutation vermutlich in `db-gates`; im Pflichtjob `unit-tests` fing sie
+   * niemand.
+   */
+  readonly satzsubjekte: string[];
+  /**
    * Die `planVersionId`, mit der der Faktenport WIRKLICH befragt wurde.
    *
    * Ohne diesen Zeugen antwortet der Stub auf jede Id gleich, und der Controller
@@ -370,6 +394,7 @@ async function starte(aufbau: Aufbau = {}): Promise<Gestartet> {
   const zeugen: Zeugen = {
     fabrikaufrufe: [],
     subjektaufrufe: [],
+    satzsubjekte: [],
     faktenaufrufe: [],
     createAufrufe: [],
     readAufrufe: [],
@@ -433,16 +458,20 @@ async function starte(aufbau: Aufbau = {}): Promise<Gestartet> {
       list: () => Promise.resolve([{ id: BERND, displayName: PERSONENNAME, active: true }]),
     }))
     .overrideProvider(RATE_REPOSITORY_FACTORY)
-    .useValue(() => ({
-      versionsFor: (employeeId: string) => Promise.resolve(saetze.get(employeeId) ?? []),
-      versionsForMany: (employeeIds: readonly string[]) =>
-        Promise.resolve(
-          new Map<string, readonly RateVersionRecord[]>(
-            employeeIds.map((id) => [id, saetze.get(id) ?? []]),
+    .useValue((subjectUserId: string) => {
+      // Das Subjekt wird AUFGEZEICHNET, nicht verworfen — siehe `satzsubjekte`.
+      zeugen.satzsubjekte.push(subjectUserId);
+      return {
+        versionsFor: (employeeId: string) => Promise.resolve(saetze.get(employeeId) ?? []),
+        versionsForMany: (employeeIds: readonly string[]) =>
+          Promise.resolve(
+            new Map<string, readonly RateVersionRecord[]>(
+              employeeIds.map((id) => [id, saetze.get(id) ?? []]),
+            ),
           ),
-        ),
-      append: () => Promise.reject(new Error("in dieser Suite nicht benutzt")),
-    }))
+        append: () => Promise.reject(new Error("in dieser Suite nicht benutzt")),
+      };
+    })
     .overrideProvider(PLAN_COST_FACTS_FACTORY)
     .useValue((subjectUserId: string, organisationId: string) => {
       zeugen.fabrikaufrufe.push({ subject: subjectUserId, organisation: organisationId });
@@ -503,14 +532,32 @@ function getSnapshot(app: INestApplication, snapshotId: string = SNAPSHOT_ID): A
     .set("cookie", COOKIE);
 }
 
-/** Genau die drei Felder, die eine Ablehnung ausmachen — ohne Korrelations-Id. */
+/**
+ * Genau die vier Felder, die eine Ablehnung ausmachen — ohne Korrelations-Id.
+ *
+ * `title` steht seit dem 12.08.2026 mit drin: die `TITEL`-Tabelle im Controller
+ * war bis dahin VOLLSTAENDIG ungemessen, alle vier Titel rotieren liess 645
+ * Faelle gruen. Ihr Kopfkommentar begruendet sie ausfuehrlich („sonst waere der
+ * Titel Zufall statt Aussage") — eine Begruendung ohne Messung.
+ */
 function ablehnung(antwortkoerper: unknown): {
   status: unknown;
+  title: unknown;
   type: unknown;
   detail: unknown;
 } {
-  const problem = antwortkoerper as { status?: unknown; type?: unknown; detail?: unknown };
-  return { status: problem.status, type: problem.type, detail: problem.detail };
+  const problem = antwortkoerper as {
+    status?: unknown;
+    title?: unknown;
+    type?: unknown;
+    detail?: unknown;
+  };
+  return {
+    status: problem.status,
+    title: problem.title,
+    type: problem.type,
+    detail: problem.detail,
+  };
 }
 
 function typVon(antwortkoerper: unknown): unknown {
@@ -556,8 +603,21 @@ describe("POST /kosten/snapshots (EYT-139)", () => {
     // koennte der Controller eine beliebige andere einfrieren — die Fakten
     // saehen gleich aus, weil der Stub auf jede Id dasselbe antwortet.
     expect(gestartet.zeugen.faktenaufrufe).toEqual([PLANVERSION_ANGEFRAGT]);
-    // Und das Snapshot-Repository wurde mit dem Subjekt DIESER Anfrage gebaut.
+    // Und BEIDE Fabriken wurden mit dem Subjekt DIESER Anfrage gerufen.
     expect(gestartet.zeugen.subjektaufrufe).toEqual([USER]);
+    expect(gestartet.zeugen.satzsubjekte).toEqual([USER]);
+    // Die zwei Kommandofelder, die bis zum 12.08.2026 ungemessen waren.
+    //
+    // Ein konstanter Idempotenzschluessel gaebe JEDEM verschiedenen Auftrag
+    // denselben Fingerabdruck — genau der Doppeleffekt, gegen den diese Route
+    // ihr eigenes 409 fuehrt. Und die Korrelations-Id wird in ein Dokument
+    // eingefroren, fuer das es kein `update` und kein `delete` gibt (Migration
+    // 0018); sie ist der einzige Faden zwischen Antwort und Logzeile.
+    expect(gestartet.zeugen.createAufrufe[0]).toMatchObject({
+      idempotencyKey: SCHLUESSEL,
+      correlationId: antwort.headers["x-correlation-id"],
+      worksiteId: null,
+    });
   });
 
   it("H2 — Retry mit gleichem Schluessel liefert dieselbe gespeicherte Wahrheit", async () => {
@@ -683,6 +743,12 @@ describe("Blockaden erzeugen keinen Snapshot (EYT-139)", () => {
         "urn:easytree:costs:rate-ambiguous",
       ],
       [
+        // Der negative Betrag ist KEINE ehrliche Nachbildung eines
+        // Datenbankzustands: Migration 0013 fuehrt `check (amount_minor_units
+        // >= 0)`, so eine Zeile kann von dort nicht kommen. Der Zweig ist
+        // Defense in depth — `hourlyRateAmount` prueft, statt `!` zu behaupten
+        // (siehe `cost-snapshot-assembly.ts`) —, und dieser Fall misst seine
+        // HTTP-Abbildung, nicht seine Erreichbarkeit im Betrieb.
         "RATE_INVALID",
         {
           saetze: new Map<string, readonly RateVersionRecord[]>([
@@ -814,6 +880,14 @@ describe("GET /kosten/snapshots/{snapshotId} (EYT-139)", () => {
   });
 
   it("H9 — unbekannte, fremde und unlesbare Snapshot-Id sind ununterscheidbar", async () => {
+    // Was dieser Fall WIRKLICH belegt, und was nicht: an der HTTP-Naht sind die
+    // drei Ids drei beliebige UUIDs, und der gestellte Port antwortet allen
+    // gleich. Gemessen ist damit die ANTWORTSEITE der Zusage — gleicher Status,
+    // gleicher Titel, gleicher URN, gleicher Text, angefragte Id nie
+    // zurueckgespiegelt. Dass die drei DATENBANKZUSTAENDE („gibt es nicht",
+    // „fremder Mandant", „nicht lesbar") ueberhaupt zu einem Grund zusammen-
+    // fallen, entscheidet RLS und misst `cost-snapshot.integration.test.ts` in
+    // `db-gates`. Beides zusammen ergibt die Zusage; dieser Test allein nicht.
     gestartet = await starte({ lesen: { ok: false, problem: "SNAPSHOT_NOT_FOUND" } });
 
     const antworten: { status: unknown; type: unknown; detail: unknown }[] = [];
@@ -822,9 +896,10 @@ describe("GET /kosten/snapshots/{snapshotId} (EYT-139)", () => {
       antworten.push(ablehnung(antwort.body));
     }
 
-    // Byteweise gleich, in allen drei Faellen — Status, URN UND Text.
+    // Byteweise gleich, in allen drei Faellen — Status, Titel, URN UND Text.
     const erwartung = {
       status: 403,
+      title: "Kein Zugriff",
       type: "urn:easytree:costs:snapshot-not-found",
       detail: LESE_DETAIL,
     };
@@ -854,6 +929,29 @@ describe("GET /kosten/snapshots/{snapshotId} (EYT-139)", () => {
 
     await getSnapshot(gestartet.app, "keine-uuid").expect(400);
 
+    expect(gestartet.zeugen.readAufrufe).toEqual([]);
+  });
+
+  it("H9c — ohne costs.read gewinnt die Zugangskette, auch bei kaputter Id", async () => {
+    // Der einzige Fall, der die REIHENFOLGE auf dem Lesepfad misst. `H9b` faehrt
+    // MIT Rechten: die Kette passiert, dann faellt die Id — ein Vorziehen der
+    // Id-Pruefung bliebe dort unsichtbar (gemessen: 21/21 gruen).
+    //
+    // Die Folge waere kein Schoenheitsfehler: ein unberechtigter Aufrufer
+    // unterschiede dann „kaputte Id" (400) von „wohlgeformte Id" (403) und
+    // haette damit ein Existenzorakel ueber die Id-FORM. Schlimmer noch, eine
+    // kaputte Id erzeugte GAR KEINE `cost_access_decision`-Zeile — ein Loch in
+    // AK9 genau dort, wo jemand Ids durchprobiert.
+    gestartet = await starte({
+      mitgliedschaften: [{ organisationId: ORG_ALPHA, permissions: ["costs.calculate"] }],
+    });
+
+    await getSnapshot(gestartet.app, "keine-uuid").expect(403);
+
+    const ereignis = einziges(gestartet.zeugen.sammler.ereignisse);
+    expect(ereignis.decision).toBe("deny");
+    expect(ereignis.reason).toBe("PERMISSION_MISSING");
+    expect(ereignis.route).toBe("GET /kosten/snapshots/{snapshotId}");
     expect(gestartet.zeugen.readAufrufe).toEqual([]);
   });
 });
@@ -989,6 +1087,16 @@ interface Ablehnungsfall {
   readonly aufbau: Aufbau;
   readonly ausfuehren: (app: INestApplication) => Anfrage;
   readonly status: number;
+  /**
+   * Der erwartete Titel — aus `TITEL` im Controller, ausser bei `about:blank`.
+   *
+   * Dort antwortet der globale `HttpExceptionFilter` und setzt
+   * `STATUS_CODES[status]`, also die englischen HTTP-Namen. Dass beide Quellen
+   * in dieser Spalte nebeneinander stehen, ist die Messung: sie trennt die
+   * Faelle, die der Kostenpfad selbst formuliert, von denen, die er an den
+   * generischen Filter verliert.
+   */
+  readonly title: string;
   readonly type: string;
   /**
    * `false` dort, wo bewusst der generische `HttpExceptionFilter` antwortet.
@@ -1004,6 +1112,7 @@ interface Ablehnungsfall {
 const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   {
     name: "ZUGANG/ORG_CONTEXT_REQUIRED",
+    title: "Bad Request",
     aufbau: {
       mitgliedschaften: [
         { organisationId: ORG_ALPHA, permissions: ["costs.read", "costs.calculate"] },
@@ -1017,6 +1126,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "ZUGANG/PERMISSION_MISSING",
+    title: "Forbidden",
     aufbau: { mitgliedschaften: [{ organisationId: ORG_ALPHA, permissions: [] }] },
     ausfuehren: (app) => postSnapshot(app),
     status: 403,
@@ -1025,6 +1135,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "MISSING_IDEMPOTENCY_KEY",
+    title: "Konflikt",
     aufbau: {},
     ausfuehren: (app) => postSnapshot(app, { schluessel: null }),
     status: 409,
@@ -1033,6 +1144,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "RUMPF_UNGUELTIG",
+    title: "Bad Request",
     aufbau: {},
     ausfuehren: (app) => postSnapshot(app, { rumpf: { publishedPlanVersionId: "keine-uuid" } }),
     status: 400,
@@ -1044,6 +1156,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
     // misst die Reihenfolge der beiden Vorpruefungen; die zwei Zeilen darueber
     // verletzen je nur eine davon und lassen einen Tausch durchgehen.
     name: "RUMPF_UNGUELTIG UND SCHLUESSEL FEHLT",
+    title: "Konflikt",
     aufbau: {},
     ausfuehren: (app) =>
       postSnapshot(app, {
@@ -1056,6 +1169,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "FACTS/NO_ORGANISATION",
+    title: "Ungueltige Anfrage",
     aufbau: { faktenAlphaErgebnis: { ok: false, problem: "NO_ORGANISATION" } },
     ausfuehren: (app) => postSnapshot(app),
     status: 400,
@@ -1064,6 +1178,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "FACTS/AMBIGUOUS_ORGANISATION",
+    title: "Ungueltige Anfrage",
     aufbau: { faktenAlphaErgebnis: { ok: false, problem: "AMBIGUOUS_ORGANISATION" } },
     ausfuehren: (app) => postSnapshot(app),
     status: 400,
@@ -1072,6 +1187,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "FACTS/PLAN_NOT_PUBLISHED",
+    title: "Konflikt",
     aufbau: { faktenAlphaErgebnis: { ok: false, problem: "PLAN_NOT_PUBLISHED" } },
     ausfuehren: (app) => postSnapshot(app),
     status: 409,
@@ -1080,6 +1196,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "FACTS/PLAN_VERSION_NOT_FOUND",
+    title: "Ungueltige Anfrage",
     aufbau: { faktenAlphaErgebnis: { ok: false, problem: "PLAN_VERSION_NOT_FOUND" } },
     ausfuehren: (app) => postSnapshot(app),
     status: 400,
@@ -1088,6 +1205,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "ASSEMBLY/RATE_NOT_FOUND",
+    title: "Konflikt",
     aufbau: { saetze: new Map<string, readonly RateVersionRecord[]>([[BERND, []]]) },
     ausfuehren: (app) => postSnapshot(app),
     status: 409,
@@ -1096,6 +1214,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "WRITE/IDEMPOTENCY_KEY_REUSED",
+    title: "Konflikt",
     aufbau: { schreiben: { ok: false, problem: "IDEMPOTENCY_KEY_REUSED" } },
     ausfuehren: (app) => postSnapshot(app, { schluessel: SCHLUESSEL_ZWEI }),
     status: 409,
@@ -1104,6 +1223,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "WRITE/WORKSITE_NOT_IN_ORG",
+    title: "Ungueltige Anfrage",
     aufbau: {},
     ausfuehren: (app) =>
       postSnapshot(app, {
@@ -1116,6 +1236,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   {
     // 500 und nicht 403: der Kanal ist kein Rechteproblem (EYT-139, entschieden).
     name: "WRITE/WRITE_CHANNEL_REJECTED",
+    title: "Serverfehler",
     aufbau: { schreiben: { ok: false, problem: "WRITE_CHANNEL_REJECTED" } },
     ausfuehren: (app) => postSnapshot(app),
     status: 500,
@@ -1126,6 +1247,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
     // Derselbe Grund wie unten, anderer Status: hier ist der Snapshot gerade
     // entstanden, die Aufruferin hat nichts falsch gemacht.
     name: "READ/nach dem Schreiben",
+    title: "Serverfehler",
     aufbau: { lesen: { ok: false, problem: "SNAPSHOT_NOT_FOUND" } },
     ausfuehren: (app) => postSnapshot(app),
     status: 500,
@@ -1134,6 +1256,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "GET/ungueltige Id",
+    title: "Bad Request",
     aufbau: {},
     ausfuehren: (app) => getSnapshot(app, "keine-uuid"),
     status: 400,
@@ -1142,6 +1265,7 @@ const ABLEHNUNGEN: readonly Ablehnungsfall[] = [
   },
   {
     name: "GET/SNAPSHOT_NOT_FOUND",
+    title: "Kein Zugriff",
     aufbau: { lesen: { ok: false, problem: "SNAPSHOT_NOT_FOUND" } },
     ausfuehren: (app) => getSnapshot(app),
     status: 403,
@@ -1158,6 +1282,7 @@ describe("Form und Protokoll jeder Ablehnung (EYT-139)", () => {
     const gemessen: {
       name: string;
       status: number;
+      title: unknown;
       type: unknown;
       gueltig: boolean;
       urnGesehen: boolean;
@@ -1171,6 +1296,7 @@ describe("Form und Protokoll jeder Ablehnung (EYT-139)", () => {
         gemessen.push({
           name: fall.name,
           status: antwort.status,
+          title: ablehnung(antwort.body).title,
           type,
           // Strikt: `ProblemDocumentSchema` ist ein `z.strictObject`, und
           // `readProblem` verwirft bei einem Fehlschlag das GANZE Dokument.
@@ -1186,6 +1312,7 @@ describe("Form und Protokoll jeder Ablehnung (EYT-139)", () => {
       ABLEHNUNGEN.map((fall) => ({
         name: fall.name,
         status: fall.status,
+        title: fall.title,
         type: fall.type,
         gueltig: true,
         urnGesehen: fall.urnErwartet,
@@ -1209,8 +1336,13 @@ describe("Form und Protokoll jeder Ablehnung (EYT-139)", () => {
 
     // Erlaubt: GET.
     gestartet = await starte();
-    const gelesen = await getSnapshot(gestartet.app).expect(200);
+    const gelesen = await getSnapshot(gestartet.app)
+      .set("x-correlation-id", KORRELATION_FEST)
+      .expect(200);
     const getEreignis = einziges(gestartet.zeugen.sammler.ereignisse);
+    // Die Middleware uebernimmt eine mitgebrachte Id — damit ist die Zeile
+    // deterministisch und die Markerpruefung unten kann nicht zufaellig treffen.
+    expect(getEreignis.correlationId).toBe(KORRELATION_FEST);
     expect(getEreignis.decision).toBe("allow");
     expect(getEreignis.permission).toBe("costs.read");
     expect(getEreignis.route).toBe("GET /kosten/snapshots/{snapshotId}");
