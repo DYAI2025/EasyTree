@@ -1094,29 +1094,65 @@ function snapshotProblemFor(failure: CreateCostSnapshotFailure): Error {
 
 `PLAN_COST_FACTS_FACTORY` ist bereits registriert — **nicht verdoppeln**.
 
-**Schritt 5: Grün bestätigen**
+**Schritt 5: Die Konformitätsliste im SELBEN Commit kürzen**
+
+> **Planfehler, beim Durchdenken von Task 3 gefunden und hier korrigiert.** Eine frühere Fassung
+> hob das für Task 4 auf. Das geht nicht: `openapi-route-conformance.test.ts` prüft mit einer
+> `stale`-Zusicherung, dass kein Eintrag eine **bereits implementierte** Operation nennt. Sobald
+> die zwei Routen registriert sind, ist der Test rot — Task 3 könnte also gar nicht grün
+> committen. Der alte EYT-109-Plan sagt dasselbe („Task 13 muss alle drei `/kosten/*`-Einträge im
+> SELBEN Commit entfernen, der die Routen anlegt").
+
+Erst messen, dass es rot ist — das ist der Nachweis, dass die Routen wirklich registriert sind:
 
 ```bash
-pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.test.ts
-pnpm --filter @easytree/api exec tsc -p tsconfig.json --noEmit
+pnpm --filter @easytree/api exec vitest run test/openapi-route-conformance.test.ts
 ```
 
-**Schritt 6: Committen**
+Erwartet: rot mit `stale` = `["GET /kosten/snapshots/{snapshotId}", "POST /kosten/snapshots"]`.
+
+Dann genau diese zwei Einträge aus `NOT_YET_IMPLEMENTED` streichen. **`GET /kosten/planversionen`
+bleibt** — nicht Teil dieses Slices. Ergebnis greppen, nicht dem Exit-Code glauben:
+
+```bash
+grep -n "/kosten/" apps/api/test/openapi-route-conformance.test.ts
+grep -n "acht\|sieben\|sechs" apps/api/test/openapi-route-conformance.test.ts
+```
+
+Erwartet: genau **eine** `/kosten/`-Zeile (`planversionen`). Nennt der Kopfkommentar eine Zahl,
+muss sie jetzt **sechs** lauten.
+
+**Schritt 6: Grün bestätigen**
+
+```bash
+pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.test.ts \
+  test/openapi-route-conformance.test.ts test/costs/cost-access-audit.http.test.ts
+pnpm --filter @easytree/api exec tsc -p tsconfig.json --noEmit
+pnpm --filter @easytree/api test
+```
+
+`cost-access-audit.http.test.ts` ist hier **Pflicht, nicht Kür**: es ist die Regressionsprobe der
+drei bestehenden Routen, die dieselbe `zugang(...)`-Kette benutzen.
+
+**Schritt 7: Committen**
 
 ```bash
 git add apps/api/src/modules/costs/interface/http/costs.controller.ts \
-        apps/api/src/app.module.ts apps/api/test/costs/snapshot-http.test.ts
+        apps/api/src/app.module.ts apps/api/test/costs/snapshot-http.test.ts \
+        apps/api/test/openapi-route-conformance.test.ts
 git diff --cached --name-only
 git commit -m "feat(api): EYT-139 — Snapshot-Routen an die eine Zugangskette binden"
 ```
 
 ---
 
-## Task 4: Konformität und Modulhonorigkeit
+## Task 4: Modulhonorigkeit
+
+> Die Kürzung von `NOT_YET_IMPLEMENTED` ist nach **Task 3** gewandert (Begründung dort). Hier
+> bleibt nur die Ehrlichkeitskorrektur.
 
 **Dateien:**
 
-- Ändern: `apps/api/test/openapi-route-conformance.test.ts`
 - Ändern: `apps/api/src/modules/costs/index.ts`
 
 **Schritt 1: Messen, was jetzt rot ist**
