@@ -115,6 +115,16 @@ const W_BEREICH_BIS = "2026-W17";
 const W_NACH_BEREICH = "2026-W18";
 const W_STEMPEL = "2026-W19";
 
+/** Multi-Org-Faelle (EYT-109). Eigene Wochen, ausserhalb aller anderen Suiten. */
+const W_MO_ALPHA = "2026-W02";
+const W_MO_BETA = "2026-W03";
+
+/** Existiert in keiner Migration und keinem Seed — die „fremde" Organisation. */
+const ORG_UNBEKANNT = "00000000-0000-4000-8000-0000000000c3";
+
+/** Feste Id der geliehenen Zweitmitgliedschaft. Nicht im Seed vergeben. */
+const MITGLIEDSCHAFT_ZWEITE = "00000000-0000-4000-8000-0000000e0ab9";
+
 const ALLE_WOCHEN = [
   W_VEROEFFENTLICHT,
   W_ENTWURF,
@@ -126,6 +136,8 @@ const ALLE_WOCHEN = [
   W_BEREICH_BIS,
   W_NACH_BEREICH,
   W_STEMPEL,
+  W_MO_ALPHA,
+  W_MO_BETA,
 ];
 
 /**
@@ -198,8 +210,12 @@ async function neueVerbindung(): Promise<Client> {
   return client;
 }
 
-function repositoryAuf(client: Client, subject: string = USER_A): PlanningWindowRepository {
-  return new PlanningWindowRepository(runnerAuf(client), subject);
+function repositoryAuf(
+  client: Client,
+  subject: string = USER_A,
+  organisationId: string | null = null,
+): PlanningWindowRepository {
+  return new PlanningWindowRepository(runnerAuf(client), subject, organisationId);
 }
 
 /**
@@ -335,6 +351,77 @@ afterAll(async () => {
   await Promise.all(clients.map((c) => c.end().catch(() => undefined)));
   gate.assertOrThrow();
 });
+
+/**
+ * Leiht `USER_A` fuer die Dauer EINES Falls eine aktive `member`-Mitgliedschaft
+ * in Organisation BETA — damit ist das Subjekt echt mehrfach-organisatorisch.
+ *
+ * Warum geliehen und nicht geseedet: `supabase/seed.sql` kennt bewusst keinen
+ * Multi-Org-Benutzer, und eine dauerhafte zweite Mitgliedschaft veraenderte jede
+ * andere Mandantensuite im selben Job — die Mandantengates laufen als eigene
+ * Schritte um diese Datei herum. Die Zeile lebt deshalb nur so lange wie der
+ * Fall, der sie braucht, und ihr Verschwinden wird NACHGESEHEN statt angenommen.
+ *
+ * Bauart woertlich uebernommen aus `planning-write.integration.test.ts`
+ * (`mitGeliehenerMitgliedschaft`), einschliesslich der beiden Punkte, die dort
+ * teuer gelernt wurden:
+ *
+ * - `catch` statt `finally`. Ein `throw` im `finally` verwuerfe einen bereits
+ *   laufenden Fehler aus dem Fall; `no-unsafe-finally` verbietet ihn, und die
+ *   erste Fassung ist im Lauf 31230613284 genau daran gescheitert. Eingefangen
+ *   statt durchgereicht laeuft das Aufraeumen auf JEDEM Weg.
+ * - Der Fehler liegt in einem Tupel und nicht nackt in der Variablen: `fn` ist
+ *   von aussen hereingereicht, und ein nacktes `let fehler: unknown = null`
+ *   koennte „kein Fehler" nicht von „hat `null` geworfen" unterscheiden.
+ *
+ * Alle Beobachtungen laufen ueber die Verwaltungsverbindung. Ueber den
+ * Laufzeitkanal saehe `easytree_app` nach dem Rollenwechsel nur, was RLS
+ * durchlaesst — eine Zaehlung dort belegte das Verschwinden der Zeile nicht.
+ */
+async function mitZweiterMitgliedschaft(fn: () => Promise<void>): Promise<void> {
+  await admin.query(
+    `insert into public.memberships (id, org_id, user_id, role, active)
+     values ($1, $2, $3, 'member', true)`,
+    [MITGLIEDSCHAFT_ZWEITE, ORG_BETA, USER_A],
+  );
+
+  let fehlerAusFall: [unknown] | null = null;
+  try {
+    // Die Leihe hat gewirkt — gemessen, nicht angenommen. Ohne diese Kontrolle
+    // koennte ein Fall gruen sein, weil das Subjekt gar nicht mehrfach
+    // organisiert war: dann maesse er die Einorganisationsantwort und nennte
+    // sie eine Bindung.
+    const stand = await admin.query<{ role: string; active: boolean }>(
+      "select role, active from public.memberships where id = $1",
+      [MITGLIEDSCHAFT_ZWEITE],
+    );
+    expect(stand.rows[0]?.role, "die geliehene Mitgliedschaft traegt die falsche Rolle").toBe(
+      "member",
+    );
+    expect(stand.rows[0]?.active, "die geliehene Mitgliedschaft ist nicht aktiv").toBe(true);
+    await fn();
+  } catch (e) {
+    fehlerAusFall = [e];
+  }
+
+  await admin.query("delete from public.memberships where id = $1", [MITGLIEDSCHAFT_ZWEITE]);
+  const rest = await zaehle(admin, "select count(*) as n from public.memberships where id = $1", [
+    MITGLIEDSCHAFT_ZWEITE,
+  ]);
+  // Vorrang fuer den gefaehrlicheren Befund: ein fehlgeschlagener Fall kostet
+  // diesen Lauf, eine ueberlebende Mitgliedschaft verfaelscht spaetere
+  // Mandantengates im selben Job. `cause` haengt den urspruenglichen Fehler an,
+  // statt ihn zu verschlucken — sonst berichtete ein doppelt gescheiterter Lauf
+  // nur das Aufraeumproblem und verloere den Grund.
+  if (rest !== 0) {
+    throw new Error(
+      "[planning-published-reads] die geliehene Mitgliedschaft ist NICHT entfernt worden — " +
+        "spaetere Mandantengates wuerden auf einem falschen Zustand messen (EYT-109).",
+      fehlerAusFall === null ? undefined : { cause: fehlerAusFall[0] },
+    );
+  }
+  if (fehlerAusFall !== null) throw fehlerAusFall[0];
+}
 
 describe("Leseoperationen fuer veroeffentlichte Staende gegen echtes PostgreSQL", () => {
   /**
@@ -683,4 +770,149 @@ describe("Leseoperationen fuer veroeffentlichte Staende gegen echtes PostgreSQL"
       ),
     ).toBe(0);
   });
+
+  // -------------------------------------------------------------------------
+  // Multi-Org-Gate (EYT-109) — die Bindung gegen echtes RLS, nicht gegen
+  // Attrappen. Bis hierher ist sie ausschliesslich mit Doubles gemessen; erst
+  // db-gates fuehrt die beiden folgenden Faelle je gegen eine echte Datenbank.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Gegenmutation: streicht man in `sichtbareOrganisationen` den gebundenen
+   * Zweig (`where id::text = $1`), sieht ein mehrfach-organisatorisches Subjekt
+   * wieder beide Organisationen — die beiden gebundenen Lesungen unten liefern
+   * dann `AMBIGUOUS_ORGANISATION` statt einer Liste, und der Fall wird rot.
+   * Streicht man stattdessen die `and org_id = $3`-Bedingung aus
+   * `publishedVersions`, enthaelt jede der beiden Listen BEIDE Versionen — auch
+   * dann wird er rot.
+   */
+  dbIt("bindet einen Multi-Org-Kontext deterministisch an die gewaehlte Organisation", async () => {
+    // Zustand nach JEDEM Schritt einzeln beobachtet — eine Summe ueber beide
+    // Wochen saehe gleich aus, egal an welcher Organisation die Versionen
+    // haengen, und genau das ist die Frage dieses Falls.
+    const alphaId = await entwurfMit(admin, W_MO_ALPHA, [intervall(W_MO_ALPHA, 0)], ORG_ALPHA);
+    expect((await beobachteVersion(admin, alphaId))?.orgId).toBe(ORG_ALPHA);
+    expect((await beobachteVersion(admin, alphaId))?.publishedAt).toBeNull();
+    expect(await zuweisungsZaehler(admin, alphaId)).toBe(1);
+
+    await veroeffentliche(admin, alphaId, new Date("2026-01-05T10:00:00.000Z"));
+    expect((await beobachteVersion(admin, alphaId))?.publishedAt).not.toBeNull();
+
+    const betaId = await entwurfMit(admin, W_MO_BETA, [intervall(W_MO_BETA, 0)], ORG_BETA);
+    expect((await beobachteVersion(admin, betaId))?.orgId).toBe(ORG_BETA);
+    expect((await beobachteVersion(admin, betaId))?.publishedAt).toBeNull();
+    expect(await zuweisungsZaehler(admin, betaId)).toBe(1);
+
+    await veroeffentliche(admin, betaId, new Date("2026-01-12T10:00:00.000Z"));
+    expect((await beobachteVersion(admin, betaId))?.publishedAt).not.toBeNull();
+
+    // Und die Alpha-Seite steht nach dem zweiten Aufbauschritt unveraendert da.
+    expect(alphaId).not.toBe(betaId);
+    expect((await beobachteVersion(admin, alphaId))?.orgId).toBe(ORG_ALPHA);
+    expect(await zuweisungsZaehler(admin, alphaId)).toBe(1);
+
+    const client = await neueVerbindung();
+
+    await mitZweiterMitgliedschaft(async () => {
+      const idsGebundenAn = async (org: string): Promise<string[]> => {
+        const ergebnis = await repositoryAuf(client, USER_A, org).publishedVersions(
+          W_MO_ALPHA,
+          W_MO_BETA,
+        );
+        expect(ergebnis.ok, `publishedVersions gebunden an ${org} haette antworten muessen`).toBe(
+          true,
+        );
+        return ergebnis.ok ? ergebnis.versions.map((v) => v.id) : [];
+      };
+
+      // Ohne Bindung bleibt es mehrdeutig. Kein „erste Zeile gewinnt": eine
+      // stille Auswahl waere die gefaehrlichste aller Antworten, weil sie
+      // aussieht wie ein Ergebnis.
+      const ohne = await repositoryAuf(client, USER_A, null).publishedVersions(
+        W_MO_ALPHA,
+        W_MO_BETA,
+      );
+      expect(ohne.ok).toBe(false);
+      if (ohne.ok) return;
+      expect(ohne.problem).toBe("AMBIGUOUS_ORGANISATION");
+
+      // Gebunden an ALPHA: liefert Alpha und NICHT Beta.
+      const gebundenAnAlpha = await idsGebundenAn(ORG_ALPHA);
+      expect(gebundenAnAlpha).toContain(alphaId);
+      expect(gebundenAnAlpha).not.toContain(betaId);
+
+      // Gebunden an BETA: liefert Beta und NICHT Alpha. Erst dieser zweite
+      // Durchgang belegt, dass nicht schlicht die erste sichtbare Organisation
+      // genommen wird — mit nur einer Richtung waere „immer Alpha" gruen.
+      const gebundenAnBeta = await idsGebundenAn(ORG_BETA);
+      expect(gebundenAnBeta).toContain(betaId);
+      expect(gebundenAnBeta).not.toContain(alphaId);
+
+      // Und die versionsgenaue Lesung folgt derselben Bindung: die fremde
+      // Version ist unter der Gegenbindung nicht erreichbar — obwohl RLS sie
+      // dem Subjekt in diesem Moment durchliesse.
+      const querzugriff = await repositoryAuf(client, USER_A, ORG_ALPHA).publishedAssignments(
+        betaId,
+      );
+      expect(querzugriff.ok).toBe(false);
+      if (querzugriff.ok) return;
+      expect(querzugriff.problem).toBe("PLAN_VERSION_NOT_FOUND");
+    });
+  });
+
+  /**
+   * Fail-closed, ohne Rueckfall — und ohne Auskunft darueber, welche Id echt
+   * ist.
+   *
+   * Gegenmutation: laesst man `organisationOf` bei null Zeilen auf die erste
+   * sichtbare Organisation zurueckfallen, antwortet der erste Teil mit
+   * `ok: true` und den Alpha-Versionen, und der Fall wird rot.
+   */
+  dbIt(
+    "liefert bei einer nicht sichtbaren Organisation nichts und faellt nicht zurueck",
+    async () => {
+      // Beobachtung gegen Vacuitaet: ORG_BETA existiert WIRKLICH. Ohne sie
+      // maesse der zweite Teil nur, dass eine nicht existierende Id nichts
+      // findet — also dasselbe wie der erste, und damit nichts.
+      expect(
+        await zaehle(admin, "select count(*) as n from public.organizations where id = $1", [
+          ORG_BETA,
+        ]),
+        "ORG_BETA muss wirklich existieren, sonst misst der zweite Teil nichts",
+      ).toBe(1);
+
+      const client = await neueVerbindung();
+      const antworten: string[] = [];
+
+      await mitZweiterMitgliedschaft(async () => {
+        // Eine Organisation, die es nirgends gibt — angefragt aus einem Kontext,
+        // in dem zwei andere sichtbar waeren.
+        const unbekannt = await repositoryAuf(client, USER_A, ORG_UNBEKANNT).publishedVersions(
+          W_MO_ALPHA,
+          W_MO_BETA,
+        );
+        expect(unbekannt.ok).toBe(false);
+        if (unbekannt.ok) return;
+        expect(unbekannt.problem).toBe("NO_ORGANISATION");
+        antworten.push(unbekannt.problem);
+      });
+
+      // Ausserhalb der Leihe, also wieder einorganisatorisch: eine Organisation,
+      // die es WIRKLICH gibt, in der `USER_A` aber nicht Mitglied ist.
+      const fremd = await repositoryAuf(client, USER_A, ORG_BETA).publishedVersions(
+        W_MO_ALPHA,
+        W_MO_BETA,
+      );
+      expect(fremd.ok).toBe(false);
+      if (fremd.ok) return;
+      expect(fremd.problem).toBe("NO_ORGANISATION");
+      antworten.push(fremd.problem);
+
+      // Der Kern: BEIDE Antworten sind identisch. Waeren sie es nicht, verriete
+      // die Antwort, welche fremden Organisations-Ids echt sind. Ueber die Liste
+      // geprueft und nicht ueber zwei Einzelvergleiche, weil ein uebersprungener
+      // Zweig sonst unbemerkt bliebe.
+      expect(antworten).toEqual(["NO_ORGANISATION", "NO_ORGANISATION"]);
+    },
+  );
 });
