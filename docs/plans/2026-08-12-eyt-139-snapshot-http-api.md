@@ -104,6 +104,40 @@ git rev-list --left-right --count origin/master...origin/feat/eyt-109-daily-plan
    **Regel für jeden Abbildungsschritt in diesem Slice:** ein `toEqual` über das GANZE Objekt mit
    paarweise verschiedenen Werten, nicht drei einzelne Feldprüfungen.
 
+### Entschieden, nicht offen: `WRITE_CHANNEL_REJECTED` wird 500
+
+Die Spec-Prüfung von Task 2 hat zu Recht verlangt, das **vor** Task 3 zu entscheiden. Hier steht
+die Entscheidung samt der Alternativen, die geprüft und verworfen wurden — damit Task 3 sie nicht
+neu verhandelt.
+
+Der PO-Auftrag verlangt `SOURCE_NEEDED_CONTRACT_MAPPING`, **wenn Contract und
+Application-Problemunion einander widersprechen**. Sie tun es hier nicht: der Vertrag zählt
+Antworten auf, er verbietet keine.
+
+| Kandidat | Warum nicht                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **403**  | **Vom Port selbst ausgeschlossen.** `cost-snapshot-repository.port.ts` schreibt zu diesem Grund wörtlich: „KEINE Umdeutung in einen Auth- oder Mandantenfehler: das Subjekt kann korrekt angemeldet und berechtigt sein und trotzdem ueber den falschen Kanal kommen. Ein `401`/`403` daraus zu machen schickte die Betreiberin auf die Suche nach einem Rechteproblem, das es nicht gibt." |
+| **409**  | Sagt „dein Stand passt nicht zum Server" und legt einen Retry mit frischem Schlüssel nahe. Der behebt nichts — die Verbindung bleibt der falsche Kanal.                                                                                                                                                                                                                                     |
+| **400**  | Beschuldigt die Aufruferin. Die Anfrage war wohlgeformt; falsch ist die Betriebskonfiguration.                                                                                                                                                                                                                                                                                              |
+| **500**  | **Gewählt.** Der einzige Code, der „hier ist der Server falsch konfiguriert" sagt.                                                                                                                                                                                                                                                                                                          |
+
+Dass 500 im Dokument fehlt, ist eine repoweite Dokumentationslücke und keine Aussage über diese
+Operation: `problemResponses` zählt für **keine** der 18 Operationen 5xx auf. Zwei Messungen zeigen,
+dass 5xx auf genau diesen Routen bereits gelebte Praxis ist:
+
+- `AuthProblemFilter` (`modules/tenancy/interface/http/auth-problem.filter.ts`) antwortet auf
+  `AUTH_SERVER_UNAVAILABLE` mit **503** — und dieser Filter hängt via `@UseFilters` am
+  `CostsController`.
+- `HttpCostsGateway.send` behandelt `status >= 500` ausdrücklich als `UNAVAILABLE`. Der Client
+  rechnet also mit 5xx.
+
+Gleiches gilt für `stage: "READ"` nach erfolgreichem Schreiben: der eben geschriebene Snapshot war
+nicht lesbar — ein Serverfehler, kein Aufruferfehler. Auch **500**.
+
+**Als FINDINGS-Eintrag (Minor) zu melden:** `problemResponses` dokumentiert für keine Operation
+5xx, obwohl 5xx real vorkommt. Das gehört in einen eigenen Slice — eine Vertragsänderung an
+18 Operationen ist nicht Teil von EYT-139.
+
 ### Abgrenzung
 
 - **`GET /kosten/planversionen` ist NICHT Teil dieses Slices.** Die Auswahlliste ist die Datenquelle
