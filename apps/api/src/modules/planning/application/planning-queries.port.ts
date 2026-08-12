@@ -7,9 +7,15 @@
  * Vertrag ueber die Anwendungsschicht bis ins Repository durchgereicht, und
  * eine Vertragsaenderung zoege eine Repositoryaenderung nach sich.
  *
- * Die Organisation steht in KEINER Signatur. Sie kommt ausschliesslich aus dem
- * gesetzten Datenbankkontext (`app.user_org_ids()` ueber RLS). Ein Parameter
- * `orgId` waere die Einladung, ihn aus der URL zu befuellen.
+ * Die Organisation steht in keiner Signatur DIESER DREI METHODEN, und das
+ * bleibt so: ein Parameter `orgId` an `planningWindow` waere die Einladung, ihn
+ * aus der URL zu befuellen.
+ *
+ * Seit EYT-109 kann der Leseport beim BAU an eine bereits serverseitig
+ * aufgeloeste Organisation gebunden werden — siehe
+ * `planning-queries.factory.ts`. Das ist der Unterschied zwischen einer
+ * Anfrage, die sich ihren Mandanten aussucht, und einer Konstruktion, der ein
+ * bereits gefallenes Urteil mitgegeben wird.
  */
 
 /** Eine Zuweisung, so wie sie in der Datenbank steht. */

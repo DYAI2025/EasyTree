@@ -32,12 +32,18 @@
  *
  * ## Verdrahtung
  *
- * Bewusst NICHT in `AppModule` registriert. Das Kostenmodul ist heute eine
- * Grenze, kein laufendes Feature: es gibt keine Route (EYT-109) und keine
- * Autorisierung (EYT-106). Eine Verdrahtung ohne beides waere eine Zusage, die
- * kein Test einloest. Wenn sie kommt, folgt sie dem Factory-Muster der Planung
- * — ein Adapter je Subjekt, nie ein Singleton, das die Identitaet der ersten
- * Anfrage weiterreicht.
+ * Seit EYT-109 in `AppModule` registriert — aber als FABRIK
+ * (`PLAN_COST_FACTS_FACTORY`), nie als Singleton: ein Adapter je Subjekt UND
+ * Organisation. Ein zwischengespeicherter Port reichte die Identitaet der
+ * ersten Anfrage an alle folgenden weiter, und RLS finge das nicht ab — der
+ * `TenantContext` wird aus eben diesem festgehaltenen Subjekt gebaut.
+ *
+ * Diese Klasse ist deshalb NICHT mehr aus `costs/index.ts` exportiert. Die
+ * einzige Konstruktionsstelle ist `plan-cost-facts.factory.ts`, und dort ist
+ * die Organisation ein Pflichtargument. Oeffentlich waere der einstellige
+ * Konstruktor eine zweite Tuer, die sie still verliert.
+ *
+ * Die Route darauf kommt spaeter (EYT-109, Snapshot-Endpunkt).
  */
 import type { AssignmentId, EmployeeId, PlanVersionId, WorksiteId } from "@easytree/domain";
 import { unsafeIdentifier } from "@easytree/domain";

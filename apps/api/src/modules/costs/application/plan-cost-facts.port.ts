@@ -21,12 +21,16 @@
  *
  * ## Was hier bewusst NICHT steht
  *
- * Keine Organisations-Id in irgendeiner Signatur. Sie kommt ausschliesslich aus
- * dem gesetzten Datenbankkontext (`app.user_org_ids()` ueber RLS) — ein
- * Parameter `orgId` waere die Einladung, ihn aus URL oder Body zu befuellen
- * (REQ-002). Und keine Subjektbindung: die Verdrahtung folgt dem
- * Factory-Muster der Planung (`PLANNING_QUERIES_FACTORY`, ein Repository je
- * Subjekt) und entsteht mit der ersten Route in EYT-109.
+ * Keine Organisations-Id in einer PORTMETHODE. Ein Parameter `orgId` an
+ * `publishedFacts` oder `publishedFactsForVersion` waere die Einladung, ihn aus
+ * URL oder Body zu befuellen (REQ-002).
+ *
+ * Die BINDUNG dagegen steht seit EYT-109 an der Fabrik
+ * ({@link PlanCostFactsFactory}) — dort ist sie das Ergebnis von
+ * `CostAccessPolicy.authorize`, also serverseitig aus `memberships` aufgeloest
+ * und nicht aus einem Header geglaubt. Sie autorisiert nichts: sie verengt nur,
+ * was RLS ohnehin sichtbar macht, und eine fremde Organisation liefert null
+ * Zeilen statt fremder Daten.
  */
 import type { PublishedPlanFacts, PublishedPlanVersionSummary } from "../domain/planned-work-fact";
 

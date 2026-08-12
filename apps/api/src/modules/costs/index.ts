@@ -8,11 +8,22 @@
  *
  * ## Stand des Moduls
  *
- * Heute ist `costs` eine **Grenze**, kein laufendes Feature: keine Route, keine
- * Verdrahtung in `AppModule`, keine eigene Tabelle in `supabase/migrations/`.
- * Das ist der ehrliche Stand von EYT-105 und keine Luecke — Satzpersistenz
- * (EYT-108), Snapshot und Route (EYT-109), XLSX-Adapter (EYT-110) und
- * Autorisierung (EYT-106) sind eigene Tickets mit eigenen Nachweisen.
+ * `costs` ist keine blosse Grenze mehr. Verdrahtet in `AppModule` sind der
+ * `CostsController`, `COST_ACCESS_POLICY`, `COST_ACCESS_AUDIT`,
+ * `RATE_REPOSITORY_FACTORY` und seit EYT-109 `PLAN_COST_FACTS_FACTORY`; unter
+ * `/kosten` haengen drei Routen (EYT-106/EYT-108): `GET /kosten/mitarbeiter`,
+ * `GET /kosten/stundensaetze/{employeeId}` und `POST /kosten/stundensaetze`.
+ * Eigene Tabellen gibt es auch: `public.employee_rate_versions` (Migration
+ * 0013), `public.cost_snapshots` und `public.cost_snapshot_positions`
+ * (Migration 0018). `public.role_permissions` steht in derselben Migration
+ * 0013, gehoert aber `tenancy` — siehe Besitzregister in
+ * `module-catalogue.ts`.
+ *
+ * Offen ist zweierlei, beides ausdruecklich: der Kosten-Snapshot hat noch
+ * KEINE Route — Montage, Persistenzvertrag, PostgreSQL-Umsetzung und Use-Case
+ * stehen, aber `COST_SNAPSHOT_REPOSITORY_FACTORY` ist nirgends registriert und
+ * der Endpunkt folgt in Task 13 — und `CostExportPort` hat bis heute keine
+ * Umsetzung (XLSX-Adapter, EYT-110).
  */
 export type {
   PlannedWorkFact,
