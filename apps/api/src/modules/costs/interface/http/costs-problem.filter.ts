@@ -20,11 +20,22 @@
  * Regression der EYT-108-Satzrouten: 409 und „Konflikt" sind dort Vorbelegung,
  * nicht Ableitung, und ein Umbau, der beides aus der Ausnahme zoege, aenderte
  * ihr Verhalten still (`test/costs/costs-problem-filter.test.ts`, Fall 1).
+ *
+ * ## Warum der Rumpf als `ProblemDocument` annotiert ist
+ *
+ * `ProblemDocumentSchema` (`packages/contracts/src/primitives.ts`) ist ein
+ * `z.strictObject`, und `readProblem` verwirft bei einem Fehlschlag das GANZE
+ * Fehlerdokument, nicht bloss das ueberzaehlige Feld — ein sechstes Feld hier
+ * kostet den Client also die ganze Meldung. Ohne die Annotation liess `tsc` ein
+ * solches Feld durch (gemessen), und aufgefallen waere es erst am Test. Wo zwei
+ * Riegel moeglich sind, sollen zwei greifen: der Compiler haelt die Form, der
+ * Test die Werte. Gleiche Bauart wie in `common/http-exception.filter.ts`.
  */
 import { Catch, HttpStatus, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
 import type { Request, Response } from "express";
 
 import type { RequestWithCorrelationId } from "../../../../common/correlation-id.middleware";
+import type { ProblemDocument } from "../../../../common/http-exception.filter";
 import { ConflictProblem } from "./conflict-problem";
 import { CostsProblem } from "./costs-problem";
 
@@ -38,12 +49,14 @@ export class CostsProblemFilter implements ExceptionFilter {
     const status = exception instanceof CostsProblem ? exception.status : HttpStatus.CONFLICT;
     const title = exception instanceof CostsProblem ? exception.title : "Konflikt";
 
-    res.status(status).json({
+    const body: ProblemDocument = {
       type: exception.type,
       title,
       status,
       detail: exception.message,
       correlationId: (req as Partial<RequestWithCorrelationId>).correlationId ?? "unknown",
-    });
+    };
+
+    res.status(status).json(body);
   }
 }
