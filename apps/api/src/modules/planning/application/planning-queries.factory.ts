@@ -15,7 +15,23 @@
  */
 import type { PlanningQueries } from "./planning-queries.port";
 
-/** Baut den Leseport fuer ein verifiziertes Subjekt. */
-export type PlanningQueriesFactory = (subjectUserId: string) => PlanningQueries;
+/**
+ * Baut den Leseport fuer ein verifiziertes Subjekt.
+ *
+ * `organisationId` ist optional und bewusst das ZWEITE Argument: bestehende
+ * Aufrufer mit genau einer Mitgliedschaft rufen unveraendert einstellig auf und
+ * behalten ihre Semantik (mehrere Mitgliedschaften ohne Auswahl bleiben
+ * `AMBIGUOUS_ORGANISATION`).
+ *
+ * Wird sie uebergeben, ist sie eine BEREITS SERVERSEITIG AUFGELOESTE Auswahl —
+ * etwa das `organisationId` aus `CostAccessPolicy.authorize`, das aus
+ * `memberships` stammt und nicht aus dem Header. Sie autorisiert nichts: das
+ * Repository verengt damit ausschliesslich die ohnehin RLS-sichtbare Menge.
+ * Eine fremde Id liefert deshalb null Zeilen und nicht fremde Daten.
+ */
+export type PlanningQueriesFactory = (
+  subjectUserId: string,
+  organisationId?: string | null,
+) => PlanningQueries;
 
 export const PLANNING_QUERIES_FACTORY = "PLANNING_QUERIES_FACTORY";

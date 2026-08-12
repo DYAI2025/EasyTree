@@ -86,19 +86,21 @@ export class PlanningWindowRepository implements PlanningQueries {
   constructor(
     private readonly runner: TenantQueryRunner,
     private readonly subjectUserId: string,
+    /**
+     * Bereits serverseitig aufgeloeste Organisation, oder `null`.
+     *
+     * KEINE Autorisierung. Der Wert verengt nur innerhalb der RLS-sichtbaren
+     * Menge; ist die Organisation dort nicht enthalten, liefert die Abfrage
+     * null Zeilen und die Antwort ist `NO_ORGANISATION`.
+     */
+    private readonly organisationId: string | null = null,
   ) {}
 
   async planningWindow(weekKey: string): Promise<PlanningWindowResult> {
     return this.runner.run({ userId: this.subjectUserId }, async (tx) => {
-      // RLS liefert genau die Organisationen der aktiven Mitgliedschaften.
-      // Kein Filter noetig — und keiner erlaubt.
-      const orgs = await tx.query<OrgRow>("select id, time_zone from public.organizations");
-      if (orgs.rows.length === 0) return { ok: false, problem: "NO_ORGANISATION" as const };
-      if (orgs.rows.length > 1) {
-        return { ok: false, problem: "AMBIGUOUS_ORGANISATION" as const };
-      }
-      const org = orgs.rows[0];
-      if (org === undefined) return { ok: false, problem: "NO_ORGANISATION" as const };
+      const organisation = await this.organisationOf(tx);
+      if (!organisation.ok) return { ok: false as const, problem: organisation.problem };
+      const org = organisation.org;
 
       // Alle Versionen dieser Woche. Mehrere veroeffentlichte sind erlaubt
       // (der Unique-Index aus 0007 ist partiell und begrenzt nur Entwuerfe),
@@ -296,15 +298,39 @@ export class PlanningWindowRepository implements PlanningQueries {
   /**
    * Die EINE Organisation des gesetzten Kontexts.
    *
-   * Bewusst nur von den beiden neuen Methoden benutzt und NICHT nachtraeglich in
-   * `planningWindow` eingezogen: dessen Fassung ist durch den `read-through`-Lauf
-   * gedeckt, diese hier noch nicht. Denselben Block zu teilen waere richtig,
-   * sobald ein Test beide Wege deckt — das ist ein eigener Schritt und nicht
-   * einer, der sich in dieser Aenderung versteckt.
+   * ## Zwei Zweige, und warum der ungebundene woertlich bleibt
+   *
+   * Ohne Bindung laeuft exakt das Statement von frueher — Buchstabe fuer
+   * Buchstabe. Das ist Absicht: der `read-through`-Lauf und die bestehenden
+   * Integrationsfaelle messen genau diesen Text, und ihn beilaeufig
+   * umzuschreiben tauschte eine geprueft Zusage gegen eine ungeprueft neue.
+   *
+   * ## Warum `id::text = $1` und nicht `id = $1::uuid`
+   *
+   * Ein `::uuid`-Cast wirft bei einer nicht wohlgeformten Eingabe SQLSTATE
+   * 22P02. Der Ausfallweg waere dann eine Ausnahme statt einer Antwort. Ueber
+   * Text vergleicht die Abfrage mit nichts und liefert null Zeilen —
+   * fail-closed als normales Ergebnis, das ein Aufrufer behandeln kann.
+   *
+   * ## Warum eine unbekannte Organisation `NO_ORGANISATION` ergibt
+   *
+   * Weil es in dem angefragten Kontext keine nutzbare Mitgliedschaft gibt —
+   * derselbe Sachverhalt wie bei einem Subjekt ganz ohne Mitgliedschaft. Ein
+   * eigener Code muesste „gibt es nicht" von „du gehoerst nicht dazu"
+   * unterscheiden; genau das ist das Existenzleck, das `PLAN_VERSION_NOT_FOUND`
+   * an anderer Stelle bereits vermeidet.
    */
   private async organisationOf(tx: TenantQuery): Promise<OrganisationResult> {
     // RLS liefert genau die Organisationen der aktiven Mitgliedschaften.
-    const orgs = await tx.query<OrgRow>("select id, time_zone from public.organizations");
+    const orgs =
+      this.organisationId === null
+        ? await tx.query<OrgRow>("select id, time_zone from public.organizations")
+        : await tx.query<OrgRow>(
+            `select id, time_zone
+               from public.organizations
+              where id::text = $1`,
+            [this.organisationId],
+          );
     if (orgs.rows.length === 0) return { ok: false, problem: "NO_ORGANISATION" };
     if (orgs.rows.length > 1) return { ok: false, problem: "AMBIGUOUS_ORGANISATION" };
     const org = orgs.rows[0];

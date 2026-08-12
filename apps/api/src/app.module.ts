@@ -178,7 +178,8 @@ import {
       provide: PLANNING_QUERIES_FACTORY,
       inject: [TENANT_QUERY_RUNNER],
       useFactory: (runner: TenantQueryRunnerProvider): PlanningQueriesFactory => {
-        return (subjectUserId: string) => new PlanningWindowRepository(runner, subjectUserId);
+        return (subjectUserId: string, organisationId?: string | null) =>
+          new PlanningWindowRepository(runner, subjectUserId, organisationId ?? null);
       },
     },
     {
