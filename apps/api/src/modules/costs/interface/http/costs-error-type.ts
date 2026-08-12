@@ -22,7 +22,12 @@
  * Diese Werte sind Teil des Vertrags. Sie umzubenennen ist eine
  * Vertragsaenderung, kein Refactoring.
  */
+import type {
+  SnapshotReadProblem,
+  SnapshotWriteProblem,
+} from "../../application/cost-snapshot-repository.port";
 import type { PlanCostFactsProblem } from "../../application/plan-cost-facts.port";
+import type { SnapshotAssemblyProblem } from "../../domain/cost-snapshot-assembly";
 
 /**
  * Genau ein Code je Ablehnungsgrund des Faktenports.
@@ -66,3 +71,49 @@ export const RATE_ERROR_TYPE = {
 } as const;
 
 export type RateErrorType = (typeof RATE_ERROR_TYPE)[keyof typeof RATE_ERROR_TYPE];
+
+/**
+ * Genau ein Code je Montagegrund (EYT-139).
+ *
+ * Zwei Eintraege verweisen bewusst auf bestehende URNs aus `RATE_ERROR_TYPE`:
+ * „Satz fehlt" und „Satz mehrdeutig" bedeuten hier dasselbe wie in der
+ * Satzverwaltung. Ein zweiter URN fuer dieselbe Aussage waere ein neuer
+ * Problemname, den kein Vertrag verlangt.
+ */
+export const SNAPSHOT_ASSEMBLY_ERROR_TYPE = {
+  RATE_NOT_FOUND: RATE_ERROR_TYPE.RATE_NOT_FOUND,
+  RATE_AMBIGUOUS: RATE_ERROR_TYPE.RATE_AMBIGUOUS,
+  RATE_INVALID: "urn:easytree:costs:rate-invalid",
+  LABEL_MISSING: "urn:easytree:costs:label-missing",
+  DAY_BOUNDARY_NONEXISTENT: "urn:easytree:costs:day-boundary-nonexistent",
+  DAY_BOUNDARY_AMBIGUOUS: "urn:easytree:costs:day-boundary-ambiguous",
+  TIME_ZONE_UNKNOWN: "urn:easytree:costs:time-zone-unknown",
+  INTERVAL_INVALID: "urn:easytree:costs:interval-invalid",
+} as const satisfies Record<SnapshotAssemblyProblem, string>;
+
+export type SnapshotAssemblyErrorType =
+  (typeof SNAPSHOT_ASSEMBLY_ERROR_TYPE)[keyof typeof SNAPSHOT_ASSEMBLY_ERROR_TYPE];
+
+export const SNAPSHOT_WRITE_ERROR_TYPE = {
+  IDEMPOTENCY_KEY_REUSED: RATE_ERROR_TYPE.IDEMPOTENCY_KEY_REUSED,
+  WORKSITE_NOT_IN_ORG: "urn:easytree:costs:worksite-not-in-org",
+  WRITE_CHANNEL_REJECTED: "urn:easytree:costs:write-channel-rejected",
+} as const satisfies Record<SnapshotWriteProblem, string>;
+
+export type SnapshotWriteErrorType =
+  (typeof SNAPSHOT_WRITE_ERROR_TYPE)[keyof typeof SNAPSHOT_WRITE_ERROR_TYPE];
+
+/**
+ * Ein Grund, ein Code — und das ist die Aussage.
+ *
+ * „gibt es nicht", „gehoert einem anderen Mandanten" und „das Subjekt darf
+ * Kosten nicht sehen" fallen im Port bereits zu EINEM Grund zusammen. Dass es
+ * hier genau einen URN gibt, ist die HTTP-Haelfte derselben Zusage: es gibt
+ * keinen Weg, aus der Antwort auf die Existenz einer fremden Id zu schliessen.
+ */
+export const SNAPSHOT_READ_ERROR_TYPE = {
+  SNAPSHOT_NOT_FOUND: "urn:easytree:costs:snapshot-not-found",
+} as const satisfies Record<SnapshotReadProblem, string>;
+
+export type SnapshotReadErrorType =
+  (typeof SNAPSHOT_READ_ERROR_TYPE)[keyof typeof SNAPSHOT_READ_ERROR_TYPE];

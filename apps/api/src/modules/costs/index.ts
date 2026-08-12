@@ -61,6 +61,21 @@ export { planCostFactsFactory } from "./infrastructure/plan-cost-facts.factory";
 export type { CostsErrorType, RateErrorType } from "./interface/http/costs-error-type";
 export { COSTS_ERROR_TYPE, RATE_ERROR_TYPE } from "./interface/http/costs-error-type";
 
+// EYT-139: die URNs des Snapshot-Pfades. Sie stehen hier, weil ihr Test die
+// Injektivitaet ueber ALLE vier Tabellen misst — `satisfies` erzwingt nur
+// Vollstaendigkeit, nicht Verschiedenheit — und ein tiefer Pfad nach
+// `interface/http/` faellt am Waechter `costs-cross-module-public-api-only`.
+export type {
+  SnapshotAssemblyErrorType,
+  SnapshotReadErrorType,
+  SnapshotWriteErrorType,
+} from "./interface/http/costs-error-type";
+export {
+  SNAPSHOT_ASSEMBLY_ERROR_TYPE,
+  SNAPSHOT_READ_ERROR_TYPE,
+  SNAPSHOT_WRITE_ERROR_TYPE,
+} from "./interface/http/costs-error-type";
+
 // EYT-106/EYT-108: Autorisierung, Satzverwaltung, Route.
 export {
   COST_ACCESS_POLICY,
@@ -179,3 +194,11 @@ export { toCostSnapshotDto } from "./interface/http/cost-snapshot.dto";
 export { CostsController } from "./interface/http/costs.controller";
 export { CostsProblemFilter } from "./interface/http/costs-problem.filter";
 export { ConflictProblem } from "./interface/http/conflict-problem";
+
+// EYT-139: die Ablehnung, die ihren Statuscode selbst mitbringt. Zweite Klasse
+// neben `ConflictProblem` und nicht dessen Erweiterung: eine „ConflictProblem"
+// mit Status 400 luege im Namen, und jede Aenderung an ihr veraenderte das
+// Verhalten der EYT-108-Satzrouten mit. Oeffentlich, weil Task 3 sie im
+// Controller wirft und ihr Test beide Filterzweige von aussen treibt.
+export { CostsProblem } from "./interface/http/costs-problem";
+export type { CostsProblemInput } from "./interface/http/costs-problem";
