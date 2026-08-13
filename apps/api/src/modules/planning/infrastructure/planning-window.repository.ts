@@ -290,8 +290,7 @@ export class PlanningWindowRepository implements PlanningQueries {
         `select id, week_key, published_at
            from public.plan_versions
           where id = $1
-            and org_id = $2
-            and published_at is not null`,
+            and org_id = $2`,
         [planVersionId, organisation.org.id],
       );
       const version = veroeffentlicht.rows[0];
