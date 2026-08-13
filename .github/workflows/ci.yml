@@ -429,6 +429,30 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.integration.test.ts 2>&1 | tee /tmp/snapshot-http.log
           bash scripts/assert-tenant-report.sh snapshot-http /tmp/snapshot-http.log
+      # EYT-143: ein gespeicherter Snapshot ueberlebt eine RUECKWIRKEND wirksame
+      # Satzversion. Der HTTP-Fall I8 im Schritt darueber misst dasselbe
+      # Szenario; diese Suite ergaenzt genau die zwei Aussagen, die er aus
+      # Bauart nicht treffen kann:
+      #
+      #  1. Sie vergleicht die GESPEICHERTEN Zeilen selbst, ueber die
+      #     Beobachterverbindung. I8 sieht nur die Leseausgabe — ein Defekt, der
+      #     die Zeilen umschriebe UND sie konsistent zurueckliese, liesse ihn
+      #     gruen.
+      #  2. Sie belegt die aktuelle Satzauflage ueber den PRODUKTIONSPFAD
+      #     (versionsFor + effectiveRateVersion) statt ueber rohes Admin-SQL.
+      #
+      # Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer Job: ein neuer
+      # Job waere ein Status-Check, den das Ruleset nicht kennt, und beide
+      # Listen in setup-/verify-branch-protection.sh muessten mitwachsen.
+      - name: Snapshot-Unveraenderlichkeit gegen spaetere Saetze (fail-closed, zwei Verbindungen, EYT-143)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/costs/snapshot-immutability.integration.test.ts 2>&1 | tee /tmp/snapshot-immutability.log
+          bash scripts/assert-tenant-report.sh snapshot-immutability /tmp/snapshot-immutability.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |
