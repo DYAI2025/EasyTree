@@ -25,15 +25,15 @@
  *
  * ## Zwei Zugangsmethoden, eine Zugangskette (EYT-139)
  *
- * {@link CostsController.zugang} bleibt die EINE Kette und wird von allen fuenf
+ * {@link CostsController.zugang} bleibt die EINE Kette und wird von allen sechs
  * Routen benutzt. Sie liefert seit EYT-139 zusaetzlich das Snapshot-Repository:
  * das braucht nur das Subjekt, kostet nichts und hat damit genau eine
  * Konstruktionsstelle.
  *
- * Der FAKTENPORT steht bewusst nicht dort, sondern in
- * {@link CostsController.snapshotAbhaengigkeiten} — der einen Konstruktionsstelle
- * der Snapshot-Abhaengigkeiten, die ausschliesslich der Schreibpfad ruft. Der
- * Grund ist strukturell:
+ * Der FAKTENPORT steht bewusst nicht dort, sondern an den beiden Stellen, die
+ * ihn wirklich brauchen: {@link CostsController.snapshotAbhaengigkeiten} fuer den
+ * Schreibpfad und {@link CostsController.planVersions} fuer die Auswahlliste
+ * (EYT-144). Der Grund ist strukturell:
  *
  * `GET /kosten/snapshots/{snapshotId}` liest einen gespeicherten Stand und
  * rechnet nichts neu. Wuerde die Zugangskette den Planungs-Faktenport auch dort
@@ -57,6 +57,7 @@ import {
   Inject,
   Param,
   Post,
+  Query,
   Req,
   UseFilters,
 } from "@nestjs/common";
@@ -68,10 +69,12 @@ import {
   IDEMPOTENCY_HEADER,
   IdSchema,
   IdempotencyKeySchema,
+  PublishedPlanVersionsQuerySchema,
   type CostSnapshot,
   type EmployeesForRates,
   type RateHistory,
   type RateVersionDto,
+  type SelectablePlanVersions,
 } from "@easytree/contracts";
 
 import type { RequestWithCorrelationId } from "../../../../common/correlation-id.middleware";
@@ -118,6 +121,7 @@ import {
   PLAN_COST_FACTS_FACTORY,
   type PlanCostFactsFactory,
   type PlanCostFactsProblem,
+  type PlanVersionListProblem,
 } from "../../application/plan-cost-facts.port";
 import {
   RATE_REPOSITORY_FACTORY,
@@ -254,6 +258,68 @@ export class CostsController {
 
     if (!ergebnis.ok) throw problemFor(ergebnis.problem);
     return toDto(ergebnis.version, heutigesGeschaeftsdatum());
+  }
+
+  /**
+   * Die Auswahlliste von `/kosten`: veroeffentlichte Planversionen eines
+   * Wochenbereichs (EYT-144).
+   *
+   * `costs.read` und nicht `costs.calculate`: hier entsteht nichts, hier wird
+   * gelesen. Wer eine Woche auswaehlen darf, hat damit noch nicht das Recht,
+   * einen revisionssicheren Stand einzufrieren.
+   *
+   * Die Reihenfolge ist dieselbe wie ueberall: erst die Zugangskette, dann die
+   * Eingabepruefung. Umgekehrt erfuehre ein Unberechtigter an einem 400, dass
+   * sein Bereich verkehrt war — eine Auskunft ueber eine Ressource, auf die er
+   * keinen Zugriff hat. Der Fall `L5` haelt das fest.
+   *
+   * Geprueft wird das GANZE `req.query`-Objekt, nicht zwei einzeln
+   * entgegengenommene Parameter. `PublishedPlanVersionsQuerySchema` ist ein
+   * `strictObject`: damit fallen ein unbekannter Parameter und ein doppelt
+   * angegebener (Express macht daraus ein Array, kein `string`) auf, statt
+   * stillschweigend auf einen Wert reduziert zu werden.
+   *
+   * Der Faktenport wird HIER gebaut und nicht in der Zugangskette — aus
+   * demselben Grund, aus dem die Snapshot-Leseroute keinen bekommt: was eine
+   * Route nicht konstruiert, kann sie auch nicht heimlich benutzen. Gebaut wird
+   * er mit `zugang.organisationId`, also mit der serverseitig aus den
+   * Mitgliedschaften aufgeloesten Organisation — nie mit dem Header.
+   */
+  @Get("planversionen")
+  async planVersions(
+    @Req() req: Request,
+    @Query() abfrage: unknown,
+    @Headers(ORGANISATION_HEADER) organisationHeader?: string,
+  ): Promise<SelectablePlanVersions> {
+    const zugang = await this.zugang(
+      req,
+      organisationHeader,
+      "costs.read",
+      "GET /kosten/planversionen",
+    );
+
+    const geprueft = PublishedPlanVersionsQuerySchema.safeParse(abfrage);
+    if (!geprueft.success) {
+      throw new BadRequestException(
+        `Ungueltiger Wochenbereich: ${geprueft.error.issues.map((i) => i.path.join(".") || "abfrage").join(", ")}`,
+      );
+    }
+
+    const gelesen = await this.factsFor(
+      zugang.subjectUserId,
+      zugang.organisationId,
+    ).publishedVersions(geprueft.data.fromWeekKey, geprueft.data.toWeekKey);
+    if (!gelesen.ok) throw costsProblem(LISTEN_ABLEHNUNG[gelesen.problem]);
+
+    // Reihenfolge unveraendert — die gehoert der Planung. Ein `sort()` hier
+    // waere eine zweite, stille Ordnung neben ihrer (Fall `L3`).
+    return {
+      versions: gelesen.versions.map((version) => ({
+        id: version.planVersionId,
+        weekKey: version.weekKey,
+        publishedAt: version.publishedAt.toISOString(),
+      })),
+    };
   }
 
   /**
@@ -656,6 +722,36 @@ const FAKTEN_ABLEHNUNG = {
       "Diese Planversion ist nicht verfuegbar. Bitte die Version in der Auswahlliste neu waehlen.",
   },
 } as const satisfies Record<PlanCostFactsProblem, Ablehnung>;
+
+/**
+ * Ablehnungen der AUSWAHLLISTE (EYT-144) — eigene Tabelle, eigene Texte.
+ *
+ * Nicht `FAKTEN_ABLEHNUNG` wiederverwendet, obwohl beide Gruende dort stehen:
+ * deren Texte enden auf „und den Snapshot erneut erzeugen". Auf der
+ * Auswahlliste ist noch gar kein Snapshot im Spiel, und eine Handlungsanweisung
+ * auf einen Vorgang, den die Person nicht angestossen hat, schickt sie an die
+ * falsche Stelle. Der URN bleibt derselbe — die Aussage ist dieselbe, nur die
+ * naechste Handlung nicht.
+ *
+ * `Record<PlanVersionListProblem, …>` und nicht `PlanCostFactsProblem`: die
+ * Liste nennt keine einzelne Planversion und kann deshalb weder
+ * `PLAN_NOT_PUBLISHED` noch `PLAN_VERSION_NOT_FOUND` ergeben. Ein Eintrag dafuer
+ * waere eine Zusage auf einen Fall, den es hier nicht gibt.
+ */
+const LISTEN_ABLEHNUNG = {
+  NO_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.NO_ORGANISATION,
+    detail:
+      "Es ist keine Organisation ausgewaehlt. Bitte oben eine Organisation waehlen und die Auswahlliste erneut laden.",
+  },
+  AMBIGUOUS_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.AMBIGUOUS_ORGANISATION,
+    detail:
+      "Es sind mehrere Organisationen moeglich. Bitte oben genau eine Organisation waehlen und die Auswahlliste erneut laden.",
+  },
+} as const satisfies Record<PlanVersionListProblem, Ablehnung>;
 
 /** Ablehnungen des Schreibvorgangs. */
 const SCHREIB_ABLEHNUNG = {

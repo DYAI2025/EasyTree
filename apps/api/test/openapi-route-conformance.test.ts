@@ -92,10 +92,10 @@ const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
     "Zeiterfassung. Es gibt keine time_entries-Tabelle — bewusst, siehe Migration 0010 Kopfkommentar (EYT-14).",
   ],
   ["POST /einsatz/zeiten/stopp", "Zeiterfassung. Gleiche Begruendung wie der Start."],
-  [
-    "GET /kosten/planversionen",
-    "Auswahlliste veroeffentlichter Planversionen (EYT-109). Der Vertrag steht seit dem Gateway-Schritt; die Leseroute braucht die Planungs-Leseports, die spaeter in EYT-109 entstehen.",
-  ],
+  // `GET /kosten/planversionen` stand hier bis EYT-144. Die Route ist am
+  // `CostsController` registriert; die `stale`-Zusicherung weiter unten hat den
+  // Eintrag in genau dem Lauf rot gemeldet, in dem die Route entstand.
+  //
   // Die beiden Snapshot-Operationen standen hier bis EYT-139. Sie sind am
   // `CostsController` registriert; die `stale`-Zusicherung weiter unten hat
   // ihre Eintraege in genau dem Lauf rot gemeldet, in dem die Routen entstanden
