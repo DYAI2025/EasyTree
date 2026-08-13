@@ -557,7 +557,12 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     await page.waitForURL("**/kosten");
     await expect(page.getByRole("heading", { name: "Kosten", level: 1 })).toBeVisible();
     await expect(page.getByTestId("kosten-unauthenticated")).toHaveCount(0);
-    await expect(page.getByTestId("kosten-leer")).toBeVisible();
+    // Bis EYT-144 stand hier `kosten-leer` — der Platzhalter der Ansicht, die
+    // noch keine Berechnung hatte. Die Ansicht ist jetzt echt; ihr ehrlicher
+    // Anfangszustand heisst „noch kein Snapshot gewaehlt". Die Aussage des
+    // Schrittes bleibt dieselbe: angemeldet, berechtigt, und OHNE Zahlen.
+    await expect(page.getByTestId("kosten-kein-snapshot")).toBeVisible();
+    await expect(page.getByLabel("Von Woche")).toBeVisible();
   });
 
   await test.step("4 — Sicherheitsnachweis: beide Sitzungscookies sind HttpOnly und Strict", async () => {
@@ -2016,10 +2021,19 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
       // Und im DOM steht kein Betrag — auch nicht versteckt. Geprueft wird der
       // gerenderte Inhalt, nicht das Sichtbare: ein `display:none`-Element
       // truege den Wert trotzdem aus.
+      //
+      // Was hier BEWUSST NICHT geprueft wird: die Abwesenheit der Snapshot-Id.
+      // Sie steht im Auslieferungspayload der Seite — gemessen am 13.08.2026
+      // gegen den echten Build, genau einmal. Das ist kein Leck, sondern Bs
+      // EIGENER URL-Parameter: `/kosten` reicht ihn als Prop an die
+      // Client-Komponente weiter, und Next serialisiert die Props der Kinder
+      // unabhaengig davon, ob der Zugangswaechter sie rendert. Eine Zusicherung
+      // darauf waere rot geworden und haette dabei nichts ueber Zugriffsrechte
+      // gesagt. Die Aussage, um die es geht, sind die BETRAEGE — und derselbe
+      // Build enthielt davon null.
       const inhalt = await seite.content();
       expect(inhalt).not.toContain(ERWARTETE_KOSTEN_ANZEIGE);
       expect(inhalt).not.toContain(ERWARTETE_KOSTEN_MINOR);
-      expect(inhalt).not.toContain(snapshotId);
 
       // Der Server lehnt unabhaengig von der Oberflaeche ab — zweimal je Route:
       // ohne Organisationskontext (400) und mit dem Kontext von A (403). Der
