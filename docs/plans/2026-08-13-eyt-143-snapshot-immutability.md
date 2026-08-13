@@ -713,8 +713,8 @@ RUN=$(gh run list --repo DYAI2025/EasyTree --commit "$(git rev-parse HEAD)" --js
 gh run view "$RUN" --repo DYAI2025/EasyTree --log --job db-gates 2>/dev/null | grep -F "[snapshot-immutability]"
 ```
 
-Expected: eine Zeile `[snapshot-immutability] mode=required executed=2 passed=2 skipped=0` und
-darunter `[snapshot-immutability] Gate OK: executed=2 passed=2 skipped=0`.
+Expected: eine Zeile `[snapshot-immutability] mode=required executed=3 passed=3 skipped=0` und
+darunter `[snapshot-immutability] Gate OK: executed=3 passed=3 skipped=0`.
 
 **Wenn `executed=0` oder `skipped>0`:** das Gate ist per Konstruktion rot — nicht „nachbessern, bis
 es grün ist", sondern die Ursache lesen. Ein Skip im Pflichtmodus ist ein Defekt, kein Zustand.
@@ -792,11 +792,31 @@ In `cost-snapshot-repository.pg.ts::read` die Positionsabfrage ersetzen. **Origi
 der am Leistungstag **derzeit** wirksamen Satzversion statt aus der gespeicherten Zeile. Der
 Snapshot wird damit vom Dokument zum Cache.
 
-**Warum sie kompiliert und an keinem Wächter fällt:** Die Ergebnisform bleibt exakt
-`PositionsZeile` — dieselben Spaltennamen, dieselben Typen. `employee_rate_versions` gehört dem
-Kostenmodul selbst, `costs-touches-only-own-tables` sieht den Zugriff als erlaubt an, und
-`api-dependency-allowlist` ist nicht berührt (kein neuer Import). Genau darum kann nur ein
-Verhaltenstest sie sehen.
+**Warum sie kompiliert:** Die Ergebnisform bleibt exakt `PositionsZeile` — dieselben
+Spaltennamen, dieselben Typen. `costs-touches-only-own-tables` greift nicht, weil
+`employee_rate_versions` dem Kostenmodul selbst gehört, und `api-dependency-allowlist` ist nicht
+berührt (kein neuer Import).
+
+> **Korrektur, gemessen am 13.08.2026 — eine Annahme dieses Plans war falsch.** Eine frühere
+> Fassung schrieb hier „fällt an keinem Wächter" und übernahm das aus
+> `snapshot-http.integration.test.ts:104`. Lokal gemessen
+> (`pnpm --filter @easytree/api exec vitest run test/architecture.test.ts test/costs/`) fällt
+> zusätzlich **`cost-snapshot-repository.test.ts::Fall 18 — rechnet beim Lesen nichts nach`**:
+> `Test Files 1 failed | 22 passed`, `Tests 1 failed | 190 passed | 36 skipped`. Dieser Fall läuft
+> ohne Datenbank und prüft den **SQL-Text** der abgesetzten Anweisungen gegen
+> `employee_rate_versions` (`:553`).
+>
+> Das ändert die Bewertung, nicht den Nutzen: Fall 18 sagt „die Anweisung nennt die Satztabelle
+> nicht" — er kann nicht sagen, dass die echte Datenbank für dieselbe Id nach einer Ablösung wieder
+> die historischen Werte liefert und die gespeicherten Zeilen unberührt bleiben. Ein Nachrechnen
+> über eine Sicht, eine Funktion oder eine zweite Datenquelle trüge den Namen nicht im
+> Anweisungstext und käme an ihm vorbei. Beide Nachweise ersetzen einander nicht — und ein
+> Wegwerf-Lauf, in dem **zwei unabhängige Gates** feuern, ist die stärkere Evidenz, nicht die
+> schwächere.
+>
+> Praktische Folge für Step 6: erwartet wird Rot in **`db-gates` UND `unit-tests`**. Das ist
+> messbar, weil `.github/workflows/ci.yml` **kein einziges `needs:`** führt — jeder Job läuft
+> unabhängig, ein rotes `unit-tests` verhindert `db-gates` also nicht.
 
 > **Falle, gemessen (Memory `counter-mutation-must-be-coherent`):** eine halbe Mutation zerbricht
 > am internen Wächter, und der rote Test misst dann die Selbstverteidigung statt der Regel. Diese
@@ -902,7 +922,7 @@ gh run list --repo DYAI2025/EasyTree --commit "$(git rev-parse HEAD)" --json dat
 ```
 
 Expected: exit 0, jeder Job `success`, und die `db-gates`-Zeile
-`[snapshot-immutability] Gate OK: executed=2 passed=2 skipped=0`.
+`[snapshot-immutability] Gate OK: executed=3 passed=3 skipped=0`.
 
 **Step 4: Deliverables auf Blocker greppen**
 
