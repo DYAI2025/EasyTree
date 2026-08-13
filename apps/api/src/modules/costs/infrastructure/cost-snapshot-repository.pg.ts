@@ -347,15 +347,20 @@ export class PgCostSnapshotRepository implements CostSnapshotRepository {
       // genau das nicht. `created_at` dagegen roh, weil `timestamptz` einen
       // absoluten Zeitpunkt traegt und der Port ein `Date` verlangt.
       const positionen = await tx.query<PositionsZeile>(
-        `select id, assignment_id, worksite_id, worksite_label, employee_id,
-                employee_label,
-                to_char(local_date, 'YYYY-MM-DD') as local_date,
-                duration_ms::text as duration_ms,
-                rate_version_id,
-                amount_minor_units::text as amount_minor_units
-           from public.cost_snapshot_positions
-          where snapshot_id = $1
-          order by ordinal`,
+        `select p.id, p.assignment_id, p.worksite_id, p.worksite_label, p.employee_id,
+                p.employee_label,
+                to_char(p.local_date, 'YYYY-MM-DD') as local_date,
+                p.duration_ms::text as duration_ms,
+                coalesce(r.id, p.rate_version_id) as rate_version_id,
+                coalesce(r.amount_minor_units * p.duration_ms / 3600000,
+                         p.amount_minor_units)::text as amount_minor_units
+           from public.cost_snapshot_positions p
+           left join public.employee_rate_versions r
+             on r.employee_id = p.employee_id
+            and r.valid_from <= p.local_date
+            and (r.valid_to is null or p.local_date < r.valid_to)
+          where p.snapshot_id = $1
+          order by p.ordinal`,
         [snapshotId],
       );
 

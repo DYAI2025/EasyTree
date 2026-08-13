@@ -421,6 +421,11 @@ jobs:
       # Job waere ein Status-Check, den das Ruleset nicht kennt, und beide
       # Listen in setup-/verify-branch-protection.sh muessten mitwachsen.
       - name: Snapshot-HTTP-Naht (fail-closed, zwei Verbindungen, EYT-139)
+        # NUR AUF DEM WEGWERF-BRANCH, NICHT MERGEN (EYT-143). Unter der
+        # Gegenmutation wird dieser Schritt rot, und der Job endete hier — die
+        # Suite, deren Rot gemessen werden soll, liefe nie. Gemessen im Lauf
+        # 31654829709: db-gates brach an genau dieser Stelle ab.
+        continue-on-error: true
         env:
           EASYTREE_TENANT_TESTS: required
           EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
