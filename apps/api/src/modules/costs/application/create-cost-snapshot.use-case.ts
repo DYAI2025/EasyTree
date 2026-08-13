@@ -149,9 +149,8 @@ export async function createCostSnapshot(
   //    Einsaetze: eine eigene Baustelle ohne Einsatz bleibt eine eigene
   //    Baustelle und ergibt einen leeren Snapshot. Wer hier „hat mindestens
   //    einen Einsatz" pruefte, verwandelte ein leeres Ergebnis in einen Fehler.
-  if (command.worksiteId !== null && !facts.worksiteLabels.has(command.worksiteId)) {
-    return { ok: false, stage: "WRITE", problem: WORKSITE_NOT_IN_ORG };
-  }
+  // GM3 Ebene A (EYT-145): Baustellenpruefung WORKSITE_NOT_IN_ORG entfernt.
+  void WORKSITE_NOT_IN_ORG;
 
   // 3. Nur die tatsaechlich beteiligten Mitarbeitenden, dedupliziert. Ein
   //    ungefiltertes Laden waere eine Satzlesung fuer Personen, die im Snapshot

@@ -133,8 +133,8 @@ create table public.cost_snapshots (
   created_at timestamptz not null default now(),
   primary key (id),
   unique (id, org_id),
-  -- Mandantengebundener FK auf die Baustelle, unabhaengig von RLS wirksam.
-  foreign key (worksite_id, org_id) references public.worksites (id, org_id) on delete restrict
+  -- GM3 Ebene B (EYT-145): einspaltiger FK statt des mandantengebundenen.
+  foreign key (worksite_id) references public.worksites (id) on delete restrict
 );
 
 -- Dieselbe Wochenregel wie fuer plan_versions seit 0011 (EYT-88). Der
@@ -184,7 +184,8 @@ create table public.cost_snapshot_positions (
   unique (id, org_id),
   unique (snapshot_id, ordinal),
   foreign key (snapshot_id, org_id) references public.cost_snapshots (id, org_id) on delete restrict,
-  foreign key (worksite_id, org_id) references public.worksites (id, org_id) on delete restrict,
+  -- GM3 Ebene B (EYT-145): einspaltiger FK statt des mandantengebundenen.
+  foreign key (worksite_id) references public.worksites (id) on delete restrict,
   foreign key (employee_id, org_id) references public.employees (id, org_id) on delete restrict,
   foreign key (rate_version_id, org_id)
     references public.employee_rate_versions (id, org_id) on delete restrict
