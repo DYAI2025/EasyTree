@@ -60,10 +60,21 @@
  * `left join public.employee_rate_versions` erweitern und `rate_version_id` wie
  * `amount_minor_units` aus dem am Leistungstag DERZEIT wirksamen Satz ermitteln,
  * statt sie zu lesen. Sie kompiliert — die Ergebnisform bleibt Spalte fuer
- * Spalte `PositionsZeile` — und faellt an keinem Waechter: `employee_rate_versions`
- * gehoert dem Kostenmodul selbst, `costs-touches-only-own-tables` sieht den
- * Zugriff also als erlaubt an, und ein neuer Import entsteht nicht. Nur ein
- * Verhaltenstest nach einer Satzabloesung sieht sie.
+ * Spalte `PositionsZeile`, `tsc` und `eslint` bleiben gruen.
+ *
+ * GEMESSEN, und es widerlegt eine naheliegende Annahme: sie faellt NICHT nur
+ * hier. `cost-snapshot-repository.test.ts::Fall 18` wird ebenfalls rot, obwohl
+ * er ohne Datenbank laeuft — er prueft den SQL-TEXT der abgesetzten Anweisungen
+ * gegen `employee_rate_versions`. Der Waechter `costs-touches-only-own-tables`
+ * dagegen greift wirklich nicht: die Tabelle gehoert dem Kostenmodul selbst.
+ *
+ * Diese Suite ist deshalb nicht der einzige, aber der einzige VERHALTENSnahe
+ * Nachweis. Fall 18 sagt „die Anweisung nennt die Satztabelle nicht"; er kann
+ * nicht sagen, dass die echte Datenbank fuer dieselbe Id nach einer Abloesung
+ * wieder die historischen Werte liefert und die gespeicherten Zeilen dabei
+ * unberuehrt bleiben. Ein Nachrechnen, das den Namen der Satztabelle nicht im
+ * Anweisungstext traegt — ueber eine Sicht, eine Funktion oder eine zweite
+ * Datenquelle —, saehe er nicht. Die beiden ersetzen einander nicht.
  */
 import { COST_RULE_VERSION } from "@easytree/domain";
 import { Client } from "pg";
