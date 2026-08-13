@@ -1959,8 +1959,16 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     const positionen = page.getByTestId("kosten-position");
     await expect(positionen).toHaveCount(1);
     await expect(positionen.first()).toContainText("E2E-Baustelle Reise");
-    // Und die andere Baustelle steht NIRGENDS auf der Seite.
-    expect(await page.content()).not.toContain("E2E-Baustelle Filter B");
+    // Und die andere Baustelle steht nirgends IM SNAPSHOT.
+    //
+    // Bewusst auf den Snapshot-Bereich eingegrenzt und NICHT auf `page.content()`:
+    // die ausgeschlossene Baustelle MUSS als `<option>` in der Auswahl stehen
+    // bleiben, sonst koennte niemand den Filter wieder aendern. Eine seitenweite
+    // Zusicherung verbot genau das und war damit eine Behauptung ueber die
+    // Oberflaeche, die dem Zweck der Auswahl widersprach (gemessen: Lauf
+    // 31739153815, auth-journey rot an dieser Zeile — bei korrektem Snapshot).
+    // Die Aussage, um die es geht, ist der gespeicherte Stand.
+    await expect(page.getByTestId("kosten-snapshot")).not.toContainText("E2E-Baustelle Filter B");
 
     // UND er liegt so in PostgreSQL: Filter im Kopf, keine fremde Position.
     // `koepfe_gesamt=2` — der ungefilterte aus 9e und dieser.
