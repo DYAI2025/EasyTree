@@ -242,6 +242,10 @@ grant insert (org_id, snapshot_id, assignment_id, worksite_id, worksite_label,
               rate_version_id, amount_minor_units, ordinal)
   on public.cost_snapshot_positions to authenticated;
 
+-- GM9 (EYT-145): update-Recht ergaenzt.
+grant update on public.cost_snapshots to authenticated;
+grant update on public.cost_snapshot_positions to authenticated;
+
 -- Kein `grant ... to easytree_app`: die Laufzeitrolle ist NOINHERIT (0003) und
 -- erreicht die Tabellen ueber `set local role authenticated`. Ein direkter
 -- Grant machte den Rollenwechsel ueberfluessig und entwertete die
