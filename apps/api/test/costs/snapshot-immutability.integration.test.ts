@@ -102,6 +102,15 @@ const APP_DB_URL = process.env["EASYTREE_TEST_APP_DB_URL"];
 
 /** Die Loginrolle, unter der API und Worker arbeiten (Migration 0003). */
 const LAUFZEITROLLE = "easytree_app";
+/**
+ * Die Rolle, in die der Laufzeitkanal wechselt — und die die Rechte TRAEGT.
+ *
+ * `easytree_app` ist NOINHERIT und besitzt selbst keine Tabellenrechte;
+ * Migration 0018 erteilt sie ausschliesslich `authenticated` („Kein
+ * `grant ... to easytree_app`"). Wer Rechte messen will, muss deshalb diese
+ * Rolle fragen.
+ */
+const ANWENDUNGSROLLE = "authenticated";
 
 const TENANT_TESTS_MODE = process.env["EASYTREE_TENANT_TESTS"] ?? "local";
 const gate = new FailClosedGate("snapshot-immutability", TENANT_TESTS_MODE, "EYT-143");
@@ -500,44 +509,61 @@ describe("Ein gespeicherter Snapshot ueberlebt eine spaetere Satzversion (EYT-14
   });
 
   // -------------------------------------------------------------------------
-  dbIt("dem Laufzeitkanal fehlt jedes Recht, einen gespeicherten Snapshot zu aendern", async () => {
-    // Der Fall oben zeigt, dass NICHTS die Zeilen umgeschrieben hat. Er sagt
-    // nicht, WARUM — und SQLSTATE 42501 ist mehrdeutig (fehlendes Spaltenrecht
-    // ODER RLS-Verstoss). Wo zwei Riegel schuetzen, steht neben dem
-    // Verhaltensfall deshalb die strukturelle Aussage: es gibt gar kein Recht,
-    // das ein Umschreiben oder Loeschen erlaubte (Migration 0018 erteilt weder
-    // update- noch delete-Grants und legt entsprechend keine solchen Policies
-    // an).
-    const rechte = await admin.query<{
-      positionen_update: boolean;
-      positionen_delete: boolean;
-      kopf_update: boolean;
-      kopf_delete: boolean;
-    }>(
-      `select has_table_privilege($1, 'public.cost_snapshot_positions', 'update') as positionen_update,
+  dbIt(
+    "der Anwendungsrolle fehlt jedes Recht, einen gespeicherten Snapshot zu aendern",
+    async () => {
+      // Der Fall oben zeigt, dass NICHTS die Zeilen umgeschrieben hat. Er sagt
+      // nicht, WARUM — und SQLSTATE 42501 ist mehrdeutig (fehlendes Spaltenrecht
+      // ODER RLS-Verstoss). Wo zwei Riegel schuetzen, steht neben dem
+      // Verhaltensfall deshalb die strukturelle Aussage: es gibt gar kein Recht,
+      // das ein Umschreiben oder Loeschen erlaubte (Migration 0018 erteilt weder
+      // update- noch delete-Grants und legt entsprechend keine solchen Policies
+      // an).
+      //
+      // Gefragt wird `authenticated`, NICHT `easytree_app` — und das ist gemessen
+      // statt angenommen. Eine erste Fassung fragte die Loginrolle und bekam auf
+      // JEDE Frage `false`, auch auf `select` (CI-Lauf 31654711862): die
+      // Loginrolle ist NOINHERIT (Migration 0003) und traegt selbst keine Rechte,
+      // sie wechselt mit `set local role authenticated` in die Rolle, die sie
+      // traegt. Migration 0018 sagt das ausdruecklich: „Kein `grant ... to
+      // easytree_app`".
+      const rechte = await admin.query<{
+        positionen_update: boolean;
+        positionen_delete: boolean;
+        kopf_update: boolean;
+        kopf_delete: boolean;
+      }>(
+        `select has_table_privilege($1, 'public.cost_snapshot_positions', 'update') as positionen_update,
               has_table_privilege($1, 'public.cost_snapshot_positions', 'delete') as positionen_delete,
               has_table_privilege($1, 'public.cost_snapshots', 'update') as kopf_update,
               has_table_privilege($1, 'public.cost_snapshots', 'delete') as kopf_delete`,
-      [LAUFZEITROLLE],
-    );
+        [ANWENDUNGSROLLE],
+      );
 
-    expect(rechte.rows[0]).toEqual({
-      positionen_update: false,
-      positionen_delete: false,
-      kopf_update: false,
-      kopf_delete: false,
-    });
+      expect(rechte.rows[0]).toEqual({
+        positionen_update: false,
+        positionen_delete: false,
+        kopf_update: false,
+        kopf_delete: false,
+      });
 
-    // Gegenprobe im selben Aufruf: `insert` und `select` MUESSEN vorhanden sein.
-    // Ohne sie pruefte die Zusicherung darueber nur, dass die Rolle ueberhaupt
-    // nichts darf — etwa weil der Name falsch geschrieben ist, denn
-    // `has_table_privilege` wuerfe bei einer unbekannten Rolle zwar, nicht aber
-    // bei einer existierenden ohne jedes Recht.
-    const vorhanden = await admin.query<{ ins: boolean; sel: boolean }>(
-      `select has_table_privilege($1, 'public.cost_snapshot_positions', 'insert') as ins,
-              has_table_privilege($1, 'public.cost_snapshot_positions', 'select') as sel`,
-      [LAUFZEITROLLE],
-    );
-    expect(vorhanden.rows[0]).toEqual({ ins: true, sel: true });
-  });
+      // Gegenprobe im selben Aufruf: `select` und das Spaltenrecht auf `insert`
+      // MUESSEN vorhanden sein. Ohne sie pruefte die Zusicherung darueber nur,
+      // dass die Rolle ueberhaupt nichts darf — genau der Zustand, in dem die
+      // erste Fassung dieses Falls stillschweigend nichts gemessen haette, waere
+      // die Gegenprobe nicht dabei gewesen.
+      //
+      // `has_COLUMN_privilege` fuer `insert`: Migration 0018 erteilt das Recht
+      // SPALTENWEISE, und ein tabellenweites `has_table_privilege(..., 'insert')`
+      // antwortet darauf `false`. Die beiden Funktionen sind hier nicht
+      // austauschbar.
+      const vorhanden = await admin.query<{ sel: boolean; ins_spalte: boolean }>(
+        `select has_table_privilege($1, 'public.cost_snapshot_positions', 'select') as sel,
+              has_column_privilege($1, 'public.cost_snapshot_positions',
+                                   'amount_minor_units', 'insert') as ins_spalte`,
+        [ANWENDUNGSROLLE],
+      );
+      expect(vorhanden.rows[0]).toEqual({ sel: true, ins_spalte: true });
+    },
+  );
 });
