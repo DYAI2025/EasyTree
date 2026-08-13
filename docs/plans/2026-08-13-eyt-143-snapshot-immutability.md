@@ -846,6 +846,18 @@ gh pr create --repo DYAI2025/EasyTree --draft \
   --body "Nur Messung: belegt, dass test/costs/snapshot-immutability.integration.test.ts rot wird, wenn der Lesepfad aus aktuellen Saetzen nachrechnet. Wird ungemergt geschlossen."
 ```
 
+> **Zweite Korrektur, gemessen am 13.08.2026 — der erste Wegwerf-Lauf bewies nicht, was er sollte.**
+> Lauf `31654829709` lieferte zwar zwei Reds (`unit-tests` → Fall 18, `db-gates` → I8), aber
+> **nicht** das verlangte: `db-gates` bricht am ERSTEN fehlgeschlagenen Schritt ab, und der Schritt
+> „Snapshot-HTTP-Naht" steht in `ci.yml` VOR dem EYT-143-Schritt. Die Suite, deren Rot die
+> Akzeptanzkriterien fordern, lief in diesem Lauf überhaupt nicht — ein Job-Ergebnis „failure" ist
+> eben kein Nachweis darüber, welcher Test rot wurde.
+>
+> Behebung, ausschließlich auf dem Wegwerf-Branch: der Schritt „Snapshot-HTTP-Naht" bekommt dort
+> `continue-on-error: true`, damit der Job bis zum EYT-143-Schritt durchläuft. Der Wegwerf-Branch
+> wird zusätzlich auf den korrigierten Slice-Stand zurückgesetzt, sonst trüge er noch die falsche
+> Rollenannahme im Rechtefall mit sich und wäre aus zwei Gründen rot.
+
 **Step 6: Das Rot lesen**
 
 ```bash
