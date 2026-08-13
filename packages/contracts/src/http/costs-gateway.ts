@@ -27,6 +27,7 @@ import {
   RateHistorySchema,
   RateVersionDtoSchema,
   SelectablePlanVersionsSchema,
+  SelectableWorksitesSchema,
   type CostSnapshot,
   type CreateCostSnapshotCommand,
   type CreateRateVersionCommand,
@@ -35,6 +36,7 @@ import {
   type RateHistory,
   type RateVersionDto,
   type SelectablePlanVersions,
+  type SelectableWorksites,
 } from "../costs/schemas.js";
 
 export const ORGANISATION_HEADER = "X-EasyTree-Organization-Id";
@@ -150,6 +152,30 @@ export class HttpCostsGateway implements CostsGateway {
       schema: SelectablePlanVersionsSchema,
       // Wie beim Snapshot-Lesen: fachlich unmöglich, trotzdem entschieden und
       // im Test "bildet 409 auf BEIDEN Lesewegen auf REJECTED ab" festgehalten.
+      conflictAs: "REJECTED",
+    });
+  }
+
+  worksitesForPublishedPlanVersion(
+    planVersionId: string,
+  ): Promise<GatewayResult<SelectableWorksites>> {
+    // Dieselbe lokale Prüfung wie bei `snapshot(...)` und aus demselben Grund:
+    // der Wert kommt zwar aus der Auswahlliste, aber die Ansicht liest ihn aus
+    // einem `<select>`, dessen Werte ein manipuliertes DOM setzen kann.
+    // `encodeURIComponent` verhinderte das Ausbrechen aus dem Pfad, nicht die
+    // Anfrage — und ein Ausbruchsversuch gehört gar nicht erst abgeschickt.
+    const geprueft = IdSchema.safeParse(planVersionId);
+    if (!geprueft.success) {
+      return Promise.resolve(gatewayFailed<SelectableWorksites>("CONTRACT_VIOLATION", null));
+    }
+    return this.send({
+      path: `/kosten/planversionen/${encodeURIComponent(geprueft.data)}/baustellen`,
+      method: "GET",
+      idempotencyKey: null,
+      schema: SelectableWorksitesSchema,
+      // Wie auf den beiden anderen Lesewegen: ein GET erzeugt fachlich keinen
+      // Konflikt. Käme doch eine 409 an, ist REJECTED die ehrliche Antwort —
+      // es gibt hier keinen Stand des Clients, der veralten könnte.
       conflictAs: "REJECTED",
     });
   }

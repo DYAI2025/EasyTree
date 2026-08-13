@@ -38,6 +38,7 @@ import {
   CreateCostSnapshotCommandSchema,
   PublishedPlanVersionsQuerySchema,
   SelectablePlanVersionsSchema,
+  SelectableWorksitesSchema,
 } from "../src/costs/schemas.js";
 
 const UUID = "3f1c9c2a-5b7e-4d21-9f0a-8c6e2b1d4a77";
@@ -267,5 +268,65 @@ describe("PublishedPlanVersionsQuerySchema", () => {
         toWeekKey: "2025-W50",
       }).success,
     ).toBe(false);
+  });
+});
+
+/**
+ * Die auswaehlbaren Baustellen einer veroeffentlichten Planversion (EYT-146).
+ *
+ * Zwei Zusicherungen, die wirklich etwas kosten:
+ *
+ * 1. **`strictObject`, auch hier.** Die Antwort beschreibt Stammdaten eines
+ *    Mandanten. Ein `z.object` entfernte ein undokumentiertes Serverfeld still
+ *    und meldete Erfolg — eine mitgereiste `orgId` oder ein interner Vermerk
+ *    kaeme unbemerkt in den Browser.
+ * 2. **Kein `active`.** Der Vertrag fuehrt das Feld bewusst NICHT, obwohl
+ *    `PlanningResource` es hat: eine bereits veroeffentlichte Zuweisung braucht
+ *    ihre Baustellenbezeichnung auch dann noch, wenn die Baustelle spaeter
+ *    deaktiviert wurde. Der Fall unten haelt das fest — er ist die einzige
+ *    Stelle, an der ein spaeteres „nur der Vollstaendigkeit halber" auffiele.
+ */
+describe("SelectableWorksitesSchema (EYT-146)", () => {
+  it("nimmt eine Liste aus Id und Bezeichnung an", () => {
+    expect(
+      SelectableWorksitesSchema.safeParse({
+        worksites: [
+          { id: UUID, label: "Baustelle Nord" },
+          { id: UUID2, label: "Baustelle Sued" },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("nimmt eine leere Liste an — eine Planversion ohne Einsatz ist kein Fehler", () => {
+    expect(SelectableWorksitesSchema.safeParse({ worksites: [] }).success).toBe(true);
+  });
+
+  it("lehnt eine Id ab, die keine ist", () => {
+    expect(
+      SelectableWorksitesSchema.safeParse({
+        worksites: [{ id: "baustelle-nord", label: "Baustelle Nord" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("lehnt eine leere Bezeichnung ab — eine namenlose Auswahlzeile waere eine rohe UUID", () => {
+    expect(
+      SelectableWorksitesSchema.safeParse({ worksites: [{ id: UUID, label: "" }] }).success,
+    ).toBe(false);
+  });
+
+  it("lehnt ein zusaetzliches Feld ab, auch das plausible `active`", () => {
+    expect(
+      SelectableWorksitesSchema.safeParse({
+        worksites: [{ id: UUID, label: "Baustelle Nord", active: true }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("lehnt eine Antwort ohne die Huelle ab", () => {
+    // Eine nackte Liste ist ein anderer Vertrag: spaetere Felder neben
+    // `worksites` waeren dort nicht mehr unterzubringen, ohne ihn zu brechen.
+    expect(SelectableWorksitesSchema.safeParse([{ id: UUID, label: "Nord" }]).success).toBe(false);
   });
 });

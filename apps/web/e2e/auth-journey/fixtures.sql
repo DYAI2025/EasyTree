@@ -103,6 +103,59 @@ values ('00000000-0000-4000-8000-00000000e261',
         '2026-08-03T06:00:00Z', '2026-08-03T14:00:00Z')
 on conflict (id) do nothing;
 
+-- ---------------------------------------------------------------------------
+-- Der Baustellenfilter (EYT-146): EIGENE Woche, EIGENE Planversion
+-- ---------------------------------------------------------------------------
+-- Bewusst NICHT an `2026-W32` angehaengt. Eine zweite Zuweisung dort veraenderte
+-- den Betrag der Reise, und die von EYT-144 abgenommenen Zahlen
+-- (`ERWARTETE_KOSTEN_MINOR`, `positionen=1`) muessten neu geschrieben werden,
+-- nur damit dieser Nachweis Platz findet. Ein Nachweis, der einen bereits
+-- abgenommenen umschreibt, ist ein schlechter Nachweis.
+--
+-- `2026-W33` ist frei: W32 gehoert der Reise, W35 dem Schritt 9c3, W36/W37 den
+-- beiden Angriffswochen von EYT-136. Ein Entwurf je Woche und Organisation ist
+-- die geltende Invariante — deshalb eine eigene Woche und keine zweite Version
+-- in W32.
+--
+-- `2026-08-10T06:00:00Z` ist in `Europe/Berlin` Montag der ISO-Woche 33, 08:00.
+--
+-- ZWEI Baustellen, EIN Mitarbeiter, und die Zeitraeume ueberschneiden sich
+-- ausdruecklich nicht: EYT-49 verbietet ueberlappende veroeffentlichte
+-- Zuweisungen derselben Person, und das Veroeffentlichen liefe sonst in genau
+-- diese Invariante — rot an der falschen Stelle und mit der falschen
+-- Begruendung. Je vier Stunden am selben lokalen Tag ergeben mit dem Startsatz
+-- (4250) je 17000 Minor Units.
+--
+-- Die Version entsteht wieder als ENTWURF: die Reise soll auch hier den
+-- Uebergang selbst ausloesen, ueber den echten Publish-Endpunkt.
+insert into public.worksites (id, org_id, name, active)
+values ('00000000-0000-4000-8000-00000000e242',
+        '00000000-0000-4000-8000-00000000e201',
+        'E2E-Baustelle Filter B', true)
+on conflict (id) do nothing;
+
+insert into public.plan_versions (id, org_id, week_key)
+values ('00000000-0000-4000-8000-00000000e252',
+        '00000000-0000-4000-8000-00000000e201',
+        '2026-W33')
+on conflict (id) do nothing;
+
+insert into public.assignments
+  (id, org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+values ('00000000-0000-4000-8000-00000000e262',
+        '00000000-0000-4000-8000-00000000e201',
+        '00000000-0000-4000-8000-00000000e252',
+        '00000000-0000-4000-8000-00000000e211',
+        '00000000-0000-4000-8000-00000000e241',
+        '2026-08-10T06:00:00Z', '2026-08-10T10:00:00Z'),
+       ('00000000-0000-4000-8000-00000000e263',
+        '00000000-0000-4000-8000-00000000e201',
+        '00000000-0000-4000-8000-00000000e252',
+        '00000000-0000-4000-8000-00000000e211',
+        '00000000-0000-4000-8000-00000000e242',
+        '2026-08-10T11:00:00Z', '2026-08-10T15:00:00Z')
+on conflict (id) do nothing;
+
 commit;
 
 -- Nachrechnen statt behaupten. Bewusst OHNE psql-Variable im Block: innerhalb
@@ -140,10 +193,16 @@ begin
     where org_id = '00000000-0000-4000-8000-00000000e201';
 
   -- Genau EINE Mitgliedschaft: haette B eine, waere der Negativnachweis wertlos.
+  --
+  -- Seit EYT-146 zwei Baustellen, zwei Planversionen (beide Entwurf) und drei
+  -- Zuweisungen: eine in W32 fuer die Reise, zwei in W33 fuer den
+  -- Baustellenfilter. Die Zahlen stehen ausgeschrieben und nicht als „>= 1",
+  -- damit eine versehentlich doppelt eingespielte Fixtur auffaellt statt den
+  -- Betrag eines Snapshots still zu verdoppeln.
   if n_mitglied <> 1 or n_mitarbeiter <> 1 or n_satz <> 1 or n_projektion <> 2
-     or n_baustelle <> 1 or n_version <> 1 or n_entwurf <> 1 or n_zuweisung <> 1 then
+     or n_baustelle <> 2 or n_version <> 2 or n_entwurf <> 2 or n_zuweisung <> 3 then
     raise exception
-      'E2E-Fixture unvollstaendig: membership=% mitarbeiter=% satz=% projektionen=% baustelle=% version=% entwurf=% zuweisung=% (erwartet 1/1/1/2/1/1/1/1)',
+      'E2E-Fixture unvollstaendig: membership=% mitarbeiter=% satz=% projektionen=% baustelle=% version=% entwurf=% zuweisung=% (erwartet 1/1/1/2/2/2/2/3)',
       n_mitglied, n_mitarbeiter, n_satz, n_projektion,
       n_baustelle, n_version, n_entwurf, n_zuweisung;
   end if;

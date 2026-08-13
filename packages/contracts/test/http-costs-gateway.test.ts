@@ -476,3 +476,117 @@ describe("HttpCostsGateway — Fehlerzustaende", () => {
     expect(result.problem?.title).toBe("Planversion nicht veroeffentlicht");
   });
 });
+
+/**
+ * Die Baustellenauswahl EINER veroeffentlichten Planversion (EYT-146).
+ *
+ * Drei Zusicherungen, jede mit ihrem Positivfall daneben:
+ *
+ * 1. Der Pfad ist der des Vertrags — und er traegt die WIRKLICH uebergebene
+ *    Planversions-Id, nicht irgendeine. Ohne diesen Vergleich koennte der
+ *    Client eine feste Id senden und alle uebrigen Faelle blieben gruen.
+ * 2. Die Id wird LOKAL geprueft, VOR dem Absenden. Der Wert kommt aus der
+ *    Auswahlliste, koennte aber ueber die Adresszeile hereinkommen; ein
+ *    Ausbruchsversuch gehoert gar nicht erst abgeschickt. Gemessen wird das an
+ *    der ABWESENHEIT des Aufrufs, nicht am Rueckgabewert allein.
+ * 3. Eine 200er Antwort, die nicht dem Schema entspricht, wird verworfen. Ein
+ *    durchgereichtes `active` oder eine fehlende Bezeichnung wuerde sonst zur
+ *    Auswahlzeile, die eine rohe UUID anzeigt.
+ */
+describe("HttpCostsGateway — Baustellen einer Planversion (EYT-146)", () => {
+  const AUSWAHL = {
+    worksites: [
+      { id: WORKSITE_ID, label: "Baustelle Nord" },
+      { id: ASSIGNMENT_ID, label: "Baustelle Sued" },
+    ],
+  };
+
+  it("ruft die Vertragsroute mit GENAU der uebergebenen Planversions-Id", async () => {
+    const recorded: Recorded[] = [];
+    const result = await gatewayWith(
+      stubFetch(200, AUSWAHL, recorded),
+    ).worksitesForPublishedPlanVersion(PLAN_VERSION_ID);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual(AUSWAHL);
+    // Ausgeschrieben statt zusammengesetzt: eine Erwartung, die denselben
+    // Template-String baut wie die Produktion, vergleicht sich mit sich selbst.
+    expect(recorded[0]?.url).toBe(
+      "https://api.example.test/api/v1/kosten/planversionen/9a2b7c1d-4e5f-4a6b-8c9d-0e1f2a3b4c5d/baustellen",
+    );
+    expect(recorded[0]?.init?.method).toBe("GET");
+    // Ein Lesen. Kein Idempotenzschluessel — er gehoert zu Schreibvorgaengen.
+    expect(headersOf(recorded[0])[IDEMPOTENCY_HEADER]).toBeUndefined();
+    expect(headersOf(recorded[0])[ORGANISATION_HEADER]).toBe(ORG);
+  });
+
+  it("nimmt eine leere Auswahl an — eine Version ohne Einsatz ist kein Fehler", async () => {
+    const result = await gatewayWith(
+      stubFetch(200, { worksites: [] }, []),
+    ).worksitesForPublishedPlanVersion(PLAN_VERSION_ID);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.worksites).toEqual([]);
+  });
+
+  it("sendet eine ungueltige Planversions-Id GAR NICHT ab", async () => {
+    const recorded: Recorded[] = [];
+    const result = await gatewayWith(
+      stubFetch(200, AUSWAHL, recorded),
+    ).worksitesForPublishedPlanVersion("../snapshots");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("CONTRACT_VIOLATION");
+    // Die eigentliche Aussage: keine Anfrage. Ohne diese Zeile bewiese der
+    // Fall nur, dass der Rueckgabewert stimmt — der Ausbruchsversuch koennte
+    // trotzdem beim Server angekommen sein.
+    expect(recorded).toEqual([]);
+  });
+
+  it("verwirft eine 200er Antwort mit einem undokumentierten Zusatzfeld", async () => {
+    const result = await gatewayWith(
+      stubFetch(200, { worksites: [{ id: WORKSITE_ID, label: "Nord", active: true }] }, []),
+    ).worksitesForPublishedPlanVersion(PLAN_VERSION_ID);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("CONTRACT_VIOLATION");
+  });
+
+  it("verwirft eine 200er Antwort ohne Bezeichnung", async () => {
+    const result = await gatewayWith(
+      stubFetch(200, { worksites: [{ id: WORKSITE_ID, label: "" }] }, []),
+    ).worksitesForPublishedPlanVersion(PLAN_VERSION_ID);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("CONTRACT_VIOLATION");
+  });
+
+  it.each<[number, string]>([
+    [401, "UNAUTHENTICATED"],
+    [403, "FORBIDDEN"],
+    [400, "REJECTED"],
+    [409, "REJECTED"],
+    [500, "UNAVAILABLE"],
+  ])("bildet %i auf %s ab und wirft nicht", async (status, erwartet) => {
+    const result = await gatewayWith(
+      stubFetch(status, PROBLEM(status), []),
+    ).worksitesForPublishedPlanVersion(PLAN_VERSION_ID);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe(erwartet);
+    // Das ProblemDocument des Servers reist mit — die Ansicht zeigt seinen Text.
+    expect(result.problem?.status).toBe(status);
+  });
+
+  it("meldet einen Netzwerkabbruch als UNAVAILABLE statt zu werfen", async () => {
+    const result = await gatewayWith(() =>
+      Promise.reject(new Error("network down")),
+    ).worksitesForPublishedPlanVersion(PLAN_VERSION_ID);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("UNAVAILABLE");
+    expect(result.problem).toBeNull();
+  });
+});

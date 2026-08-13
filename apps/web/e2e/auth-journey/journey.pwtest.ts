@@ -196,6 +196,55 @@ const ID_OHNE_SNAPSHOT = "00000000-0000-4000-8000-00000000dead";
 const PLANWOCHE = "2026-W32";
 
 /**
+ * Die zweite Planwoche — der Baustellenfilter (EYT-146).
+ *
+ * EIGENE Woche und eigene Planversion, damit die von EYT-144 abgenommenen
+ * Zahlen (`ERWARTETE_KOSTEN_MINOR`, eine Position) unangetastet bleiben. Eine
+ * zweite Zuweisung in `PLANWOCHE` haette beide veraendert, und ein Nachweis,
+ * der einen abgenommenen umschreibt, ist ein schlechter Nachweis.
+ *
+ * `2026-08-10T06:00:00Z` ist in `Europe/Berlin` Montag der ISO-Woche 33 — die
+ * Zuordnung, die der Publish-Pfad prueft. W33 ist frei: W32 gehoert der Reise,
+ * W35 dem Schritt 9c3, W36/W37 den Angriffswochen.
+ */
+const PLANWOCHE_146 = "2026-W33";
+/** Der Entwurf aus `fixtures.sql`, den 9h ueber die echte API veroeffentlicht. */
+const ENTWURF_146 = "00000000-0000-4000-8000-00000000e252";
+/**
+ * Die beiden Baustellen der W33-Version — benannt nach ihrer ROLLE im Nachweis,
+ * nicht nach ihrer Reihenfolge.
+ *
+ * Gefiltert wird auf „E2E-Baustelle Reise" (…e241). „E2E-Baustelle Filter B"
+ * (…e242) ist die, die danach nirgends mehr auftauchen darf — im Snapshot
+ * nicht, in PostgreSQL nicht und im HTML nicht.
+ */
+const BAUSTELLE_GEFILTERT = "00000000-0000-4000-8000-00000000e241";
+const BAUSTELLE_AUSGESCHLOSSEN = "00000000-0000-4000-8000-00000000e242";
+/**
+ * Der gefilterte Betrag — von Hand nachgerechnet, wie {@link ERWARTETE_KOSTEN_MINOR}.
+ *
+ * Die Zuweisung auf …e241 laeuft am 10.08.2026 von 06:00Z bis 10:00Z, in
+ * `Europe/Berlin` also 08:00–12:00: vier Stunden an EINEM lokalen Tag. Der
+ * Startsatz betraegt 4250 Minor Units; die Abloesung aus 9a beginnt erst am
+ * {@link ABLOESE_DATUM}. 4 × 4250 = 17000.
+ *
+ * Die zweite Zuweisung (…e242, 11:00Z–15:00Z) traegt denselben Betrag. Genau
+ * deshalb ist 17000 aussagekraeftig: waere der Filter wirkungslos, stuende hier
+ * 34000 — die Zahl faellt also nicht nur bei einem leeren, sondern auch bei
+ * einem ungefilterten Ergebnis auf.
+ */
+const ERWARTETE_FILTER_MINOR = "17000";
+const ERWARTETE_FILTER_ANZEIGE = "170,00 EUR";
+/**
+ * Idempotenzschluessel des EYT-146-Publish.
+ *
+ * Als Konstante und nicht als Literal im Header — dieselbe gitleaks-Falle wie
+ * bei {@link B_PUBLISH_VORGANG}: die Regel `generic-api-key` matcht das Muster
+ * `Key": "<wert>"` und meldete den Inline-Wert als Fund.
+ */
+const PUBLISH_VORGANG_146 = `e2e-publish-${PLANWOCHE_146}`;
+
+/**
  * Idempotenzschluessel des B-Nachweises.
  *
  * Als Konstante und nicht als Literal direkt im Header: gitleaks' Regel
@@ -1799,6 +1848,228 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     console.log(`  ${nachher}`);
     expect(nachher).toContain("koepfe=1");
     schritte["9g_zweiter_kontext"] = { snapshotId: kostenSnapshotId, datenbank: nachher };
+  });
+
+  // ---------------------------------------------------------------------
+  // 9h — Der Baustellenfilter (EYT-146)
+  // ---------------------------------------------------------------------
+  // NACH 9g und nicht davor: `eyt144-snapshot-pruefen.sql` verlangt
+  // `koepfe=1` fuer die ganze Organisation. Ein zweiter Snapshot vor jenem
+  // Aufruf machte den abgenommenen EYT-144-Nachweis rot — an der falschen
+  // Stelle und mit der falschen Begruendung.
+  //
+  // Eigene Woche, eigene Planversion, zwei Baustellen (siehe `fixtures.sql`).
+  // Damit bleiben die Zahlen von EYT-144 unangetastet.
+  await test.step("9h — /kosten filtert den Snapshot auf EINE reale Baustelle", async () => {
+    const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+    // Die W33-Version ist ein Entwurf. Erst der ECHTE Publish-Endpunkt macht
+    // sie zu einer Kostenquelle — dieselbe Naht wie in 9d, nur ueber die API,
+    // weil die Planungsoberflaeche dafuer nichts Neues beweisen wuerde.
+    // Ueber eine lokale Bindung, wie in 9d — und nicht direkt die Konstante im
+    // Header. Gemessen (gitleaks 8.24.3, Lauf 31737022667): die Regel
+    // `generic-api-key` schlaegt auf das Muster `Key": <bezeichner>` an, sobald
+    // der BEZEICHNER genug Entropie hat; `PUBLISH_VORGANG_146` kam auf 4.04 und
+    // wurde als Fund gemeldet. Der Wert ist kein Geheimnis, aber eine Ausnahme
+    // in `.gitleaksignore` waere der falsche Weg (EYT-133 hat den Secret-Guard
+    // gerade gegen genau solche Bypaesse gehaertet).
+    const schluessel146 = PUBLISH_VORGANG_146;
+    const veroeffentlicht = await page.request.post("/api/v1/planung/versionen", {
+      headers: { "Idempotency-Key": schluessel146 },
+      data: { weekKey: PLANWOCHE_146, expectedVersionId: ENTWURF_146 },
+    });
+    expect(veroeffentlicht.status()).toBe(201);
+    const version146 = (await veroeffentlicht.json()) as { versionId: string };
+    expect(version146.versionId).toBe(ENTWURF_146);
+
+    const listenAntwort = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/kosten/planversionen" &&
+        r.request().method() === "GET",
+    );
+    await page.goto("/kosten");
+    await page.getByLabel("Von Woche").fill(PLANWOCHE_146);
+    await page.getByLabel("Bis Woche").fill(PLANWOCHE_146);
+    await page.getByRole("button", { name: "Planversionen laden" }).click();
+    expect((await listenAntwort).status()).toBe(200);
+
+    // Die Baustellenauswahl wird ERST nach der Versionswahl geholt — und sie
+    // kommt aus dem Kostenmodul, nicht aus einer Planungsroute.
+    const baustellenAntwort = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === `/api/v1/kosten/planversionen/${ENTWURF_146}/baustellen` &&
+        r.request().method() === "GET",
+    );
+    await page.getByLabel("Veröffentlichte Planversion").selectOption({ value: ENTWURF_146 });
+
+    const baustellen = await baustellenAntwort;
+    expect(baustellen.status()).toBe(200);
+    const auswahl = (await baustellen.json()) as { worksites: { id: string; label: string }[] };
+    // GENAU die beiden Baustellen dieser Version, mit ihren ECHTEN Namen aus
+    // `public.worksites` — in der zugesicherten Reihenfolge (Bezeichnung
+    // aufsteigend). Kein Name ist hier erfunden oder aus der Id abgeleitet.
+    expect(auswahl.worksites).toEqual([
+      { id: BAUSTELLE_AUSGESCHLOSSEN, label: "E2E-Baustelle Filter B" },
+      { id: BAUSTELLE_GEFILTERT, label: "E2E-Baustelle Reise" },
+    ]);
+
+    const sichtbar = page.getByLabel("Baustelle");
+    await expect(sichtbar).toBeVisible();
+    await expect(sichtbar.locator("option")).toHaveText([
+      "Alle Baustellen",
+      "E2E-Baustelle Filter B",
+      "E2E-Baustelle Reise",
+    ]);
+
+    // Gefiltert wird auf „E2E-Baustelle Reise" (…e241) — die Baustelle, die es
+    // schon vorher gab. Die andere (…e242) darf danach nirgends auftauchen.
+    const erzeugt = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/kosten/snapshots" && r.request().method() === "POST",
+    );
+    await sichtbar.selectOption({ value: BAUSTELLE_GEFILTERT });
+    await page.getByRole("button", { name: "Snapshot erzeugen" }).click();
+
+    const post = await erzeugt;
+    expect(post.status()).toBe(201);
+    // Der Rumpf, den der Browser WIRKLICH gesendet hat — nicht der, den die
+    // Ansicht anzeigt. Ohne diese Zeile bewiese der Rest nur, dass der Server
+    // richtig filtert, nicht dass die Oberflaeche die gewaehlte Id sendet.
+    expect(post.request().postDataJSON()).toEqual({
+      publishedPlanVersionId: ENTWURF_146,
+      worksiteId: BAUSTELLE_GEFILTERT,
+    });
+
+    const gefiltert = (await post.json()) as {
+      id: string;
+      worksiteId: string | null;
+      totalMinorUnits: string;
+      positions: { worksiteId: string; worksiteLabel: string }[];
+    };
+    expect(gefiltert.worksiteId).toBe(BAUSTELLE_GEFILTERT);
+    expect(gefiltert.totalMinorUnits).toBe(ERWARTETE_FILTER_MINOR);
+    expect(gefiltert.positions).toHaveLength(1);
+    expect(gefiltert.positions[0]?.worksiteId).toBe(BAUSTELLE_GEFILTERT);
+    const gefilterteId = gefiltert.id;
+    expect(gefilterteId).not.toBe(kostenSnapshotId);
+
+    // Die Oberflaeche zeigt den gefilterten GESPEICHERTEN Stand.
+    await expect(page.getByTestId("kosten-baustellenfilter")).toHaveText(BAUSTELLE_GEFILTERT);
+    await expect(page.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_FILTER_ANZEIGE);
+    const positionen = page.getByTestId("kosten-position");
+    await expect(positionen).toHaveCount(1);
+    await expect(positionen.first()).toContainText("E2E-Baustelle Reise");
+    // Und die andere Baustelle steht NIRGENDS auf der Seite.
+    expect(await page.content()).not.toContain("E2E-Baustelle Filter B");
+
+    // UND er liegt so in PostgreSQL: Filter im Kopf, keine fremde Position.
+    // `koepfe_gesamt=2` — der ungefilterte aus 9e und dieser.
+    const gepruefte = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt146-snapshot-pruefen.sql"),
+      [
+        "-v",
+        `snapshot_id=${gefilterteId}`,
+        "-v",
+        `baustelle=${BAUSTELLE_GEFILTERT}`,
+        "-v",
+        `fremde_baustelle=${BAUSTELLE_AUSGESCHLOSSEN}`,
+        "-v",
+        `summe=${ERWARTETE_FILTER_MINOR}`,
+        "-v",
+        "positionen=1",
+        "-v",
+        `woche=${PLANWOCHE_146}`,
+        "-v",
+        "koepfe_gesamt=2",
+      ],
+      "[eyt146-snapshot]",
+    );
+    console.log(`  ${gepruefte}`);
+
+    await page.screenshot({ path: join(ARTEFAKTE, "09-kosten-gefiltert.png"), fullPage: true });
+
+    // Reload: derselbe gefilterte Snapshot, ohne zweite Erzeugung und ohne
+    // Baustellenabfrage — der Reload-Vertrag gilt auch mit Filter.
+    const vorher = apiAufrufe.length;
+    await page.reload();
+    await expect(page.getByTestId("kosten-snapshot")).toHaveAttribute(
+      "data-snapshot-id",
+      gefilterteId,
+    );
+    await expect(page.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_FILTER_ANZEIGE);
+    const seitReload = apiAufrufe.slice(vorher);
+    expect(seitReload).toContain(`GET /api/v1/kosten/snapshots/${gefilterteId}`);
+    expect(seitReload).not.toContain("POST /api/v1/kosten/snapshots");
+    expect(seitReload.filter((a) => a.includes("/baustellen"))).toEqual([]);
+    expect(seitReload.filter((a) => a.includes("/kosten/planversionen"))).toEqual([]);
+
+    // Zweiter Browserkontext: eigene Cookies, eigener Speicher, derselbe Stand.
+    const zweiter = await page.context().browser()?.newContext();
+    if (zweiter === undefined) throw new Error("[auth-journey] kein zweiter Browserkontext.");
+    try {
+      const seite2 = await zweiter.newPage();
+      const aufrufe2: string[] = [];
+      seite2.on("request", (anfrage) => {
+        const pfad = new URL(anfrage.url()).pathname;
+        if (pfad.startsWith("/api/")) aufrufe2.push(`${anfrage.method()} ${pfad}`);
+      });
+
+      await seite2.goto("/anmelden");
+      await seite2.getByLabel("E-Mail").fill(email);
+      await seite2.getByLabel("Passwort").fill(passwort);
+      await seite2.getByRole("button", { name: "Anmelden" }).click();
+      await seite2.waitForURL((u) => !u.pathname.startsWith("/anmelden"));
+
+      await seite2.goto(`/kosten?snapshot=${gefilterteId}`);
+      await expect(seite2.getByTestId("kosten-snapshot")).toHaveAttribute(
+        "data-snapshot-id",
+        gefilterteId,
+      );
+      await expect(seite2.getByTestId("kosten-baustellenfilter")).toHaveText(BAUSTELLE_GEFILTERT);
+      await expect(seite2.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_FILTER_ANZEIGE);
+      expect(aufrufe2).toContain(`GET /api/v1/kosten/snapshots/${gefilterteId}`);
+      expect(aufrufe2).not.toContain("POST /api/v1/kosten/snapshots");
+
+      await seite2.screenshot({ path: join(ARTEFAKTE, "10-kosten-gefiltert-zweiter.png") });
+    } finally {
+      await zweiter.close();
+    }
+
+    // Nach Reload UND zweitem Kontext: immer noch GENAU ZWEI Snapshots.
+    const danach = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt146-snapshot-pruefen.sql"),
+      [
+        "-v",
+        `snapshot_id=${gefilterteId}`,
+        "-v",
+        `baustelle=${BAUSTELLE_GEFILTERT}`,
+        "-v",
+        `fremde_baustelle=${BAUSTELLE_AUSGESCHLOSSEN}`,
+        "-v",
+        `summe=${ERWARTETE_FILTER_MINOR}`,
+        "-v",
+        "positionen=1",
+        "-v",
+        `woche=${PLANWOCHE_146}`,
+        "-v",
+        "koepfe_gesamt=2",
+      ],
+      "[eyt146-snapshot]",
+    );
+    console.log(`  ${danach}`);
+    expect(danach).toContain("koepfe_gesamt=2");
+    expect(danach).toContain("fremde_positionen=0");
+
+    schritte["9h_baustellenfilter"] = {
+      planVersionId: ENTWURF_146,
+      baustellen: auswahl.worksites.map((b) => b.label),
+      gewaehlt: BAUSTELLE_GEFILTERT,
+      snapshotId: gefilterteId,
+      summe: gefiltert.totalMinorUnits,
+      datenbank: danach,
+    };
   });
 
   await test.step("10 — ein fremder Organisationskontext wird abgelehnt", async () => {

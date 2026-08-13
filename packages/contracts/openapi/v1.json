@@ -1179,6 +1179,78 @@
         }
       }
     },
+    "/kosten/planversionen/{planVersionId}/baustellen": {
+      "get": {
+        "operationId": "listWorksitesForPublishedPlanVersion",
+        "summary": "Auswaehlbare Baustellen einer veroeffentlichten Planversion",
+        "description": "Liefert AUSSCHLIESSLICH die Baustellen, auf die diese veroeffentlichte Planversion tatsaechlich Einsaetze legt - nicht die Baustellen des Mandanten. Die Reihenfolge ist Teil des Vertrags: aufsteigend nach Bezeichnung, bei gleicher Bezeichnung aufsteigend nach Id. Verglichen wird nach Zeicheneinheiten und NICHT sprachabhaengig; eine Umlautsortierung waere von der Umgebung abhaengig und damit kein Vertrag.",
+        "parameters": [
+          {
+            "name": "planVersionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "description": "UUID"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Auswaehlbare Baustellen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectableWorksites"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/kosten/snapshots": {
       "post": {
         "operationId": "createCostSnapshot",
@@ -2832,6 +2904,58 @@
         },
         "required": [
           "versions"
+        ],
+        "additionalProperties": false
+      },
+      "SelectableWorksite": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "additionalProperties": false
+      },
+      "SelectableWorksites": {
+        "type": "object",
+        "properties": {
+          "worksites": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "worksites"
         ],
         "additionalProperties": false
       }

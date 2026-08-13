@@ -75,6 +75,7 @@ import {
   type RateHistory,
   type RateVersionDto,
   type SelectablePlanVersions,
+  type SelectableWorksites,
 } from "@easytree/contracts";
 
 import type { RequestWithCorrelationId } from "../../../../common/correlation-id.middleware";
@@ -131,6 +132,7 @@ import {
   type RateWriteProblem,
 } from "../../application/rate-repository.port";
 import type { SnapshotAssemblyProblem } from "../../domain/cost-snapshot-assembly";
+import type { PublishedPlanFacts } from "../../domain/planned-work-fact";
 import { effectiveRateVersion, rateVersionStatus } from "../../domain/rate-effectivity";
 import { toCostSnapshotDto } from "./cost-snapshot.dto";
 import {
@@ -320,6 +322,57 @@ export class CostsController {
         publishedAt: version.publishedAt.toISOString(),
       })),
     };
+  }
+
+  /**
+   * Die ZWEITE Auswahlliste von `/kosten`: die Baustellen, auf die genau diese
+   * veroeffentlichte Planversion Einsaetze legt (EYT-146).
+   *
+   * `costs.read` und nicht `costs.calculate`: hier entsteht nichts. Und nicht
+   * `planning.read` — die Kostenoberflaeche bleibt vollstaendig hinter der
+   * Kostengrenze, sonst braeuchte sie fuer einen Filter ein zweites Recht.
+   *
+   * Reihenfolge wie ueberall: Zugangskette, dann Eingabepruefung. Umgekehrt
+   * erfuehre ein Unberechtigter an einem 400, dass seine Id verkehrt war (`W5`).
+   *
+   * Die Quelle ist ausdruecklich `publishedFactsForVersion` und NICHT
+   * `publishedFacts(weekKey)`: letzteres liefert bevorzugt den Entwurf, und
+   * eine Auswahl daraus boete Baustellen an, auf die die veroeffentlichte
+   * Version gar nichts legt. Der gestellte Port in
+   * `worksite-selection-http.test.ts` laesst beide Alternativen WERFEN, damit
+   * ein Rueckfall auffliegt statt still eine plausible Liste zu zeigen.
+   *
+   * Der Faktenport wird HIER gebaut, mit `zugang.organisationId` — also mit der
+   * serverseitig aus den Mitgliedschaften aufgeloesten Organisation, nie mit dem
+   * Header.
+   */
+  @Get("planversionen/:planVersionId/baustellen")
+  async worksitesForPlanVersion(
+    @Req() req: Request,
+    @Param("planVersionId") planVersionId: string,
+    @Headers(ORGANISATION_HEADER) organisationHeader?: string,
+  ): Promise<SelectableWorksites> {
+    const zugang = await this.zugang(
+      req,
+      organisationHeader,
+      "costs.read",
+      "GET /kosten/planversionen/{planVersionId}/baustellen",
+    );
+
+    const geprueft = IdSchema.safeParse(planVersionId);
+    if (!geprueft.success) {
+      throw new BadRequestException(
+        "Die angegebene Planversions-Id ist keine gueltige Id. Bitte die Version in der Auswahlliste neu waehlen.",
+      );
+    }
+
+    const gelesen = await this.factsFor(
+      zugang.subjectUserId,
+      zugang.organisationId,
+    ).publishedFactsForVersion(geprueft.data);
+    if (!gelesen.ok) throw costsProblem(BAUSTELLEN_ABLEHNUNG[gelesen.problem]);
+
+    return { worksites: baustellenAuswahl(gelesen.facts) };
   }
 
   /**
@@ -752,6 +805,108 @@ const LISTEN_ABLEHNUNG = {
       "Es sind mehrere Organisationen moeglich. Bitte oben genau eine Organisation waehlen und die Auswahlliste erneut laden.",
   },
 } as const satisfies Record<PlanVersionListProblem, Ablehnung>;
+
+/**
+ * Ablehnungen der BAUSTELLENAUSWAHL (EYT-146) — eigene Tabelle, eigene Texte.
+ *
+ * Nicht `FAKTEN_ABLEHNUNG` wiederverwendet, obwohl alle vier Gruende dort
+ * stehen: deren Texte enden auf „und den Snapshot erneut erzeugen". Beim Oeffnen
+ * der Baustellenauswahl ist noch kein Snapshot im Spiel, und eine
+ * Handlungsanweisung auf einen Vorgang, den die Person nicht angestossen hat,
+ * schickt sie an die falsche Stelle. Dieselbe Entscheidung wie bei
+ * `LISTEN_ABLEHNUNG` — und derselbe URN, denn die Aussage ist dieselbe, nur die
+ * naechste Handlung nicht.
+ *
+ * `Record<PlanCostFactsProblem, …>` und nicht `PlanVersionListProblem`: diese
+ * Route NENNT eine einzelne Planversion und kann deshalb sehr wohl
+ * `PLAN_NOT_PUBLISHED` und `PLAN_VERSION_NOT_FOUND` ergeben. Genau darin liegt
+ * der Unterschied zur Auswahlliste.
+ */
+const BAUSTELLEN_ABLEHNUNG = {
+  NO_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.NO_ORGANISATION,
+    detail:
+      "Es ist keine Organisation ausgewaehlt. Bitte oben eine Organisation waehlen und die Baustellenauswahl erneut laden.",
+  },
+  AMBIGUOUS_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.AMBIGUOUS_ORGANISATION,
+    detail:
+      "Es sind mehrere Organisationen moeglich. Bitte oben genau eine Organisation waehlen und die Baustellenauswahl erneut laden.",
+  },
+  PLAN_NOT_PUBLISHED: {
+    status: 409,
+    type: COSTS_ERROR_TYPE.PLAN_NOT_PUBLISHED,
+    detail:
+      "Diese Planversion ist ein Entwurf. Baustellen einer Kostenauswahl stammen ausschliesslich aus einer veroeffentlichten Planung — bitte zuerst veroeffentlichen.",
+  },
+  PLAN_VERSION_NOT_FOUND: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.PLAN_VERSION_NOT_FOUND,
+    detail:
+      "Diese Planversion ist nicht verfuegbar. Bitte die Version in der Auswahlliste neu waehlen.",
+  },
+} as const satisfies Record<PlanCostFactsProblem, Ablehnung>;
+
+/**
+ * Die Baustellen, auf die diese veroeffentlichte Version wirklich Einsaetze
+ * legt — abgeleitet, nicht durchgereicht (EYT-146).
+ *
+ * ## Warum aus `work` und nicht aus `worksiteLabels`
+ *
+ * `worksiteLabels` stammt aus der Ressourcenliste der Planung und fuehrt ALLE
+ * im Mandanten sichtbaren Baustellen. Wer sie durchreichte, boete einen Filter
+ * an, der garantiert null Positionen ergibt — und ein leerer Snapshot sieht wie
+ * ein Rechenfehler aus, nicht wie eine leere Auswahl. Die Menge steckt deshalb
+ * in den Einsaetzen; die Bezeichnungen kommen aus der Abbildung daneben.
+ *
+ * ## Die Reihenfolge ist Vertrag
+ *
+ * Bezeichnung aufsteigend, bei Gleichstand Id aufsteigend. Beides bewusst als
+ * Vergleich von Zeicheneinheiten und NICHT mit `localeCompare`: ohne Locale
+ * folgt das der Umgebungsvariablen `LANG`, mit Locale der ICU-Version des
+ * Node-Builds — beides waere eine Ordnung, die auf zwei Maschinen verschieden
+ * ausfaellt, und damit keine Zusage.
+ *
+ * Der Tiebreak ist keine Zierde: `public.worksites` fuehrt keine Eindeutigkeit
+ * auf `name` (Migration 0006), zwei gleichnamige Baustellen sind also moeglich.
+ * Ohne ihn gaebe der Komparator die Reihenfolge an das Eingabearray zurueck,
+ * also an die Reihenfolge der Einsaetze — genau die zufaellige Ordnung, die
+ * diese Regel beseitigen soll (`W2b`).
+ *
+ * ## Fehlende Bezeichnung: fail-closed, ohne rohe Id
+ *
+ * Eine Baustelle in `work` ohne Eintrag in `worksiteLabels` ist ein gebrochener
+ * Vertrag der Planung, kein Anzeigeproblem. Die Id als Ersatz waere eine
+ * Auswahlzeile, die niemand lesen kann; eine erfundene Bezeichnung waere
+ * schlimmer. Also 409 mit dem BESTEHENDEN URN `LABEL_MISSING` — dieselbe
+ * Aussage wie in der Montage, deshalb kein zweiter Problemname. Der Text nennt
+ * die Id NICHT: er geht an eine Person, die Stammdaten pflegt, und eine rohe
+ * UUID im Fehlertext waere zugleich eine Auskunft ueber den Bestand.
+ */
+function baustellenAuswahl(facts: PublishedPlanFacts): SelectableWorksites["worksites"] {
+  const ids = [...new Set(facts.work.map((einsatz) => einsatz.worksiteId as string))];
+  const auswahl = ids.map((id) => {
+    const label = facts.worksiteLabels.get(id);
+    if (label === undefined) {
+      throw costsProblem({
+        status: 409,
+        type: SNAPSHOT_ASSEMBLY_ERROR_TYPE.LABEL_MISSING,
+        detail:
+          "Fuer mindestens eine Baustelle dieser Planversion fehlt eine Bezeichnung. Es wurde bewusst keine Auswahl angezeigt — bitte die Stammdaten vervollstaendigen.",
+      });
+    }
+    return { id, label };
+  });
+  // Kein `localeCompare` — siehe oben. Der Tiebreak steht danach und nicht
+  // stattdessen: er entscheidet ausschliesslich bei gleicher Bezeichnung.
+  return auswahl.sort((a, b) => {
+    if (a.label !== b.label) return a.label < b.label ? -1 : 1;
+    if (a.id === b.id) return 0;
+    return a.id < b.id ? -1 : 1;
+  });
+}
 
 /** Ablehnungen des Schreibvorgangs. */
 const SCHREIB_ABLEHNUNG = {

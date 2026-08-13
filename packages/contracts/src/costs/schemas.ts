@@ -279,6 +279,49 @@ export const SelectablePlanVersionsSchema = z.strictObject({
 export type SelectablePlanVersions = z.infer<typeof SelectablePlanVersionsSchema>;
 
 /**
+ * Eine auswählbare Baustelle EINER veröffentlichten Planversion (EYT-146).
+ *
+ * Benannt nach ihrer ROLLE, wie {@link SelectablePlanVersionSchema} — nicht
+ * `Worksite`. Der Unterschied ist keine Wortwahl: dies ist kein Stammdatensatz
+ * und keine Baustellenliste des Mandanten, sondern die Menge der Baustellen,
+ * auf die diese eine veröffentlichte Version tatsächlich Einsätze legt. Ein
+ * generischer Name lüde dazu ein, hier später `GET /baustellen` anzuhängen.
+ *
+ * ## Warum kein `active`
+ *
+ * `PlanningResource` führt das Feld, dieser Vertrag bewusst nicht. Ein bereits
+ * veröffentlichter Einsatz braucht die Bezeichnung seiner Baustelle auch dann
+ * noch, wenn die Baustelle inzwischen deaktiviert wurde — dieselbe Begründung,
+ * mit der `PublishedPlanFacts.worksiteLabels` inaktive Einträge enthält. Ein
+ * `active` hier wäre ein Zustand von HEUTE über eine Auswahl von DAMALS, und
+ * die Oberfläche müsste entscheiden, ob sie eine historische Baustelle
+ * ausgraut — also eine Zeile verstecken, auf der Kosten liegen.
+ *
+ * `label` und nicht `name`: die Nachbarschaft heißt so
+ * (`CostPositionDto.worksiteLabel`, `PublishedPlanFacts.worksiteLabels`), und
+ * ein zweiter Begriff für dieselbe Zeichenkette wäre eine Naht, an der jemand
+ * abbildet statt durchreicht.
+ */
+export const SelectableWorksiteSchema = z.strictObject({
+  id: IdSchema,
+  label: z.string().min(1),
+});
+export type SelectableWorksite = z.infer<typeof SelectableWorksiteSchema>;
+
+/**
+ * Die Hülle um die auswählbaren Baustellen — wie bei den Planversionen ein
+ * Objekt und keine nackte Liste.
+ *
+ * Eine nackte Liste wäre ein Vertrag ohne Platz: käme später eine Angabe neben
+ * der Auswahl dazu (etwa „diese Version hat Einsätze ohne Baustelle"), ließe
+ * sie sich nur durch einen Bruch unterbringen.
+ */
+export const SelectableWorksitesSchema = z.strictObject({
+  worksites: z.array(SelectableWorksiteSchema),
+});
+export type SelectableWorksites = z.infer<typeof SelectableWorksitesSchema>;
+
+/**
  * Wochenbereich der Auswahlliste — ein Objekt, kein Paar nackter Strings.
  *
  * Zwei gleichtypige Positionsparameter lassen sich vertauschen, ohne dass etwas

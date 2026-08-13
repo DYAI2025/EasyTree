@@ -98,6 +98,9 @@ function gatewayMit(historie: RateHistory): CostsGateway {
     publishedPlanVersions: () => {
       throw new Error("in dieser Ansicht nicht benutzt");
     },
+    worksitesForPublishedPlanVersion: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
     createSnapshot: () => {
       throw new Error("in dieser Ansicht nicht benutzt");
     },

@@ -157,9 +157,42 @@ function kostenGateway(): CostsGateway {
           ],
         },
       }),
+    worksitesForPublishedPlanVersion: () =>
+      Promise.resolve({
+        ok: true,
+        value: {
+          worksites: [
+            { id: "00000000-0000-4000-8000-00000a110006", label: "Baustelle Nord" },
+            { id: "00000000-0000-4000-8000-00000a110009", label: "Baustelle Süd" },
+          ],
+        },
+      }),
     createSnapshot: werfe,
     snapshot: () => Promise.resolve({ ok: true, value: A11Y_SNAPSHOT }),
   };
+}
+
+/**
+ * Der AUSWAHLPFAD — ohne gespeicherten Snapshot, dafuer mit beiden Selects.
+ *
+ * Der Fall daneben rendert `snapshotId` und misst damit den Reload-Vertrag: dort
+ * erscheint die Auswahl gar nicht. Ein `select` ohne verbundenes `label` waere
+ * genau dort unsichtbar geblieben — deshalb ein zweiter, eigener Aufbau
+ * (EYT-146).
+ */
+async function zeigeAuswahl(): Promise<void> {
+  render(
+    <CostsGatewayProvider gateway={kostenGateway()}>
+      <KostenAnsicht snapshotId={null} />
+    </CostsGatewayProvider>,
+  );
+  await userEvent.type(screen.getByLabelText("Von Woche"), "2026-W32");
+  await userEvent.type(screen.getByLabelText("Bis Woche"), "2026-W32");
+  await userEvent.click(screen.getByRole("button", { name: "Planversionen laden" }));
+  await userEvent.selectOptions(await screen.findByLabelText("Veröffentlichte Planversion"), [
+    "00000000-0000-4000-8000-00000a110002",
+  ]);
+  await screen.findByTestId("kosten-baustellen");
 }
 
 describe("Accessibility der Kostenansicht (EYT-144)", () => {
@@ -198,5 +231,33 @@ describe("Accessibility der Kostenansicht (EYT-144)", () => {
       expect(kopfzellen.length).toBeGreaterThan(0);
       expect(kopfzellen.every((zelle) => zelle.getAttribute("scope") === "col")).toBe(true);
     }
+  });
+
+  it("has zero axe violations with both selectors on screen (EYT-146)", async () => {
+    await zeigeAuswahl();
+
+    // Auf `document.body` und nicht auf einem `container`: `zeigeAuswahl`
+    // rendert selbst, und ein zweiter Aufhaenger daneben waere ein leerer Baum,
+    // den axe klaglos als fehlerfrei meldete.
+    const results = await axe.run(document.body, {
+      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+      rules: { "color-contrast": { enabled: false } },
+    });
+    expect(results.violations).toEqual([]);
+  });
+
+  it("beschriftet die Baustellenauswahl und nennt 'Alle Baustellen' im Text", async () => {
+    await zeigeAuswahl();
+
+    // `getByLabelText` findet nur, was ueber `for`/`id` wirklich verbunden ist.
+    const auswahl = screen.getByLabelText("Baustelle");
+    expect(auswahl.tagName).toBe("SELECT");
+    // Der Zustand „kein Filter" steht als TEXT in einer Option und nicht nur in
+    // der Abwesenheit einer Auswahl — vorlesbar, nicht erschlossen.
+    expect([...auswahl.querySelectorAll("option")].map((o) => o.textContent)).toEqual([
+      "Alle Baustellen",
+      "Baustelle Nord",
+      "Baustelle Süd",
+    ]);
   });
 });

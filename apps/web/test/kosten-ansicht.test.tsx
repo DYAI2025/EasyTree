@@ -36,6 +36,7 @@ import type {
   GatewayResult,
   ProblemDocument,
   SelectablePlanVersions,
+  SelectableWorksites,
 } from "@easytree/contracts";
 import { CostSnapshotSchema } from "@easytree/contracts";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -58,6 +59,33 @@ const VERSIONEN: SelectablePlanVersions = {
     { id: VERSION_B, weekKey: "2026-W33", publishedAt: "2026-08-08T11:12:13.140Z" },
   ],
 };
+
+/**
+ * Die Baustellen der beiden Planversionen — bewusst DISJUNKT (EYT-146).
+ *
+ * Kein gemeinsamer Eintrag: waeren die Listen gleich, koennte eine Ansicht die
+ * alte Auswahl beim Versionswechsel stehen lassen und A19 bliebe gruen, obwohl
+ * eine Baustelle der VORIGEN Version in den Snapshot-Auftrag reiste.
+ */
+const BAUSTELLE_A_NORD = "00000000-0000-4000-8000-00000000ba01";
+const BAUSTELLE_A_SUED = "00000000-0000-4000-8000-00000000ba02";
+const BAUSTELLE_B_WEST = "00000000-0000-4000-8000-00000000bb01";
+
+const BAUSTELLEN_ZU_A: SelectableWorksites = {
+  worksites: [
+    { id: BAUSTELLE_A_NORD, label: "Baustelle Nord" },
+    { id: BAUSTELLE_A_SUED, label: "Baustelle Süd" },
+  ],
+};
+
+const BAUSTELLEN_ZU_B: SelectableWorksites = {
+  worksites: [{ id: BAUSTELLE_B_WEST, label: "Baustelle West" }],
+};
+
+/** Antwortet je Planversion — die Voraussetzung dafuer, dass A19 etwas misst. */
+function baustellenJeVersion(planVersionId: string): GatewayResult<SelectableWorksites> {
+  return { ok: true, value: planVersionId === VERSION_B ? BAUSTELLEN_ZU_B : BAUSTELLEN_ZU_A };
+}
 
 /** Kopfsumme, Tagessumme und Positionssumme widersprechen sich ABSICHTLICH. */
 const SNAPSHOT: CostSnapshot = {
@@ -103,6 +131,8 @@ const SNAPSHOT: CostSnapshot = {
 
 interface Aufrufe {
   readonly versionen: unknown[];
+  /** Je Aufruf die WIRKLICH angefragte Planversions-Id (EYT-146). */
+  readonly baustellen: string[];
   readonly erzeugt: unknown[];
   readonly gelesen: string[];
   readonly schluessel: string[];
@@ -114,6 +144,10 @@ interface Antworten {
   readonly lesen?: GatewayResult<CostSnapshot>;
   /** Haelt `createSnapshot` offen, damit der Zwischenzustand sichtbar wird. */
   readonly erzeugenHaengt?: boolean;
+  /** Antwort der Baustellenauswahl — je Planversion, damit A19 messbar ist. */
+  readonly baustellen?: (planVersionId: string) => GatewayResult<SelectableWorksites>;
+  /** Haelt die Baustellenauswahl offen, damit ihr Ladezustand sichtbar wird. */
+  readonly baustellenHaengt?: boolean;
 }
 
 function fehler<T>(
@@ -128,7 +162,13 @@ function problem(type: string, detail: string): ProblemDocument {
 }
 
 function baue(antworten: Antworten = {}): { gateway: CostsGateway; aufrufe: Aufrufe } {
-  const aufrufe: Aufrufe = { versionen: [], erzeugt: [], gelesen: [], schluessel: [] };
+  const aufrufe: Aufrufe = {
+    versionen: [],
+    baustellen: [],
+    erzeugt: [],
+    gelesen: [],
+    schluessel: [],
+  };
   const gateway: CostsGateway = {
     // Diese drei gehoeren zur Satzverwaltung. Sie werfen, statt etwas
     // Plausibles zu liefern: ruft die Kostenansicht sie doch, soll der Fall
@@ -145,6 +185,13 @@ function baue(antworten: Antworten = {}): { gateway: CostsGateway; aufrufe: Aufr
     publishedPlanVersions: (query) => {
       aufrufe.versionen.push(query);
       return Promise.resolve(antworten.versionen ?? { ok: true, value: VERSIONEN });
+    },
+    worksitesForPublishedPlanVersion: (planVersionId) => {
+      aufrufe.baustellen.push(planVersionId);
+      if (antworten.baustellenHaengt === true) return new Promise(() => {});
+      return Promise.resolve(
+        antworten.baustellen?.(planVersionId) ?? { ok: true, value: BAUSTELLEN_ZU_A },
+      );
     },
     createSnapshot: (command, optionen) => {
       aufrufe.erzeugt.push(command);
@@ -244,6 +291,10 @@ describe("Kostenansicht — Auswahl, Erzeugung, gespeicherter Stand (EYT-144)", 
     // zusaetzlich als Zahl.
     expect(aufrufe.erzeugt).toEqual([]);
     expect(aufrufe.versionen).toEqual([]);
+    // Und seit EYT-146 auch KEINE Baustellenauswahl: der Reload-Vertrag ist
+    // eine Aussage darueber, was NICHT passiert, und eine neue Leseroute ist
+    // genau die Art Zusatz, die ihn unbemerkt aufweicht.
+    expect(aufrufe.baustellen).toEqual([]);
   });
 
   it("A5 zeigt den Ladezustand des gespeicherten Snapshots", () => {
@@ -416,5 +467,178 @@ describe("Kostenansicht — Auswahl, Erzeugung, gespeicherter Stand (EYT-144)", 
     expect(screen.getByTestId("kosten-kein-snapshot").textContent).toContain(
       "bewusst keine Zahlen",
     );
+  });
+});
+
+/**
+ * Die Baustellenauswahl (EYT-146).
+ *
+ * Die Fixturen sind auch hier die Gegenmutation: die Baustellen von VERSION_A
+ * und VERSION_B sind disjunkt. Liesse die Ansicht beim Versionswechsel die alte
+ * Auswahl stehen, reiste eine Baustelle der vorigen Version in den
+ * Snapshot-Auftrag — und `A19` faellt genau darauf.
+ */
+describe("Kostenansicht — Baustellenauswahl (EYT-146)", () => {
+  async function waehleVersion(version: string): Promise<void> {
+    await userEvent.selectOptions(await screen.findByLabelText("Veröffentlichte Planversion"), [
+      version,
+    ]);
+  }
+
+  it("A16 fragt die Baustellen GENAU der gewaehlten Planversion an", async () => {
+    const { aufrufe } = zeige({ baustellen: baustellenJeVersion });
+    await ladeVersionen();
+    // Vor der Auswahl darf nichts angefragt werden: es gibt keine Version, auf
+    // die sich eine Baustellenliste beziehen koennte.
+    expect(aufrufe.baustellen).toEqual([]);
+
+    await waehleVersion(VERSION_B);
+    await waitFor(() => expect(aufrufe.baustellen).toEqual([VERSION_B]));
+
+    const auswahl = await screen.findByLabelText("Baustelle");
+    // "Alle Baustellen" plus die EINE Baustelle von VERSION_B.
+    expect(auswahl.querySelectorAll("option")).toHaveLength(2);
+    expect(auswahl.textContent).toContain("Baustelle West");
+    // Und keine aus der anderen Version.
+    expect(auswahl.textContent).not.toContain("Baustelle Nord");
+  });
+
+  it("A17 sendet die KONKRET gewaehlte Baustelle an createSnapshot", async () => {
+    const { aufrufe } = zeige({ baustellen: baustellenJeVersion });
+    await ladeVersionen();
+    await waehleVersion(VERSION_A);
+    // Die ZWEITE Baustelle, nicht die erste: ohne zwei Eintraege waere die
+    // Auswahl nicht von einem Vorgabewert zu unterscheiden.
+    await userEvent.selectOptions(await screen.findByLabelText("Baustelle"), [BAUSTELLE_A_SUED]);
+    await userEvent.click(screen.getByRole("button", { name: "Snapshot erzeugen" }));
+
+    await screen.findByTestId("kosten-snapshot");
+    expect(aufrufe.erzeugt).toEqual([
+      { publishedPlanVersionId: VERSION_A, worksiteId: BAUSTELLE_A_SUED },
+    ]);
+  });
+
+  it("A18 sendet fuer 'Alle Baustellen' ausdruecklich null", async () => {
+    const { aufrufe } = zeige({ baustellen: baustellenJeVersion });
+    await ladeVersionen();
+    await waehleVersion(VERSION_A);
+    // Erst eine konkrete Baustelle waehlen und dann zurueck auf "alle": ohne
+    // den Rueckweg bewiese der Fall nur, dass der Anfangswert null ist.
+    const auswahl = await screen.findByLabelText("Baustelle");
+    await userEvent.selectOptions(auswahl, [BAUSTELLE_A_NORD]);
+    await userEvent.selectOptions(auswahl, [""]);
+    await userEvent.click(screen.getByRole("button", { name: "Snapshot erzeugen" }));
+
+    await screen.findByTestId("kosten-snapshot");
+    expect(aufrufe.erzeugt).toEqual([{ publishedPlanVersionId: VERSION_A, worksiteId: null }]);
+  });
+
+  it("A19 verwirft die Baustellenwahl beim Versionswechsel und laedt neu", async () => {
+    const { aufrufe } = zeige({ baustellen: baustellenJeVersion });
+    await ladeVersionen();
+    await waehleVersion(VERSION_A);
+    await userEvent.selectOptions(await screen.findByLabelText("Baustelle"), [BAUSTELLE_A_NORD]);
+
+    await waehleVersion(VERSION_B);
+    await waitFor(() => expect(aufrufe.baustellen).toEqual([VERSION_A, VERSION_B]));
+
+    await userEvent.click(screen.getByRole("button", { name: "Snapshot erzeugen" }));
+    await screen.findByTestId("kosten-snapshot");
+
+    // Die eigentliche Aussage: die Baustelle der VORIGEN Version erreicht den
+    // Auftrag nicht. Sie gehoert einer Planversion, die gar nicht gerechnet
+    // wird — der Server lehnte sie ab, und die Ansicht haette es vorher wissen
+    // koennen.
+    expect(aufrufe.erzeugt).toEqual([{ publishedPlanVersionId: VERSION_B, worksiteId: null }]);
+  });
+
+  it("A20 zeigt den Ladezustand der Baustellen als TEXT", async () => {
+    zeige({ baustellenHaengt: true });
+    await ladeVersionen();
+    await waehleVersion(VERSION_A);
+
+    expect((await screen.findByTestId("kosten-baustellen-laedt")).textContent).toContain(
+      "werden geladen",
+    );
+    // Solange die Auswahl unbekannt ist, wird nicht erzeugt: ein Snapshot ist
+    // unveraenderlich und nicht loeschbar.
+    expect(screen.getByRole("button", { name: "Snapshot erzeugen" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+  });
+
+  it("A21 sagt es ehrlich, wenn die Version keine Baustelle nennt", async () => {
+    const { aufrufe } = zeige({ baustellen: () => ({ ok: true, value: { worksites: [] } }) });
+    await ladeVersionen();
+    await waehleVersion(VERSION_A);
+
+    const leer = await screen.findByTestId("kosten-baustellen-leer");
+    expect(leer.textContent).toContain("keine Baustelle");
+    // "Alle Baustellen" bleibt und ist NICHT dasselbe wie eine erfundene Zeile.
+    const auswahl = screen.getByLabelText("Baustelle");
+    expect(auswahl.querySelectorAll("option")).toHaveLength(1);
+    expect(auswahl.textContent).toBe("Alle Baustellen");
+
+    await userEvent.click(screen.getByRole("button", { name: "Snapshot erzeugen" }));
+    await screen.findByTestId("kosten-snapshot");
+    expect(aufrufe.erzeugt).toEqual([{ publishedPlanVersionId: VERSION_A, worksiteId: null }]);
+  });
+
+  it("A22 erzeugt NICHTS, wenn die Baustellenauswahl nicht geladen werden konnte", async () => {
+    const { aufrufe } = zeige({
+      baustellen: () =>
+        fehler(
+          "REJECTED",
+          problem(
+            "urn:easytree:costs:plan-not-published",
+            "Diese Planversion ist ein Entwurf. Bitte zuerst veroeffentlichen.",
+          ),
+        ),
+    });
+    await ladeVersionen();
+    await waehleVersion(VERSION_A);
+
+    const meldung = await screen.findByTestId("kosten-baustellen-fehler");
+    // Der Text des SERVERS, nicht ein hier nachgebauter.
+    expect(meldung.textContent).toContain("Entwurf");
+    expect(meldung.getAttribute("data-problem-type")).toBe("urn:easytree:costs:plan-not-published");
+
+    // Und kein Erzeugen: ohne geladene Auswahl kann niemand informiert filtern,
+    // und ein ungefilterter Snapshot waere eine stille Ersatzentscheidung.
+    expect(screen.getByRole("button", { name: "Snapshot erzeugen" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(aufrufe.erzeugt).toEqual([]);
+  });
+
+  it("A23 fragt nach dem Zuruecksetzen auf 'Bitte wählen' keine Baustellen an", async () => {
+    const { aufrufe } = zeige({ baustellen: baustellenJeVersion });
+    await ladeVersionen();
+    await waehleVersion(VERSION_A);
+    await waitFor(() => expect(aufrufe.baustellen).toEqual([VERSION_A]));
+
+    await userEvent.selectOptions(screen.getByLabelText("Veröffentlichte Planversion"), [""]);
+    // Keine zweite Anfrage mit leerer Id — die waere garantiert ein 400.
+    expect(aufrufe.baustellen).toEqual([VERSION_A]);
+    expect(screen.queryByLabelText("Baustelle")).toBeNull();
+  });
+
+  it("A24 verwirft die Baustellenwahl auch beim erneuten Laden des Wochenbereichs", async () => {
+    const { aufrufe } = zeige({ baustellen: baustellenJeVersion });
+    await ladeVersionen();
+    await waehleVersion(VERSION_A);
+    await userEvent.selectOptions(await screen.findByLabelText("Baustelle"), [BAUSTELLE_A_NORD]);
+
+    // Ein neuer Wochenbereich setzt schon die Planversion zurueck. Bliebe die
+    // Baustelle stehen, haette der naechste Snapshot einen Filter, den niemand
+    // fuer ihn gewaehlt hat.
+    await userEvent.click(screen.getByRole("button", { name: "Planversionen laden" }));
+    await screen.findByTestId("kosten-versionen");
+    expect(screen.queryByLabelText("Baustelle")).toBeNull();
+
+    await waehleVersion(VERSION_A);
+    await userEvent.click(screen.getByRole("button", { name: "Snapshot erzeugen" }));
+    await screen.findByTestId("kosten-snapshot");
+    expect(aufrufe.erzeugt).toEqual([{ publishedPlanVersionId: VERSION_A, worksiteId: null }]);
   });
 });

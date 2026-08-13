@@ -163,6 +163,8 @@ export {
   RateVersionStatusSchema,
   SelectablePlanVersionSchema,
   SelectablePlanVersionsSchema,
+  SelectableWorksiteSchema,
+  SelectableWorksitesSchema,
 } from "./costs/schemas.js";
 export type {
   CostDayTotalDto,
@@ -178,6 +180,8 @@ export type {
   RateVersionStatus,
   SelectablePlanVersion,
   SelectablePlanVersions,
+  SelectableWorksite,
+  SelectableWorksites,
 } from "./costs/schemas.js";
 export type { CostsGateway } from "./costs/gateway.js";
 export { HttpCostsGateway, ORGANISATION_HEADER } from "./http/costs-gateway.js";

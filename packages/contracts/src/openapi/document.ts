@@ -56,6 +56,8 @@ import {
   RateVersionDtoSchema,
   SelectablePlanVersionSchema,
   SelectablePlanVersionsSchema,
+  SelectableWorksiteSchema,
+  SelectableWorksitesSchema,
 } from "../costs/schemas.js";
 import {
   IDEMPOTENCY_HEADER,
@@ -139,6 +141,12 @@ const NAMED_SCHEMAS = {
   CreateCostSnapshotCommand: CreateCostSnapshotCommandSchema,
   SelectablePlanVersion: SelectablePlanVersionSchema,
   SelectablePlanVersions: SelectablePlanVersionsSchema,
+  // EYT-146: die Baustellen EINER veroeffentlichten Planversion. Kein `active`
+  // im erzeugten Dokument — siehe die Begruendung am Zod-Schema: eine
+  // historische Auswahl mit einem Zustand von heute zu versehen zwaenge die
+  // Oberflaeche, Zeilen auszugrauen, auf denen Kosten liegen.
+  SelectableWorksite: SelectableWorksiteSchema,
+  SelectableWorksites: SelectableWorksitesSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type NamedSchema = keyof typeof NAMED_SCHEMAS;
@@ -429,6 +437,19 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           parameters: [wochenbereichParam("fromWeekKey"), wochenbereichParam("toWeekKey")],
           responses: {
             "200": jsonOk("SelectablePlanVersions", "Auswaehlbare Planversionen"),
+            ...problemResponses,
+          },
+        },
+      },
+      "/kosten/planversionen/{planVersionId}/baustellen": {
+        get: {
+          operationId: "listWorksitesForPublishedPlanVersion",
+          summary: "Auswaehlbare Baustellen einer veroeffentlichten Planversion",
+          description:
+            "Liefert AUSSCHLIESSLICH die Baustellen, auf die diese veroeffentlichte Planversion tatsaechlich Einsaetze legt - nicht die Baustellen des Mandanten. Die Reihenfolge ist Teil des Vertrags: aufsteigend nach Bezeichnung, bei gleicher Bezeichnung aufsteigend nach Id. Verglichen wird nach Zeicheneinheiten und NICHT sprachabhaengig; eine Umlautsortierung waere von der Umgebung abhaengig und damit kein Vertrag.",
+          parameters: [idPathParam("planVersionId")],
+          responses: {
+            "200": jsonOk("SelectableWorksites", "Auswaehlbare Baustellen"),
             ...problemResponses,
           },
         },

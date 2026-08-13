@@ -11,20 +11,20 @@
  * `costs` ist keine blosse Grenze mehr. Verdrahtet in `AppModule` sind der
  * `CostsController`, `COST_ACCESS_POLICY`, `COST_ACCESS_AUDIT`,
  * `RATE_REPOSITORY_FACTORY`, seit EYT-109 `PLAN_COST_FACTS_FACTORY` und seit
- * EYT-139 `COST_SNAPSHOT_REPOSITORY_FACTORY`; unter `/kosten` haengen fuenf
+ * EYT-139 `COST_SNAPSHOT_REPOSITORY_FACTORY`; unter `/kosten` haengen sieben
  * Routen: `GET /kosten/mitarbeiter`, `GET /kosten/stundensaetze/{employeeId}`
- * und `POST /kosten/stundensaetze` (EYT-106/EYT-108) sowie
- * `POST /kosten/snapshots` und `GET /kosten/snapshots/{snapshotId}` (EYT-139).
+ * und `POST /kosten/stundensaetze` (EYT-106/EYT-108), `POST /kosten/snapshots`
+ * und `GET /kosten/snapshots/{snapshotId}` (EYT-139),
+ * `GET /kosten/planversionen` (EYT-144) sowie
+ * `GET /kosten/planversionen/{planVersionId}/baustellen` (EYT-146).
  * Eigene Tabellen gibt es auch: `public.employee_rate_versions` (Migration
  * 0013), `public.cost_snapshots` und `public.cost_snapshot_positions`
  * (Migration 0018). `public.role_permissions` steht in derselben Migration
  * 0013, gehoert aber `tenancy` — siehe Besitzregister in
  * `module-catalogue.ts`.
  *
- * Offen bleibt zweierlei, beides ausdruecklich: die Auswahlliste
- * `GET /kosten/planversionen` steht im Vertrag und hat noch keine Route (sie
- * ist nicht Teil von EYT-139 und steht weiter in `NOT_YET_IMPLEMENTED`), und
- * `CostExportPort` hat bis heute keine Umsetzung (XLSX-Adapter, EYT-110).
+ * Offen bleibt eines, und zwar ausdruecklich: `CostExportPort` hat bis heute
+ * keine Umsetzung (XLSX-Adapter, EYT-110).
  */
 export type {
   PlannedWorkFact,
