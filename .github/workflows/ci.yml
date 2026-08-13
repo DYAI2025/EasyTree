@@ -125,10 +125,17 @@ jobs:
       - name: Reset 1 — migrations + seed on empty DB
         run: pnpm exec supabase db reset
       - name: pgTAP suite (run 1)
+        # NUR AUF DEM WEGWERF-BRANCH, NICHT MERGEN (EYT-145 GM8). Unter der
+        # Gegenmutation wird die Policy-Zusicherung in 0013 korrekt rot; ohne
+        # dieses Zugestaendnis endete db-gates hier, und der zweite benannte
+        # Zieltest (Kanalfall im Integrationstest) liefe nie.
+        continue-on-error: true
         run: pnpm exec supabase test db
       - name: Reset 2 — reproducibility proof
         run: pnpm exec supabase db reset
       - name: pgTAP suite (run 2, must be identical)
+        # NUR AUF DEM WEGWERF-BRANCH, NICHT MERGEN (EYT-145 GM8). Gleicher Grund.
+        continue-on-error: true
         run: pnpm exec supabase test db
       # Das Metagate in supabase/tests/0005_schema_meta_gate.sql fragt den
       # Katalog statt Tabellen aufzuzaehlen. Diese Gegenprobe beweist, dass es

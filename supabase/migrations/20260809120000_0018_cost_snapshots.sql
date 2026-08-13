@@ -269,8 +269,8 @@ create policy cost_snapshots_select on public.cost_snapshots
 create policy cost_snapshots_insert on public.cost_snapshots
   for insert to authenticated
   with check (
-    app.is_runtime_channel()
-    and org_id in (select app.user_org_ids())
+    -- GM8 (EYT-145): Kanalvorbehalt entfernt.
+    org_id in (select app.user_org_ids())
     and app.has_permission(org_id, 'costs.calculate')
     and created_by = auth.uid()
   );
@@ -287,7 +287,7 @@ create policy cost_snapshot_positions_select on public.cost_snapshot_positions
 create policy cost_snapshot_positions_insert on public.cost_snapshot_positions
   for insert to authenticated
   with check (
-    app.is_runtime_channel()
-    and org_id in (select app.user_org_ids())
+    -- GM8 (EYT-145): Kanalvorbehalt entfernt.
+    org_id in (select app.user_org_ids())
     and app.has_permission(org_id, 'costs.calculate')
   );
