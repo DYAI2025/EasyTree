@@ -98,8 +98,10 @@ before acting on it. Do **not** use local `master` as the reference — compare 
   clickable week view). EYT-75/87/72/81/11 are **not** in the open sprint.
 - **Correction (03.08.2026, measured on `origin/master` + EYT-107):** an earlier revision said
   "eight of the nine contract operations are still unimplemented". That count is stale. Measured
-  now, `NOT_YET_IMPLEMENTED` holds **five** entries — all under `/einsatz/`, all waiting on the
-  subject model from EYT-14. Implemented are the planning window read, the draft validation, the
+  now, `NOT_YET_IMPLEMENTED` holds **five** entries, all under `/einsatz/`, **four** of them
+  waiting on the subject model from EYT-14 — `GET /einsatz/plan` gives its own reason (the
+  employee read view, without which AK9 cannot be evidenced) and does not name EYT-14.
+  Implemented are the planning window read, the draft validation, the
   assignment write and, since EYT-107, `POST /planung/versionen` (publish).
   **Correction (14.08.2026, measured on `feat/eyt-109-daily-plan-cost-snapshot`):** the contract
   now carries **19** operations, not nine. `NOT_YET_IMPLEMENTED` still holds exactly the same
@@ -112,7 +114,7 @@ before acting on it. Do **not** use local `master` as the reference — compare 
   `NOT_YET_IMPLEMENTED` map inside `apps/api/test/openapi-route-conformance.test.ts`, each entry
   carrying its reason, and the test fails both ways: a contract operation with neither a route
   nor an entry, **and** an entry for an operation that has since been implemented. Writes and
-  the draft/conflict path are **EYT-50** (Story); three of the eight additionally wait on the
+  the draft/conflict path are **EYT-50** (Story); three of the five additionally wait on the
   subject model from EYT-14. **Correction (28.07.2026, measured against Jira):** an earlier
   revision of this file said "writes and publish are EYT-88". That is false. **EYT-88 is the
   Bug "Planungswochen-Schlüssel erlaubt ungültige ISO-Wochen in Vertrag und Datenbank"** — the
@@ -303,8 +305,13 @@ PostgREST **Data API**. Three rules, all on `public.plan_versions`:
   blind outside the runtime channel and silently disarmed the trigger.
 
 Consequences worth knowing before you touch any of this: moving the app onto the Supavisor
-transaction pooler makes `session_user` `postgres.<tenant>` and **breaks publishing** — loudly,
-via the zero-rows exception in `planning-write.repository.ts`. And `service_role`/`postgres`
+transaction pooler makes `session_user` `postgres.<tenant>` and is **expected to break
+publishing** — loudly, via the zero-rows exception in `planning-write.repository.ts` — and,
+since migration `0018`, to break **creating cost snapshots** too, there via a typed
+`WRITE_CHANNEL_REJECTED` return rather than a throw. Reading snapshots survives: the `_select`
+policies carry no channel condition. All three statements are **derived** from `session_user`
+plus the policies and are **not measured against a pooler connection** — pgTAP runs as
+`postgres`, not `postgres.<pooler-tenant>`. And `service_role`/`postgres`
 carry `BYPASSRLS`, so none of it constrains them. See
 [`docs/runbooks/planning-publish.md`](docs/runbooks/planning-publish.md).
 
@@ -312,9 +319,13 @@ carry `BYPASSRLS`, so none of it constrains them. See
 14.08.2026 on `providers.tsx` — **three** gateways from React context: `PlanningGateway`,
 `AuthGateway` and, since EYT-109, `CostsGateway` (`lib/api-client-provider.tsx`,
 `lib/planning-gateway-provider.tsx`, `lib/auth-gateway-provider.tsx`,
-`lib/costs-gateway-provider.tsx`), wrapped by `SessionProvider`, which carries the selected
-organisation into the costs gateway. The single construction site for all of them is the
-composition root `app/providers.tsx` (ADR-001 §5). `apps/web/test/no-supabase-import.test.ts` is a static
+`lib/costs-gateway-provider.tsx`), wrapped by `SessionProvider`. That provider does **not** hand
+the selected organisation to the costs gateway itself: it _reports_ it upward via
+`onOrganisationChange`, the composition root stores it in a ref (`providers.tsx:45,56-58`), and
+the gateway reads that ref on **every** call to send `X-EasyTree-Organization-Id`. The handover
+is therefore not synchronous — the report runs in a parent effect, so a costs request fired from
+a child effect in the same commit goes out **without** the header. The single construction site
+for all of them is the composition root `app/providers.tsx` (ADR-001 §5). `apps/web/test/no-supabase-import.test.ts` is a static
 guard that fails if the Supabase JS SDK name appears anywhere under `apps/web` — that guard
 string is assembled from parts on purpose, so don't "fix" it by inlining the literal.
 
@@ -330,10 +341,12 @@ browser rather than an error. Each gateway's URL is assembled in exactly one pla
 factory — because the test that checks it must call the same function production does; an
 earlier version built its own gateway and would have stayed green whatever `providers.tsx` did.
 There are **three** such factories (`lib/planning-gateway-factory.ts`,
-`lib/auth-gateway-factory.ts`, `lib/costs-gateway-factory.ts`), and measured 14.08.2026 **only
-the planning one is covered by that test** (`apps/web/test/api-base-path.test.ts`).
-`buildCostsApiBaseUrl` and `buildAuthApiBaseUrl` are called by no test at all — the guarantee
-this paragraph describes does **not** hold for them yet (EYT-109 Task 16, open).
+`lib/auth-gateway-factory.ts`, `lib/costs-gateway-factory.ts`), and measured 14.08.2026 only the
+planning one is **asserted** by that test (`apps/web/test/api-base-path.test.ts`). Mind the
+distinction: `buildCostsApiBaseUrl` and `buildAuthApiBaseUrl` are **executed** on every page
+load — `app/layout.tsx` renders `<Providers>`, so every browser e2e run goes through them — but
+**no test names them or says anything about the URLs they build**. Executed is not asserted; the
+guarantee this paragraph describes does **not** hold for those two yet (EYT-109 Task 16, open).
 
 **The contract is generated from Zod, and the generated file is checked in.**
 `packages/contracts/src/**/schemas.ts` are the source; `packages/contracts/openapi/v1.json` is
@@ -490,15 +503,30 @@ planning-invariants gate (EYT-49 — two real connections, because one session c
 constraint _rejecting_ but not _serialising_), then the API/worker process smokes. Every gate
 asserts its own greppable `[…] mode=required executed=… skipped=0` line.
 
-That sentence names the first gates, not all of them. Measured 14.08.2026 the job has **30
-steps**, and the gate block has grown to eleven named gates — beyond the tenant and
-planning-invariants ones above: planning write (EYT-92/EYT-136), planning publish (EYT-107),
-cost access (EYT-106), rate timestamp contract and rate succession (EYT-108), published-plan
-reads (EYT-109), cost snapshot persistence/atomicity/permissions/channel (EYT-138),
-snapshot HTTP seam (EYT-139) and snapshot immutability against later rates (EYT-143). Read the
-job, not this paragraph, before claiming what `db-gates` covers — and read the gate LINES, not
-the job's green tick: `db-gates` stops at its first failing step, so a red job says nothing
-about which suite failed.
+That sentence names the first gates, not all of them. Measured 14.08.2026 the job has **32
+steps** (30 with a `name:`, plus `actions/checkout` and `setup-pnpm`) and emits **13 gate
+lines** — count the lines, not the steps, because one step can emit two (the EYT-108 step runs
+both `rate-timestamp` and `rate-http-contract`, and the tenant gate appears twice: direct
+connection and transaction pooler). On run `31759500751` (head `4e409fb`) they were:
+
+```
+[cost-access] [cost-snapshot] [planning-invariants] [planning-publish]
+[planning-published-reads] [planning-write] [rate-http-contract] [rate-succession]
+[rate-timestamp] [snapshot-http] [snapshot-immutability] [tenant-isolation] [tenant-pooling]
+```
+
+each `mode=required`, `passed=executed`, `skipped=0`. Read the job, not this paragraph, before
+claiming what `db-gates` covers — and read the gate LINES, not the job's green tick. What a red
+`db-gates` does and does not tell you, measured on two real red runs: the step list **does** name
+the failing step (`23 failure — Kosten-Snapshot … EYT-138`), and `Tenant report -> step summary`
+still runs because it carries `if: always()`. What is lost is everything **after** the red step —
+those gates are `skipped`, so a red run says nothing about whether they would have held. Extract
+the lines with:
+
+```bash
+gh run view <run> --log --job <db-gates-job-id> \
+  | grep -oE '\[[a-z-]+\] mode=[a-z]+ executed=[0-9]+ passed=[0-9]+ skipped=[0-9]+' | sort -u
+```
 
 ## Deployment (Railway) — measured 01.08.2026
 

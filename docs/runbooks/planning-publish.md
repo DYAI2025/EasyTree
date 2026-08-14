@@ -221,11 +221,17 @@ Publish-Frage hält, unterschätzt die Auswirkung um den Unterschied zwischen
 funktioniert noch".
 
 **Seit Migration `0018` (EYT-109) gilt dieselbe Bedingung zusätzlich für das
-Erzeugen von Kosten-Snapshots** — `cost_snapshots_insert` und
-`cost_snapshot_positions_insert` tragen `app.is_runtime_channel()` an erster
-Stelle ihrer `with check`-Klausel. Das **Lesen** von Snapshots hängt
-ausdrücklich **nicht** am Kanal: beide `_select`-Policies prüfen nur
-Organisation und `costs.read` (Migration `0018`, Z. 254–263 und 278–283).
+Erzeugen von Kosten-Snapshots** — `cost_snapshots_insert` (Migration `0018`,
+Z. 269–276) und `cost_snapshot_positions_insert` (Z. 287–293) tragen
+`app.is_runtime_channel()` als ersten Konjunktionsterm ihrer `with check`-Klausel.
+Das **Lesen** von Snapshots hängt ausdrücklich **nicht** am Kanal: beide
+`_select`-Policies prüfen nur Organisation und `costs.read` (Z. 254–263 und
+278–283).
+
+> Die Reihenfolge innerhalb der `and`-Kette ist Lesbarkeit, keine Zusicherung —
+> unter `and` ist sie semantisch folgenlos, und kein Test bewacht sie. Bewacht
+> ist nur, **dass** die Bedingung vorkommt (pgTAP `0013`, C2/C3:
+> `with_check like '%is_runtime_channel%'`).
 
 | Situation                                                           | `session_user`             | Planungsschreiben (Entwurf, Zuweisung, Publish)       | Snapshot erzeugen | Snapshot lesen |
 | ------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------- | ----------------- | -------------- |
@@ -255,14 +261,25 @@ Die Null-Zeilen-Mechanik von oben lässt sich **nicht** auf Kosten übertragen,
 und der Versuch war einmal genau der Fehler. Gemessen am 12.08.2026 im ersten
 `db-gates`-Lauf der Snapshot-Suite:
 
-| Vorgang                     | SQL-Art  | Policy-Klausel | Verhalten bei falschem Kanal                                           |
+| Vorgang                     | SQL-Art  | Policy-Klausel | Verhalten der DATENBANK bei falschem Kanal                             |
 | --------------------------- | -------- | -------------- | ---------------------------------------------------------------------- |
 | Planversion veröffentlichen | `update` | `using`        | **filtert** → null betroffene Zeilen → benannte Ausnahme im Repository |
 | Snapshot erzeugen           | `insert` | `with check`   | **filtert nicht** → wirft SQLSTATE 42501                               |
 
+**Die Spalte beschreibt die Datenbank, nicht den API-Pfad.** Im echten
+Kostenpfad tritt der `42501` gar nicht auf: das Repository fragt den Kanal
+vorher (siehe unten), die Policy feuert dann nie. Wer die Zeile für das
+Laufzeitverhalten hält, sucht im Betrieb nach einem SQLSTATE, den es dort nicht
+gibt.
+
 Eine verletzte `with check`-Klausel liefert bei `insert` also keine leere
-Ergebnismenge, sondern wirft. Und `42501` ist mehrdeutig (fehlendes
-Spaltenrecht **oder** RLS-Verstoß **oder** fehlendes `costs.calculate`) — ein
+Ergebnismenge, sondern wirft. Und `42501` ist mehrdeutig: es bedeutet
+**fehlendes Tabellen-/Spaltenrecht** _oder_ **Verletzung der Insert-Policy** —
+und die zweite Ursache zerfällt noch einmal in **vier ununterscheidbare
+Konjunkte derselben Klausel** (Migration `0018`, Z. 271–276): Laufzeitkanal,
+Organisationszugehörigkeit, `costs.calculate` und Urheberschaft. Ein fehlendes
+`costs.calculate` ist damit kein dritter Fall neben dem RLS-Verstoß, sondern
+einer seiner vier. Das schwächt das Argument nicht, es verschärft es: ein
 `catch (42501) → WRITE_CHANNEL_REJECTED` wäre die bequeme und die falsche
 Reparatur, weil er ein Rechteproblem als Kanalproblem ausgäbe.
 
@@ -292,11 +309,22 @@ erzeugen. Diese Asymmetrie ist gewollt (Migration `0018`, Z. 254–257) und im
 Störungsfall die schnellste Unterscheidung zwischen „Kanal falsch" und
 „Rechte fehlen".
 
-> Nachgemessen ist die **Policy-Wirkung** (`db-gates`, pgTAP `0013`) und der
-> **Rückgabepfad** (`snapshot-http.test.ts`). Ein Lauf gegen eine echte
-> Supavisor-Poolerverbindung mit Kostenpfad ist **nicht** gefahren worden — die
-> Aussage über den Pooler folgt aus `session_user` plus Policy, nicht aus einer
-> Messung an ihm. Wer den Wechsel vorbereitet, misst zuerst mit dem SQL unten.
+> **Was hier gemessen ist und was nicht.** Gemessen sind die Policy-Wirkung
+> (pgTAP `0013`, Fälle D1/D3: ein `insert` außerhalb des Laufzeitkanals
+> scheitert; D2: ein `select` in derselben Sitzung liefert die Zeile) und der
+> Rückgabepfad (`snapshot-http.test.ts`) — beide zweimal grün im
+> `db-gates`-Job. **Nicht** gemessen ist der Pooler selbst: in pgTAP ist
+> `session_user` `postgres`, nicht `postgres.<pooler-tenant>`. Die Pooleraussage
+> ist also eine Ableitung aus `session_user` plus Policy, keine Messung an einer
+> Poolerverbindung. Wer den Wechsel vorbereitet, misst zuerst mit dem SQL unten.
+>
+> **Offene Lücke im Wächtersatz:** dass die `_select`-Policies **keinen**
+> Kanalvorbehalt tragen, ist von keinem Test bewacht — `0013` C4/C5 prüfen nur
+> `qual like '%has_permission%'` und `'%costs.read%'`. Wer
+> `app.is_runtime_channel() and` in die Lesepolicy einfügt und damit das Lesen
+> über die Data-API abschaltet, bleibt grün. Die Asymmetrie ist gewollt
+> (Migration `0018`, Z. 254–257), aber sie ist heute nur dokumentiert, nicht
+> gesichert.
 
 Wer den Kanal ändern muss, ändert `app.is_runtime_channel()` in einer neuen
 Vorwärtsmigration — nicht die Policy, und schon gar nicht durch Entfernen der

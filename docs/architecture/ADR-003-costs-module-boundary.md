@@ -109,17 +109,31 @@ registriert, **bevor** ihre Migration existiert — EYT-105 AC 1 verlangt die
 Registrierung, EYT-108/EYT-109 liefern das Schema. Ein abweichender Name in der
 Migration ist eine Änderung an dieser ADR, nicht ein Implementierungsdetail.
 
-> **Genau das ist eingetreten — Nachtrag 14.08.2026 (EYT-109).** Migration `0018`
-> legt `public.cost_snapshot_positions` an, nicht `public.cost_snapshot_items`
-> (`20260809120000_0018_cost_snapshots.sql:162`). `TABLE_OWNERSHIP` ist bereits
-> auf den tatsächlichen Namen gezogen und hält den Vorgang fest
-> (`module-catalogue.ts:245-252`: „Hiess in diesem Register bis 0018
-> `cost_snapshot_items`. Diesen Namen hat es nie gegeben"). Die Zeile oben ist
-> damit die **letzte** Stelle im Repository, die den nie existierenden Namen
-> führte. Sie bleibt als Beleg stehen; maßgeblich ist
-> `public.cost_snapshot_positions`. Der Satz darüber hat funktioniert: die
-> Abweichung ist nicht als Implementierungsdetail durchgerutscht, sondern hier
-> als ADR-Änderung vermerkt.
+> **Genau das ist eingetreten — zweimal. Nachtrag 14.08.2026 (EYT-109).** Von
+> den drei Namen oben haben **zwei** die Migration nicht überlebt:
+>
+> | Zeile oben                   | tatsächlicher Name               | Migration      | im Register vermerkt          |
+> | ---------------------------- | -------------------------------- | -------------- | ----------------------------- |
+> | `public.cost_rate_versions`  | `public.employee_rate_versions`  | `0013`, Z. 108 | `module-catalogue.ts:218-223` |
+> | `public.cost_snapshot_items` | `public.cost_snapshot_positions` | `0018`, Z. 162 | `module-catalogue.ts:245-252` |
+>
+> `public.cost_snapshots` ist unverändert geblieben. Die Begründungen stehen im
+> Register: `cost_` wäre in einem Kostenmodul doppelt gemoppelt und zugleich
+> ungenauer (versioniert werden **Mitarbeiter**sätze), und die Domänenmontage
+> spricht von **Positionen**, nicht von Items.
+>
+> Die zwei Zeilen oben bleiben als Beleg stehen; maßgeblich sind die Namen in
+> dieser Tabelle. Sie sind damit die letzten Stellen der **produktiven
+> Registrierung**, die die nie existierenden Namen führten — nicht die letzten
+> im Repository: `cost_snapshot_items` steht weiterhin fünfmal im
+> **synthetischen** Besitzregister von
+> `apps/api/test/costs-module-boundaries.red-case.test.ts` (dort absichtlich, der
+> Test läuft gegen einen Wegwerfbaum) sowie als Erklärkommentar in `0018:21` und
+> `module-catalogue.ts:245`.
+>
+> Der Satz darüber hat funktioniert: keine der beiden Abweichungen ist als
+> Implementierungsdetail durchgerutscht — beide sind im Register begründet und
+> hier als ADR-Änderung vermerkt.
 
 Was daraus **nicht** folgt: `costs` besitzt keine Planungstabelle und schreibt
 keine. Umgekehrt besitzt kein anderes Modul eine `cost_*`-Tabelle.
@@ -212,11 +226,11 @@ Entscheidung mit Supply-Chain-Prüfung, kein Nebeneffekt eines Imports.
 > Gegenwartsaussage aber falsch. Gemessen auf
 > `feat/eyt-109-daily-plan-cost-snapshot`:
 >
-> | Aussage von EYT-105  | Stand 14.08.2026                                                                                                 |
-> | -------------------- | ---------------------------------------------------------------------------------------------------------------- |
-> | nicht in `AppModule` | verdrahtet — `CostsController` in `controllers`, `PgCostSnapshotRepository` als Provider (`app.module.ts:41,77`) |
-> | keine Route          | **sieben** unter `/kosten` (`costs.controller.ts:171-443`)                                                       |
-> | keine Migration      | **zwei** — `0013_cost_permissions_and_rates`, `0018_cost_snapshots`                                              |
+> | Aussage von EYT-105  | Stand 14.08.2026                                                                                                                                                                                                                                                                                                                                                |
+> | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | nicht in `AppModule` | verdrahtet — `CostsController` im `controllers`-Array (`app.module.ts:77`, Import Z. 41). Das Snapshot-Repository hängt **nicht** als Klasse im Provider-Array, sondern als Fabrik am Token `COST_SNAPSHOT_REPOSITORY_FACTORY` (Z. 147–156), deren `useFactory` je Subjekt ein `new PgCostSnapshotRepository(…)` erzeugt (Z. 154)                               |
+> | keine Route          | **sieben** unter `/kosten` (`costs.controller.ts:171-443`)                                                                                                                                                                                                                                                                                                      |
+> | keine Migration      | **drei** ändern costs-eigenes Schema — `0013_cost_permissions_and_rates` (legt `employee_rate_versions` an), `0014_rate_succession` (`revoke`/`grant update (valid_to)` und Policy `employee_rate_versions_close` auf derselben Tabelle) und `0018_cost_snapshots`. Nur zwei davon tragen `cost` im Dateinamen — wer nach Dateinamen zählt, zählt eine zu wenig |
 >
 > Die Reihenfolge der Entscheidung hat gehalten: verdrahtet wurde erst **nach**
 > der Autorisierung (EYT-106), nicht davor. Der letzte Satz des Absatzes ist

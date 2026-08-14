@@ -325,20 +325,29 @@ Geändert wurden **zwei Felder in zwei Zeilen**, jedes gegen eine Messung:
   `S5·REQ-006` an `auth-journey` mit echtem Chromium, echtem GoTrue und echten HttpOnly-Cookies
   gegen `dist/main.js`. Beide Jobs sind auf `f2b49d3` grün (Lauf `31757338756`, 11/11).
   `production-verified` bleibt unerreichbar — daran ändert dieser Nachzug nichts.
-- **`wired-in-prod?` → `yes`.** Legende: Produktions-Kompositionswurzel. Gemessen stehen
-  `CostsController` und `PgCostSnapshotRepository` in `apps/api/src/app.module.ts` (Z. 41, 77)
-  und `CostsGatewayProvider`/`createCostsGateway` in `apps/web/app/providers.tsx` (Z. 9–10, 48, 64) — Lese- **und** Schreibpfad.
+- **`wired-in-prod?` → `yes`.** Legende: Produktions-Kompositionswurzel. Gemessen steht
+  `CostsController` im `controllers`-Array von `apps/api/src/app.module.ts` (Z. 77, Import
+  Z. 41); das Snapshot-Repository hängt als Fabrik am Token
+  `COST_SNAPSHOT_REPOSITORY_FACTORY` (Z. 147–156, `new PgCostSnapshotRepository(…)` in Z. 154),
+  **nicht** als Klasse im Provider-Array. Im Browser verdrahten
+  `CostsGatewayProvider`/`createCostsGateway` in `apps/web/app/providers.tsx` (Z. 9–10, 48, 64)
+  — Lese- **und** Schreibpfad.
 - Die **CI-Bindung** beider Zeilen war überholt: `S5·REQ-005` nannte das Tenant-Gate,
   `S5·REQ-006` den `read-through`-Harness. Der Harness ersetzt `REQUEST_IDENTITY` und kann eine
   Browserreise nicht belegen; der tragende Job ist `auth-journey`.
 
 **Ausdrücklich NICHT geändert — und warum:**
 
-- **`true-line-status` bleibt `pending`.** Für dieses Feld existiert in dieser Datei **keine
-  Legende**; belegt sind nur drei benutzte Werte (`pending`, `blocked`, `review-required`).
-  Einen vierten zu erfinden, um zwei Zeilen grüner aussehen zu lassen, wäre genau die Sorte
-  Selbstermächtigung, gegen die der Rest dieser Datei geschrieben ist. Der Wert gehört vom
-  Product Owner gesetzt, zusammen mit seiner Legende.
+- **`true-line-status` bleibt `pending`** — und die zuerst notierte Begründung dafür war
+  falsch. Sie lautete „einen vierten Wert zu erfinden wäre Selbstermächtigung"; gemessen werden
+  in dieser Datei aber **vier** Werte benutzt, und `pass` ist mit zehn Vorkommen (Sprint-4-
+  Tabelle, Z. 115–126) der häufigste. Es gäbe also nichts zu erfinden.
+  Der Wert bleibt trotzdem stehen, aus zwei anderen Gründen: für `true-line-status` gibt es
+  **weder in dieser Datei noch sonst im Repository eine Legende** (Legenden existieren nur für
+  `evidence-class`, Z. 39, und `wired-in-prod?`, Z. 56) — was `pass` genau zusichert, ist damit
+  nirgends festgeschrieben. Und die Sprint-4-Zeilen tragen `pass` neben `wired-in-prod?` =
+  **ja**; der Sprint-5-Schnitt ist nicht produktiv verdrahtet. Wer den Wert setzt, entscheidet
+  eine Bedeutung mit — das gehört zum Product Owner, zusammen mit der fehlenden Legende.
 - **`docs/traceability/REQUIREMENT_TO_JIRA_v1.3.csv` ist unangetastet.** Der Plan (Task 20
   Schritt 2) nennt genau diese Datei; sie liegt **außerhalb** des armierten Scope-Manifests
   (`docs/scope/sprint-5-daily-cost-export.scope.json` führt `docs/traceability.md` als Literal,
