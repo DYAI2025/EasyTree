@@ -2073,7 +2073,10 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
         expect(koerperB).not.toContain(MITARBEITER_ID);
         expect(koerperB).not.toContain(veroeffentlichteVersionId);
         expect(koerperB).not.toContain("personnel-plan-cost-v1");
-        const problemB = (await mitKopf.json()) as { detail?: string };
+        // Aus DEMSELBEN Text geparst, nicht ueber einen zweiten Zugriff auf die
+        // Antwort: `dataApiSchreibversuch` haelt weiter oben fest, warum diese
+        // Datei jeden Koerper genau einmal liest.
+        const problemB = JSON.parse(koerperB) as { detail?: string };
         expect(problemB.detail).toBe("Kein Zugriff auf die Kostendaten dieser Organisation.");
 
         // Und im Netzwerkprotokoll dieses Browsers steht kein erfolgreicher
