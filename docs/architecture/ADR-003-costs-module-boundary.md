@@ -109,6 +109,18 @@ registriert, **bevor** ihre Migration existiert — EYT-105 AC 1 verlangt die
 Registrierung, EYT-108/EYT-109 liefern das Schema. Ein abweichender Name in der
 Migration ist eine Änderung an dieser ADR, nicht ein Implementierungsdetail.
 
+> **Genau das ist eingetreten — Nachtrag 14.08.2026 (EYT-109).** Migration `0018`
+> legt `public.cost_snapshot_positions` an, nicht `public.cost_snapshot_items`
+> (`20260809120000_0018_cost_snapshots.sql:162`). `TABLE_OWNERSHIP` ist bereits
+> auf den tatsächlichen Namen gezogen und hält den Vorgang fest
+> (`module-catalogue.ts:245-252`: „Hiess in diesem Register bis 0018
+> `cost_snapshot_items`. Diesen Namen hat es nie gegeben"). Die Zeile oben ist
+> damit die **letzte** Stelle im Repository, die den nie existierenden Namen
+> führte. Sie bleibt als Beleg stehen; maßgeblich ist
+> `public.cost_snapshot_positions`. Der Satz darüber hat funktioniert: die
+> Abweichung ist nicht als Implementierungsdetail durchgerutscht, sondern hier
+> als ADR-Änderung vermerkt.
+
 Was daraus **nicht** folgt: `costs` besitzt keine Planungstabelle und schreibt
 keine. Umgekehrt besitzt kein anderes Modul eine `cost_*`-Tabelle.
 
