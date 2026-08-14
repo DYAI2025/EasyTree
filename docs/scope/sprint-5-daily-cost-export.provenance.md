@@ -1,8 +1,55 @@
 # Provenance des Scope-Manifests `sprint-5-daily-cost-export`
 
-Stand: 03.08.2026 · gilt für `docs/scope/sprint-5-daily-cost-export.scope.json`
-mit dem Digest `41995f2cc2c5…` (gebunden in
+Stand: 14.08.2026 · gilt für `docs/scope/sprint-5-daily-cost-export.scope.json`
+mit dem Digest `7df01e75fe9d…` (gebunden in
 `.plumbline/scope-authority/sprint-5-daily-cost-export.json`).
+
+**Revision 3, Product-Owner-Autorisierung 14.08.2026 — nachträgliche
+Governance-Korrektur.** Ein einziger Pfad kommt hinzu:
+
+```
+packages/contracts/src/planning/schemas.ts
+```
+
+Sonst ändert sich am Manifest nichts. Kein Produktcode, kein Test, keine
+EYT-146-Datei wird dabei angefasst — auch `packages/contracts/src/planning/schemas.ts`
+selbst nicht. Die Änderung an dieser Datei existiert bereits im Branch; hier
+wird ausschließlich die Autorität nachgezogen, die sie von Anfang an hätte
+tragen müssen.
+
+**Herkunft der Änderung.** Commit
+`f04b7538a7a5b2a202768aafefb3f5c84539fff9` („fix(contracts): EYT-109 —
+Reviewbefunde zu Task 1 schliessen", 08.08.2026) ändert sechs Zeilen in
+`packages/contracts/src/planning/schemas.ts`. Er ist der **einzige** Commit auf
+der Prüfoberfläche `f9da4459…HEAD`, der diese Datei berührt — gemessen mit
+`git log --oneline f9da4459..HEAD -- packages/contracts/src/planning/schemas.ts`
+(genau eine Zeile). Die Datei gehört damit zu EYT-109 Task 1, dessen Scope der
+Product Owner bestätigt hat; das Manifest war gegenüber diesem bereits
+abgenommenen Stand unvollständig.
+
+**Warum der Befund pre-existing ist.** `f04b753` ist Vorfahre von `b2554391` —
+der Baseline, auf der EYT-146 begann — und die dort eingecheckte Fassung des
+Manifests führt den Pfad ebenfalls nicht (`git show
+b2554391:docs/scope/sprint-5-daily-cost-export.scope.json | grep -F
+'planning/schemas.ts'` liefert nichts, Exit 1). Der vollständige Scope-Gate
+hätte also schon vor EYT-146 rot gemeldet. **EYT-146 hat diesen Befund weder
+verursacht noch verdeckt**; er wird hier nur getrennt und sichtbar geschlossen,
+statt in einer Feature-Abnahme mitzulaufen.
+
+**Warum genau ein Pfad und kein Muster.** Der reproduzierte Gate-Lauf nennt auf
+der gesamten Branch-Oberfläche (265 Dateien) exakt eine Verletzung:
+`packages/contracts/src/planning/schemas.ts`. Ein Muster wie
+`packages/contracts/src/planning/**` würde Dateien mitautorisieren, die niemand
+geprüft hat — `gateway.ts` und alles künftig dort Hinzukommende. Die
+Autorisierung des Product Owners vom 14.08.2026 gilt ausdrücklich **nur für
+diesen exakten Dateipfad**. `packages/contracts/src/planning/**` ist **nicht**
+autorisiert, weder jetzt noch rückwirkend.
+
+**Weg der Korrektur.** Genau der unten unter „Wie eine künftige Erweiterung
+aussieht" beschriebene: gebundene Baseline unter `.plumbline/scope-authority/`
+entfernt (entwaffnet), den vom Product Owner autorisierten Pfad ergänzt, neu
+armiert. Das Manifest hat seine eigene Erweiterung zu keinem Zeitpunkt selbst
+ratifiziert.
 
 **Revision 2, Product-Owner-Bestätigung 03.08.2026.** Revision 1 (`82b4426`)
 wurde gebunden, bevor `pnpm format:fix` die Datei normalisierte — die gebundene
@@ -41,6 +88,10 @@ Diese Datei ist **nicht** autoritativ: sie erklärt, sie erlaubt nichts. Autorit
 hat allein das gepinnte Manifest.
 
 ## Aufbau des Manifests
+
+Dieser Abschnitt beschreibt **Revision 2** (73 Einträge). Revision 3 ergänzt
+genau einen 74. Eintrag, oben begründet; alles Folgende bleibt unverändert
+gültig.
 
 **65 Einträge sind unverändert übernommen** aus
 `docs/canvas/sprint-5-daily-cost-export.canvas.md`, Abschnitt
@@ -94,7 +145,11 @@ stammen und keine geänderten Dateien sind. Keine davon steht im Manifest:
   `scripts/verify-branch-protection.sh` sind ohnehin seit dem Canvas
   bestätigt — sie stehen hier nur, weil der Plan-Gate sie als Textfund
   meldete.)
-- **EYT-109 und EYT-110:** keine Pfade vorweg autorisiert.
+- **EYT-109 und EYT-110:** keine Pfade vorweg autorisiert. (Revision 3 ergänzt
+  nachträglich **einen** bereits geänderten EYT-109-Pfad,
+  `packages/contracts/src/planning/schemas.ts`; das ist eine Korrektur für eine
+  vorhandene, abgenommene Änderung und keine Vorwegautorisierung. Für EYT-110
+  bleibt es bei null Pfaden.)
 
 ## Wie eine künftige Erweiterung aussieht
 
