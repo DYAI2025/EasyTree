@@ -195,6 +195,26 @@ Entscheidung mit Supply-Chain-Prüfung, kein Nebeneffekt eines Imports.
 
 ### 7. Stand des Moduls: Grenze, noch kein laufendes Feature
 
+> **⚠️ Überholt — Nachtrag 14.08.2026 (EYT-109).** Der Absatz darunter beschreibt
+> den Stand von EYT-105 und ist als Momentaufnahme richtig geblieben, als
+> Gegenwartsaussage aber falsch. Gemessen auf
+> `feat/eyt-109-daily-plan-cost-snapshot`:
+>
+> | Aussage von EYT-105  | Stand 14.08.2026                                                                                                 |
+> | -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+> | nicht in `AppModule` | verdrahtet — `CostsController` in `controllers`, `PgCostSnapshotRepository` als Provider (`app.module.ts:41,77`) |
+> | keine Route          | **sieben** unter `/kosten` (`costs.controller.ts:171-443`)                                                       |
+> | keine Migration      | **zwei** — `0013_cost_permissions_and_rates`, `0018_cost_snapshots`                                              |
+>
+> Die Reihenfolge der Entscheidung hat gehalten: verdrahtet wurde erst **nach**
+> der Autorisierung (EYT-106), nicht davor. Der letzte Satz des Absatzes ist
+> damit eingelöst, nicht verletzt. Offen bleibt allein der Export (EYT-110);
+> `CostExportPort` ist weiterhin unverdrahtet.
+>
+> Dieser Abschnitt wird **nicht** umgeschrieben: die ADR hält die Entscheidung
+> von EYT-105 fest, nicht den Tagesstand. Wer den heutigen Umfang braucht, misst
+> ihn — die drei Kommandos stehen in der Tabelle oben.
+
 `costs` ist **nicht** in `AppModule` verdrahtet, hat **keine** Route und **keine**
 Migration. Das ist der vollständige und ehrliche Umfang von EYT-105. Autorisierung
 (EYT-106), veröffentlichte Planquelle (EYT-107), Sätze (EYT-108), Snapshot und Route
