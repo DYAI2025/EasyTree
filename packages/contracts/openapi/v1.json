@@ -2361,6 +2361,7 @@
                 },
                 "validTo": {
                   "nullable": true,
+                  "description": "Letzter wirksamer Tag, einschließlich; `null` = unbegrenzt. Eine Nachfolgeversion ab dem Folgetag schließt lückenlos an; derselbe Tag wäre eine Überlappung (EYT-95).",
                   "type": "string",
                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                 },
@@ -2451,6 +2452,7 @@
           },
           "validTo": {
             "nullable": true,
+            "description": "Letzter wirksamer Tag, einschließlich; `null` = unbegrenzt. Eine Nachfolgeversion ab dem Folgetag schließt lückenlos an; derselbe Tag wäre eine Überlappung (EYT-95).",
             "type": "string",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
           },
@@ -2526,6 +2528,7 @@
           },
           "validTo": {
             "nullable": true,
+            "description": "Letzter wirksamer Tag, einschließlich; `null` = unbegrenzt. Eine Nachfolgeversion ab dem Folgetag schließt lückenlos an; derselbe Tag wäre eine Überlappung (EYT-95).",
             "type": "string",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
           },

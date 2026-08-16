@@ -67,6 +67,23 @@ export const EmployeesForRatesSchema = z.strictObject({
 });
 export type EmployeesForRates = z.infer<typeof EmployeesForRatesSchema>;
 
+/**
+ * Die zugesicherte Bedeutung von `validTo` — einmal, für beide Richtungen.
+ *
+ * Sie steht als Konstante und nicht zweimal als Literal: der gelesene und der
+ * geschriebene Wert bedeuten dasselbe, und zwei Texte, die dasselbe sagen
+ * sollen, driften auseinander.
+ *
+ * Bewusst OHNE Angaben zur Persistenz: ein API-Vertrag beschreibt
+ * Clientsemantik, nicht die Speicherung des Anbieters. Wie der Server das
+ * Intervall intern ablegt, ist nicht Teil dieser Zusage und geht keinen
+ * Aufrufer etwas an.
+ */
+const VALID_TO_BESCHREIBUNG =
+  "Letzter wirksamer Tag, einschließlich; `null` = unbegrenzt. " +
+  "Eine Nachfolgeversion ab dem Folgetag schließt lückenlos an; " +
+  "derselbe Tag wäre eine Überlappung (EYT-95).";
+
 export const RATE_VERSION_STATUS = ["aktiv", "kommend", "abgelaufen"] as const;
 export const RateVersionStatusSchema = z.enum(RATE_VERSION_STATUS);
 export type RateVersionStatus = z.infer<typeof RateVersionStatusSchema>;
@@ -77,7 +94,7 @@ export const RateVersionDtoSchema = z.strictObject({
   amountMinorUnits: MinorUnitsSchema,
   currency: z.literal("EUR"),
   validFrom: BusinessDateSchema,
-  validTo: BusinessDateSchema.nullable(),
+  validTo: BusinessDateSchema.nullable().describe(VALID_TO_BESCHREIBUNG),
   status: RateVersionStatusSchema,
   predecessorId: IdSchema.nullable(),
   reason: z.string().min(1),
@@ -99,7 +116,7 @@ export const CreateRateVersionCommandSchema = z.strictObject({
   amountMinorUnits: MinorUnitsSchema,
   currency: z.literal("EUR"),
   validFrom: BusinessDateSchema,
-  validTo: BusinessDateSchema.nullable(),
+  validTo: BusinessDateSchema.nullable().describe(VALID_TO_BESCHREIBUNG),
   /** Fachlicher Änderungsgrund — Pflicht, wird auditiert (EYT-108). */
   reason: z.string().min(1).max(500),
   /**
