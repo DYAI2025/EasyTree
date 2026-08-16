@@ -132,9 +132,13 @@ const SATZ_V1 = "00000000-0000-4000-8000-0000006d1431";
  * beginnende Version veraenderte auch eine Neuberechnung nicht und unterschiede
  * „Snapshot" deshalb nicht von „Cache".
  *
- * Das Intervall ist halboffen (`[validFrom, validTo)`, Migration 0013): nach der
- * Abloesung endet V1 am Leistungstag und gilt dort NICHT mehr, V2 gilt ab ihm.
- * Genau eine Version ist wirksam, `effectiveRateVersion` bleibt eindeutig.
+ * Halboffen ist nur noch die DATENBANK (`[valid_from, valid_to)`, Migration
+ * 0013). Oberhalb der Persistenzgrenze fuehrt `validTo` seit EYT-109 D1 den
+ * LETZTEN wirksamen Tag: nach der Abloesung endet V1 am Tag VOR dem
+ * Leistungstag und gilt an ihm NICHT mehr, V2 gilt ab ihm. Genau eine Version
+ * ist wirksam, `effectiveRateVersion` bleibt eindeutig — und waehlt dieselbe
+ * wie vor D1. Genau das ist hier der Regressionsnachweis: Betraege und Ids
+ * unten muessen unveraendert bleiben.
  */
 const LEISTUNGSTAG = "2029-03-15";
 const V1_AB = "2029-01-01";

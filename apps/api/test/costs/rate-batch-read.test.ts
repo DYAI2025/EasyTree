@@ -307,8 +307,47 @@ describe("PgRateRepository.versionsForMany", () => {
     // Die Zeilen werden vollstaendig in Datensaetze gewandelt, nicht nur ihre Ids.
     expect(abbildung.get(ANNA)?.[1]?.amountMinorUnits).toBe("2500");
     expect(abbildung.get(ANNA)?.[1]?.validTo).toBeNull();
-    expect(abbildung.get(ANNA)?.[0]?.validTo).toBe("2025-12-31");
+    // EYT-109 D1: die DB fuehrt `[von, bis)`, die Fachwelt `[von, bis]`.
+    // Gespeichert ist `2025-12-31` (exklusiv); fachlich endet die Version am
+    // 30.12. Gegenmutation: `dbEndeZuValidTo` in `toRecord` entfernen -> rot.
+    expect(abbildung.get(ANNA)?.[0]?.validTo).toBe("2025-12-30");
     expect(abbildung.get(BERND)?.[0]?.employeeId).toBe(BERND);
+  });
+
+  it("Fall 7a — liefert am Wechseltag den letzten wirksamen Tag, nicht die DB-Grenze", async () => {
+    // Der Fall aus PO-Kommentar 13533: Vorgaenger [2026-06-01, 2026-07-01) in
+    // der Datenbank, Nachfolger ab 2026-07-01. Oberhalb der Persistenzgrenze
+    // endet der Vorgaenger am 30.06. — sonst zeigte die Oberflaeche „gueltig
+    // bis 01.07." fuer eine Version, die am 01.07. nicht mehr gilt.
+    //
+    // Gegenmutation: `dbEndeZuValidTo` in `toRecord` entfernen -> `2026-07-01`,
+    // rot. Und `null` muss `null` bleiben: die einzige Zeile, die heute in
+    // Produktion steht, traegt `valid_to IS NULL`.
+    const { repository } = repositoryMit([
+      zeile({
+        id: "5a000000-5a00-4a00-8a00-5a000000000a",
+        employee_id: ANNA,
+        valid_from: "2026-06-01",
+        valid_to: "2026-07-01",
+      }),
+      zeile({
+        id: "5a000000-5a00-4a00-8a00-5a000000000b",
+        employee_id: ANNA,
+        valid_from: "2026-07-01",
+        valid_to: null,
+      }),
+    ]);
+
+    const abbildung = await repository.versionsForMany([ANNA]);
+    const historie = abbildung.get(ANNA) ?? [];
+
+    // Die Reihenfolge der Fixtur bleibt erhalten (Fall 7) — der erste Eintrag
+    // ist der Vorgaenger.
+    expect(historie).toHaveLength(2);
+    expect(historie.map((v) => v.validTo)).toEqual(["2026-06-30", null]);
+    // Lueckenlos und ueberlappungsfrei: der Nachfolger beginnt am Tag NACH dem
+    // letzten wirksamen Tag des Vorgaengers (EYT-95).
+    expect(historie[1]?.validFrom).toBe("2026-07-01");
   });
 
   it("Fall 8 — bindet die Lesung an das Subjekt der Anfrage", async () => {

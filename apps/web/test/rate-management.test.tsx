@@ -57,10 +57,19 @@ function version(teil: Partial<RateVersionDto> & Pick<RateVersionDto, "id">): Ra
   };
 }
 
+/**
+ * Die Enddaten sind FACHLICH — der letzte wirksame Tag (EYT-95, EYT-109 D1).
+ *
+ * Bis D1 trugen diese Fixturen die rohen Datenbankgrenzen (`2026-07-01`,
+ * `2027-01-01`) und froren damit den Defekt ein: die Spalte „Gültig bis" zeigte
+ * einen Tag, an dem der Satz schon nicht mehr galt. Die API liefert seither den
+ * letzten wirksamen Tag, und die Komponente reicht ihn unveraendert durch —
+ * ihre Beschriftung war nie falsch, nur der gelieferte Wert.
+ */
 const V_ALT = version({
   id: "00000000-0000-4000-8000-00000053a001",
   validFrom: "2026-01-01",
-  validTo: "2026-07-01",
+  validTo: "2026-06-30",
   status: "abgelaufen",
   reason: "Erstanlage",
 });
@@ -68,7 +77,7 @@ const V_AKTIV = version({
   id: "00000000-0000-4000-8000-00000053a002",
   amountMinorUnits: "4200",
   validFrom: "2026-07-01",
-  validTo: "2027-01-01",
+  validTo: "2026-12-31",
   status: "aktiv",
   predecessorId: V_ALT.id,
   reason: "Tariferhoehung",
@@ -145,12 +154,66 @@ describe("Satzhistorie macht die Abloesung sichtbar (EYT-108)", () => {
     expect(ersetzt).toContain("—");
 
     // Der Vorgaenger ist sichtbar GESCHLOSSEN. Ohne diese Zusicherung koennte
-    // `valid_to` verschwinden und die Ansicht saehe unveraendert aus.
+    // das Enddatum verschwinden und die Ansicht saehe unveraendert aus.
     const bis = screen.getAllByTestId("gueltig-bis").map((z) => z.textContent);
-    expect(bis).toContain("2026-07-01");
+    expect(bis).toContain("2026-06-30");
 
     expect(screen.getByText("Tariferhoehung")).toBeTruthy();
     expect(screen.getByText("42,00 €")).toBeTruthy();
+  });
+
+  it("erzaehlt den Satzwechsel lueckenlos: kein Tag doppelt, kein Tag fehlt", async () => {
+    // Die Nahtstelle als GESCHICHTE, nicht als Einzelwert. Unter „Gültig bis"
+    // steht der letzte wirksame Tag; die Nachfolgeversion beginnt am Folgetag.
+    //
+    // Gegenmutation: die Fixturen auf die rohen Datenbankgrenzen zurueckdrehen
+    // (`2026-07-01` / `2027-01-01`) -> der 01.07. stuende zweimal in der
+    // Erzaehlung, einmal als Ende von V_ALT und einmal als Beginn von V_AKTIV,
+    // und diese Zusicherung wird rot.
+    await zeigeHistorie({
+      employeeId: MITARBEITER,
+      activeVersionId: V_AKTIV.id,
+      versions: [V_KOMMEND, V_AKTIV, V_ALT],
+    });
+
+    // Es gibt bewusst KEIN `data-testid` fuer „Gültig ab" — die Komponente
+    // bleibt in diesem Slice unveraendert. Der Anker ist deshalb die Zeile
+    // selbst (`data-version-id`); gelesen wird das GERENDERTE Enddatum, und
+    // das Startdatum wird in derselben Zeile nachgewiesen statt aus der
+    // Fixtur behauptet.
+    const zeilen = screen.getAllByTestId("satzversion");
+    expect(zeilen).toHaveLength(3);
+
+    const gelesen = [V_ALT, V_AKTIV, V_KOMMEND].map((erwartet) => {
+      const zeile = zeilen.find((z) => z.getAttribute("data-version-id") === erwartet.id);
+      // Ohne diese Bremse liefe der Vergleich unten auf leeren Werten gruen —
+      // ein umbenanntes `data-testid` faellt hier auf und nicht erst im
+      // CI-Job `auth-journey` (`removing-a-testid-breaks-e2e-silently`).
+      expect(zeile, `Zeile fuer ${erwartet.id} fehlt`).toBeTruthy();
+      const bis = zeile?.querySelector('[data-testid="gueltig-bis"]')?.textContent ?? "";
+      expect(bis, `gueltig-bis fehlt in ${erwartet.id}`).not.toBe("");
+      // Das Startdatum steht in derselben Zeile — gerendert, nicht behauptet.
+      expect(zeile?.textContent).toContain(erwartet.validFrom);
+      return { ab: erwartet.validFrom, bis };
+    });
+
+    expect(gelesen).toEqual([
+      { ab: "2026-01-01", bis: "2026-06-30" },
+      { ab: "2026-07-01", bis: "2026-12-31" },
+      { ab: "2027-01-01", bis: "—" },
+    ]);
+    const sortiert = gelesen;
+
+    // Und die Eigenschaft ausdruecklich: jedes Ende liegt ECHT vor dem
+    // naechsten Beginn. Ein Ende gleich dem naechsten Beginn waere eine
+    // Ueberlappung (EYT-95), ein Ende zwei Tage davor eine Luecke.
+    for (const [vorher, nachher] of [
+      [sortiert[0], sortiert[1]],
+      [sortiert[1], sortiert[2]],
+    ] as const) {
+      expect(vorher?.bis).not.toBe(nachher?.ab);
+      expect((vorher?.bis ?? "") < (nachher?.ab ?? "")).toBe(true);
+    }
   });
 
   it("sagt es ehrlich, wenn der Vorgaenger nicht in der geladenen Historie liegt", async () => {

@@ -46,7 +46,17 @@ export interface NewRateVersion {
   readonly organisationId: string;
   readonly employeeId: string;
   readonly amountMinorUnits: string;
+  /** Erster Gueltigkeitstag, einschliessend (JJJJ-MM-TT). */
   readonly validFrom: string;
+  /**
+   * LETZTER wirksamer Tag, EINSCHLIESSEND. `null` = unbegrenzt (EYT-95,
+   * EYT-109 D1).
+   *
+   * Der Port spricht FACHLICH. Die Umrechnung auf die halboffene
+   * Datenbankgrenze macht ausschliesslich der Adapter
+   * (`infrastructure/rate-interval-boundary.ts`) — wer hier schon einen
+   * DB-Wert einsetzt, verschiebt den Satz um einen Tag.
+   */
   readonly validTo: string | null;
   readonly reason: string;
   readonly expectedActiveVersionId: string | null;

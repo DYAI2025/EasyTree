@@ -28,6 +28,7 @@ import type {
 } from "../application/rate-repository.port";
 import { pruefeAbloesung } from "../domain/rate-succession";
 import type { RateVersionRecord } from "../domain/rate-version";
+import { dbEndeZuValidTo, validToZuDbEnde } from "./rate-interval-boundary";
 
 /** PostgreSQL-Fehlercodes, die hier eine fachliche Bedeutung tragen. */
 const EXCLUSION_VIOLATION = "23P01";
@@ -101,7 +102,9 @@ function toRecord(row: RateRow): RateVersionRecord {
     amountMinorUnits: row.amount_minor_units,
     currency: "EUR",
     validFrom: row.valid_from,
-    validTo: row.valid_to,
+    // Halboffen (DB) -> einschliessend (Fachwelt). Die einzige Leserichtung
+    // dieser Naht; oberhalb gibt es keine zweite Lesart mehr (EYT-109 D1).
+    validTo: dbEndeZuValidTo(row.valid_to),
     predecessorId: row.predecessor_id,
     reason: row.reason,
     createdAt: row.created_at,
@@ -270,7 +273,12 @@ export class PgRateRepository implements RateRepository {
               amountMinorUnits: "0",
               currency: "EUR",
               validFrom: vorgaenger.valid_from,
-              validTo: vorgaenger.valid_to,
+              // Auch dieser Weg fuehrt durch die Naht: `pruefeAbloesung` ist
+              // eine FACHLICHE Regel und sieht nie eine DB-Grenze (EYT-109 D1).
+              // Heute prueft sie nur auf `null` — und `null` bleibt `null`;
+              // morgen koennte sie mehr lesen, und dann waere ein roher
+              // Durchgriff still falsch.
+              validTo: dbEndeZuValidTo(vorgaenger.valid_to),
               predecessorId: null,
               reason: "",
               createdAt: "",
@@ -287,7 +295,11 @@ export class PgRateRepository implements RateRepository {
             `update public.employee_rate_versions
                 set valid_to = $2::date
               where id = $1 and valid_to is null`,
-            [vorgaenger.id, abloesung.validToDesVorgaengers],
+            // Einschliessend (Fachwelt) -> halboffen (DB). Der gespeicherte
+            // Wert ist damit derselbe wie vor EYT-109 D1:
+            // `validToZuDbEnde(dayBefore(nachfolger.validFrom))` =
+            // `nachfolger.validFrom`. Das ist der EYT-108-Regressionsnachweis.
+            [vorgaenger.id, validToZuDbEnde(abloesung.validToDesVorgaengers)],
           );
           if (geschlossen.rowCount !== 1) {
             // Nach der Sperre darf das nicht passieren. Wenn doch, WERFEN —
@@ -311,7 +323,9 @@ export class PgRateRepository implements RateRepository {
             version.employeeId,
             version.amountMinorUnits,
             version.validFrom,
-            version.validTo,
+            // Einschliessend (Fachwelt) -> halboffen (DB). Erst hier wird aus
+            // dem letzten wirksamen Tag die Ausschlussgrenze (EYT-109 D1).
+            validToZuDbEnde(version.validTo),
             version.expectedActiveVersionId,
             version.reason,
             version.correlationId,

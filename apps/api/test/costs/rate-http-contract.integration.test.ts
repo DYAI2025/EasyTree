@@ -25,7 +25,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import { Client } from "pg";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AppModule } from "../../src/app.module";
 import { TENANT_QUERY_RUNNER } from "../../src/platform/database/tenant-query-runner.provider";
@@ -196,6 +196,101 @@ describe("Kostenantworten sind vertragskonform (EYT-108)", () => {
     // Aktive Version und Liste muessen zueinander passen.
     if (geprueft.data.activeVersionId !== null) {
       expect(geprueft.data.versions.map((v) => v.id)).toContain(geprueft.data.activeVersionId);
+    }
+  });
+
+  /**
+   * Die GANZE Kette am Stueck (EYT-109 D1).
+   *
+   * HTTP-Eingabe -> Zod -> Controller -> Port -> `validToZuDbEnde` ->
+   * PostgreSQL -> `dbEndeZuValidTo` -> `toDto` -> HTTP-Ausgabe. Kein anderer
+   * Test misst beide Umrechnungen zusammen mit dem echten Vertrag.
+   *
+   * Ein Vorzeichenfehler in EINER der beiden Richtungen hebt sich im Rundlauf
+   * auf; deshalb prueft `rate-succession.integration.test.ts` zusaetzlich die
+   * ROHE Zeile ueber eine Adminverbindung. Erst beide zusammen trennen
+   * „richtig" von „symmetrisch falsch" (`net-count-checks-cancel-out`).
+   */
+  dbIt("POST/GET fuehren `validTo` als letzten wirksamen Tag durch (EYT-109 D1)", async () => {
+    // Fachlich [2029-01-01, 2029-12-31]. In der Datenbank wird daraus
+    // `[2029-01-01, 2030-01-01)` — und damit grenzt der Satz lueckenlos an die
+    // im ersten Fall angelegte offene Version ab 2030-01-01, ohne den
+    // EXCLUDE-Constraint aus Migration 0013 zu verletzen.
+    //
+    // Gegenmutation: `validToZuDbEnde` aus dem INSERT entfernen -> der
+    // gespeicherte Wert waere `2029-12-31`, das Zurueckgelesene `2029-12-30`,
+    // und diese Zusicherung wird rot.
+    const antwort = await request(app!.getHttpServer())
+      .post("/api/v1/kosten/stundensaetze")
+      .set(IDEMPOTENCY_HEADER, newIdempotencyKey())
+      .send({
+        employeeId: EMPLOYEE_ALPHA,
+        amountMinorUnits: "3900",
+        currency: "EUR",
+        validFrom: "2029-01-01",
+        validTo: "2029-12-31",
+        reason: MARKE,
+        expectedActiveVersionId: null,
+      })
+      .expect(201);
+
+    const angelegt = RateVersionDtoSchema.parse(antwort.body);
+    // Was hineinging, kommt heraus — nicht die DB-Grenze `2030-01-01`.
+    expect(angelegt.validTo).toBe("2029-12-31");
+    expect(angelegt.validFrom).toBe("2029-01-01");
+
+    // Und ueber den LESEPFAD, der eine eigene SQL-Projektion hat.
+    const historie = RateHistorySchema.parse(
+      (
+        await request(app!.getHttpServer())
+          .get(`/api/v1/kosten/stundensaetze/${EMPLOYEE_ALPHA}`)
+          .expect(200)
+      ).body,
+    );
+    const wieder = historie.versions.find((version) => version.id === angelegt.id);
+    expect(wieder?.validTo).toBe("2029-12-31");
+
+    // Lueckenlos: die offene Version aus dem ersten Fall beginnt genau am Tag
+    // NACH dem letzten wirksamen Tag dieser hier. Kein Tag doppelt, keiner fehlt.
+    const offene = historie.versions.filter((version) => version.validTo === null);
+    expect(offene).toHaveLength(1);
+    expect(offene[0]?.validFrom).toBe("2030-01-01");
+  });
+
+  /**
+   * Der Anzeigezustand ist einschliessend — ueber den echten Controller.
+   *
+   * `status` entsteht erst dort (`rateVersionStatus`), also kann kein
+   * Repository-Test ihn pruefen. Das Geschaeftsdatum kommt aus `new Date()`;
+   * gefaelscht wird deshalb NUR `Date`, nicht die Timer — `pg` und `supertest`
+   * brauchen echte Timeouts.
+   */
+  dbIt("nennt eine Version an ihrem letzten Gueltigkeitstag `aktiv` (EYT-109 D1)", async () => {
+    const holeStatus = async (): Promise<string | undefined> => {
+      const historie = RateHistorySchema.parse(
+        (
+          await request(app!.getHttpServer())
+            .get(`/api/v1/kosten/stundensaetze/${EMPLOYEE_ALPHA}`)
+            .expect(200)
+        ).body,
+      );
+      return historie.versions.find((version) => version.validTo === "2029-12-31")?.status;
+    };
+
+    // Gegenmutation: `rateVersionStatus` von `<` zurueck auf `<=` -> am
+    // 31.12.2029 stuende "abgelaufen", rot. Das ist Risiko R2.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2029-12-31T12:00:00.000Z"));
+      expect(await holeStatus()).toBe("aktiv");
+
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      expect(await holeStatus()).toBe("abgelaufen");
+
+      vi.setSystemTime(new Date("2028-12-31T12:00:00.000Z"));
+      expect(await holeStatus()).toBe("kommend");
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

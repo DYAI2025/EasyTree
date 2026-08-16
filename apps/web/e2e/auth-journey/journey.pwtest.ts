@@ -167,6 +167,18 @@ const ABLOESE_DATUM = "2026-09-01";
 const ABLOESE_GRUND = "Tariferhoehung der E2E-Reise";
 
 /**
+ * Der letzte wirksame Tag des Vorgaengers (EYT-109 D1).
+ *
+ * Von Hand ausgeschrieben und NICHT aus {@link ABLOESE_DATUM} gerechnet:
+ * teilte sich der Test die Umrechnung mit dem Produktivcode, hoebe ein Fehler
+ * darin sich auf und der Nachweis waere gruen, ohne etwas zu messen
+ * (`net-count-checks-cancel-out`). August hat 31 Tage.
+ */
+const LETZTER_TAG_VOR_ABLOESUNG = "2026-08-31";
+/** Dasselbe fuer die zweite Abloesung: September hat 30 Tage. */
+const LETZTER_TAG_VOR_ABLOESUNG_3 = "2026-09-30";
+
+/**
  * Die ZWEITE Abloesung — sie entsteht NACH dem Snapshot (EYT-109 Task 17).
  *
  * Das Datum muss echt spaeter liegen als {@link ABLOESE_DATUM}: `pruefeAbloesung`
@@ -797,6 +809,22 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     await expect(tabelle.getByText(`ersetzt Version vom 2026-01-01`)).toBeVisible();
     await expect(tabelle.getByText("2026-01-01").first()).toBeVisible();
     await expect(tabelle.getByText(ABLOESE_GRUND)).toBeVisible();
+
+    // EYT-109 D1 — die Naht, im echten Browser gelesen.
+    //
+    // Unter „Gültig bis" steht der LETZTE wirksame Tag, nicht der Beginn des
+    // Nachfolgers: der Vorgaenger endet am 31.08., der Nachfolger beginnt am
+    // 01.09. Kein Tag doppelt, keiner fehlt. Vor D1 stand hier zweimal
+    // `2026-09-01` — einmal als Ende, einmal als Beginn.
+    //
+    // Gegenmutation: `dbEndeZuValidTo` aus `toRecord` entfernen -> die Spalte
+    // zeigte wieder `2026-09-01`, und diese Zusicherung wird rot.
+    // `gueltig-bis` wird NICHT umbenannt (`removing-a-testid-breaks-e2e-silently`).
+    const enddaten = await tabelle.getByTestId("gueltig-bis").allTextContents();
+    expect(enddaten).toHaveLength(2);
+    expect(enddaten).toContain(LETZTER_TAG_VOR_ABLOESUNG);
+    expect(enddaten).toContain("—");
+    expect(enddaten).not.toContain(ABLOESE_DATUM);
 
     await page.screenshot({
       path: join(ARTEFAKTE, "03-satzabloesung.png"),
@@ -2250,7 +2278,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     ).not.toBe(vorgaenger.id);
     const startsatz = historie.versions.find((v) => v.id === satzImSnapshot);
     expect(startsatz, "die Satzversion des Snapshots steht nicht in der Historie").toBeDefined();
-    expect(startsatz?.validTo).toBe(ABLOESE_DATUM);
+    // EYT-109 D1: die API fuehrt den LETZTEN wirksamen Tag, nicht die
+    // halboffene Datenbankgrenze. Der Startsatz endet am 31.08., der
+    // Nachfolger beginnt am 01.09. — lueckenlos und ueberlappungsfrei.
+    expect(startsatz?.validTo).toBe(LETZTER_TAG_VOR_ABLOESUNG);
+    expect(vorgaenger.validFrom).toBe(ABLOESE_DATUM);
 
     // 3 — die neue Version, ueber die echte Route. Lokale Bindung statt
     // Konstante direkt im Header (gitleaks, siehe {@link SATZ_VORGANG_3}).
@@ -2286,8 +2318,11 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       await page.request.get(`/api/v1/kosten/stundensaetze/${MITARBEITER_ID}`)
     ).json()) as { versions: { id: string; validTo: string | null }[] };
     expect(historieDanach.versions).toHaveLength(3);
+    // Wieder fachlich: der Vorgaenger endet am Tag VOR dem Beginn des
+    // Nachfolgers (EYT-109 D1). In der Datenbank steht unveraendert
+    // `2026-10-01` — das misst `rate-succession.integration.test.ts` roh.
     expect(historieDanach.versions.find((v) => v.id === vorgaenger.id)?.validTo).toBe(
-      ABLOESE_DATUM_3,
+      LETZTER_TAG_VOR_ABLOESUNG_3,
     );
 
     // 4 — DERSELBE Snapshot, noch einmal ueber den realen Lesepfad. Die

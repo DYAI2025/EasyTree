@@ -146,17 +146,22 @@ describe("assembleCostSnapshotPositions", () => {
     expect(ergebnis.problem).toBe("RATE_AMBIGUOUS");
   });
 
-  it("waehlt am Nahtstellentag den Nachfolger — dieser Fall friert D1 ein", () => {
-    // Satz A [2026-06-01, 2026-07-01), Satz B [2026-07-01, ∞).
-    // Am 2026-07-01 gilt GENAU B.
+  it("waehlt am Nahtstellentag den Nachfolger — jetzt mit EINER Semantik", () => {
+    // FACHLICH: Satz A [2026-06-01, 2026-06-30], Satz B [2026-07-01, ∞).
+    // In der Datenbank steht dafuer weiterhin `A.valid_to = 2026-07-01`; die
+    // Umrechnung macht `infrastructure/rate-interval-boundary.ts`.
     //
-    // Wer hier auf `selectRateVersion` aus `@easytree/domain` umstellt, bekommt
-    // RATE_AMBIGUOUS: die einschliessende Lesart der Domaene passt nicht zur
-    // halboffenen Lesart der Datenbank (Migration 0013). Siehe D1.
+    // Der frueher hier eingefrorene Widerspruch (D1) ist aufgeloest: dieselbe
+    // Auswahl faellt jetzt mit `@easytree/domain::selectRateVersion` — und
+    // liefert dasselbe Ergebnis wie vorher, dieselbe `rateVersionId` und
+    // denselben Betrag.
+    //
+    // Gegenmutation: `a.validTo` auf `"2026-07-01"` (den alten DB-Wert)
+    // zuruecksetzen -> beide Saetze decken den 01.07. -> RATE_AMBIGUOUS, rot.
     const a = satz({
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       validFrom: "2026-06-01",
-      validTo: "2026-07-01",
+      validTo: "2026-06-30",
     });
     const b = satz({
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -198,7 +203,7 @@ describe("assembleCostSnapshotPositions", () => {
     const a = satz({
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       validFrom: "2026-06-01",
-      validTo: "2026-07-01",
+      validTo: "2026-06-30",
     });
     const b = satz({
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -216,6 +221,76 @@ describe("assembleCostSnapshotPositions", () => {
     if (!ergebnis.ok) return;
     expect(ergebnis.positions[0]?.rateVersionId).toBe(a.id);
     expect(ergebnis.positions[0]?.amountMinorUnits).toBe(20000n); // 8 h * 25,00
+  });
+
+  it("waehlt am LETZTEN wirksamen Tag noch den Vorgaenger", () => {
+    // Der scharfe Gegenpol zum Nahtstellentag, und der Fall, den die alte
+    // halboffene Modulregel auf FACHLICHEN Werten verloren haette: mit
+    // `businessDate < validTo` galte A am 30.06. schon nicht mehr, und der
+    // Einsatz stuende ohne Satz da.
+    //
+    // Gegenmutation: in `rate-effectivity.ts` die alte Bedingung
+    // `businessDate < version.validTo` zurueckholen -> RATE_NOT_FOUND, rot.
+    const a = satz({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      validFrom: "2026-06-01",
+      validTo: "2026-06-30",
+    });
+    const b = satz({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      validFrom: "2026-07-01",
+      validTo: null,
+      amountMinorUnits: "3000",
+    });
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({
+        facts: fakten({
+          weekKey: "2026-W27",
+          work: [
+            {
+              ...EINSATZ,
+              // 08:00–16:00 Berlin am 30.06.2026 = 06:00–14:00 UTC.
+              startsAtUtc: new Date("2026-06-30T06:00:00.000Z"),
+              endsAtUtc: new Date("2026-06-30T14:00:00.000Z"),
+            },
+          ],
+        }),
+        ratesByEmployee: new Map<string, readonly RateVersion[]>([[EINSATZ.employeeId, [a, b]]]),
+      }),
+    );
+    // Kein `JSON.stringify` auf dem Ergebnis: die Positionen tragen `bigint`,
+    // und der Serialisierer wirft — die Meldung verdeckte dann den echten Fall.
+    expect(ergebnis.ok ? "ok" : ergebnis.problem).toBe("ok");
+    if (!ergebnis.ok) return;
+    expect(ergebnis.positions[0]?.localDate).toBe("2026-06-30");
+    expect(ergebnis.positions[0]?.rateVersionId).toBe(a.id);
+    expect(ergebnis.positions[0]?.amountMinorUnits).toBe(20000n); // 8 h * 25,00
+  });
+
+  it("nennt eine unbrauchbare NACHBARzeile RATE_INVALID, statt sie zu ignorieren", () => {
+    // Die bewusste Ausweitung aus Risiko R8: seit EYT-109 D1 laufen ALLE
+    // Zeilen des Beschaeftigten durch die Domaenenfactory, nicht nur die
+    // gewaehlte — anders ist Mehrdeutigkeit ueber den ganzen Katalog gar nicht
+    // feststellbar. Mit den Checks aus Migration 0013 ist dieser Zweig
+    // unerreichbar; er wird strenger, nicht lockerer.
+    //
+    // Gegenmutation: den `RATE_INVALID`-Zweig auf `continue` aendern -> die
+    // kaputte Zeile verschwaende still und Mehrdeutigkeit bliebe unentdeckt.
+    const kaputt = satz({
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      validFrom: "2026-08-01",
+      validTo: "2026-07-01",
+    });
+    const ergebnis = assembleCostSnapshotPositions(
+      eingabe({
+        ratesByEmployee: new Map<string, readonly RateVersion[]>([
+          [EINSATZ.employeeId, [satz(), kaputt]],
+        ]),
+      }),
+    );
+    expect(ergebnis.ok).toBe(false);
+    if (ergebnis.ok) return;
+    expect(ergebnis.problem).toBe("RATE_INVALID");
   });
 
   it("liefert kein Teilergebnis, wenn ein einziger Einsatz blockiert", () => {
@@ -392,10 +467,12 @@ describe("assembleCostSnapshotPositions", () => {
    * Anteile wiederverwendet, kaeme hier auf zweimal 25,00 und faellt.
    */
   it("waehlt den Satz je Ortstag, nicht einmal je Einsatz", () => {
+    // FACHLICH: A endet am 15.06., B beginnt am 16.06. (in der Datenbank
+    // steht dafuer `A.valid_to = 2026-06-16`).
     const a = satz({
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       validFrom: "2026-06-01",
-      validTo: "2026-06-16",
+      validTo: "2026-06-15",
     });
     const b = satz({
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",

@@ -6,15 +6,20 @@
  * Uhr — der Erstellungszeitpunkt gehoert in den Snapshotkopf und entsteht im
  * Use-Case.
  *
- * ## Warum `effectiveRateVersion` und nicht `selectRateVersion`
+ * ## Warum `effectiveRateVersion` und nicht direkt `selectRateVersion`
  *
- * Die Datenbank liest `[validFrom, validTo)` halboffen (Migration 0013,
- * EXCLUDE-Constraint). `@easytree/domain::selectRateVersion` liest `validTo`
- * EINSCHLIESSEND. An jedem Nahtstellentag — Satz A endet, Satz B beginnt am
- * selben Tag — lieferte die Domaenenlesart RATE_AMBIGUOUS fuer eine
- * Konstellation, die die Datenbank ausdruecklich zulaesst. Deshalb waehlt die
- * Modulregel, und `costOfDuration` bekommt die einmal uebersetzte Version.
- * Siehe D1 im Plan; ein Test friert den Fall ein.
+ * Seit EYT-109 D1 sind das dieselbe Regel: `effectiveRateVersion` waehlt nicht
+ * mehr selbst, sondern uebersetzt `RateVersionRecord`s in gepruefte
+ * `HourlyRateVersion`s und delegiert an `@easytree/domain::selectRateVersion`.
+ * Der Aufruf steht hier, damit Controller und Montage durch DIESELBE Funktion
+ * gehen; ein direkter Aufruf von `selectRateVersion` braeuchte hier eine
+ * zweite Record-Konvertierung — und eine zweite Konvertierung ist eine zweite
+ * Gelegenheit, sich um einen Tag zu irren.
+ *
+ * Es gibt hier deshalb auch KEIN `dayBefore` mehr: `validTo` ist oberhalb der
+ * Persistenzgrenze bereits der letzte wirksame Tag. Die frueher an dieser
+ * Stelle stehende Umrechnung waere heute die doppelte (Risiko R1); die eine
+ * Naht liegt in `infrastructure/rate-interval-boundary.ts`.
  *
  * ## Warum die Blockade total ist
  *
@@ -27,15 +32,10 @@ import {
   allocateAcrossLocalDays,
   costOfDuration,
   createTimeZone,
-  dayBefore,
-  hourlyRateAmount,
-  hourlyRateVersion,
-  moneyOfMinorUnits,
   TimeInterval,
-  unsafeIdentifier,
   COST_RULE_VERSION,
 } from "@easytree/domain";
-import type { LocalBusinessDate, RateVersionId } from "@easytree/domain";
+import { formatLocalDate } from "./local-business-date-format";
 import { effectiveRateVersion } from "./rate-effectivity";
 import type { RateVersionRecord } from "./rate-version";
 import type { PublishedPlanFacts } from "./planned-work-fact";
@@ -140,32 +140,15 @@ export function assembleCostSnapshotPositions(
 
     for (const anteil of anteile.parts) {
       const tag = formatLocalDate(anteil.date);
+      // `gewaehlt.problem` ist bereits vom Typ `RateEffectivityProblem`, und
+      // alle drei Werte stehen schon in `SNAPSHOT_ASSEMBLY_PROBLEMS` — die
+      // Zuweisung typprueft ohne Cast.
       const gewaehlt = effectiveRateVersion(saetze, tag);
       if (!gewaehlt.ok) return scheitern(gewaehlt.problem, tag);
 
-      // `hourlyRateAmount` und `hourlyRateVersion` sind BEIDE Result-Factories,
-      // nicht direkte Konstruktoren. Das Ergebnis auszupacken statt `!` zu
-      // schreiben ist der Unterschied zwischen einer Pruefung und ihrer
-      // Behauptung (`money.ts:266`, `rate-version.ts:138`).
-      const satzBetrag = hourlyRateAmount(
-        moneyOfMinorUnits(BigInt(gewaehlt.version.amountMinorUnits), gewaehlt.version.currency),
-      );
-      if (!satzBetrag.ok) return scheitern("RATE_INVALID", tag);
-
-      // Halboffen (DB) -> einschliessend (Domaene). `null` bleibt `null`.
-      // Der DB-Check `valid_to > valid_from` schliesst das leere Intervall aus.
-      const version = hourlyRateVersion({
-        rateVersionId: unsafeIdentifier<RateVersionId>(gewaehlt.version.id),
-        amountPerHour: satzBetrag.rate,
-        validFrom: parseLocalDate(gewaehlt.version.validFrom),
-        validTo:
-          gewaehlt.version.validTo === null
-            ? null
-            : dayBefore(parseLocalDate(gewaehlt.version.validTo)),
-      });
-      if (!version.ok) return scheitern("RATE_INVALID", tag);
-
-      const betrag = costOfDuration(version.version, anteil.quantity);
+      // `checked` kommt fertig geprueft aus der Bruecke. Hier NICHT noch einmal
+      // konvertieren: das war bis EYT-109 D1 die zweite Umrechnungsstelle.
+      const betrag = costOfDuration(gewaehlt.checked, anteil.quantity);
 
       positionen.push({
         assignmentId: einsatz.assignmentId,
@@ -226,34 +209,4 @@ export function assembleCostSnapshotPositions(
  */
 function vergleiche(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
-}
-
-/**
- * `JJJJ-MM-TT` aus einem geprueften Ortstag — mit String-Padding, nie ueber
- * `Date`. Ein `new Date(...)` machte aus einem Kalendertag wieder einen
- * Zeitpunkt in irgendeiner Zone; genau das verbietet
- * `no-local-time-construction.test.ts`.
- */
-function formatLocalDate(date: LocalBusinessDate): string {
-  const mm = String(date.month).padStart(2, "0");
-  const dd = String(date.day).padStart(2, "0");
-  return `${String(date.year).padStart(4, "0")}-${mm}-${dd}`;
-}
-
-/**
- * `JJJJ-MM-TT` -> {@link LocalBusinessDate}, ohne `Date`.
- *
- * `@easytree/domain` exportiert bewusst KEINE solche Funktion:
- * `LocalBusinessDate` ist ein offenes Interface ohne Laufzeitvalidierung, und
- * das Paket sagt dazu ausdruecklich „wer diese Eingabe ausschliessen will, tut
- * das an der Grenze, an der das Datum entsteht" (`local-business-date.ts`).
- * Diese Grenze ist hier: die Zeichenkette kommt aus `date`-Spalten, die
- * PostgreSQL bereits als Kalendertag geprueft hat.
- */
-function parseLocalDate(iso: string): LocalBusinessDate {
-  return {
-    year: Number(iso.slice(0, 4)),
-    month: Number(iso.slice(5, 7)),
-    day: Number(iso.slice(8, 10)),
-  };
 }

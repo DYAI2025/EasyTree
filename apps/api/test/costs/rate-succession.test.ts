@@ -12,10 +12,32 @@
  * laufende Datenbank pruefbar sein. Auf diesem Rechner laeuft kein Supabase;
  * ein Test, der nur im CI etwas misst, ist ein schlechter erster Nachweis.
  */
+import { dayAfter } from "@easytree/domain";
 import { describe, expect, it } from "vitest";
 
 import { RATE_SUCCESSION_PROBLEMS, pruefeAbloesung } from "../../src/modules/costs";
 import type { RateVersion } from "../../src/modules/costs";
+
+/**
+ * Ein Kalendertag aus seiner Textform — bewusst HIER und nicht aus dem Modul.
+ *
+ * Der Test soll die Regel messen, nicht die Umrechnung des Moduls mitbenutzen:
+ * teilten sich beide dieselbe Funktion, hoebe ein Fehler darin sich im
+ * Vergleich auf und der Fall waere gruen (`net-count-checks-cancel-out`).
+ */
+function tag(iso: string): { year: number; month: number; day: number } {
+  return {
+    year: Number(iso.slice(0, 4)),
+    month: Number(iso.slice(5, 7)),
+    day: Number(iso.slice(8, 10)),
+  };
+}
+
+function alsText(datum: { year: number; month: number; day: number }): string {
+  const mm = String(datum.month).padStart(2, "0");
+  const dd = String(datum.day).padStart(2, "0");
+  return `${String(datum.year).padStart(4, "0")}-${mm}-${dd}`;
+}
 
 const VORGAENGER: RateVersion = {
   id: "00000000-0000-4000-8000-0000000000a1",
@@ -44,11 +66,32 @@ describe("Abloesung eines offenen Stundensatzes (EYT-108 Option A+)", () => {
       expectedActiveVersionId: VORGAENGER.id,
     });
     expect(ergebnis.ok).toBe(true);
-    // Der Endtag ist NICHT frei waehlbar: halboffenes Intervall [von, bis),
-    // also schliesst der Vorgaenger exakt dort, wo der Nachfolger beginnt.
-    // Ein Tag davor risse eine Luecke, ein Tag danach eine Ueberlappung —
-    // und die lehnt der EXCLUDE-Constraint aus Migration 0013 ab.
-    if (ergebnis.ok) expect(ergebnis.validToDesVorgaengers).toBe("2026-07-01");
+    // EYT-109 D1: die Regel liefert den FACHLICHEN Endtag. Bei einem
+    // Nachfolger ab 01.07. endet der Vorgaenger am 30.06. — lueckenlos und
+    // ueberlappungsfrei unter der einschliessenden Lesart von EYT-95. Der
+    // gespeicherte DB-Wert bleibt `2026-07-01`; die Umrechnung macht der
+    // Adapter (`validToZuDbEnde`). Gegenmutation: `dayBefore` weglassen -> rot.
+    if (ergebnis.ok) expect(ergebnis.validToDesVorgaengers).toBe("2026-06-30");
+  });
+
+  it("schliesst lueckenlos an: der Tag NACH dem Endtag ist der Beginn des Nachfolgers", () => {
+    // Die Eigenschaft, nicht der Einzelwert. Sie haelt ueber Monats-, Jahres-
+    // und Schaltjahresraender, an denen eine Subtraktion auf der Tageszahl
+    // falsch waere. Gegenmutation: `dayBefore` durch `tag - 1` ersetzen -> am
+    // 2028-03-01 kaeme "2028-03-00" heraus, rot.
+    for (const validFrom of ["2026-07-01", "2027-01-01", "2028-03-01", "2026-03-01"]) {
+      const ergebnis = pruefeAbloesung({
+        vorgaenger: VORGAENGER,
+        nachfolger: { ...NACHFOLGER, validFrom },
+        expectedActiveVersionId: VORGAENGER.id,
+      });
+      expect(ergebnis.ok, validFrom).toBe(true);
+      if (!ergebnis.ok) continue;
+      expect(alsText(dayAfter(tag(ergebnis.validToDesVorgaengers))), validFrom).toBe(validFrom);
+      // Und der Endtag liegt WIRKLICH davor — ein `dayAfter` in beiden
+      // Richtungen erfuellte die Zeile darueber ebenfalls.
+      expect(ergebnis.validToDesVorgaengers < validFrom, validFrom).toBe(true);
+    }
   });
 
   it("lehnt einen bereits geschlossenen Vorgaenger ab", () => {

@@ -27,6 +27,9 @@
  * verletzt, arbeitet der Aufrufer auf einer veralteten Ansicht — jede andere
  * Meldung liesse ihn glauben, er kenne die richtige Version.
  */
+import { dayBefore } from "@easytree/domain";
+
+import { formatLocalDate, parseLocalDate } from "./local-business-date-format";
 import type { RateVersionRecord } from "./rate-version";
 
 export const RATE_SUCCESSION_PROBLEMS = [
@@ -82,8 +85,18 @@ export function pruefeAbloesung(befehl: RateSuccessionCommand): RateSuccessionRe
     return { ok: false, problem: "NACHFOLGER_NICHT_SPAETER" };
   }
 
-  // Halboffenes Intervall [von, bis): der Vorgaenger endet exakt dort, wo der
-  // Nachfolger beginnt. Nicht frei waehlbar — ein Tag frueher risse eine
-  // Luecke, ein Tag spaeter eine Ueberlappung.
-  return { ok: true, validToDesVorgaengers: nachfolger.validFrom };
+  // Der Vorgaenger endet am Tag VOR dem Beginn des Nachfolgers: lueckenlos und
+  // ueberlappungsfrei unter der einschliessenden Lesart von EYT-95. Nicht frei
+  // waehlbar — ein Tag frueher risse eine Luecke, ein Tag spaeter eine
+  // Ueberlappung.
+  //
+  // `dayBefore` ist hier ein KALENDERSCHRITT, keine Datenbankuebersetzung: die
+  // Regel kennt nur fachliche Tage. Dass daraus im Adapter wieder
+  // `nachfolger.validFrom` als DB-Wert wird, ist die Leistung von
+  // `validToZuDbEnde` und nicht die dieser Zeile — und deshalb steht sie hier
+  // und nicht dort (EYT-109 D1).
+  return {
+    ok: true,
+    validToDesVorgaengers: formatLocalDate(dayBefore(parseLocalDate(nachfolger.validFrom))),
+  };
 }

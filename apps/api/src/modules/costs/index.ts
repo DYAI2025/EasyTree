@@ -184,6 +184,16 @@ export type {
   CreateCostSnapshotResult,
 } from "./application/create-cost-snapshot.use-case";
 
+// EYT-109 D1: die EINE Umrechnung zwischen halboffener Datenbank und
+// einschliessender Fachwelt. Sie steht hier aus demselben Grund wie
+// `toCostSnapshotDto` und `PgRateRepository`: ihr Test braucht sie von aussen,
+// und ein tiefer Pfad nach `infrastructure/` faellt am Waechter
+// `costs-cross-module-public-api-only` — auch aus Tests. Dass sie damit
+// modulweit sichtbar wird, ist der bewusst eingegangene Preis (Risiko R11);
+// der Waechter `rate-boundary-single-site.test.ts` macht jeden Aufruf
+// ausserhalb von `rate-repository.pg.ts` rot.
+export { dbEndeZuValidTo, validToZuDbEnde } from "./infrastructure/rate-interval-boundary";
+
 export { PgRateRepository } from "./infrastructure/rate-repository.pg";
 export { PgCostSnapshotRepository } from "./infrastructure/cost-snapshot-repository.pg";
 
