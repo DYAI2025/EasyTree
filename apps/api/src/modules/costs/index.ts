@@ -8,28 +8,74 @@
  *
  * ## Stand des Moduls
  *
- * Heute ist `costs` eine **Grenze**, kein laufendes Feature: keine Route, keine
- * Verdrahtung in `AppModule`, keine eigene Tabelle in `supabase/migrations/`.
- * Das ist der ehrliche Stand von EYT-105 und keine Luecke — Satzpersistenz
- * (EYT-108), Snapshot und Route (EYT-109), XLSX-Adapter (EYT-110) und
- * Autorisierung (EYT-106) sind eigene Tickets mit eigenen Nachweisen.
+ * `costs` ist keine blosse Grenze mehr. Verdrahtet in `AppModule` sind der
+ * `CostsController`, `COST_ACCESS_POLICY`, `COST_ACCESS_AUDIT`,
+ * `RATE_REPOSITORY_FACTORY`, seit EYT-109 `PLAN_COST_FACTS_FACTORY` und seit
+ * EYT-139 `COST_SNAPSHOT_REPOSITORY_FACTORY`; unter `/kosten` haengen sieben
+ * Routen: `GET /kosten/mitarbeiter`, `GET /kosten/stundensaetze/{employeeId}`
+ * und `POST /kosten/stundensaetze` (EYT-106/EYT-108), `POST /kosten/snapshots`
+ * und `GET /kosten/snapshots/{snapshotId}` (EYT-139),
+ * `GET /kosten/planversionen` (EYT-144) sowie
+ * `GET /kosten/planversionen/{planVersionId}/baustellen` (EYT-146).
+ * Eigene Tabellen gibt es auch: `public.employee_rate_versions` (Migration
+ * 0013), `public.cost_snapshots` und `public.cost_snapshot_positions`
+ * (Migration 0018). `public.role_permissions` steht in derselben Migration
+ * 0013, gehoert aber `tenancy` — siehe Besitzregister in
+ * `module-catalogue.ts`.
+ *
+ * Offen bleibt eines, und zwar ausdruecklich: `CostExportPort` hat bis heute
+ * keine Umsetzung (XLSX-Adapter, EYT-110).
  */
-export type { PlannedWorkFact, PublishedPlanFacts } from "./domain/planned-work-fact";
+export type {
+  PlannedWorkFact,
+  PublishedPlanFacts,
+  PublishedPlanVersionSummary,
+} from "./domain/planned-work-fact";
 
 export type {
+  PlanCostFactsFactory,
   PlanCostFactsPort,
   PlanCostFactsProblem,
   PlanCostFactsResult,
+  PlanVersionListProblem,
+  PublishedVersionsListResult,
 } from "./application/plan-cost-facts.port";
-export { PLAN_COST_FACTS, PLAN_COST_FACTS_PROBLEMS } from "./application/plan-cost-facts.port";
+export {
+  PLAN_COST_FACTS,
+  PLAN_COST_FACTS_FACTORY,
+  PLAN_COST_FACTS_PROBLEMS,
+} from "./application/plan-cost-facts.port";
 
 export type { CostExportPort, CostExportRendering } from "./application/cost-export.port";
 export { COST_EXPORT_PORT } from "./application/cost-export.port";
 
-export { PlanningFactsAdapter } from "./infrastructure/planning-facts.adapter";
+// `PlanningFactsAdapter` steht bewusst NICHT hier (EYT-109). Er hat genau eine
+// Konstruktionsstelle, `plan-cost-facts.factory.ts`, und dort ist die
+// Organisation pflichtig. Oeffentlich waere er eine zweite Tuer mit einstelligem
+// Konstruktor: `new PlanningFactsAdapter(queriesFor(subjectUserId))` kompiliert,
+// verliert die Organisation still und faellt erst als `AMBIGUOUS_ORGANISATION`
+// beim Mehr-Organisations-Benutzer auf. Ohne diesen Export gibt es ausserhalb
+// des Moduls keinen legalen Weg mehr an der Fabrik vorbei — der Waechter
+// `costs-cross-module-public-api-only` verbietet tiefe Pfade, auch aus Tests.
+export { planCostFactsFactory } from "./infrastructure/plan-cost-facts.factory";
 
 export type { CostsErrorType, RateErrorType } from "./interface/http/costs-error-type";
 export { COSTS_ERROR_TYPE, RATE_ERROR_TYPE } from "./interface/http/costs-error-type";
+
+// EYT-139: die URNs des Snapshot-Pfades. Sie stehen hier, weil ihr Test die
+// Injektivitaet ueber ALLE vier Tabellen misst — `satisfies` erzwingt nur
+// Vollstaendigkeit, nicht Verschiedenheit — und ein tiefer Pfad nach
+// `interface/http/` faellt am Waechter `costs-cross-module-public-api-only`.
+export type {
+  SnapshotAssemblyErrorType,
+  SnapshotReadErrorType,
+  SnapshotWriteErrorType,
+} from "./interface/http/costs-error-type";
+export {
+  SNAPSHOT_ASSEMBLY_ERROR_TYPE,
+  SNAPSHOT_READ_ERROR_TYPE,
+  SNAPSHOT_WRITE_ERROR_TYPE,
+} from "./interface/http/costs-error-type";
 
 // EYT-106/EYT-108: Autorisierung, Satzverwaltung, Route.
 export {
@@ -88,8 +134,83 @@ export {
 export type { EffectiveRateResult, RateEffectivityProblem } from "./domain/rate-effectivity";
 export type { RateVersionRecord as RateVersion } from "./domain/rate-version";
 
+// EYT-109: die Snapshot-Montage — Tagesallokation, Satzauswahl und Geldregel an
+// einer Naht. Sie steht hier, weil sie ausserhalb des Moduls gebraucht wird
+// (Use-Case und Test); ein tiefer Pfad daran vorbei waere eine Grenze, die nur
+// im Verzeichnisnamen existiert (Waechter `costs-cross-module-public-api-only`).
+export {
+  SNAPSHOT_ASSEMBLY_PROBLEMS,
+  assembleCostSnapshotPositions,
+} from "./domain/cost-snapshot-assembly";
+export type {
+  AssembledPosition,
+  SnapshotAssemblyInput,
+  SnapshotAssemblyProblem,
+  SnapshotAssemblyResult,
+} from "./domain/cost-snapshot-assembly";
+
+// EYT-109: der Persistenzvertrag des Snapshots. Die PostgreSQL-Umsetzung gibt
+// es seit EYT-138 — `PgCostSnapshotRepository`, weiter unten in dieser Datei
+// exportiert. Kein `update`, kein `delete`, kein `recalculate`: die Datenbank
+// verweigert sie (Migration 0018, keine Grants), und ein Vertrag, der sie
+// anboete, waere eine Zusage ohne Deckung.
+export {
+  COST_SNAPSHOT_REPOSITORY_FACTORY,
+  SNAPSHOT_READ_PROBLEMS,
+  SNAPSHOT_WRITE_PROBLEMS,
+} from "./application/cost-snapshot-repository.port";
+export type {
+  CostRuleVersion,
+  CostSnapshotRepository,
+  CostSnapshotRepositoryFactory,
+  NewCostSnapshot,
+  SnapshotReadProblem,
+  SnapshotReadResult,
+  SnapshotWriteProblem,
+  SnapshotWriteResult,
+  StoredCostSnapshot,
+  StoredCostSnapshotPosition,
+} from "./application/cost-snapshot-repository.port";
+
+// EYT-109: der Snapshot-Command. Steht in der oeffentlichen Modul-API, weil ihn
+// seit EYT-139 der `CostsController` ruft und weil der Test ihn von aussen
+// braucht — ein tiefer Pfad nach `application/` faellt am Waechter
+// `costs-cross-module-public-api-only`.
+export { createCostSnapshot } from "./application/create-cost-snapshot.use-case";
+export type {
+  CreateCostSnapshotCommand,
+  CreateCostSnapshotDependencies,
+  CreateCostSnapshotFailure,
+  CreateCostSnapshotResult,
+} from "./application/create-cost-snapshot.use-case";
+
+// EYT-109 D1: die EINE Umrechnung zwischen halboffener Datenbank und
+// einschliessender Fachwelt. Sie steht hier aus demselben Grund wie
+// `toCostSnapshotDto` und `PgRateRepository`: ihr Test braucht sie von aussen,
+// und ein tiefer Pfad nach `infrastructure/` faellt am Waechter
+// `costs-cross-module-public-api-only` — auch aus Tests. Dass sie damit
+// modulweit sichtbar wird, ist der bewusst eingegangene Preis (Risiko R11);
+// der Waechter `rate-boundary-single-site.test.ts` macht jeden Aufruf
+// ausserhalb von `rate-repository.pg.ts` rot.
+export { dbEndeZuValidTo, validToZuDbEnde } from "./infrastructure/rate-interval-boundary";
+
 export { PgRateRepository } from "./infrastructure/rate-repository.pg";
+export { PgCostSnapshotRepository } from "./infrastructure/cost-snapshot-repository.pg";
+
+// EYT-139: die HTTP-Naht des Snapshots — gespeicherter Stand -> Transportform,
+// die einzige Stelle, an der `days` entsteht. Sie steht hier, weil ihr Test sie
+// von aussen braucht; ein tiefer Pfad nach `interface/http/` faellt am Waechter
+// `costs-cross-module-public-api-only` (gemessen: eine Verletzung, EYT-139).
+export { toCostSnapshotDto } from "./interface/http/cost-snapshot.dto";
 
 export { CostsController } from "./interface/http/costs.controller";
 export { CostsProblemFilter } from "./interface/http/costs-problem.filter";
 export { ConflictProblem } from "./interface/http/conflict-problem";
+
+// EYT-139: die Ablehnung, die ihren Statuscode selbst mitbringt. Zweite Klasse
+// neben `ConflictProblem` und nicht dessen Erweiterung: eine „ConflictProblem"
+// mit Status 400 luege im Namen, und jede Aenderung an ihr veraenderte das
+// Verhalten der EYT-108-Satzrouten mit. Oeffentlich, weil Task 3 sie im
+// Controller wirft und ihr Test beide Filterzweige von aussen treibt.
+export { CostsProblem } from "./interface/http/costs-problem";
+export type { CostsProblemInput, CostsProblemStatus } from "./interface/http/costs-problem";

@@ -121,7 +121,17 @@ export {
   toDurationMilliseconds,
 } from "./duration-milliseconds.js";
 
-export { compareLocalBusinessDate, dayAfter } from "./local-business-date.js";
+export { compareLocalBusinessDate, dayAfter, dayBefore } from "./local-business-date.js";
+
+// EYT-109 — Tagesallokation. Steht bewusst neben `planningWeekOf`, das die
+// GEGENTEILIGE Regel traegt (eine Nachtschicht bleibt in der Woche ihres
+// Beginns): zwei Fragen, zwei Antworten.
+export type {
+  LocalDayAllocationError,
+  LocalDayAllocationResult,
+  LocalDayPart,
+} from "./local-day-allocation.js";
+export { allocateAcrossLocalDays, LOCAL_DAY_ALLOCATION_ERRORS } from "./local-day-allocation.js";
 
 export type {
   HourlyRateVersion,

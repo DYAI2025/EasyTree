@@ -131,24 +131,57 @@ export type { HttpAuthGatewayOptions } from "./http/auth-gateway.js";
 
 // EYT-108 ff.: Kostenbereich. Betraege reisen als Minor-Unit-String, nie Float;
 // Versionen sind unveraenderlich, es gibt kein Update-Kommando.
+//
+// Drei Namen aus einem Fass, die nichts miteinander zu tun haben — hier steht,
+// welcher welcher ist (EYT-109):
+//
+//   PublishedPlanVersion        (Planung)  ANTWORT auf das Veroeffentlichungs-
+//                                          kommando: versionId, weekKey,
+//                                          publishedAtUtc, assignmentIds.
+//   SelectablePlanVersion       (Kosten)   EINE Zeile der Auswahlliste von
+//                                          `/kosten`: id, weekKey, publishedAt.
+//   SelectablePlanVersions      (Kosten)   die Huelle um diese Zeilen.
+//
+// Die Kostenseite heisst bewusst nicht `PublishedPlanVersion(s)`: das haette
+// sich vom Planungstyp nur durch ein angehaengtes `s` unterschieden, und genau
+// dieses Paar bietet die Autovervollstaendigung nebeneinander an.
 export {
   BusinessDateSchema,
+  CostDayTotalDtoSchema,
+  CostPositionDtoSchema,
+  CostSnapshotSchema,
+  CreateCostSnapshotCommandSchema,
   CreateRateVersionCommandSchema,
+  DurationMillisecondsSchema,
   EmployeeForRatesDtoSchema,
   EmployeesForRatesSchema,
   MinorUnitsSchema,
+  PublishedPlanVersionsQuerySchema,
   RATE_VERSION_STATUS,
   RateHistorySchema,
   RateVersionDtoSchema,
   RateVersionStatusSchema,
+  SelectablePlanVersionSchema,
+  SelectablePlanVersionsSchema,
+  SelectableWorksiteSchema,
+  SelectableWorksitesSchema,
 } from "./costs/schemas.js";
 export type {
+  CostDayTotalDto,
+  CostPositionDto,
+  CostSnapshot,
+  CreateCostSnapshotCommand,
   CreateRateVersionCommand,
   EmployeeForRatesDto,
   EmployeesForRates,
+  PublishedPlanVersionsQuery,
   RateHistory,
   RateVersionDto,
   RateVersionStatus,
+  SelectablePlanVersion,
+  SelectablePlanVersions,
+  SelectableWorksite,
+  SelectableWorksites,
 } from "./costs/schemas.js";
 export type { CostsGateway } from "./costs/gateway.js";
 export { HttpCostsGateway, ORGANISATION_HEADER } from "./http/costs-gateway.js";

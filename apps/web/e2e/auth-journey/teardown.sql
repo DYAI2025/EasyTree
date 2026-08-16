@@ -58,6 +58,20 @@ delete from public.assignments
   where org_id = '00000000-0000-4000-8000-00000000e201';
 delete from public.plan_versions
   where org_id = '00000000-0000-4000-8000-00000000e201';
+-- Kostensnapshots VOR Baustellen, Mitarbeitern und Satzversionen (EYT-144):
+-- `cost_snapshot_positions` haengt mit `on delete restrict` an allen dreien,
+-- und der Kopf zusaetzlich an der Baustelle. Positionen vor dem Kopf, aus
+-- demselben Grund.
+--
+-- Es braucht hier KEIN ausgesetztes Trigger-Paar wie bei den Planzeilen: die
+-- Unveraenderlichkeit der Snapshots ist ueber FEHLENDE Grants gebaut, nicht
+-- ueber einen Trigger (Migration 0018). Der Admin-Zugang dieses Teardowns ist
+-- Eigentuemer und damit von Grants ohnehin nicht betroffen. Wer das aendert und
+-- einen Trigger einzieht, muss diese Stelle mitziehen.
+delete from public.cost_snapshot_positions
+  where org_id = '00000000-0000-4000-8000-00000000e201';
+delete from public.cost_snapshots
+  where org_id = '00000000-0000-4000-8000-00000000e201';
 delete from public.worksites
   where org_id = '00000000-0000-4000-8000-00000000e201';
 delete from public.outbox_messages
@@ -105,6 +119,7 @@ declare
   n_mitarbeiter int;
   n_satz int;
   n_planung int;
+  n_kosten int;
   n_wirkung int;
   n_trigger int;
   rest int;
@@ -133,6 +148,17 @@ begin
     select 1 from public.worksites where org_id = '00000000-0000-4000-8000-00000000e201'
   ) as planung;
 
+  -- Seit EYT-144 erzeugt die Reise einen Kosten-Snapshot. Ohne diese Zaehlung
+  -- meldete der Teardown `restzeilen=0`, waehrend Kopf und Positionen liegen
+  -- blieben — und der naechste Lauf faende in `eyt144-snapshot-pruefen.sql`
+  -- zwei Snapshots statt einem.
+  select count(*) into n_kosten from (
+    select 1 from public.cost_snapshots where org_id = '00000000-0000-4000-8000-00000000e201'
+    union all
+    select 1 from public.cost_snapshot_positions
+      where org_id = '00000000-0000-4000-8000-00000000e201'
+  ) as kosten;
+
   -- Und die Nebenwirkungen des Veroeffentlichens.
   select count(*) into n_wirkung from (
     select 1 from public.audit_events where org_id = '00000000-0000-4000-8000-00000000e201'
@@ -150,14 +176,14 @@ begin
       and tgenabled = 'O';
 
   rest := n_auth + n_projektion + n_org + n_mitglied + n_mitarbeiter + n_satz
-        + n_planung + n_wirkung;
+        + n_planung + n_kosten + n_wirkung;
   if rest <> 0 or n_trigger <> 2 then
     raise exception
-      'E2E-Teardown unvollstaendig: auth=% projektion=% org=% membership=% mitarbeiter=% satz=% planung=% wirkung=% aktive_trigger=% (erwartet 2)',
+      'E2E-Teardown unvollstaendig: auth=% projektion=% org=% membership=% mitarbeiter=% satz=% planung=% kosten=% wirkung=% aktive_trigger=% (erwartet 2)',
       n_auth, n_projektion, n_org, n_mitglied, n_mitarbeiter, n_satz,
-      n_planung, n_wirkung, n_trigger;
+      n_planung, n_kosten, n_wirkung, n_trigger;
   end if;
   raise notice
-    '[auth-journey-teardown] restzeilen=0 auth=0 projektion=0 org=0 membership=0 mitarbeiter=0 satz=0 planung=0 wirkung=0 trigger=2';
+    '[auth-journey-teardown] restzeilen=0 auth=0 projektion=0 org=0 membership=0 mitarbeiter=0 satz=0 planung=0 kosten=0 wirkung=0 trigger=2';
 end
 $$;

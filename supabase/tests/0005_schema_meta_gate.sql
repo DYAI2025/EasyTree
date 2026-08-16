@@ -60,7 +60,13 @@ insert into expected_tables (table_name, tenant_owned, note) values
   -- Produkteigenschaft, kein Kundendatum, und traegt deshalb kein org_id
   -- (EYT-106). Aenderungen laufen ausschliesslich ueber Migrationen.
   ('role_permissions', false, 'Rolle -> atomares Recht, produktweit, nur lesbar (0013)'),
-  ('employee_rate_versions', true, 'Unveraenderliche Stundensatzversionen je Mitarbeiter (0013)');
+  ('employee_rate_versions', true, 'Unveraenderliche Stundensatzversionen je Mitarbeiter (0013)'),
+  -- Unveraenderlich durch FEHLENDE RECHTE, nicht durch Trigger: kein update-
+  -- und kein delete-Grant, und entsprechend auch keine solche Policy (0018,
+  -- EYT-109). Die Rechte-, Policy- und Kanalzusicherungen dazu stehen in
+  -- supabase/tests/0013_cost_snapshots.sql.
+  ('cost_snapshots', true, 'Unveraenderlicher Kopf eines Plan-Personalkosten-Snapshots (0018)'),
+  ('cost_snapshot_positions', true, 'Positionen eines Kosten-Snapshots, Reihenfolge per ordinal eingefroren (0018)');
 
 -- ---------------------------------------------------------------------------
 -- 1. Vollstaendigkeit in beide Richtungen

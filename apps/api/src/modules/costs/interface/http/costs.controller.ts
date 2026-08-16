@@ -1,6 +1,6 @@
 /**
- * Kosten-Endpunkte (EYT-106/EYT-108): Mitarbeiterliste, Satzhistorie, neue
- * Satzversion.
+ * Kosten-Endpunkte (EYT-106/EYT-108/EYT-139): Mitarbeiterliste, Satzhistorie,
+ * neue Satzversion, Snapshot erzeugen und Snapshot lesen.
  *
  * ## Reihenfolge jeder Anfrage, ohne Ausnahme
  *
@@ -22,6 +22,30 @@
  * nicht verraet, ob eine fremde Organisation existiert. Nur hier, an der
  * einen Zugangskette, sind Recht, bestaetigte Organisation und stabiler
  * Ablehnungsgrund gleichzeitig bekannt (EYT-106 AK9).
+ *
+ * ## Zwei Zugangsmethoden, eine Zugangskette (EYT-139)
+ *
+ * {@link CostsController.zugang} bleibt die EINE Kette und wird von allen sechs
+ * Routen benutzt. Sie liefert seit EYT-139 zusaetzlich das Snapshot-Repository:
+ * das braucht nur das Subjekt, kostet nichts und hat damit genau eine
+ * Konstruktionsstelle.
+ *
+ * Der FAKTENPORT steht bewusst nicht dort, sondern an den beiden Stellen, die
+ * ihn wirklich brauchen: {@link CostsController.snapshotAbhaengigkeiten} fuer den
+ * Schreibpfad und {@link CostsController.planVersions} fuer die Auswahlliste
+ * (EYT-144). Der Grund ist strukturell:
+ *
+ * `GET /kosten/snapshots/{snapshotId}` liest einen gespeicherten Stand und
+ * rechnet nichts neu. Wuerde die Zugangskette den Planungs-Faktenport auch dort
+ * bauen, waere „rechnet nichts neu" nur noch eine Behauptung ueber den Rumpf der
+ * Methode statt eine Eigenschaft der Verdrahtung. Der Test misst genau das
+ * (`H8`, Zaehler `fabrikaufrufe`).
+ *
+ * Eine frueher hier stehende zweite Begruendung — die drei Satzrouten
+ * bezahlten sonst „Arbeit je Anfrage ohne Gegenwert" — ist gestrichen, weil sie
+ * gemessen nicht traegt: `planCostFactsFactory` ist wie `snapshotsFor` nur ein
+ * Feldzuweisungs-Konstruktor, und derselbe Absatz nennt diese Kosten oben
+ * „kostet nichts". Eine zu starke Begruendung ist auch eine falsche.
  */
 import {
   BadRequestException,
@@ -33,18 +57,25 @@ import {
   Inject,
   Param,
   Post,
+  Query,
   Req,
   UseFilters,
 } from "@nestjs/common";
 import type { Request } from "express";
 
 import {
+  CreateCostSnapshotCommandSchema,
   CreateRateVersionCommandSchema,
   IDEMPOTENCY_HEADER,
+  IdSchema,
   IdempotencyKeySchema,
+  PublishedPlanVersionsQuerySchema,
+  type CostSnapshot,
   type EmployeesForRates,
   type RateHistory,
   type RateVersionDto,
+  type SelectablePlanVersions,
+  type SelectableWorksites,
 } from "@easytree/contracts";
 
 import type { RequestWithCorrelationId } from "../../../../common/correlation-id.middleware";
@@ -76,15 +107,43 @@ import {
   type CostPermission,
 } from "../../application/cost-access.policy";
 import {
+  COST_SNAPSHOT_REPOSITORY_FACTORY,
+  type CostSnapshotRepository,
+  type CostSnapshotRepositoryFactory,
+  type SnapshotReadProblem,
+  type SnapshotWriteProblem,
+} from "../../application/cost-snapshot-repository.port";
+import {
+  createCostSnapshot,
+  type CreateCostSnapshotDependencies,
+  type CreateCostSnapshotFailure,
+} from "../../application/create-cost-snapshot.use-case";
+import {
+  PLAN_COST_FACTS_FACTORY,
+  type PlanCostFactsFactory,
+  type PlanCostFactsProblem,
+  type PlanVersionListProblem,
+} from "../../application/plan-cost-facts.port";
+import {
   RATE_REPOSITORY_FACTORY,
   type RateRepository,
   type RateRepositoryFactory,
   type RateVersionRecord,
   type RateWriteProblem,
 } from "../../application/rate-repository.port";
+import type { SnapshotAssemblyProblem } from "../../domain/cost-snapshot-assembly";
+import type { PublishedPlanFacts } from "../../domain/planned-work-fact";
 import { effectiveRateVersion, rateVersionStatus } from "../../domain/rate-effectivity";
-import { COSTS_ERROR_TYPE, RATE_ERROR_TYPE } from "./costs-error-type";
+import { toCostSnapshotDto } from "./cost-snapshot.dto";
+import {
+  COSTS_ERROR_TYPE,
+  RATE_ERROR_TYPE,
+  SNAPSHOT_ASSEMBLY_ERROR_TYPE,
+  SNAPSHOT_READ_ERROR_TYPE,
+  SNAPSHOT_WRITE_ERROR_TYPE,
+} from "./costs-error-type";
 import { ConflictProblem } from "./conflict-problem";
+import { CostsProblem, type CostsProblemStatus } from "./costs-problem";
 import { CostsProblemFilter } from "./costs-problem.filter";
 
 /** Der Header waehlt die Organisation aus. Er autorisiert nichts. */
@@ -101,6 +160,12 @@ export class CostsController {
     @Inject(EMPLOYEE_DIRECTORY_FACTORY)
     private readonly employeeDirectoryFor: EmployeeDirectoryFactory,
     @Inject(COST_ACCESS_AUDIT) private readonly audit: CostAccessAuditLog,
+    // EYT-139: beide Fabriken, nie ein fertiger Port. Ein Singleton truege die
+    // Identitaet — und beim Faktenport zusaetzlich die Organisation — der
+    // ERSTEN Anfrage in alle folgenden.
+    @Inject(PLAN_COST_FACTS_FACTORY) private readonly factsFor: PlanCostFactsFactory,
+    @Inject(COST_SNAPSHOT_REPOSITORY_FACTORY)
+    private readonly snapshotsFor: CostSnapshotRepositoryFactory,
   ) {}
 
   @Get("mitarbeiter")
@@ -130,13 +195,13 @@ export class CostsController {
     @Param("employeeId") employeeId: string,
     @Headers(ORGANISATION_HEADER) organisationHeader?: string,
   ): Promise<RateHistory> {
-    const { repository } = await this.zugang(
+    const { rates } = await this.zugang(
       req,
       organisationHeader,
       "costs.read",
       "GET /kosten/stundensaetze/{employeeId}",
     );
-    const versionen = await repository.versionsFor(employeeId);
+    const versionen = await rates.versionsFor(employeeId);
     const heute = heutigesGeschaeftsdatum();
     const wirksam = effectiveRateVersion(versionen, heute);
     return {
@@ -155,7 +220,7 @@ export class CostsController {
   ): Promise<RateVersionDto> {
     // Anlegen braucht ein ANDERES Recht als Lesen — atomar, nicht "wer lesen
     // darf, darf auch schreiben".
-    const { repository, organisationId } = await this.zugang(
+    const { rates, organisationId } = await this.zugang(
       req,
       organisationHeader,
       "costs.manage_rates",
@@ -181,7 +246,7 @@ export class CostsController {
       );
     }
 
-    const ergebnis = await repository.append({
+    const ergebnis = await rates.append({
       organisationId,
       employeeId: geprueft.data.employeeId,
       amountMinorUnits: geprueft.data.amountMinorUnits,
@@ -197,13 +262,263 @@ export class CostsController {
     return toDto(ergebnis.version, heutigesGeschaeftsdatum());
   }
 
+  /**
+   * Die Auswahlliste von `/kosten`: veroeffentlichte Planversionen eines
+   * Wochenbereichs (EYT-144).
+   *
+   * `costs.read` und nicht `costs.calculate`: hier entsteht nichts, hier wird
+   * gelesen. Wer eine Woche auswaehlen darf, hat damit noch nicht das Recht,
+   * einen revisionssicheren Stand einzufrieren.
+   *
+   * Die Reihenfolge ist dieselbe wie ueberall: erst die Zugangskette, dann die
+   * Eingabepruefung. Umgekehrt erfuehre ein Unberechtigter an einem 400, dass
+   * sein Bereich verkehrt war — eine Auskunft ueber eine Ressource, auf die er
+   * keinen Zugriff hat. Der Fall `L5` haelt das fest.
+   *
+   * Geprueft wird das GANZE `req.query`-Objekt, nicht zwei einzeln
+   * entgegengenommene Parameter. `PublishedPlanVersionsQuerySchema` ist ein
+   * `strictObject`: damit fallen ein unbekannter Parameter und ein doppelt
+   * angegebener (Express macht daraus ein Array, kein `string`) auf, statt
+   * stillschweigend auf einen Wert reduziert zu werden.
+   *
+   * Der Faktenport wird HIER gebaut und nicht in der Zugangskette — aus
+   * demselben Grund, aus dem die Snapshot-Leseroute keinen bekommt: was eine
+   * Route nicht konstruiert, kann sie auch nicht heimlich benutzen. Gebaut wird
+   * er mit `zugang.organisationId`, also mit der serverseitig aus den
+   * Mitgliedschaften aufgeloesten Organisation — nie mit dem Header.
+   */
+  @Get("planversionen")
+  async planVersions(
+    @Req() req: Request,
+    @Query() abfrage: unknown,
+    @Headers(ORGANISATION_HEADER) organisationHeader?: string,
+  ): Promise<SelectablePlanVersions> {
+    const zugang = await this.zugang(
+      req,
+      organisationHeader,
+      "costs.read",
+      "GET /kosten/planversionen",
+    );
+
+    const geprueft = PublishedPlanVersionsQuerySchema.safeParse(abfrage);
+    if (!geprueft.success) {
+      throw new BadRequestException(
+        `Ungueltiger Wochenbereich: ${geprueft.error.issues.map((i) => i.path.join(".") || "abfrage").join(", ")}`,
+      );
+    }
+
+    const gelesen = await this.factsFor(
+      zugang.subjectUserId,
+      zugang.organisationId,
+    ).publishedVersions(geprueft.data.fromWeekKey, geprueft.data.toWeekKey);
+    if (!gelesen.ok) throw costsProblem(LISTEN_ABLEHNUNG[gelesen.problem]);
+
+    // Reihenfolge unveraendert — die gehoert der Planung. Ein `sort()` hier
+    // waere eine zweite, stille Ordnung neben ihrer (Fall `L3`).
+    return {
+      versions: gelesen.versions.map((version) => ({
+        id: version.planVersionId,
+        weekKey: version.weekKey,
+        publishedAt: version.publishedAt.toISOString(),
+      })),
+    };
+  }
+
+  /**
+   * Die ZWEITE Auswahlliste von `/kosten`: die Baustellen, auf die genau diese
+   * veroeffentlichte Planversion Einsaetze legt (EYT-146).
+   *
+   * `costs.read` und nicht `costs.calculate`: hier entsteht nichts. Und nicht
+   * `planning.read` — die Kostenoberflaeche bleibt vollstaendig hinter der
+   * Kostengrenze, sonst braeuchte sie fuer einen Filter ein zweites Recht.
+   *
+   * Reihenfolge wie ueberall: Zugangskette, dann Eingabepruefung. Umgekehrt
+   * erfuehre ein Unberechtigter an einem 400, dass seine Id verkehrt war (`W5`).
+   *
+   * Die Quelle ist ausdruecklich `publishedFactsForVersion` und NICHT
+   * `publishedFacts(weekKey)`: letzteres liefert bevorzugt den Entwurf, und
+   * eine Auswahl daraus boete Baustellen an, auf die die veroeffentlichte
+   * Version gar nichts legt. Der gestellte Port in
+   * `worksite-selection-http.test.ts` laesst beide Alternativen WERFEN, damit
+   * ein Rueckfall auffliegt statt still eine plausible Liste zu zeigen.
+   *
+   * Der Faktenport wird HIER gebaut, mit `zugang.organisationId` — also mit der
+   * serverseitig aus den Mitgliedschaften aufgeloesten Organisation, nie mit dem
+   * Header.
+   */
+  @Get("planversionen/:planVersionId/baustellen")
+  async worksitesForPlanVersion(
+    @Req() req: Request,
+    @Param("planVersionId") planVersionId: string,
+    @Headers(ORGANISATION_HEADER) organisationHeader?: string,
+  ): Promise<SelectableWorksites> {
+    const zugang = await this.zugang(
+      req,
+      organisationHeader,
+      "costs.read",
+      "GET /kosten/planversionen/{planVersionId}/baustellen",
+    );
+
+    const geprueft = IdSchema.safeParse(planVersionId);
+    if (!geprueft.success) {
+      throw new BadRequestException(
+        "Die angegebene Planversions-Id ist keine gueltige Id. Bitte die Version in der Auswahlliste neu waehlen.",
+      );
+    }
+
+    const gelesen = await this.factsFor(
+      zugang.subjectUserId,
+      zugang.organisationId,
+    ).publishedFactsForVersion(geprueft.data);
+    if (!gelesen.ok) throw costsProblem(BAUSTELLEN_ABLEHNUNG[gelesen.problem]);
+
+    return { worksites: baustellenAuswahl(gelesen.facts) };
+  }
+
+  /**
+   * Erzeugt aus einer VEROEFFENTLICHTEN Planversion einen unveraenderlichen
+   * Personalkosten-Snapshot (EYT-139).
+   *
+   * Reihenfolge, und sie ist bindend: Zugangskette, dann Idempotenzschluessel,
+   * dann Rumpf, dann erst der Use-Case. Der Schluessel steht VOR dem Rumpf und
+   * VOR jedem Portzugriff — eine Anfrage ohne Wiederholungsschutz darf gar
+   * nicht erst in die Transaktion, und ein Snapshot laesst sich nicht mehr
+   * loeschen (Migration 0018, keine Grants).
+   *
+   * `organisationId` kommt AUSSCHLIESSLICH aus der Zugangskette.
+   * `CreateCostSnapshotCommandSchema` kennt das Feld nicht; ein `organisationId`
+   * im Rumpf faellt am `strictObject` durch.
+   */
+  @Post("snapshots")
+  async createSnapshot(
+    @Req() req: Request,
+    @Body() body: unknown,
+    @Headers(ORGANISATION_HEADER) organisationHeader?: string,
+    @Headers(IDEMPOTENCY_HEADER) idempotencyKey?: string,
+  ): Promise<CostSnapshot> {
+    // Rechnen ist ein anderes Recht als Lesen: wer Kosten sehen darf, darf
+    // deshalb noch lange keinen revisionssicheren Stand einfrieren.
+    const zugang = await this.zugang(
+      req,
+      organisationHeader,
+      "costs.calculate",
+      "POST /kosten/snapshots",
+    );
+
+    const schluessel = IdempotencyKeySchema.safeParse(idempotencyKey);
+    if (!schluessel.success) {
+      throw new ConflictProblem(
+        RATE_ERROR_TYPE.MISSING_IDEMPOTENCY_KEY,
+        "Diese Anfrage braucht einen gueltigen Idempotency-Key. Ohne ihn koennte eine Wiederholung einen zweiten Snapshot anlegen — und ein Snapshot laesst sich nicht loeschen.",
+      );
+    }
+
+    const geprueft = CreateCostSnapshotCommandSchema.safeParse(body);
+    if (!geprueft.success) {
+      throw new BadRequestException(
+        `Ungueltiger Snapshot-Auftrag: ${geprueft.error.issues.map((i) => i.path.join(".") || "koerper").join(", ")}`,
+      );
+    }
+
+    const ergebnis = await createCostSnapshot(this.snapshotAbhaengigkeiten(zugang), {
+      organisationId: zugang.organisationId,
+      publishedPlanVersionId: geprueft.data.publishedPlanVersionId,
+      worksiteId: geprueft.data.worksiteId,
+      correlationId: (req as Partial<RequestWithCorrelationId>).correlationId ?? "unbekannt",
+      idempotencyKey: schluessel.data,
+    });
+    if (!ergebnis.ok) throw snapshotProblemFor(ergebnis);
+    // Der zurueckgelesene Stand, nicht die Eingabe. Beim Retry ist das der
+    // Unterschied zwischen „dieselbe Wahrheit" und „nochmal dieselbe Frage".
+    return toCostSnapshotDto(ergebnis.snapshot);
+  }
+
+  /**
+   * Liest den GESPEICHERTEN Snapshot. Rechnet nichts neu (EYT-139).
+   *
+   * Deshalb baut dieser Pfad keinen Faktenport und keine Satzhistorie: was
+   * hier nicht konstruiert wird, kann auch nicht heimlich in die Antwort
+   * einfliessen.
+   */
+  @Get("snapshots/:snapshotId")
+  async snapshot(
+    @Req() req: Request,
+    @Param("snapshotId") snapshotId: string,
+    @Headers(ORGANISATION_HEADER) organisationHeader?: string,
+  ): Promise<CostSnapshot> {
+    const { snapshots } = await this.zugang(
+      req,
+      organisationHeader,
+      "costs.read",
+      "GET /kosten/snapshots/{snapshotId}",
+    );
+
+    const geprueft = IdSchema.safeParse(snapshotId);
+    if (!geprueft.success) {
+      throw new BadRequestException(
+        "Die angegebene Snapshot-Id ist keine gueltige Id. Bitte den Link aus der Kostenansicht verwenden.",
+      );
+    }
+
+    const gelesen = await snapshots.read(geprueft.data);
+    if (!gelesen.ok) throw leseProblem(gelesen.problem);
+    return toCostSnapshotDto(gelesen.snapshot);
+  }
+
+  /**
+   * Die EINE Konstruktionsstelle der Snapshot-Abhaengigkeiten (EYT-139).
+   *
+   * Sie nimmt den Rueckgabewert der Zugangskette entgegen und ergaenzt genau
+   * eines: den Faktenport. Bindend ist dabei, WOMIT er gebaut wird —
+   * `zugang.organisationId` ist der Wert, den `CostAccessPolicy.authorize`
+   * serverseitig aus den Mitgliedschaften aufgeloest hat. Nicht der Header
+   * (unbestaetigter Wunsch) und nicht `mitgliedschaften[0]` (bei mehreren
+   * Mitgliedschaften schlicht geraten). Beides saehe im Erfolgsfall des
+   * Ein-Organisations-Benutzers korrekt aus und rechnete beim
+   * Mehr-Organisations-Benutzer im falschen Mandanten.
+   */
+  private snapshotAbhaengigkeiten(zugang: {
+    rates: RateRepository;
+    snapshots: CostSnapshotRepository;
+    organisationId: string;
+    subjectUserId: string;
+  }): CreateCostSnapshotDependencies {
+    return {
+      facts: this.factsFor(zugang.subjectUserId, zugang.organisationId),
+      rates: zugang.rates,
+      repository: zugang.snapshots,
+    };
+  }
+
   /** Die eine Zugangskette. Wirft, wenn irgendetwas daran nicht traegt. */
   private async zugang(
     req: Request,
     organisationHeader: string | undefined,
     permission: CostPermission,
     route: string,
-  ): Promise<{ repository: RateRepository; organisationId: string; subjectUserId: string }> {
+  ): Promise<{
+    /**
+     * Die Satzhistorie je Subjekt.
+     *
+     * Heisst `rates` und nicht `repository`: `snapshotAbhaengigkeiten` bildet
+     * daraus `repository: zugang.snapshots` ab, und zwei verschiedene Dinge
+     * unter demselben Namen sind an genau der Naht, die beide zusammenfuehrt,
+     * eine Leseeinladung zum Vertauschen. Die Typen verhindern den Fehler, der
+     * Name soll ihn gar nicht erst nahelegen.
+     */
+    rates: RateRepository;
+    /**
+     * Das Snapshot-Repository — je Subjekt, hier gebaut und nirgends sonst.
+     *
+     * Es steht in DIESER Methode und nicht erst im Schreibpfad, weil die
+     * Leseroute nichts anderes braucht als die Zugangsentscheidung und dieses
+     * Repository. Zwei Konstruktionsstellen fuer dieselbe Fabrik waeren zwei
+     * Stellen, an denen jemand ein anderes Subjekt einsetzen koennte.
+     */
+    snapshots: CostSnapshotRepository;
+    organisationId: string;
+    subjectUserId: string;
+  }> {
     let identitaet;
     try {
       identitaet = await this.identitaet.identify({
@@ -273,7 +588,8 @@ export class CostsController {
     });
 
     return {
-      repository: this.repositoryFor(identitaet.userId),
+      rates: this.repositoryFor(identitaet.userId),
+      snapshots: this.snapshotsFor(identitaet.userId),
       organisationId: entscheidung.organisationId,
       subjectUserId: identitaet.userId,
     };
@@ -350,10 +666,12 @@ function problemFor(problem: RateWriteProblem): Error {
   }
   // Die drei Abloesungsablehnungen (EYT-108). Alle als 409: der Aufrufer hat
   // nichts falsch FORMULIERT, sein Stand passt nur nicht mehr zum Server.
-  // Deshalb ConflictProblem und nicht BadRequestException — nur der
-  // 409-Pfad traegt seinen URN bis in die Antwort, weil ausschliesslich
-  // `CostsProblemFilter` (@Catch(ConflictProblem)) ihn setzt; eine
-  // HttpException faellt in den globalen Filter und wird zu "about:blank".
+  // Deshalb ConflictProblem und nicht BadRequestException: eine HttpException
+  // faellt in den globalen Filter und wird zu "about:blank", ihr URN geht
+  // verloren. Den URN traegt ausschliesslich `CostsProblemFilter`
+  // (@Catch(ConflictProblem, CostsProblem)) in die Antwort — seit EYT-139 fuer
+  // JEDEN Status, nicht mehr nur fuer 409. Die Wahl ist damit inhaltlich:
+  // `ConflictProblem` fuer 409, `CostsProblem` fuer jeden anderen Status.
   if (problem === "VORGAENGER_BEREITS_GESCHLOSSEN") {
     return new ConflictProblem(
       RATE_ERROR_TYPE.RATE_PREDECESSOR_CLOSED,
@@ -382,6 +700,359 @@ function problemFor(problem: RateWriteProblem): Error {
     type: RATE_ERROR_TYPE.RATE_NOT_FOUND,
     message: "Diese Person ist in der gewaehlten Organisation nicht vorhanden.",
   });
+}
+
+// ---------------------------------------------------------------------------
+// Die Fehlerabbildung des Snapshot-Pfades (EYT-139)
+//
+// Erschoepfend ueber `failure.stage` und ueber jeden Grund JEDER Stufe — ohne
+// `default`-Zweig und ohne `as`. Die drei Tabellen tragen `satisfies
+// Record<Problem, …>`: kommt ein Grund dazu, kompiliert diese Datei nicht mehr.
+// Ein `default` haette den neuen Grund stillschweigend auf irgendetwas
+// abgebildet, und niemand haette es bemerkt.
+// ---------------------------------------------------------------------------
+
+/**
+ * Der Titel gehoert zum Status, nicht zur Aufrufstelle.
+ *
+ * Eine Tabelle statt eines Textes je `throw`: sonst hiesse derselbe 409 an der
+ * einen Stelle "Konflikt" und an der naechsten "Nicht moeglich", und der Titel
+ * waere Zufall statt Aussage.
+ */
+const TITEL = {
+  400: "Ungueltige Anfrage",
+  403: "Kein Zugriff",
+  409: "Konflikt",
+  500: "Serverfehler",
+} as const satisfies Record<CostsProblemStatus, string>;
+
+/** Eine Ablehnung ohne Kontextfelder: Status, URN und Text stehen fest. */
+interface Ablehnung {
+  readonly status: CostsProblemStatus;
+  readonly type: string;
+  readonly detail: string;
+}
+
+function costsProblem(ablehnung: Ablehnung): CostsProblem {
+  return new CostsProblem({
+    status: ablehnung.status,
+    title: TITEL[ablehnung.status],
+    type: ablehnung.type,
+    detail: ablehnung.detail,
+  });
+}
+
+/** Ablehnungen des Faktenports. */
+const FAKTEN_ABLEHNUNG = {
+  NO_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.NO_ORGANISATION,
+    detail:
+      "Es ist keine Organisation ausgewaehlt. Bitte oben eine Organisation waehlen und den Snapshot erneut erzeugen.",
+  },
+  AMBIGUOUS_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.AMBIGUOUS_ORGANISATION,
+    detail:
+      "Es sind mehrere Organisationen moeglich. Bitte oben genau eine Organisation waehlen und den Snapshot erneut erzeugen.",
+  },
+  // 409 und nicht 400: die Anfrage ist korrekt formuliert, der Serverzustand
+  // passt nur nicht. Behoben wird sie durch eine HANDLUNG in der Planung
+  // (veroeffentlichen), nicht durch eine andere Formulierung.
+  PLAN_NOT_PUBLISHED: {
+    status: 409,
+    type: COSTS_ERROR_TYPE.PLAN_NOT_PUBLISHED,
+    detail:
+      "Diese Planversion ist ein Entwurf. Kosten entstehen ausschliesslich aus einer veroeffentlichten Planung — bitte zuerst veroeffentlichen.",
+  },
+  // 400 und nicht 409: die genannte Version ist in diesem Mandanten nicht
+  // sichtbar. Der Vertrag fuehrt kein 404, und ob sie „nicht existiert" oder
+  // „einem anderen Mandanten gehoert", bleibt bewusst ununterscheidbar.
+  PLAN_VERSION_NOT_FOUND: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.PLAN_VERSION_NOT_FOUND,
+    detail:
+      "Diese Planversion ist nicht verfuegbar. Bitte die Version in der Auswahlliste neu waehlen.",
+  },
+} as const satisfies Record<PlanCostFactsProblem, Ablehnung>;
+
+/**
+ * Ablehnungen der AUSWAHLLISTE (EYT-144) — eigene Tabelle, eigene Texte.
+ *
+ * Nicht `FAKTEN_ABLEHNUNG` wiederverwendet, obwohl beide Gruende dort stehen:
+ * deren Texte enden auf „und den Snapshot erneut erzeugen". Auf der
+ * Auswahlliste ist noch gar kein Snapshot im Spiel, und eine Handlungsanweisung
+ * auf einen Vorgang, den die Person nicht angestossen hat, schickt sie an die
+ * falsche Stelle. Der URN bleibt derselbe — die Aussage ist dieselbe, nur die
+ * naechste Handlung nicht.
+ *
+ * `Record<PlanVersionListProblem, …>` und nicht `PlanCostFactsProblem`: die
+ * Liste nennt keine einzelne Planversion und kann deshalb weder
+ * `PLAN_NOT_PUBLISHED` noch `PLAN_VERSION_NOT_FOUND` ergeben. Ein Eintrag dafuer
+ * waere eine Zusage auf einen Fall, den es hier nicht gibt.
+ */
+const LISTEN_ABLEHNUNG = {
+  NO_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.NO_ORGANISATION,
+    detail:
+      "Es ist keine Organisation ausgewaehlt. Bitte oben eine Organisation waehlen und die Auswahlliste erneut laden.",
+  },
+  AMBIGUOUS_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.AMBIGUOUS_ORGANISATION,
+    detail:
+      "Es sind mehrere Organisationen moeglich. Bitte oben genau eine Organisation waehlen und die Auswahlliste erneut laden.",
+  },
+} as const satisfies Record<PlanVersionListProblem, Ablehnung>;
+
+/**
+ * Ablehnungen der BAUSTELLENAUSWAHL (EYT-146) — eigene Tabelle, eigene Texte.
+ *
+ * Nicht `FAKTEN_ABLEHNUNG` wiederverwendet, obwohl alle vier Gruende dort
+ * stehen: deren Texte enden auf „und den Snapshot erneut erzeugen". Beim Oeffnen
+ * der Baustellenauswahl ist noch kein Snapshot im Spiel, und eine
+ * Handlungsanweisung auf einen Vorgang, den die Person nicht angestossen hat,
+ * schickt sie an die falsche Stelle. Dieselbe Entscheidung wie bei
+ * `LISTEN_ABLEHNUNG` — und derselbe URN, denn die Aussage ist dieselbe, nur die
+ * naechste Handlung nicht.
+ *
+ * `Record<PlanCostFactsProblem, …>` und nicht `PlanVersionListProblem`: diese
+ * Route NENNT eine einzelne Planversion und kann deshalb sehr wohl
+ * `PLAN_NOT_PUBLISHED` und `PLAN_VERSION_NOT_FOUND` ergeben. Genau darin liegt
+ * der Unterschied zur Auswahlliste.
+ */
+const BAUSTELLEN_ABLEHNUNG = {
+  NO_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.NO_ORGANISATION,
+    detail:
+      "Es ist keine Organisation ausgewaehlt. Bitte oben eine Organisation waehlen und die Baustellenauswahl erneut laden.",
+  },
+  AMBIGUOUS_ORGANISATION: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.AMBIGUOUS_ORGANISATION,
+    detail:
+      "Es sind mehrere Organisationen moeglich. Bitte oben genau eine Organisation waehlen und die Baustellenauswahl erneut laden.",
+  },
+  PLAN_NOT_PUBLISHED: {
+    status: 409,
+    type: COSTS_ERROR_TYPE.PLAN_NOT_PUBLISHED,
+    detail:
+      "Diese Planversion ist ein Entwurf. Baustellen einer Kostenauswahl stammen ausschliesslich aus einer veroeffentlichten Planung — bitte zuerst veroeffentlichen.",
+  },
+  PLAN_VERSION_NOT_FOUND: {
+    status: 400,
+    type: COSTS_ERROR_TYPE.PLAN_VERSION_NOT_FOUND,
+    detail:
+      "Diese Planversion ist nicht verfuegbar. Bitte die Version in der Auswahlliste neu waehlen.",
+  },
+} as const satisfies Record<PlanCostFactsProblem, Ablehnung>;
+
+/**
+ * Die Baustellen, auf die diese veroeffentlichte Version wirklich Einsaetze
+ * legt — abgeleitet, nicht durchgereicht (EYT-146).
+ *
+ * ## Warum aus `work` und nicht aus `worksiteLabels`
+ *
+ * `worksiteLabels` stammt aus der Ressourcenliste der Planung und fuehrt ALLE
+ * im Mandanten sichtbaren Baustellen. Wer sie durchreichte, boete einen Filter
+ * an, der garantiert null Positionen ergibt — und ein leerer Snapshot sieht wie
+ * ein Rechenfehler aus, nicht wie eine leere Auswahl. Die Menge steckt deshalb
+ * in den Einsaetzen; die Bezeichnungen kommen aus der Abbildung daneben.
+ *
+ * ## Die Reihenfolge ist Vertrag
+ *
+ * Bezeichnung aufsteigend, bei Gleichstand Id aufsteigend. Beides bewusst als
+ * Vergleich von Zeicheneinheiten und NICHT mit `localeCompare`: ohne Locale
+ * folgt das der Umgebungsvariablen `LANG`, mit Locale der ICU-Version des
+ * Node-Builds — beides waere eine Ordnung, die auf zwei Maschinen verschieden
+ * ausfaellt, und damit keine Zusage.
+ *
+ * Der Tiebreak ist keine Zierde: `public.worksites` fuehrt keine Eindeutigkeit
+ * auf `name` (Migration 0006), zwei gleichnamige Baustellen sind also moeglich.
+ * Ohne ihn gaebe der Komparator die Reihenfolge an das Eingabearray zurueck,
+ * also an die Reihenfolge der Einsaetze — genau die zufaellige Ordnung, die
+ * diese Regel beseitigen soll (`W2b`).
+ *
+ * ## Fehlende Bezeichnung: fail-closed, ohne rohe Id
+ *
+ * Eine Baustelle in `work` ohne Eintrag in `worksiteLabels` ist ein gebrochener
+ * Vertrag der Planung, kein Anzeigeproblem. Die Id als Ersatz waere eine
+ * Auswahlzeile, die niemand lesen kann; eine erfundene Bezeichnung waere
+ * schlimmer. Also 409 mit dem BESTEHENDEN URN `LABEL_MISSING` — dieselbe
+ * Aussage wie in der Montage, deshalb kein zweiter Problemname. Der Text nennt
+ * die Id NICHT: er geht an eine Person, die Stammdaten pflegt, und eine rohe
+ * UUID im Fehlertext waere zugleich eine Auskunft ueber den Bestand.
+ */
+function baustellenAuswahl(facts: PublishedPlanFacts): SelectableWorksites["worksites"] {
+  const ids = [...new Set(facts.work.map((einsatz) => einsatz.worksiteId as string))];
+  const auswahl = ids.map((id) => {
+    const label = facts.worksiteLabels.get(id);
+    if (label === undefined) {
+      throw costsProblem({
+        status: 409,
+        type: SNAPSHOT_ASSEMBLY_ERROR_TYPE.LABEL_MISSING,
+        detail:
+          "Fuer mindestens eine Baustelle dieser Planversion fehlt eine Bezeichnung. Es wurde bewusst keine Auswahl angezeigt — bitte die Stammdaten vervollstaendigen.",
+      });
+    }
+    return { id, label };
+  });
+  // Kein `localeCompare` — siehe oben. Der Tiebreak steht danach und nicht
+  // stattdessen: er entscheidet ausschliesslich bei gleicher Bezeichnung.
+  return auswahl.sort((a, b) => {
+    if (a.label !== b.label) return a.label < b.label ? -1 : 1;
+    if (a.id === b.id) return 0;
+    return a.id < b.id ? -1 : 1;
+  });
+}
+
+/** Ablehnungen des Schreibvorgangs. */
+const SCHREIB_ABLEHNUNG = {
+  IDEMPOTENCY_KEY_REUSED: {
+    status: 409,
+    type: SNAPSHOT_WRITE_ERROR_TYPE.IDEMPOTENCY_KEY_REUSED,
+    detail:
+      "Dieser Idempotency-Key wurde bereits fuer einen anderen Snapshot verwendet. Bitte einen neuen Schluessel senden.",
+  },
+  WORKSITE_NOT_IN_ORG: {
+    status: 400,
+    type: SNAPSHOT_WRITE_ERROR_TYPE.WORKSITE_NOT_IN_ORG,
+    detail:
+      "Die gewaehlte Baustelle gehoert nicht zu dieser Organisation. Es wurde kein Snapshot gespeichert. Bitte eine Baustelle aus der Auswahlliste waehlen.",
+  },
+  /**
+   * 500, und das ist entschieden statt offen (EYT-139).
+   *
+   * Der Port schliesst die Umdeutung in einen Auth- oder Mandantenfehler
+   * ausdruecklich aus: das Subjekt kann korrekt angemeldet und berechtigt sein
+   * und trotzdem ueber den falschen Kanal kommen (PostgREST-Data-API,
+   * Transaktionspooler). Ein 403 schickte die Betreiberin auf die Suche nach
+   * einem Rechteproblem, das es nicht gibt; ein 409 legte einen Retry nahe, der
+   * nichts behebt; ein 400 beschuldigte die Aufruferin. Bleibt 5xx — und das
+   * ist auf diesen Routen bereits gelebte Praxis (`AuthProblemFilter` liefert
+   * dort 503, `HttpCostsGateway.send` behandelt `>= 500` als `UNAVAILABLE`).
+   */
+  WRITE_CHANNEL_REJECTED: {
+    status: 500,
+    type: SNAPSHOT_WRITE_ERROR_TYPE.WRITE_CHANNEL_REJECTED,
+    detail:
+      "Der Snapshot konnte nicht gespeichert werden: die Datenbank hat den Schreibkanal abgelehnt. Das ist ein Betriebsfehler und kein Rechteproblem — bitte den Betrieb mit der Korrelations-Id verstaendigen.",
+  },
+} as const satisfies Record<SnapshotWriteProblem, Ablehnung>;
+
+/**
+ * Der Snapshot wurde geschrieben und war danach nicht lesbar.
+ *
+ * 500, nicht 403: hier ist die Id gerade eben entstanden, das Subjekt ist
+ * dasselbe, und die Aufruferin hat nichts falsch gemacht. Der gespeicherte
+ * Stand existiert moeglicherweise — nur die Antwort fehlt.
+ */
+const LESEN_NACH_SCHREIBEN = {
+  SNAPSHOT_NOT_FOUND: {
+    status: 500,
+    type: SNAPSHOT_READ_ERROR_TYPE.SNAPSHOT_NOT_FOUND,
+    detail:
+      "Der Snapshot wurde angelegt, konnte danach aber nicht gelesen werden. Bitte die Kostenansicht neu laden; wiederholt sich das, den Betrieb mit der Korrelations-Id verstaendigen.",
+  },
+} as const satisfies Record<SnapshotReadProblem, Ablehnung>;
+
+/**
+ * Die Leseroute — 403 fuer alle drei zusammengefassten Faelle.
+ *
+ * „Unbekannt", „fremd" und „nicht lesbar" sind hier EINE Antwort, und die
+ * Ununterscheidbarkeit ist strukturell: `SnapshotReadProblem` hat genau einen
+ * Wert, `SNAPSHOT_READ_ERROR_TYPE` genau einen URN, und dieser Text nennt die
+ * angefragte Id NICHT. Wer Ids durchprobiert, erfaehrt an der Antwort nichts.
+ *
+ * Warum 403 und nicht 404: der Vertrag fuehrt in keiner seiner Operationen ein
+ * 404 (`problemResponses` = 400/401/403/409), und `CostsProblemStatus` laesst
+ * es deshalb gar nicht zu. Unter den verfuegbaren Codes ist 403 die
+ * wahrheitsgemaesse Aussage — „du bekommst diesen Snapshot nicht".
+ */
+const LESE_ABLEHNUNG = {
+  SNAPSHOT_NOT_FOUND: {
+    status: 403,
+    type: SNAPSHOT_READ_ERROR_TYPE.SNAPSHOT_NOT_FOUND,
+    detail:
+      "Dieser Snapshot ist nicht verfuegbar. Bitte die Kostenansicht oeffnen und einen Snapshot aus der Liste waehlen.",
+  },
+} as const satisfies Record<SnapshotReadProblem, Ablehnung>;
+
+/**
+ * Warum die Montage blockiert hat — als Handlungsanweisung.
+ *
+ * Bewusst OHNE Betrag und ohne Stundensatz: der Fehlertext ist keine
+ * Kostenauskunft, und `HttpExceptionFilter` haelt fuer den Rest der API
+ * dieselbe Linie. Person, Tag und Einsatz stehen darin, weil ohne sie
+ * „irgendwo fehlt ein Satz" die einzige mitgeteilte Information waere.
+ */
+const MONTAGE_HINWEIS = {
+  RATE_NOT_FOUND:
+    "fehlt ein gueltiger Stundensatz. Bitte den Satz hinterlegen und den Snapshot erneut erzeugen.",
+  RATE_AMBIGUOUS:
+    "gelten mehrere Stundensaetze gleichzeitig. Bitte die ueberlappenden Satzversionen bereinigen und den Snapshot erneut erzeugen.",
+  RATE_INVALID:
+    "ist die gespeicherte Satzversion nicht verwendbar. Bitte die Satzversion pruefen und korrigieren.",
+  LABEL_MISSING:
+    "fehlt eine Bezeichnung fuer Person oder Baustelle. Bitte die Stammdaten vervollstaendigen.",
+  DAY_BOUNDARY_NONEXISTENT:
+    "faellt die lokale Tagesgrenze in eine Stunde, die es in der Zeitzone der Organisation nicht gibt. Bitte den Einsatzzeitraum anpassen.",
+  DAY_BOUNDARY_AMBIGUOUS:
+    "gibt es die lokale Tagesgrenze in der Zeitzone der Organisation zweimal. Bitte den Einsatzzeitraum anpassen.",
+  TIME_ZONE_UNKNOWN:
+    "ist die Zeitzone der Organisation unbekannt. Bitte sie in den Organisationseinstellungen korrigieren.",
+  INTERVAL_INVALID:
+    "ist der Einsatzzeitraum ungueltig. Bitte Beginn und Ende des Einsatzes korrigieren.",
+} as const satisfies Record<SnapshotAssemblyProblem, string>;
+
+/**
+ * Alle acht Montagegruende sind 409.
+ *
+ * Nicht 400: die Aufruferin hat nichts falsch FORMULIERT — der Rumpf ist
+ * gueltig, der Serverzustand passt nur nicht. Behoben wird jeder dieser Faelle
+ * durch eine Handlung an den Stammdaten, nicht durch eine andere Anfrage.
+ */
+function montageProblem(
+  failure: Extract<CreateCostSnapshotFailure, { stage: "ASSEMBLY" }>,
+): CostsProblem {
+  const teile = [
+    failure.employeeId === null ? null : `Person ${failure.employeeId}`,
+    failure.localDate === null ? null : `den ${failure.localDate}`,
+    failure.assignmentId === null ? null : `Einsatz ${failure.assignmentId}`,
+  ].filter((teil): teil is string => teil !== null);
+  const wo = teile.length === 0 ? "In dieser Planversion" : `Fuer ${teile.join(", ")}`;
+  return costsProblem({
+    status: 409,
+    type: SNAPSHOT_ASSEMBLY_ERROR_TYPE[failure.problem],
+    detail: `${wo} ${MONTAGE_HINWEIS[failure.problem]} Es wurde kein Snapshot gespeichert.`,
+  });
+}
+
+/**
+ * Die eine Abbildung Ablehnung -> HTTP fuer `POST /kosten/snapshots`.
+ *
+ * `switch` ohne `default`: kommt eine fuenfte Stufe dazu, meldet der Compiler
+ * den fehlenden Rueckgabewert. Ein `default` haette sie stillschweigend auf
+ * einen bestehenden Fall abgebildet.
+ */
+function snapshotProblemFor(failure: CreateCostSnapshotFailure): CostsProblem {
+  switch (failure.stage) {
+    case "FACTS":
+      return costsProblem(FAKTEN_ABLEHNUNG[failure.problem]);
+    case "ASSEMBLY":
+      return montageProblem(failure);
+    case "WRITE":
+      return costsProblem(SCHREIB_ABLEHNUNG[failure.problem]);
+    case "READ":
+      return costsProblem(LESEN_NACH_SCHREIBEN[failure.problem]);
+  }
+}
+
+/** Die Abbildung der Leseroute — siehe {@link LESE_ABLEHNUNG}. */
+function leseProblem(problem: SnapshotReadProblem): CostsProblem {
+  return costsProblem(LESE_ABLEHNUNG[problem]);
 }
 
 /**

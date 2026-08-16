@@ -366,6 +366,93 @@ jobs:
         run: |
           pnpm --filter @easytree/api exec vitest run test/costs/rate-succession.integration.test.ts 2>&1 | tee /tmp/rate-succession.log
           bash scripts/assert-tenant-report.sh rate-succession /tmp/rate-succession.log
+      # EYT-109: die Leseoperationen fuer veroeffentlichte Staende. Zwei
+      # Verbindungen wie beim Publish-Gate — das Repository laeuft auf dem
+      # Laufzeitkanal (easytree_app), Fixtures und Zaehlungen auf `postgres`.
+      # Eine Beobachtung ueber den Laufzeitkanal saehe genau das nicht, dessen
+      # Abwesenheit sie belegen soll.
+      #
+      # Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer Job: ein neuer
+      # Job waere ein Status-Check, den das Ruleset nicht kennt, und beide
+      # Listen in setup-/verify-branch-protection.sh muessten mitwachsen.
+      #
+      # `assert-tenant-report.sh` statt eines rohen `grep`: das Skript prueft
+      # zusaetzlich `passed == executed`, was sich als regulaerer Ausdruck nicht
+      # formulieren laesst. Ein Lauf mit executed=7 passed=2 skipped=0 waere
+      # unter einem blossen grep gruen.
+      - name: Planungslesungen fuer veroeffentlichte Staende (fail-closed, zwei Verbindungen, EYT-109)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/planning-published-reads.integration.test.ts 2>&1 | tee /tmp/planning-published-reads.log
+          bash scripts/assert-tenant-report.sh planning-published-reads /tmp/planning-published-reads.log
+      # EYT-138: der Snapshot-Schreibweg gegen die echte Datenbank. Wieder zwei
+      # Verbindungen — das Repository auf dem Laufzeitkanal (easytree_app),
+      # Fixtures und Zaehlungen auf `postgres`. Eine Zaehlung ueber den
+      # Laufzeitkanal saehe genau das nicht, dessen Abwesenheit sie belegen soll,
+      # und scheiterte ausserdem an fehlenden Rechten.
+      #
+      # Hier entstehen die Aussagen, die der datenbankfreie Zwilling
+      # (test/costs/cost-snapshot-repository.test.ts) strukturell nicht treffen
+      # kann: echte Atomizitaet, RLS, Spaltenrechte, mandantengebundene
+      # Fremdschluessel und die Kanalgrenze aus Migration 0018. Auf der
+      # Entwicklungsmaschine laeuft kein Docker; dieser Schritt ist der einzige
+      # Ort, an dem die Suite je ausgefuehrt wird.
+      - name: Kosten-Snapshot — Persistenz, Atomizitaet, Rechte, Kanal (fail-closed, zwei Verbindungen, EYT-138)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/costs/cost-snapshot.integration.test.ts 2>&1 | tee /tmp/cost-snapshot.log
+          bash scripts/assert-tenant-report.sh cost-snapshot /tmp/cost-snapshot.log
+      # EYT-139: die HTTP-Naht des Snapshots gegen echtes PostgreSQL. Was hier
+      # gemessen wird, kann der Nahttest mit gestellten Repositories
+      # (test/costs/snapshot-http.test.ts) strukturell nicht: dass RLS die
+      # fremde Organisation wirklich ausblendet, dass ein Montagefehler KEINE
+      # Zeile hinterlaesst, dass ein Retry keinen zweiten Snapshot anlegt, und
+      # dass ein gelesener Snapshot eine spaetere Satzversion nicht sieht.
+      #
+      # Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer Job: ein neuer
+      # Job waere ein Status-Check, den das Ruleset nicht kennt, und beide
+      # Listen in setup-/verify-branch-protection.sh muessten mitwachsen.
+      - name: Snapshot-HTTP-Naht (fail-closed, zwei Verbindungen, EYT-139)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/costs/snapshot-http.integration.test.ts 2>&1 | tee /tmp/snapshot-http.log
+          bash scripts/assert-tenant-report.sh snapshot-http /tmp/snapshot-http.log
+      # EYT-143: ein gespeicherter Snapshot ueberlebt eine RUECKWIRKEND wirksame
+      # Satzversion. Der HTTP-Fall I8 im Schritt darueber misst dasselbe
+      # Szenario; diese Suite ergaenzt genau die zwei Aussagen, die er aus
+      # Bauart nicht treffen kann:
+      #
+      #  1. Sie vergleicht die GESPEICHERTEN Zeilen selbst, ueber die
+      #     Beobachterverbindung. I8 sieht nur die Leseausgabe — ein Defekt, der
+      #     die Zeilen umschriebe UND sie konsistent zurueckliese, liesse ihn
+      #     gruen.
+      #  2. Sie belegt die aktuelle Satzauflage ueber den PRODUKTIONSPFAD
+      #     (versionsFor + effectiveRateVersion) statt ueber rohes Admin-SQL.
+      #
+      # Eigener Schritt im BESTEHENDEN Job db-gates, kein neuer Job: ein neuer
+      # Job waere ein Status-Check, den das Ruleset nicht kennt, und beide
+      # Listen in setup-/verify-branch-protection.sh muessten mitwachsen.
+      - name: Snapshot-Unveraenderlichkeit gegen spaetere Saetze (fail-closed, zwei Verbindungen, EYT-143)
+        env:
+          EASYTREE_TENANT_TESTS: required
+          EASYTREE_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          EASYTREE_TEST_APP_DB_URL: postgresql://easytree_app:ci-local-app-password@127.0.0.1:54322/postgres
+        shell: bash
+        run: |
+          pnpm --filter @easytree/api exec vitest run test/costs/snapshot-immutability.integration.test.ts 2>&1 | tee /tmp/snapshot-immutability.log
+          bash scripts/assert-tenant-report.sh snapshot-immutability /tmp/snapshot-immutability.log
       - name: Resolve pooler URL + pre-flight (Supavisor, EYT-15)
         shell: bash
         run: |

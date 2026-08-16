@@ -20,21 +20,41 @@
  * RLS-Verantwortung bleibt vollstaendig beim Planungsrepository und dem
  * `TenantQueryRunner` dahinter (EYT-45).
  *
+ * ## Warum die versionsgenaue Methode nicht das Wochenfenster benutzt
+ *
+ * `planningWindow(weekKey)` liefert den BEARBEITBAREN Stand und bevorzugt dafuer
+ * den Entwurf. Ein Snapshot darauf uebernaehme unveroeffentlichte Zuweisungen,
+ * fror sie unveraenderlich ein, und der spaetere Export (EYT-110) saehe
+ * revisionssicher aus, ohne es zu sein. Deshalb adressiert
+ * `publishedFactsForVersion` die Version — der Test
+ * `test/costs/planning-facts.adapter.test.ts` laesst das Wochenfenster im
+ * gestellten Port WERFEN, damit ein Rueckfall auffliegt statt gruen zu bleiben.
+ *
  * ## Verdrahtung
  *
- * Bewusst NICHT in `AppModule` registriert. Das Kostenmodul ist heute eine
- * Grenze, kein laufendes Feature: es gibt keine Route (EYT-109) und keine
- * Autorisierung (EYT-106). Eine Verdrahtung ohne beides waere eine Zusage, die
- * kein Test einloest. Wenn sie kommt, folgt sie dem Factory-Muster der Planung
- * — ein Adapter je Subjekt, nie ein Singleton, das die Identitaet der ersten
- * Anfrage weiterreicht.
+ * Seit EYT-109 in `AppModule` registriert — aber als FABRIK
+ * (`PLAN_COST_FACTS_FACTORY`), nie als Singleton: ein Adapter je Subjekt UND
+ * Organisation. Ein zwischengespeicherter Port reichte die Identitaet der
+ * ersten Anfrage an alle folgenden weiter, und RLS finge das nicht ab — der
+ * `TenantContext` wird aus eben diesem festgehaltenen Subjekt gebaut.
+ *
+ * Diese Klasse ist deshalb NICHT mehr aus `costs/index.ts` exportiert. Die
+ * einzige Konstruktionsstelle ist `plan-cost-facts.factory.ts`, und dort ist
+ * die Organisation ein Pflichtargument. Oeffentlich waere der einstellige
+ * Konstruktor eine zweite Tuer, die sie still verliert.
+ *
+ * Die Route darauf kommt spaeter (EYT-109, Snapshot-Endpunkt).
  */
 import type { AssignmentId, EmployeeId, PlanVersionId, WorksiteId } from "@easytree/domain";
 import { unsafeIdentifier } from "@easytree/domain";
 
-import type { AssignmentRow, PlanningQueries } from "../../planning";
-import type { PlanCostFactsPort, PlanCostFactsResult } from "../application/plan-cost-facts.port";
-import type { PlannedWorkFact } from "../domain/planned-work-fact";
+import type { AssignmentRow, PlanningQueries, PublishedAssignmentsRow } from "../../planning";
+import type {
+  PlanCostFactsPort,
+  PlanCostFactsResult,
+  PublishedVersionsListResult,
+} from "../application/plan-cost-facts.port";
+import type { PlannedWorkFact, PublishedPlanFacts } from "../domain/planned-work-fact";
 
 /**
  * Abbildung einer Planungszeile auf einen Kostenfakt.
@@ -49,6 +69,35 @@ function planfakt(row: AssignmentRow): PlannedWorkFact {
     worksiteId: unsafeIdentifier<WorksiteId>(row.worksiteId),
     startsAtUtc: row.startsAtUtc,
     endsAtUtc: row.endsAtUtc,
+  };
+}
+
+/**
+ * Bezeichnungen einer Ressourcenliste, nach Id.
+ *
+ * Der Parameter ist STRUKTURELL getippt und nicht als `ResourceRow`: diesen
+ * Namen exportiert `planning/index.ts` nicht, und ein Tiefimport nach
+ * `planning/application/` faellt am Waechter
+ * `costs-cross-module-public-api-only`. Das ist keine Umgehung, sondern die
+ * Grenze: die Planung garantiert die Zeilenform nur dort, wo sie sie auch
+ * benennt.
+ */
+function bezeichnungen(
+  zeilen: readonly { readonly id: string; readonly label: string }[],
+): ReadonlyMap<string, string> {
+  return new Map(zeilen.map((zeile) => [zeile.id, zeile.label]));
+}
+
+/** Der veroeffentlichte Stand der Planung als Faktenlage des Kostenmoduls. */
+function planfakten(row: PublishedAssignmentsRow): PublishedPlanFacts {
+  return {
+    planVersionId: unsafeIdentifier<PlanVersionId>(row.planVersionId),
+    weekKey: row.weekKey,
+    timeZone: row.timeZone,
+    publishedAt: row.publishedAt,
+    work: row.assignments.map(planfakt),
+    employeeLabels: bezeichnungen(row.resources.employees),
+    worksiteLabels: bezeichnungen(row.resources.worksites),
   };
 }
 
@@ -71,14 +120,42 @@ export class PlanningFactsAdapter implements PlanCostFactsPort {
       return { ok: false, problem: "PLAN_NOT_PUBLISHED" };
     }
 
+    // Der zweite, versionsgenaue Lesevorgang ist kein Umweg (EYT-109, Task 8):
+    // `planningWindow` fuehrt weder `publishedAt` noch die Bezeichnungen in
+    // einer Form, die dieser Vertrag verlangt. Einen Zeitpunkt hier zu setzen
+    // waere eine erfundene Tatsache. Die Wochenlogik darueber entscheidet
+    // unveraendert, OB und WELCHE Version — die Semantik dieser Methode aendert
+    // sich dadurch nicht.
+    return this.publishedFactsForVersion(quelle.id);
+  }
+
+  async publishedFactsForVersion(planVersionId: string): Promise<PlanCostFactsResult> {
+    const gelesen = await this.planning.publishedAssignments(planVersionId);
+    // Vier Gruende, unveraendert durchgereicht: `PublishedReadProblem` ist eine
+    // echte Teilmenge von `PlanCostFactsProblem`. Kein Cast — ein `as` haette
+    // hier genau die Pruefung entfernt, die diese Zeile wertvoll macht.
+    if (!gelesen.ok) return { ok: false, problem: gelesen.problem };
+
+    return { ok: true, facts: planfakten(gelesen.published) };
+  }
+
+  async publishedVersions(
+    fromWeekKey: string,
+    toWeekKey: string,
+  ): Promise<PublishedVersionsListResult> {
+    const gelesen = await this.planning.publishedVersions(fromWeekKey, toWeekKey);
+    if (!gelesen.ok) return { ok: false, problem: gelesen.problem };
+
+    // Reihenfolge unveraendert. Ein `sort()` hier waere eine zweite, stille
+    // Ordnung neben der der Planung — und der Test aus Task 7 bewiese die
+    // tatsaechlich wirksame nicht mehr.
     return {
       ok: true,
-      facts: {
-        planVersionId: unsafeIdentifier<PlanVersionId>(quelle.id),
-        weekKey: gelesen.window.weekKey,
-        timeZone: gelesen.window.timeZone,
-        work: gelesen.window.assignments.map(planfakt),
-      },
+      versions: gelesen.versions.map((zeile) => ({
+        planVersionId: unsafeIdentifier<PlanVersionId>(zeile.id),
+        weekKey: zeile.weekKey,
+        publishedAt: zeile.publishedAt,
+      })),
     };
   }
 }

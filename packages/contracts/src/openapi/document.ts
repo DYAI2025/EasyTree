@@ -46,12 +46,25 @@ import {
 } from "../planning/schemas.js";
 import { LoginCommandSchema, SessionDtoSchema } from "../auth/schemas.js";
 import {
+  CostDayTotalDtoSchema,
+  CostPositionDtoSchema,
+  CostSnapshotSchema,
+  CreateCostSnapshotCommandSchema,
   CreateRateVersionCommandSchema,
   EmployeesForRatesSchema,
   RateHistorySchema,
   RateVersionDtoSchema,
+  SelectablePlanVersionSchema,
+  SelectablePlanVersionsSchema,
+  SelectableWorksiteSchema,
+  SelectableWorksitesSchema,
 } from "../costs/schemas.js";
-import { IDEMPOTENCY_HEADER, IdempotencyKeySchema, ProblemDocumentSchema } from "../primitives.js";
+import {
+  IDEMPOTENCY_HEADER,
+  IdSchema,
+  IdempotencyKeySchema,
+  ProblemDocumentSchema,
+} from "../primitives.js";
 
 /** Vertragsversion. Aenderungen hier sind eine bewusste Entscheidung, kein Nebeneffekt. */
 export const API_VERSION = "1.0.0";
@@ -91,6 +104,49 @@ const NAMED_SCHEMAS = {
   RateHistory: RateHistorySchema,
   RateVersionDto: RateVersionDtoSchema,
   CreateRateVersionCommand: CreateRateVersionCommandSchema,
+  // EYT-109: der gespeicherte Tageskosten-Snapshot. Position und Tagessumme
+  // stehen ZUSAETZLICH einzeln hier, damit der Export (EYT-110) sie benennen
+  // kann. Was das NICHT bewirkt: `CostSnapshot.positions.items` bleibt im
+  // erzeugten Dokument ein vollstaendig eingebettetes, namenloses Objekt — der
+  // Eintrag stellt einen Namen DANEBEN, er ersetzt die Kopie nicht. Ein
+  // Generator gibt beides aus. Dieselbe Lage haben `PlanningResource`,
+  // `TimeIntervalDto` und `PlanningConflictDto` schon vorher; die Entscheidung
+  // ist also konsistent, nur der frueher hier behauptete Nutzen ("EIN
+  // Positionstyp statt eines Inline-Objekts") war es nicht. Auf `$ref`-Ausgabe
+  // umzustellen waere eine eigene, groessere Aenderung.
+  //
+  // ## Ehrlichkeitshinweis: ZWEI Regeln fallen bei der Erzeugung weg
+  //
+  // Dieselbe Luecke wie bei `weekKeyParam`, nur eine Ebene tiefer — und
+  // deshalb hier benannt statt verschwiegen. Beide Regeln stehen im
+  // Zod-Schema, erscheinen aber in KEINER Form im erzeugten Dokument:
+  //
+  // 1. `CostSnapshotSchema.superRefine` verlangt, dass zu jedem lokalen Tag
+  //    mit Positionen eine Tagessumme in `days` gehoert und kein Tag dort
+  //    zweimal steht. Das ist eine Beziehung zwischen ZWEI Feldern; JSON
+  //    Schema kann sie nicht ausdruecken.
+  // 2. `DurationMillisecondsSchema` verlangt zusaetzlich zur Ziffernfolge
+  //    einen echt positiven Wert (`> 0`, so wie die Tabelle
+  //    `check (duration_ms > 0)` fuehrt). Im Dokument steht nur
+  //    `pattern: ^\d+$` — "0" geht dort durch.
+  //
+  // Ein generierter Client kann also einen Snapshot mit Positionen ohne
+  // Tagessumme oder mit Dauer null bauen. Abgelehnt wird beides trotzdem:
+  // vom Client beim `safeParse` der Antwort und vom Server zur Laufzeit,
+  // nicht vom Schema. Wer eine der beiden Regeln lockert oder verschaerft,
+  // aendert diesen Absatz mit.
+  CostPositionDto: CostPositionDtoSchema,
+  CostDayTotalDto: CostDayTotalDtoSchema,
+  CostSnapshot: CostSnapshotSchema,
+  CreateCostSnapshotCommand: CreateCostSnapshotCommandSchema,
+  SelectablePlanVersion: SelectablePlanVersionSchema,
+  SelectablePlanVersions: SelectablePlanVersionsSchema,
+  // EYT-146: die Baustellen EINER veroeffentlichten Planversion. Kein `active`
+  // im erzeugten Dokument — siehe die Begruendung am Zod-Schema: eine
+  // historische Auswahl mit einem Zustand von heute zu versehen zwaenge die
+  // Oberflaeche, Zeilen auszugrauen, auf denen Kosten liegen.
+  SelectableWorksite: SelectableWorksiteSchema,
+  SelectableWorksites: SelectableWorksitesSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type NamedSchema = keyof typeof NAMED_SCHEMAS;
@@ -148,7 +204,7 @@ const idempotencyHeader = {
  *    trotzdem, aber vom Server zur Laufzeit und nicht vom Schema. Dieselbe
  *    ehrliche Grenzziehung wie bei `TimeIntervalDtoSchema` ("Ende nach Beginn").
  */
-const weekKeyParam = {
+export const weekKeyParam = {
   name: "weekKey",
   in: "query",
   required: true,
@@ -156,6 +212,61 @@ const weekKeyParam = {
     "ISO-Woche im Format 2026-W32. Woche 01-53. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben (etwa 2020 und 2026, nicht 2021 oder 2025). Diese Kalenderregel kann JSON Schema nicht ausdruecken und wird hier NICHT erzwungen - der Server lehnt einen ungueltigen Schluessel zur Laufzeit ab.",
   schema: { type: "string", pattern: "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$" },
 } as const;
+
+/**
+ * Die beiden Grenzen des Wochenbereichs der Auswahlliste (EYT-109).
+ *
+ * Abgeleitet aus {@link weekKeyParam} statt danebengeschrieben: Muster UND
+ * Beschreibung werden uebernommen, damit die dortige Ehrlichkeit zur
+ * Kalenderregel hier nicht bei einer Kopie verlorengeht.
+ *
+ * Dazu kommt eine ZWEITE nicht ausdrueckbare Regel. `fromWeekKey <= toWeekKey`
+ * ist eine Beziehung zwischen zwei Parametern; ein Parameterschema beschreibt
+ * immer nur einen einzelnen Wert und kann davon nichts wissen. Ein generierter
+ * Client darf also einen verkehrten Bereich bilden — abgelehnt wird er
+ * trotzdem, zur Laufzeit: im Client von `PublishedPlanVersionsQuerySchema`, im
+ * Server noch einmal. Dieselbe Grenzziehung, die `weekKeyParam` fuer die
+ * Kalenderregel und `TimeIntervalDtoSchema` fuer "Ende nach Beginn" macht.
+ *
+ * Die Rolle steht in einer Tabelle statt in einem zweiten Parameter. Als freier
+ * String liesse sich `wochenbereichParam("toWeekKey", "Erste Woche …")`
+ * schreiben — uebersetzbar, veroeffentlicht, und in sich widersprechend. So ist
+ * die Verwechslung nicht darstellbar. Der Punkt am Ende jedes Eintrags gehoert
+ * dazu: die Beschreibung wird zusammengesetzt, ohne ihn liefen zwei Saetze
+ * ineinander.
+ */
+const WOCHENBEREICH_ROLLE = {
+  fromWeekKey: "Erste Woche des Bereichs, einschliesslich.",
+  toWeekKey: "Letzte Woche des Bereichs, einschliesslich.",
+} as const;
+
+function wochenbereichParam(name: keyof typeof WOCHENBEREICH_ROLLE): unknown {
+  return {
+    name,
+    in: "query",
+    required: true,
+    description: `${WOCHENBEREICH_ROLLE[name]} ${weekKeyParam.description} Zusaetzlich muss fromWeekKey vor oder gleich toWeekKey liegen; diese Regel verbindet ZWEI Parameter und kann in einem Parameterschema ebenfalls NICHT ausgedrueckt werden - der Server lehnt einen verkehrten Bereich zur Laufzeit ab.`,
+    schema: weekKeyParam.schema,
+  };
+}
+
+/**
+ * Ein Pfadparameter, der einen Bezeichner traegt — aus `IdSchema`, nicht von Hand.
+ *
+ * Der Dateikopf verspricht "kein zweiter Typenbestand, der abdriften koennte".
+ * Genau den gab es hier: die beiden Pfadparameter standen als handgeschriebenes
+ * `{ type: "string", format: "uuid" }` da und waren damit schwaecher als
+ * derselbe Begriff in jedem Rumpf und jeder Antwort — ohne Muster, ohne
+ * Beschreibung. `idempotencyHeader` macht es seit jeher richtig vor.
+ */
+function idPathParam(name: string): unknown {
+  return {
+    name,
+    in: "path",
+    required: true,
+    schema: z.toJSONSchema(IdSchema, { target: "openapi-3.0" }),
+  };
+}
 
 function jsonBody(name: NamedSchema): unknown {
   return { required: true, content: { "application/json": { schema: ref(name) } } };
@@ -306,14 +417,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
         get: {
           operationId: "getRateHistory",
           summary: "Aktive Satzversion und Historie eines Mitarbeiters",
-          parameters: [
-            {
-              name: "employeeId",
-              in: "path",
-              required: true,
-              schema: { type: "string", format: "uuid" },
-            },
-          ],
+          parameters: [idPathParam("employeeId")],
           responses: { "200": jsonOk("RateHistory", "Satzhistorie"), ...problemResponses },
         },
       },
@@ -324,6 +428,53 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           parameters: [idempotencyHeader],
           requestBody: jsonBody("CreateRateVersionCommand"),
           responses: { "201": jsonOk("RateVersionDto", "Angelegte Version"), ...problemResponses },
+        },
+      },
+      "/kosten/planversionen": {
+        get: {
+          operationId: "listPublishedPlanVersions",
+          summary: "Auswaehlbare veroeffentlichte Planversionen im Wochenbereich",
+          parameters: [wochenbereichParam("fromWeekKey"), wochenbereichParam("toWeekKey")],
+          responses: {
+            "200": jsonOk("SelectablePlanVersions", "Auswaehlbare Planversionen"),
+            ...problemResponses,
+          },
+        },
+      },
+      "/kosten/planversionen/{planVersionId}/baustellen": {
+        get: {
+          operationId: "listWorksitesForPublishedPlanVersion",
+          summary: "Auswaehlbare Baustellen einer veroeffentlichten Planversion",
+          description:
+            "Liefert AUSSCHLIESSLICH die Baustellen, auf die diese veroeffentlichte Planversion tatsaechlich Einsaetze legt - nicht die Baustellen des Mandanten. Die Reihenfolge ist Teil des Vertrags: aufsteigend nach Bezeichnung, bei gleicher Bezeichnung aufsteigend nach Id. Verglichen wird nach Zeicheneinheiten und NICHT sprachabhaengig; eine Umlautsortierung waere von der Umgebung abhaengig und damit kein Vertrag.",
+          parameters: [idPathParam("planVersionId")],
+          responses: {
+            "200": jsonOk("SelectableWorksites", "Auswaehlbare Baustellen"),
+            ...problemResponses,
+          },
+        },
+      },
+      "/kosten/snapshots": {
+        post: {
+          operationId: "createCostSnapshot",
+          summary: "Tageskosten-Snapshot aus einer veroeffentlichten Planversion erzeugen",
+          parameters: [idempotencyHeader],
+          requestBody: jsonBody("CreateCostSnapshotCommand"),
+          responses: {
+            "201": jsonOk("CostSnapshot", "Erzeugter Snapshot"),
+            ...problemResponses,
+          },
+        },
+      },
+      "/kosten/snapshots/{snapshotId}": {
+        get: {
+          operationId: "getCostSnapshot",
+          summary: "Gespeicherten Tageskosten-Snapshot lesen",
+          parameters: [idPathParam("snapshotId")],
+          responses: {
+            "200": jsonOk("CostSnapshot", "Gespeicherter Snapshot"),
+            ...problemResponses,
+          },
         },
       },
     },

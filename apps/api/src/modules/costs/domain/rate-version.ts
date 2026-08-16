@@ -19,8 +19,19 @@ export interface RateVersionRecord {
   /** Minor Units als dezimaler String — nie Gleitkomma (EYT-95). */
   readonly amountMinorUnits: string;
   readonly currency: "EUR";
-  /** Lokales Geschaeftsdatum JJJJ-MM-TT. */
+  /** Lokales Geschaeftsdatum JJJJ-MM-TT — erster Gueltigkeitstag, einschliessend. */
   readonly validFrom: string;
+  /**
+   * LETZTER wirksamer Tag, EINSCHLIESSEND. `null` = unbegrenzt (EYT-95,
+   * EYT-109 D1).
+   *
+   * Nicht die Grenze, die in `public.employee_rate_versions.valid_to` steht:
+   * die Datenbank fuehrt `[valid_from, valid_to)` halboffen (Migration 0013).
+   * Uebersetzt wird an genau einer Stelle,
+   * `infrastructure/rate-interval-boundary.ts`; oberhalb dieser Naht gibt es
+   * nur noch diese eine Lesart. Ein Nachfolger ab dem Folgetag schliesst
+   * lueckenlos an — derselbe Tag waere eine Ueberlappung.
+   */
   readonly validTo: string | null;
   readonly predecessorId: string | null;
   readonly reason: string;

@@ -9,10 +9,15 @@
 import type { GatewayResult } from "../gateway.js";
 import type { WriteOptions } from "../planning/gateway.js";
 import type {
+  CostSnapshot,
+  CreateCostSnapshotCommand,
   CreateRateVersionCommand,
   EmployeesForRates,
+  PublishedPlanVersionsQuery,
   RateHistory,
   RateVersionDto,
+  SelectablePlanVersions,
+  SelectableWorksites,
 } from "./schemas.js";
 
 export interface CostsGateway {
@@ -25,4 +30,36 @@ export interface CostsGateway {
     command: CreateRateVersionCommand,
     options: WriteOptions,
   ): Promise<GatewayResult<RateVersionDto>>;
+  /**
+   * Auswählbare Planversionen im Wochenbereich — die Auswahlliste von `/kosten`.
+   *
+   * Ein Objekt statt zweier gleichtypiger Strings, damit `from` und `to` nicht
+   * vertauschbar sind; die Reihenfolgeregel steckt im Schema.
+   */
+  publishedPlanVersions(
+    query: PublishedPlanVersionsQuery,
+  ): Promise<GatewayResult<SelectablePlanVersions>>;
+  /**
+   * Die Baustellen, auf die GENAU DIESE veröffentlichte Planversion Einsätze
+   * legt — die zweite Auswahlliste von `/kosten` (EYT-146).
+   *
+   * Bewusst an die Planversion gebunden und nicht `listWorksites()`: eine
+   * mandantenweite Baustellenliste wäre eine zweite Stammdatenquelle im
+   * Kostenmodul, und die Oberfläche könnte damit nach einer Baustelle filtern,
+   * auf der diese Version gar nichts geplant hat — das Ergebnis wäre ein leerer
+   * Snapshot, der wie ein Rechenfehler aussieht.
+   *
+   * Ein Lesen, kein Schreiben: es entsteht nichts, deshalb keine
+   * {@link WriteOptions} und serverseitig `costs.read`.
+   */
+  worksitesForPublishedPlanVersion(
+    planVersionId: string,
+  ): Promise<GatewayResult<SelectableWorksites>>;
+  /** Erzeugt einen unveränderlichen Snapshot. Pflicht-Idempotenzschlüssel wie jeder Write. */
+  createSnapshot(
+    command: CreateCostSnapshotCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<CostSnapshot>>;
+  /** Liest einen GESPEICHERTEN Snapshot. Rechnet nichts neu. */
+  snapshot(snapshotId: string): Promise<GatewayResult<CostSnapshot>>;
 }

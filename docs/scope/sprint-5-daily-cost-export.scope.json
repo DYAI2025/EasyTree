@@ -74,7 +74,8 @@
     "apps/web/app/planung/**",
     "docs/reviews/**",
     "apps/api/src/platform/idempotency/**",
-    ".gitignore"
+    ".gitignore",
+    "packages/contracts/src/planning/schemas.ts"
   ],
   "governance_paths": ["docs/scope/**"]
 }

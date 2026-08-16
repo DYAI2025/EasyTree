@@ -56,6 +56,7 @@ import {
   costOfDuration,
   CURRENCIES,
   dayAfter,
+  dayBefore,
   durationMilliseconds,
   findRateVersionOverlaps,
   HOURLY_RATE_AMOUNT_ERRORS,
@@ -1060,6 +1061,84 @@ describe("Satzversion — Gueltigkeit einschliessend, intern halboffen (AK3, V3)
 });
 
 // ---------------------------------------------------------------------------
+// EYT-109 — der Vorgaengertag als sichtbare Naht zwischen zwei Lesarten
+// ---------------------------------------------------------------------------
+
+/**
+ * `dayBefore` gehoert nicht zu V3, sondern zu EYT-109, und steht trotzdem hier:
+ * es ist die Umkehrung von `dayAfter`, und getrennt gelesen faellt niemandem
+ * auf, wenn eine der beiden Richtungen abdriftet.
+ *
+ * Der Grund fuer die Funktion ist eine echte Divergenz im Repository. Der
+ * Snapshotpfad waehlt die Satzversion HALBOFFEN aus — so wie
+ * `apps/api/src/modules/costs/domain/rate-effectivity.ts` und der
+ * EXCLUDE-Constraint der Migration 0013 — und muss die gewaehlte Zeile danach
+ * in eine EINSCHLIESSEND gemeinte `HourlyRateVersion` giessen. Die Umrechnung
+ * ist genau ein Kalendertag rueckwaerts; sie an der Aufrufstelle hinzurechnen
+ * waere an Monats-, Jahres- und Schaltjahresgrenzen falsch und dort unsichtbar.
+ */
+describe("Kalendervorgaenger — Naht zwischen halboffener und einschliessender Lesart (EYT-109)", () => {
+  it("bildet den Vortag innerhalb des Monats und ueber die Monatsgrenze", () => {
+    // POSITIVRICHTUNG, Spiegelbild des `dayAfter`-Positivfalls oben: der
+    // gewoehnliche Schritt innerhalb des Monats plus die erste Stelle, an der
+    // reine Subtraktion aufhoert zu genuegen.
+    // Gegenmutation: `dayBefore` die Eingabe unveraendert zurueckgeben lassen
+    // -> beide Zeilen rot.
+    expect(dayBefore(day(2026, 7, 16))).toEqual(day(2026, 7, 15));
+    expect(dayBefore(day(2026, 8, 1))).toEqual(day(2026, 7, 31));
+  });
+
+  it("widerlegt die blosse Tagesdekrementierung an Jahres- und Schaltjahresgrenze", () => {
+    // NEGATIVRICHTUNG: fuenf Faelle, in denen die naheliegende Rechnung
+    // `{ ...date, day: date.day - 1 }` bzw. ein fest kodierter Februar
+    // nachweislich etwas anderes liefert.
+    //   01.01.2026 -> `day - 1` ergaebe den "0. Januar 2026", keinen Kalendertag
+    //   01.03.2028 -> Schaltjahr, richtig ist der 29.02.
+    //   01.03.2026 -> Gemeinjahr, richtig ist der 28.02.
+    //   01.03.2100 -> 100er-Ausnahme der gregorianischen Regel: KEIN Schaltjahr
+    //   01.03.2000 -> 400er-Ausnahme davon: doch ein Schaltjahr
+    // Die letzten beiden Zeilen sind das Einzige, was eine Regel "durch vier
+    // teilbar" von der echten gregorianischen unterscheidet.
+    // Gegenmutation: `{ ...date, day: date.day - 1 }` -> alle Zeilen rot.
+    // Zweite Gegenmutation: Februar fest mit 28 Tagen -> zweite und fuenfte rot.
+    expect(dayBefore(day(2026, 1, 1))).toEqual(day(2025, 12, 31));
+    expect(dayBefore(day(2028, 3, 1))).toEqual(day(2028, 2, 29));
+    expect(dayBefore(day(2026, 3, 1))).toEqual(day(2026, 2, 28));
+    expect(dayBefore(day(2100, 3, 1))).toEqual(day(2100, 2, 28));
+    expect(dayBefore(day(2000, 3, 1))).toEqual(day(2000, 2, 29));
+    // Und ausdruecklich benannt, was nicht entstehen darf.
+    expect(dayBefore(day(2026, 1, 1))).not.toEqual({ year: 2026, month: 1, day: 0 });
+  });
+
+  it("ist an den Grenzen die Umkehrung von dayAfter", () => {
+    // Rundreise in BEIDE Richtungen, auf genau den Tagen, an denen naive
+    // Arithmetik bricht: Jahreswechsel und Schalttag. Eine Richtung allein
+    // genuegt nicht — eine Implementierung, die konsequent um zwei Tage
+    // danebenliegt, kaeme in der Hin-und-Rueck-Rechnung wieder heraus.
+    // Gegenmutation: den Jahresruecksprung in `dayBefore` auf den 30.12. legen
+    // -> die erste und die zweite Zeile rot.
+    expect(dayBefore(dayAfter(day(2026, 12, 31)))).toEqual(day(2026, 12, 31));
+    expect(dayAfter(dayBefore(day(2027, 1, 1)))).toEqual(day(2027, 1, 1));
+    expect(dayBefore(dayAfter(day(2028, 2, 29)))).toEqual(day(2028, 2, 29));
+    expect(dayAfter(dayBefore(day(2028, 3, 1)))).toEqual(day(2028, 3, 1));
+  });
+
+  it("normalisiert einen unmoeglichen Tag und bricht nur beim Monat ab — wie dayAfter", () => {
+    // Beide Entscheidungen von `dayAfter` gelten hier spiegelbildlich, und
+    // dieser Test haelt die Nachbarn aneinander: der "0. August" faellt auf den
+    // letzten Tag des Vormonats, so wie der "30. Februar" auf den ersten des
+    // Folgemonats faellt; ein Monat ausserhalb 1..12 bricht in beiden Faellen
+    // laut ab. Verschieden strenge Nachbarn waeren die schlechtere Ueberraschung.
+    // Gegenmutation: die Monatspruefung am Kopf von `dayBefore` entfernen
+    // -> dritte Zeile rot, weil {2026,13,4} zurueckkaeme statt eines Abbruchs.
+    expect(dayBefore(day(2026, 8, 0))).toEqual(day(2026, 7, 31));
+    expect(dayAfter(day(2026, 2, 30))).toEqual(day(2026, 3, 1));
+    expect(() => dayBefore(day(2026, 13, 5))).toThrow(RangeError);
+    expect(() => dayAfter(day(2026, 13, 5))).toThrow(RangeError);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // V5.5 — kanonische, deduplizierte Ueberlappungsstruktur
 // ---------------------------------------------------------------------------
 
@@ -1413,6 +1492,12 @@ describe("Fehlercodelisten — doppelfrei und vollstaendig erreichbar", () => {
     expect([...fehlerlisten].sort()).toEqual([
       "COST_POSITION_INPUT_ERRORS",
       "HOURLY_RATE_AMOUNT_ERRORS",
+      // EYT-109: die neunte Liste. Sie steht hier, weil dieser Test genau das
+      // verlangt — die Ableitung oben deckt sie ab dem ersten Moment ab, diese
+      // Zeile ist die Quittung dafuer, dass jemand sie gesehen hat. Ihre
+      // Erreichbarkeit wird in `local-day-allocation.test.ts` mit echten Zonen
+      // belegt, nicht hier.
+      "LOCAL_DAY_ALLOCATION_ERRORS",
       "MONEY_ERRORS",
       "PLAN_COST_AMOUNT_ERRORS",
       "QUANTITY_ERRORS",

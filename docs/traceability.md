@@ -298,22 +298,70 @@ selbst von einem „begrenzten modularen Schnitt". FR-010 (Ist-Kosten) ist nicht
 
 ## S5 Tabelle C — True-Line-Felder und Reality Ledger
 
-| Requirement | value-check-id | true-line-status  | evidence-class | wired-in-prod? | CI-Bindung (Workflow · Job · Schritt)                                                      |
-| ----------- | -------------- | ----------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------ |
-| S5·REQ-001  | VC-S5-001      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` **+** `db-gates` · `supabase test db`                           |
-| S5·REQ-002  | VC-S5-002      | `blocked`         | `none`         | no             | `db-gates` · Tenant-Gate + `supabase test db` **+** `read-through` · Harness               |
-| S5·REQ-003  | VC-S5-003      | `pending`         | `none`         | no             | `db-gates` · Planungsinvarianten-Gate **+** `read-through` · Harness                       |
-| S5·REQ-004  | VC-S5-004      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` **+** `db-gates` · `supabase test db`                           |
-| S5·REQ-005  | VC-S5-005      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` + TZ-Matrix **+** `db-gates` · Tenant-Gate                      |
-| S5·REQ-006  | VC-S5-006      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` **+** `read-through` · Harness                                  |
-| S5·REQ-007  | VC-S5-007      | `pending`         | `none`         | no             | `unit-tests` · `pnpm test` **+** `read-through` · Harness                                  |
-| S5·REQ-008  | VC-S5-008      | `review-required` | `none`         | no             | `read-through` · `bash scripts/read-through-harness.sh` — **Pflichtcheck seit 30.07.2026** |
-| S5·REQ-G01  | VC-S5-G01      | `review-required` | `none`         | no             | n/a — Governance-Vorschlag, nicht baseline-bestätigt                                       |
-| S5·REQ-G02  | VC-S5-G02      | `pending`         | `none`         | no             | n/a — Governance-Vorschlag, nicht baseline-bestätigt                                       |
+| Requirement | value-check-id | true-line-status  | evidence-class        | wired-in-prod?          | CI-Bindung (Workflow · Job · Schritt)                                                                                             |
+| ----------- | -------------- | ----------------- | --------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| S5·REQ-001  | VC-S5-001      | `pending`         | `none`                | no                      | `unit-tests` · `pnpm test` **+** `db-gates` · `supabase test db`                                                                  |
+| S5·REQ-002  | VC-S5-002      | `blocked`         | `none`                | no                      | `db-gates` · Tenant-Gate + `supabase test db` **+** `read-through` · Harness                                                      |
+| S5·REQ-003  | VC-S5-003      | `pending`         | `none`                | no                      | `db-gates` · Planungsinvarianten-Gate **+** `read-through` · Harness                                                              |
+| S5·REQ-004  | VC-S5-004      | `pending`         | `none`                | no                      | `unit-tests` · `pnpm test` **+** `db-gates` · `supabase test db`                                                                  |
+| S5·REQ-005  | VC-S5-005      | `pending`         | `real-boundary-smoke` | yes (Lesen + Schreiben) | `unit-tests` · `pnpm test` + TZ-Matrix **+** `db-gates` · Kosten-Snapshot-Gate (EYT-138) + Snapshot-Unveraenderlichkeit (EYT-143) |
+| S5·REQ-006  | VC-S5-006      | `pending`         | `real-boundary-smoke` | yes (Lesen + Schreiben) | `unit-tests` · `pnpm test` **+** `auth-journey` · reale Reise gegen `dist/main.js`                                                |
+| S5·REQ-007  | VC-S5-007      | `pending`         | `none`                | no                      | `unit-tests` · `pnpm test` **+** `read-through` · Harness                                                                         |
+| S5·REQ-008  | VC-S5-008      | `review-required` | `none`                | no                      | `read-through` · `bash scripts/read-through-harness.sh` — **Pflichtcheck seit 30.07.2026**                                        |
+| S5·REQ-G01  | VC-S5-G01      | `review-required` | `none`                | no                      | n/a — Governance-Vorschlag, nicht baseline-bestätigt                                                                              |
+| S5·REQ-G02  | VC-S5-G02      | `pending`         | `none`                | no                      | n/a — Governance-Vorschlag, nicht baseline-bestätigt                                                                              |
 
 `production-verified` ist in Sprint 5 unerreichbar — die Baseline schließt produktives
 Deployment und Produktionsfreigabe ausdrücklich aus. Höchster erreichbarer Wert:
 `real-boundary-smoke`.
+
+### Nachtrag 14.08.2026 — EYT-109 Task 20, teilweiser Nachzug
+
+Geändert wurden **zwei Felder in zwei Zeilen**, jedes gegen eine Messung:
+
+- **`evidence-class` → `real-boundary-smoke`.** `S5·REQ-005` hängt an den
+  `db-gates`-Schritten „Kosten-Snapshot — Persistenz, Atomizität, Rechte, Kanal" (EYT-138) und
+  „Snapshot-Unveränderlichkeit gegen spätere Sätze" (EYT-143) gegen echtes PostgreSQL;
+  `S5·REQ-006` an `auth-journey` mit echtem Chromium, echtem GoTrue und echten HttpOnly-Cookies
+  gegen `dist/main.js`. Beide Jobs sind auf `f2b49d3` grün (Lauf `31757338756`, 11/11).
+  `production-verified` bleibt unerreichbar — daran ändert dieser Nachzug nichts.
+- **`wired-in-prod?` → `yes`.** Legende: Produktions-Kompositionswurzel. Gemessen steht
+  `CostsController` im `controllers`-Array von `apps/api/src/app.module.ts` (Z. 77, Import
+  Z. 41); das Snapshot-Repository hängt als Fabrik am Token
+  `COST_SNAPSHOT_REPOSITORY_FACTORY` (Z. 147–156, `new PgCostSnapshotRepository(…)` in Z. 154),
+  **nicht** als Klasse im Provider-Array. Im Browser verdrahten
+  `CostsGatewayProvider`/`createCostsGateway` in `apps/web/app/providers.tsx` (Z. 9–10, 48, 64)
+  — Lese- **und** Schreibpfad.
+- Die **CI-Bindung** beider Zeilen war überholt: `S5·REQ-005` nannte das Tenant-Gate,
+  `S5·REQ-006` den `read-through`-Harness. Der Harness ersetzt `REQUEST_IDENTITY` und kann eine
+  Browserreise nicht belegen; der tragende Job ist `auth-journey`.
+
+**Ausdrücklich NICHT geändert — und warum:**
+
+- **`true-line-status` bleibt `pending`** — und die zuerst notierte Begründung dafür war
+  falsch. Sie lautete „einen vierten Wert zu erfinden wäre Selbstermächtigung"; gemessen werden
+  in dieser Datei aber **vier** Werte benutzt, und `pass` ist mit zehn Vorkommen (Sprint-4-
+  Tabelle, Z. 115–126) der häufigste. Es gäbe also nichts zu erfinden.
+  Der Wert bleibt trotzdem stehen, aus zwei anderen Gründen: für `true-line-status` gibt es
+  **weder in dieser Datei noch sonst im Repository eine Legende** (Legenden existieren nur für
+  `evidence-class`, Z. 39, und `wired-in-prod?`, Z. 56) — was `pass` genau zusichert, ist damit
+  nirgends festgeschrieben. Und die Sprint-4-Zeilen tragen `pass` neben `wired-in-prod?` =
+  **ja**; der Sprint-5-Schnitt ist nicht produktiv verdrahtet. Wer den Wert setzt, entscheidet
+  eine Bedeutung mit — das gehört zum Product Owner, zusammen mit der fehlenden Legende.
+- **`docs/traceability/REQUIREMENT_TO_JIRA_v1.3.csv` ist unangetastet.** Der Plan (Task 20
+  Schritt 2) nennt genau diese Datei; sie liegt **außerhalb** des armierten Scope-Manifests
+  (`docs/scope/sprint-5-daily-cost-export.scope.json` führt `docs/traceability.md` als Literal,
+  kein Glob über das gleichnamige Verzeichnis). Reproduziert: der Scope-Check lehnt den CSV-Pfad
+  mit `PRIL_POLICY_VIOLATION`, Exit 3 ab. Eine Erweiterung des Manifests wäre eine
+  PO-Entscheidung, keine Ausführungsentscheidung.
+  **Nebenbefund, gemessen und aufgelöst.** Die S5-Zusammenfassung oben und `CLAUDE.md` sagten
+  Gegenteiliges über `read-through`: hier „seit 30.07.2026 Pflichtcheck, 0 offen", dort
+  „_nicht_ required, der Verifizierer meldet `FAIL AC3`". Am 14.08.2026 ausgeführt
+  (`bash scripts/verify-branch-protection.sh`, lesend):
+  `PASS AC3 — alle 11 Pflichtchecks sind als required_status_checks gesetzt`, dazu
+  `strict_required_status_checks_policy=true` und `0 offen`. **Diese Datei lag richtig,
+  `CLAUDE.md` war veraltet** und ist im selben Zug korrigiert. Einzige Ungenauigkeit hier: die
+  Zusammenfassung spricht von „zehn Kontexte" — es sind inzwischen **elf**.
 
 ## S5 Dokumentationsdrift-Ledger
 
@@ -343,7 +391,8 @@ Deployment und Produktionsfreigabe ausdrücklich aus. Höchster erreichbarer Wer
 - mit allen sechs Canvas-Pflichtfeldern: 10 · mit True-Line-Feldern: 10
 - **mit exakter CI-Ausführungsbindung: 8 von 8** (Preflight 30.07.2026, [`docs/plans/2026-07-30-sprint-5-daily-cost-export.md`](plans/2026-07-30-sprint-5-daily-cost-export.md))
 - **davon in einem blockierenden Job: 8 von 8** — `read-through` ist seit 30.07.2026 Pflichtcheck (Ruleset `19718704`, zehn Kontexte, `verify-branch-protection.sh`: 0 offen)
-- `evidence-class` besser als `none`: 0 · `wired-in-prod?` = yes: 0
+- `evidence-class` besser als `none`: **2** · `wired-in-prod?` = yes: **2** (Nachzug 14.08.2026,
+  EYT-109 Task 20 — siehe Nachtrag unter Tabelle C)
 - offene Widersprüche: **0** · Dokumentationsdrift: **1** (`DOC-DRIFT-S5-001`, kein Blocker)
 
 ## S5 User Confirmation

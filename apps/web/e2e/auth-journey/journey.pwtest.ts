@@ -58,6 +58,30 @@ import { psqlMitMarker } from "./global-setup";
  *
  * - `REQUEST_IDENTITY` fest auf Benutzer A verdrahten: Bs Sitzung nennt dann
  *   As Id und der Kostenpfad laesst B durch — beide B-Nachweise werden rot.
+ * - Die Kostenansicht die Gesamtsumme aus den Positionen summieren lassen
+ *   (EYT-144): Schritt 9e wird rot — bei EINER Position faellt das hier zwar
+ *   nicht auf, wohl aber in `kosten-ansicht.test.tsx` (Fall A1), wo die Fixtur
+ *   Kopf- und Positionssumme absichtlich auseinanderlegt. Hier greift dafuer
+ *   der Vergleich gegen PostgreSQL.
+ * - Die Kostenansicht beim Oeffnen von `?snapshot=<id>` erneut erzeugen lassen
+ *   (EYT-144): Schritt 9f wird rot (`POST /api/v1/kosten/snapshots` steht dann
+ *   im Netzwerkprotokoll nach dem Reload), und 9g ebenfalls, weil das Skript
+ *   `eyt144-snapshot-pruefen.sql` dann `koepfe=2` zaehlt.
+ * - `costs.read` aus der Route `GET /kosten/planversionen` entfernen: der
+ *   B-Nachweis „B erreicht weder Planversionsliste noch fremden Snapshot" wird
+ *   rot, weil die Liste mit dem Organisationsheader von A dann 200 liefert.
+ * - `pruefeRecht` in `MembershipCostAccessPolicy` auf „immer ok" setzen oder
+ *   den `costs.read`-Zweig aus `KostenZugang` entfernen: Schritt 9g2 wird rot —
+ *   ein `member` DERSELBEN Organisation saehe dann Kosten. Das ist die Grenze,
+ *   die der B-Nachweis unten NICHT misst: dort fehlt die Mitgliedschaft, und
+ *   die Policy beantwortet `ORG_NOT_A_MEMBER` und `PERMISSION_MISSING`
+ *   absichtlich gleich.
+ * - `('member','costs.read')` in `role_permissions` eintragen: 9g2 wird rot —
+ *   an der Praemissenzusicherung, noch vor der ersten Messung.
+ * - `GET /kosten/snapshots/:id` neu rechnen statt lesen lassen: Schritt 9g3
+ *   wird rot, weil die Antwort nach der Satzaenderung eine andere Snapshot-Id
+ *   und andere Positions-Ids traegt. Der BETRAG faellt dabei ausdruecklich
+ *   nicht — die Begruendung steht bei 9g3.
  * - `serializeAccessCookie` ohne `HttpOnly` (Schritt 4).
  * - `SameSite=Lax` statt `Strict` (Schritt 4).
  * - Die Kosten-Navigation unabhaengig von `costs.read` rendern (Schritt 6
@@ -143,6 +167,77 @@ const ABLOESE_DATUM = "2026-09-01";
 const ABLOESE_GRUND = "Tariferhoehung der E2E-Reise";
 
 /**
+ * Der letzte wirksame Tag des Vorgaengers (EYT-109 D1).
+ *
+ * Von Hand ausgeschrieben und NICHT aus {@link ABLOESE_DATUM} gerechnet:
+ * teilte sich der Test die Umrechnung mit dem Produktivcode, hoebe ein Fehler
+ * darin sich auf und der Nachweis waere gruen, ohne etwas zu messen
+ * (`net-count-checks-cancel-out`). August hat 31 Tage.
+ */
+const LETZTER_TAG_VOR_ABLOESUNG = "2026-08-31";
+/** Dasselbe fuer die zweite Abloesung: September hat 30 Tage. */
+const LETZTER_TAG_VOR_ABLOESUNG_3 = "2026-09-30";
+
+/**
+ * Die ZWEITE Abloesung — sie entsteht NACH dem Snapshot (EYT-109 Task 17).
+ *
+ * Das Datum muss echt spaeter liegen als {@link ABLOESE_DATUM}: `pruefeAbloesung`
+ * verlangt `nachfolger.validFrom > vorgaenger.validFrom` und liefert sonst
+ * `NACHFOLGER_NICHT_SPAETER`. Und es liegt weit hinter dem Leistungstag des
+ * Snapshots (03.08.2026) — nicht aus Bequemlichkeit, sondern weil die
+ * Satzabloesung ueberhaupt keinen rueckwirkenden Nachfolger zulaesst. Was der
+ * Nachweis darum zeigen kann und was nicht, steht bei Schritt 9g3.
+ *
+ * Fest und nicht relativ zu heute, aus demselben Grund wie {@link ABLOESE_DATUM}.
+ * Der Lauf bleibt dadurch datumsunabhaengig: welche der drei Versionen am
+ * Laufdatum „aktiv" heisst, spielt fuer keine Zusicherung eine Rolle — 9g3
+ * waehlt seinen Vorgaenger ueber `validTo === null`, nicht ueber den Status.
+ */
+const ABLOESE_DATUM_3 = "2026-10-01";
+const ABLOESE_GRUND_3 = "Zweite Tariferhoehung nach dem Snapshot";
+const ABLOESE_BETRAG_3 = "5100";
+/**
+ * Idempotenzschluessel der zweiten Abloesung.
+ *
+ * Als Konstante und im Aufruf ueber eine kurze lokale Bindung — dieselbe
+ * gitleaks-Falle wie bei {@link PUBLISH_VORGANG_146}: die Regel
+ * `generic-api-key` schlaegt auf `Key": <bezeichner>` an, sobald der BEZEICHNER
+ * genug Entropie hat.
+ */
+const SATZ_VORGANG_3 = `e2e-satz-nach-snapshot-${ABLOESE_DATUM_3}`;
+
+/**
+ * Der Kosten-Snapshot der Reise (EYT-144) — von Hand nachgerechnet.
+ *
+ * Die Zuweisung aus `fixtures.sql` laeuft am 03.08.2026 von 06:00Z bis 14:00Z,
+ * in `Europe/Berlin` also 08:00–16:00: acht Stunden an EINEM lokalen Tag. Der
+ * am 03.08. wirksame Satz ist der Startsatz mit 4250 Minor Units — die
+ * Abloesung aus 9a beginnt erst am {@link ABLOESE_DATUM} (01.09.2026) und darf
+ * hier gerade NICHT greifen. 8 × 4250 = 34000.
+ *
+ * Diese Zahl steht als Konstante und wird NICHT aus der Antwort uebernommen:
+ * ein Server, der 0 lieferte, saehe sonst genauso gruen aus. Zusaetzlich
+ * vergleicht die Reise die Anzeige mit dem Antwortkoerper UND mit der Zeile in
+ * PostgreSQL — drei unabhaengige Quellen fuer denselben Betrag.
+ */
+const ERWARTETE_KOSTEN_MINOR = "34000";
+const ERWARTETE_KOSTEN_ANZEIGE = "340,00 EUR";
+/** 28.800.000 ms, wie die Ansicht sie formatiert. */
+const ERWARTETE_DAUER = "8:00 h";
+
+/**
+ * Die Snapshot-Id der Reise, fuer den B-Nachweis (EYT-144).
+ *
+ * Modulweit, weil beide Faelle sie brauchen und in verschiedenen Testfunktionen
+ * stehen; `mode: "serial"` plus `workers: 1` garantieren die Reihenfolge. Faellt
+ * Reise A aus, bleibt sie leer — B faellt dann auf {@link ID_OHNE_SNAPSHOT}
+ * zurueck, damit sein Nachweis eine gueltige Id anfragt statt an der
+ * Eingabepruefung zu scheitern und damit gar nichts ueber Rechte zu sagen.
+ */
+let reiseSnapshotId = "";
+const ID_OHNE_SNAPSHOT = "00000000-0000-4000-8000-00000000dead";
+
+/**
  * Die Planwoche der Publish-Reise (EYT-107).
  *
  * Muss zu den Zeitstempeln in `fixtures.sql` passen: `2026-08-03T06:00:00Z`
@@ -151,6 +246,55 @@ const ABLOESE_GRUND = "Tariferhoehung der E2E-Reise";
  * es nicht.
  */
 const PLANWOCHE = "2026-W32";
+
+/**
+ * Die zweite Planwoche — der Baustellenfilter (EYT-146).
+ *
+ * EIGENE Woche und eigene Planversion, damit die von EYT-144 abgenommenen
+ * Zahlen (`ERWARTETE_KOSTEN_MINOR`, eine Position) unangetastet bleiben. Eine
+ * zweite Zuweisung in `PLANWOCHE` haette beide veraendert, und ein Nachweis,
+ * der einen abgenommenen umschreibt, ist ein schlechter Nachweis.
+ *
+ * `2026-08-10T06:00:00Z` ist in `Europe/Berlin` Montag der ISO-Woche 33 — die
+ * Zuordnung, die der Publish-Pfad prueft. W33 ist frei: W32 gehoert der Reise,
+ * W35 dem Schritt 9c3, W36/W37 den Angriffswochen.
+ */
+const PLANWOCHE_146 = "2026-W33";
+/** Der Entwurf aus `fixtures.sql`, den 9h ueber die echte API veroeffentlicht. */
+const ENTWURF_146 = "00000000-0000-4000-8000-00000000e252";
+/**
+ * Die beiden Baustellen der W33-Version — benannt nach ihrer ROLLE im Nachweis,
+ * nicht nach ihrer Reihenfolge.
+ *
+ * Gefiltert wird auf „E2E-Baustelle Reise" (…e241). „E2E-Baustelle Filter B"
+ * (…e242) ist die, die danach nirgends mehr auftauchen darf — im Snapshot
+ * nicht, in PostgreSQL nicht und im HTML nicht.
+ */
+const BAUSTELLE_GEFILTERT = "00000000-0000-4000-8000-00000000e241";
+const BAUSTELLE_AUSGESCHLOSSEN = "00000000-0000-4000-8000-00000000e242";
+/**
+ * Der gefilterte Betrag — von Hand nachgerechnet, wie {@link ERWARTETE_KOSTEN_MINOR}.
+ *
+ * Die Zuweisung auf …e241 laeuft am 10.08.2026 von 06:00Z bis 10:00Z, in
+ * `Europe/Berlin` also 08:00–12:00: vier Stunden an EINEM lokalen Tag. Der
+ * Startsatz betraegt 4250 Minor Units; die Abloesung aus 9a beginnt erst am
+ * {@link ABLOESE_DATUM}. 4 × 4250 = 17000.
+ *
+ * Die zweite Zuweisung (…e242, 11:00Z–15:00Z) traegt denselben Betrag. Genau
+ * deshalb ist 17000 aussagekraeftig: waere der Filter wirkungslos, stuende hier
+ * 34000 — die Zahl faellt also nicht nur bei einem leeren, sondern auch bei
+ * einem ungefilterten Ergebnis auf.
+ */
+const ERWARTETE_FILTER_MINOR = "17000";
+const ERWARTETE_FILTER_ANZEIGE = "170,00 EUR";
+/**
+ * Idempotenzschluessel des EYT-146-Publish.
+ *
+ * Als Konstante und nicht als Literal im Header — dieselbe gitleaks-Falle wie
+ * bei {@link B_PUBLISH_VORGANG}: die Regel `generic-api-key` matcht das Muster
+ * `Key": "<wert>"` und meldete den Inline-Wert als Fund.
+ */
+const PUBLISH_VORGANG_146 = `e2e-publish-${PLANWOCHE_146}`;
 
 /**
  * Idempotenzschluessel des B-Nachweises.
@@ -514,7 +658,12 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     await page.waitForURL("**/kosten");
     await expect(page.getByRole("heading", { name: "Kosten", level: 1 })).toBeVisible();
     await expect(page.getByTestId("kosten-unauthenticated")).toHaveCount(0);
-    await expect(page.getByTestId("kosten-leer")).toBeVisible();
+    // Bis EYT-144 stand hier `kosten-leer` — der Platzhalter der Ansicht, die
+    // noch keine Berechnung hatte. Die Ansicht ist jetzt echt; ihr ehrlicher
+    // Anfangszustand heisst „noch kein Snapshot gewaehlt". Die Aussage des
+    // Schrittes bleibt dieselbe: angemeldet, berechtigt, und OHNE Zahlen.
+    await expect(page.getByTestId("kosten-kein-snapshot")).toBeVisible();
+    await expect(page.getByLabel("Von Woche")).toBeVisible();
   });
 
   await test.step("4 — Sicherheitsnachweis: beide Sitzungscookies sind HttpOnly und Strict", async () => {
@@ -660,6 +809,22 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     await expect(tabelle.getByText(`ersetzt Version vom 2026-01-01`)).toBeVisible();
     await expect(tabelle.getByText("2026-01-01").first()).toBeVisible();
     await expect(tabelle.getByText(ABLOESE_GRUND)).toBeVisible();
+
+    // EYT-109 D1 — die Naht, im echten Browser gelesen.
+    //
+    // Unter „Gültig bis" steht der LETZTE wirksame Tag, nicht der Beginn des
+    // Nachfolgers: der Vorgaenger endet am 31.08., der Nachfolger beginnt am
+    // 01.09. Kein Tag doppelt, keiner fehlt. Vor D1 stand hier zweimal
+    // `2026-09-01` — einmal als Ende, einmal als Beginn.
+    //
+    // Gegenmutation: `dbEndeZuValidTo` aus `toRecord` entfernen -> die Spalte
+    // zeigte wieder `2026-09-01`, und diese Zusicherung wird rot.
+    // `gueltig-bis` wird NICHT umbenannt (`removing-a-testid-breaks-e2e-silently`).
+    const enddaten = await tabelle.getByTestId("gueltig-bis").allTextContents();
+    expect(enddaten).toHaveLength(2);
+    expect(enddaten).toContain(LETZTER_TAG_VOR_ABLOESUNG);
+    expect(enddaten).toContain("—");
+    expect(enddaten).not.toContain(ABLOESE_DATUM);
 
     await page.screenshot({
       path: join(ARTEFAKTE, "03-satzabloesung.png"),
@@ -1546,6 +1711,934 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     };
   });
 
+  // ---------------------------------------------------------------------
+  // 9e–9g3 — Der Kostendurchstich (EYT-144) und seine beiden Grenzen (EYT-109)
+  // ---------------------------------------------------------------------
+  // Erst hier moeglich: 9d hat die Planversion GERADE veroeffentlicht, und ein
+  // Snapshot entsteht ausschliesslich aus einer veroeffentlichten Version.
+  // Genau deshalb steht dieser Block nach 9d und nicht bei den anderen
+  // Kostenschritten (8/9/9a/9b) weiter oben.
+  let kostenSnapshotId = "";
+
+  await test.step("9e — /kosten erzeugt aus der echten Planversion einen gespeicherten Snapshot", async () => {
+    const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+    const listenAntwort = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/kosten/planversionen" &&
+        r.request().method() === "GET",
+    );
+    await page.goto("/kosten");
+    await page.getByLabel("Von Woche").fill(PLANWOCHE);
+    await page.getByLabel("Bis Woche").fill(PLANWOCHE);
+    await page.getByRole("button", { name: "Planversionen laden" }).click();
+
+    const antwort = await listenAntwort;
+    expect(antwort.status()).toBe(200);
+    const liste = (await antwort.json()) as {
+      versions: { id: string; weekKey: string; publishedAt: string }[];
+    };
+    // GENAU die Version, die 9d veroeffentlicht hat — kein Entwurf, keine
+    // fremde. Ohne diesen Vergleich bewiese die Liste nur, dass sie nicht leer
+    // ist.
+    expect(liste.versions.map((v) => v.id)).toEqual([veroeffentlichteVersionId]);
+    expect(liste.versions[0]?.weekKey).toBe(PLANWOCHE);
+    expect(apiAufrufe).toContain("GET /api/v1/kosten/planversionen");
+
+    const erzeugt = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/kosten/snapshots" && r.request().method() === "POST",
+    );
+    await page
+      .getByLabel("Veröffentlichte Planversion")
+      .selectOption({ value: veroeffentlichteVersionId });
+    await page.getByRole("button", { name: "Snapshot erzeugen" }).click();
+
+    const post = await erzeugt;
+    expect(post.status()).toBe(201);
+    const gespeichert = (await post.json()) as {
+      id: string;
+      planVersionId: string;
+      totalMinorUnits: string;
+      weekKey: string;
+      days: { localDate: string; amountMinorUnits: string }[];
+      positions: { id: string; amountMinorUnits: string; rateVersionId: string }[];
+    };
+    kostenSnapshotId = gespeichert.id;
+    reiseSnapshotId = gespeichert.id;
+    expect(kostenSnapshotId).not.toBe("");
+    expect(gespeichert.planVersionId).toBe(veroeffentlichteVersionId);
+    expect(gespeichert.weekKey).toBe(PLANWOCHE);
+    // Der nachgerechnete Betrag, nicht der zurueckgelesene: siehe
+    // {@link ERWARTETE_KOSTEN_MINOR}.
+    expect(gespeichert.totalMinorUnits).toBe(ERWARTETE_KOSTEN_MINOR);
+    expect(gespeichert.positions).toHaveLength(1);
+
+    // Die Oberflaeche zeigt den GESPEICHERTEN Stand.
+    const ansicht = page.getByTestId("kosten-snapshot");
+    await expect(ansicht).toBeVisible();
+    await expect(ansicht).toHaveAttribute("data-snapshot-id", kostenSnapshotId);
+    await expect(page.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_KOSTEN_ANZEIGE);
+    await expect(page.getByTestId("kosten-planversion-id")).toHaveText(veroeffentlichteVersionId);
+    await expect(page.getByTestId("kosten-regelversion")).toHaveText("personnel-plan-cost-v1");
+    await expect(page.getByTestId("kosten-baustellenfilter")).toHaveText("alle Baustellen");
+
+    // Bis zur Einzelposition — mit Person, Baustelle, Dauer und Betrag.
+    const positionen = page.getByTestId("kosten-position");
+    await expect(positionen).toHaveCount(1);
+    await expect(positionen.first()).toHaveAttribute(
+      "data-amount-minor-units",
+      ERWARTETE_KOSTEN_MINOR,
+    );
+    await expect(positionen.first()).toContainText(MITARBEITER_NAME);
+    await expect(positionen.first()).toContainText("E2E-Baustelle Reise");
+    await expect(positionen.first()).toContainText(ERWARTETE_DAUER);
+    // Und die Tagessumme des einen lokalen Tages.
+    await expect(page.getByTestId("kosten-tag")).toHaveCount(1);
+    await expect(page.getByTestId("kosten-tag")).toContainText("2026-08-03");
+
+    // Die Adresse traegt den Snapshot — Voraussetzung fuer 9f und 9g.
+    expect(new URL(page.url()).search).toBe(`?snapshot=${kostenSnapshotId}`);
+
+    // UND er liegt wirklich in PostgreSQL. Das ist die Aussage, die der
+    // Browser nicht treffen kann.
+    const gepruefte = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt144-snapshot-pruefen.sql"),
+      [
+        "-v",
+        `snapshot_id=${kostenSnapshotId}`,
+        "-v",
+        `summe=${ERWARTETE_KOSTEN_MINOR}`,
+        "-v",
+        "positionen=1",
+        "-v",
+        `woche=${PLANWOCHE}`,
+      ],
+      "[eyt144-snapshot]",
+    );
+    console.log(`  ${gepruefte}`);
+
+    await page.screenshot({ path: join(ARTEFAKTE, "07-kosten-snapshot.png"), fullPage: true });
+    schritte["9e_kosten_snapshot"] = {
+      snapshotId: kostenSnapshotId,
+      planVersionId: veroeffentlichteVersionId,
+      summe: gespeichert.totalMinorUnits,
+      positionen: gespeichert.positions.length,
+      datenbank: gepruefte,
+    };
+  });
+
+  await test.step("9f — Reload zeigt DENSELBEN Snapshot, ohne ihn neu zu erzeugen", async () => {
+    const vorher = apiAufrufe.length;
+    await page.reload();
+
+    const ansicht = page.getByTestId("kosten-snapshot");
+    await expect(ansicht).toBeVisible();
+    await expect(ansicht).toHaveAttribute("data-snapshot-id", kostenSnapshotId);
+    await expect(page.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_KOSTEN_ANZEIGE);
+    await expect(page.getByTestId("kosten-position")).toHaveAttribute(
+      "data-amount-minor-units",
+      ERWARTETE_KOSTEN_MINOR,
+    );
+
+    // Der eigentliche Nachweis ist eine ABWESENHEIT: nach dem Reload steht im
+    // Netzwerkprotokoll ein Lesen des gespeicherten Standes und KEIN Schreiben.
+    // Ohne diese Zaehlung koennte die Ansicht denselben Betrag anzeigen und
+    // dabei stillschweigend einen zweiten Snapshot angelegt haben.
+    const seitReload = apiAufrufe.slice(vorher);
+    expect(seitReload).toContain(`GET /api/v1/kosten/snapshots/${kostenSnapshotId}`);
+    expect(seitReload).not.toContain("POST /api/v1/kosten/snapshots");
+    // Und keine Satzabfrage: ein Snapshot wird gelesen, nicht neu bewertet.
+    expect(seitReload.filter((a) => a.includes("/kosten/stundensaetze"))).toEqual([]);
+
+    schritte["9f_reload"] = {
+      snapshotId: kostenSnapshotId,
+      aufrufe_seit_reload: seitReload,
+    };
+  });
+
+  await test.step("9g — ein ZWEITER Browserkontext sieht denselben gespeicherten Snapshot", async () => {
+    const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+    const zweiter = await page.context().browser()?.newContext();
+    if (zweiter === undefined) throw new Error("[auth-journey] kein zweiter Browserkontext.");
+    try {
+      const seite2 = await zweiter.newPage();
+      const aufrufe2: string[] = [];
+      seite2.on("request", (anfrage) => {
+        const pfad = new URL(anfrage.url()).pathname;
+        if (pfad.startsWith("/api/")) aufrufe2.push(`${anfrage.method()} ${pfad}`);
+      });
+
+      await seite2.goto("/anmelden");
+      await seite2.getByLabel("E-Mail").fill(email);
+      await seite2.getByLabel("Passwort").fill(passwort);
+      await seite2.getByRole("button", { name: "Anmelden" }).click();
+      await seite2.waitForURL((u) => !u.pathname.startsWith("/anmelden"));
+
+      await seite2.goto(`/kosten?snapshot=${kostenSnapshotId}`);
+      const ansicht2 = seite2.getByTestId("kosten-snapshot");
+      await expect(ansicht2).toBeVisible();
+      await expect(ansicht2).toHaveAttribute("data-snapshot-id", kostenSnapshotId);
+      await expect(seite2.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_KOSTEN_ANZEIGE);
+      await expect(seite2.getByTestId("kosten-position")).toHaveAttribute(
+        "data-amount-minor-units",
+        ERWARTETE_KOSTEN_MINOR,
+      );
+      // Eigene Cookies, eigener Speicher — und trotzdem kein Schreibzugriff.
+      expect(aufrufe2).toContain(`GET /api/v1/kosten/snapshots/${kostenSnapshotId}`);
+      expect(aufrufe2).not.toContain("POST /api/v1/kosten/snapshots");
+
+      await seite2.screenshot({ path: join(ARTEFAKTE, "08-kosten-zweiter-kontext.png") });
+    } finally {
+      await zweiter.close();
+    }
+
+    // Nach Reload UND zweitem Kontext: immer noch GENAU EIN Snapshot. Das ist
+    // der Beweis, dass Ansehen nichts erzeugt — die Zaehlung im Skript
+    // (`koepfe`) umfasst alle Snapshots dieser Organisation, nicht nur den
+    // erwarteten.
+    const nachher = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt144-snapshot-pruefen.sql"),
+      [
+        "-v",
+        `snapshot_id=${kostenSnapshotId}`,
+        "-v",
+        `summe=${ERWARTETE_KOSTEN_MINOR}`,
+        "-v",
+        "positionen=1",
+        "-v",
+        `woche=${PLANWOCHE}`,
+      ],
+      "[eyt144-snapshot]",
+    );
+    console.log(`  ${nachher}`);
+    expect(nachher).toContain("koepfe=1");
+    schritte["9g_zweiter_kontext"] = { snapshotId: kostenSnapshotId, datenbank: nachher };
+  });
+
+  // ---------------------------------------------------------------------
+  // 9g2 — Die Kostengrenze innerhalb DERSELBEN Organisation (EYT-109 Task 17)
+  // ---------------------------------------------------------------------
+  // Was der bestehende B-Nachweis am Ende dieser Datei NICHT sagt: dort hat B
+  // ueberhaupt keine Mitgliedschaft, und die Ablehnung kann genauso gut daran
+  // haengen, dass es fuer ihn keine Organisation gibt. `MembershipCostAccessPolicy`
+  // beantwortet `ORG_NOT_A_MEMBER` und `PERMISSION_MISSING` ABSICHTLICH gleich
+  // (403, derselbe Text, kein Existenzleck) — von aussen ist am Status also
+  // nicht ablesbar, welcher der beiden Riegel getragen hat.
+  //
+  // Dieser Schritt trennt sie, und zwar an einer MESSBAREN Stelle: mit aktiver
+  // Mitgliedschaft loest die Policy die Organisation auch OHNE Header eindeutig
+  // auf (`memberships.length === 1`) und faellt erst am Recht. Ohne
+  // Mitgliedschaft kommt sie gar nicht so weit und antwortet 400
+  // (`ORG_CONTEXT_REQUIRED`) — genau das misst der bestehende Nachweis unten in
+  // „der Kostenpfad lehnt B stabil ab". Die beiden Faelle sind damit an ihrem
+  // Statuspaar unterscheidbar (403/403 hier gegen 400/403 dort), und keiner
+  // ersetzt den anderen.
+  //
+  // Gegenmutationen, die diesen Schritt rot machen:
+  // - `('member','costs.read')` in `role_permissions` eintragen: der Schritt
+  //   wird rot, und zwar VOR dem ersten Angriff — an der Praemissenzusicherung
+  //   ueber Bs eigenes Token. Genau so soll es sein: der Nachweis waere damit
+  //   vakuos geworden, und das faellt vor der Messung auf statt danach.
+  // - Den `costs.read`-Zweig aus `KostenZugang` entfernen (oder die
+  //   Navigationsbedingung in `app-shell.tsx`): der Forbidden-Zustand bzw. der
+  //   fehlende Navigationspunkt wird rot.
+  // - `pruefeRecht` in `MembershipCostAccessPolicy` auf „immer ok" setzen:
+  //   beide direkten GETs liefern dann 200 und tragen Betraege.
+  await test.step("9g2 — ein member DERSELBEN Organisation ohne costs.read sieht keine Kosten", async () => {
+    const supabaseUrl = pflicht("EASYTREE_JOURNEY_SUPABASE_URL");
+    const anonKey = pflicht("EASYTREE_JOURNEY_ANON_KEY");
+    const emailB = pflicht("EASYTREE_JOURNEY_EMAIL_B");
+    const passwortB = pflicht("EASYTREE_JOURNEY_PASSWORT_B");
+    const idB = pflicht("EASYTREE_JOURNEY_USER_B");
+    const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+    // `catch` statt `finally` — dieselbe Begruendung wie in 9c5: ein `throw` im
+    // `finally` verwuerfe einen bereits laufenden Fehler (`no-unsafe-finally`).
+    let fehlerAusFall: [unknown] | null = null;
+    try {
+      // Die Leihgabe, unveraendert wiederverwendet: dasselbe Skript, dieselbe
+      // feste Zeilen-Id, dieselbe Nachbedingung. 9c5 hat sie vorher schon
+      // zurueckgegeben, das INSERT ohne `on conflict` traegt hier also erneut —
+      // und wuerde laut scheitern, wenn die Rueckgabe dort ausgefallen waere.
+      // Der Aufruf steht INNERHALB des `try`, weil das Skript die Zeile
+      // committet BEVOR es seine Nachbedingung prueft.
+      const an = psqlMitMarker(
+        verwaltung,
+        join(HIER, "eyt136-member-an.sql"),
+        ["-v", `benutzer_a=${benutzerId}`, "-v", `benutzer_b=${idB}`],
+        "[eyt136-member-an]",
+      );
+      console.log(`  ${an}`);
+
+      // ------------------------------------------------------------------
+      // Die PRAEMISSE, ueber Bs EIGENES Token gemessen
+      // ------------------------------------------------------------------
+      // Nicht angenommen und nicht aus der Migration abgeschrieben: gefragt
+      // wird die laufende Datenbank, ueber dieselbe Zuordnungstabelle, die
+      // `app.has_permission` und `MembershipCostAccessPolicy` lesen
+      // (`role_permissions`, fuer jeden Angemeldeten lesbar seit 0013).
+      const kopfB = await bearerKopf(request, supabaseUrl, anonKey, emailB, passwortB);
+      const memberDarfLesen = await dataApiLese<{ role: string; permission: string }>(
+        request,
+        `${supabaseUrl}/rest/v1/role_permissions?role=eq.member&permission=eq.costs.read&select=role,permission`,
+        kopfB,
+      );
+      expect(
+        memberDarfLesen,
+        "member traegt costs.read — der Kostennachweis waere vakuos",
+      ).toHaveLength(0);
+      // Die Gegenprobe: die Abfrage findet sehr wohl etwas, wenn es etwas zu
+      // finden gibt. Ohne sie bewiese eine leere Antwort auch dann „member darf
+      // nicht", wenn der Filter schlicht nie etwas trifft.
+      const ownerDarfLesen = await dataApiLese<{ role: string; permission: string }>(
+        request,
+        `${supabaseUrl}/rest/v1/role_permissions?role=eq.owner&permission=eq.costs.read&select=role,permission`,
+        kopfB,
+      );
+      expect(
+        ownerDarfLesen,
+        "die Rechteabfrage findet auch fuer owner nichts — sie misst gar nichts",
+      ).toHaveLength(1);
+
+      const kontextB = await page.context().browser()?.newContext();
+      if (kontextB === undefined) throw new Error("[auth-journey] kein Browserkontext fuer B.");
+      try {
+        const seiteB = await kontextB.newPage();
+        const aufrufeB: string[] = [];
+        seiteB.on("request", (anfrage) => {
+          const pfad = new URL(anfrage.url()).pathname;
+          if (pfad.startsWith("/api/")) aufrufeB.push(`${anfrage.method()} ${pfad}`);
+        });
+
+        // 1 — echte Anmeldung ueber dieselbe Loginseite und denselben GoTrue.
+        await seiteB.goto("/anmelden");
+        await seiteB.getByLabel("E-Mail").fill(emailB);
+        await seiteB.getByLabel("Passwort").fill(passwortB);
+        await seiteB.getByRole("button", { name: "Anmelden" }).click();
+        await seiteB.waitForURL((u) => !u.pathname.startsWith("/anmelden"));
+        expect((await kontextB.cookies()).find((k) => k.name === "eyt_access")?.httpOnly).toBe(
+          true,
+        );
+
+        // 2 — und der Server bestaetigt: SELBE Organisation, Rolle `member`,
+        // kein Kostenrecht. Das ist der Unterschied zum Nachweis unten, wo die
+        // Liste leer ist.
+        const sitzungAntwort = await seiteB.request.get("/api/v1/auth/session");
+        expect(sitzungAntwort.status()).toBe(200);
+        const sitzungB = (await sitzungAntwort.json()) as {
+          userId: string;
+          organisations: { id: string; name: string; role: string; permissions: string[] }[];
+        };
+        expect(sitzungB.userId).toBe(idB);
+        expect(sitzungB.userId).not.toBe(benutzerId);
+        expect(sitzungB.organisations).toHaveLength(1);
+        const orgB = sitzungB.organisations[0]!;
+        expect(orgB.id).toBe(ORG_ID);
+        expect(orgB.role).toBe("member");
+        expect(orgB.permissions).not.toContain("costs.read");
+        expect(orgB.permissions).not.toContain("costs.calculate");
+
+        // 3 — die Kosten-Navigation erscheint nicht. `app-shell.tsx` bindet sie
+        // an `costs.read`; sichtbar ist sie fuer A (Schritt 6) und fuer B nicht.
+        await seiteB.goto(`/kosten?snapshot=${kostenSnapshotId}`);
+        await expect(seiteB.getByRole("link", { name: "Kosten" })).toHaveCount(0);
+
+        // 4 — und die Seite zeigt den VORGESEHENEN Zustand: Forbidden, nicht
+        // „nicht angemeldet" und nicht „Organisation waehlen". B ist angemeldet
+        // und seine Organisation ist eindeutig — nur das Recht fehlt.
+        await expect(seiteB.getByTestId("kosten-forbidden")).toBeVisible();
+        await expect(seiteB.getByTestId("kosten-unauthenticated")).toHaveCount(0);
+        await expect(seiteB.getByTestId("kosten-snapshot")).toHaveCount(0);
+        await expect(seiteB.getByTestId("kosten-gesamtsumme")).toHaveCount(0);
+        await expect(seiteB.getByTestId("kosten-position")).toHaveCount(0);
+        await expect(seiteB.getByLabel("Von Woche")).toHaveCount(0);
+
+        // 5 — kein Betrag, kein Satz, keine Position im DOM. Geprueft wird der
+        // gerenderte Inhalt, nicht das Sichtbare: ein `display:none`-Element
+        // truege den Wert trotzdem aus.
+        //
+        // Was hier BEWUSST NICHT geprueft wird, mit derselben Begruendung wie
+        // beim Nachweis unten: die Snapshot-Id (Bs eigener URL-Parameter, den
+        // Next als Prop der Client-Komponente serialisiert) und der
+        // Organisationsname (den der Forbidden-Banner absichtlich nennt — er
+        // erklaert dem Menschen, WO ihm das Recht fehlt). Die Aussage, um die es
+        // geht, sind Betraege und Personendaten.
+        const inhaltB = await seiteB.content();
+        expect(inhaltB).not.toContain(ERWARTETE_KOSTEN_ANZEIGE);
+        expect(inhaltB).not.toContain(ERWARTETE_KOSTEN_MINOR);
+        expect(inhaltB).not.toContain(ERWARTETER_BETRAG);
+        expect(inhaltB).not.toContain(ERWARTETE_DAUER);
+        expect(inhaltB).not.toContain(MITARBEITER_NAME);
+        expect(inhaltB).not.toContain(MITARBEITER_ID);
+
+        // 6 — der Server lehnt unabhaengig von der Oberflaeche ab, und zwar am
+        // RECHT. Das Statuspaar ist die Aussage:
+        //
+        //   ohne Header  403  -> die Organisation war eindeutig aufloesbar
+        //                       (`memberships.length === 1`), es fehlte das Recht
+        //   mit Header   403  -> dieselbe, legitime Organisation, dasselbe Ergebnis
+        //
+        // Der bestehende Nachweis unten misst an derselben Route 400/403: ohne
+        // Mitgliedschaft kommt die Policy ueber die Organisationsaufloesung nicht
+        // hinaus. Ohne die kopflose Anfrage hier waere nicht belegt, dass DIESE
+        // Ablehnung eine andere ist.
+        const ohneKopf = await seiteB.request.get(`/api/v1/kosten/snapshots/${kostenSnapshotId}`);
+        expect(ohneKopf.status()).toBe(403);
+        const mitKopf = await seiteB.request.get(`/api/v1/kosten/snapshots/${kostenSnapshotId}`, {
+          headers: { "X-EasyTree-Organization-Id": ORG_ID },
+        });
+        expect(mitKopf.status()).toBe(403);
+
+        // 7 — und die Antwort traegt nichts aus dem Snapshot: keine Betraege,
+        // keine Personendaten, keine Herkunftsangaben.
+        const koerperB = await mitKopf.text();
+        expect(koerperB).not.toContain(ERWARTETE_KOSTEN_MINOR);
+        expect(koerperB).not.toContain(ERWARTETE_KOSTEN_ANZEIGE);
+        expect(koerperB).not.toContain(MITARBEITER_NAME);
+        expect(koerperB).not.toContain(MITARBEITER_ID);
+        expect(koerperB).not.toContain(veroeffentlichteVersionId);
+        expect(koerperB).not.toContain("personnel-plan-cost-v1");
+        // Aus DEMSELBEN Text geparst, nicht ueber einen zweiten Zugriff auf die
+        // Antwort: `dataApiSchreibversuch` haelt weiter oben fest, warum diese
+        // Datei jeden Koerper genau einmal liest.
+        const problemB = JSON.parse(koerperB) as { detail?: string };
+        expect(problemB.detail).toBe("Kein Zugriff auf die Kostendaten dieser Organisation.");
+
+        // Und im Netzwerkprotokoll dieses Browsers steht kein erfolgreicher
+        // Kostenaufruf, den die Oberflaeche selbst ausgeloest haette: der
+        // Waechter blockt VOR dem Gateway.
+        expect(aufrufeB.filter((a) => a.includes("/kosten/planversionen"))).toEqual([]);
+
+        await seiteB.screenshot({
+          path: join(ARTEFAKTE, "08b-member-ohne-kostenrecht.png"),
+          fullPage: true,
+        });
+
+        schritte["9g2_member_ohne_costs_read"] = {
+          userId_ist_B: sitzungB.userId === idB,
+          organisation: orgB.id,
+          rolle: orgB.role,
+          rechte: orgB.permissions,
+          member_hat_costs_read: memberDarfLesen.length === 1,
+          owner_hat_costs_read: ownerDarfLesen.length === 1,
+          kosten_navigation: 0,
+          oberflaeche: "kosten-forbidden",
+          snapshot_ohne_header: ohneKopf.status(),
+          snapshot_mit_header: mitKopf.status(),
+          betrag_im_dom: false,
+          betrag_in_antwort: false,
+        };
+      } finally {
+        await kontextB.close();
+      }
+    } catch (e) {
+      fehlerAusFall = [e];
+    }
+
+    // Die Rueckgabe laeuft UNBEDINGT und ist idempotent — Wortlaut und
+    // Rangfolge wie in 9c5. Eine ueberlebende Leihgabe machte den Nachweis
+    // „B ist ohne Mitgliedschaft ausgesperrt" gruen-falsch, und sie ist damit
+    // der gefaehrlichere Befund.
+    let fehlerAusRueckgabe: [unknown] | null = null;
+    try {
+      const aus = psqlMitMarker(
+        verwaltung,
+        join(HIER, "eyt136-member-aus.sql"),
+        ["-v", `benutzer_b=${idB}`],
+        "[eyt136-member-aus]",
+      );
+      console.log(`  ${aus}`);
+    } catch (e) {
+      fehlerAusRueckgabe = [e];
+    }
+
+    if (fehlerAusRueckgabe !== null && fehlerAusFall !== null) {
+      throw new AggregateError(
+        [fehlerAusRueckgabe[0], fehlerAusFall[0]],
+        "[auth-journey] EYT-109 Task 17: die Rueckgabe der geliehenen member-Mitgliedschaft UND " +
+          "der Kostennachweis sind gescheitert. Beide Fehler stehen in `errors`; die " +
+          "ueberlebende Mitgliedschaft ist der dringendere Befund.",
+      );
+    }
+    if (fehlerAusRueckgabe !== null) throw fehlerAusRueckgabe[0];
+    if (fehlerAusFall !== null) throw fehlerAusFall[0];
+  });
+
+  // ---------------------------------------------------------------------
+  // 9g3 — Eine NACH dem Snapshot angelegte Satzversion aendert ihn nicht
+  //        (EYT-109 Task 17)
+  // ---------------------------------------------------------------------
+  // Die neue Version entsteht ueber die ECHTE Route `POST /kosten/stundensaetze`
+  // — Browserkontext des angemeldeten Owners, Next-Rewrite, NestJS, Policy,
+  // RLS, PostgreSQL. Kein SQL-Insert: eine per Hand eingefuegte Zeile bewiese
+  // nichts ueber den Anwendungspfad.
+  //
+  // ## Warum ueber `page.request` und nicht ueber das Formular
+  //
+  // GEMESSEN am Code, nicht vermutet: `rate-management.tsx` sendet
+  // `expectedActiveVersionId: historie.activeVersionId`, und `activeVersionId`
+  // ist die am HEUTIGEN Geschaeftsdatum wirksame Version — das ist der
+  // Startsatz, denn die Abloesung aus 9a beginnt erst am 01.09.2026.
+  // `pruefeAbloesung` verlangt aber eine OFFENE Vorgaengerversion und lehnt den
+  // geschlossenen Startsatz mit `VORGAENGER_BEREITS_GESCHLOSSEN` ab. Solange
+  // ein Nachfolger noch in der Zukunft liegt, kann das Formular deshalb keine
+  // dritte Version anlegen. Das ist eine Produkteigenschaft und wird hier
+  // NICHT geaendert — der Nachweis nimmt stattdessen die Route, die der
+  // kanonische Task-17-Vertrag zuerst nennt, und waehlt den Vorgaenger ueber
+  // `validTo === null` aus der ECHTEN Antwort der Historienroute.
+  //
+  // ## Was dieser Schritt beweist — und was ausdruecklich NICHT
+  //
+  // Die Satzabloesung laesst keinen rueckwirkenden Nachfolger zu
+  // (`validFrom > vorgaenger.validFrom`). Eine nach dem Snapshot angelegte
+  // Version kann den Leistungstag 03.08.2026 also gar nicht mehr bewerten —
+  // ein Lesepfad, der HEIMLICH NEU RECHNETE, kaeme auf denselben BETRAG. Der
+  // Betragsvergleich allein wuerde einen solchen Fehler folglich nicht fangen.
+  // Die tragende Zusicherung ist deshalb die Tiefengleichheit des ganzen
+  // Snapshots samt seiner Ids: eine Neuberechnung truege eine neue Snapshot-Id
+  // und neue Positions-Ids.
+  //
+  // Gegenmutationen, die diesen Schritt rot machen:
+  // - `GET /kosten/snapshots/:id` neu rechnen statt lesen lassen (im Controller
+  //   `createCostSnapshot` statt `snapshots`): die Antwort traegt eine andere
+  //   Snapshot-Id und andere Positions-Ids, `toEqual` wird rot. AUSFALLANALYSE,
+  //   nicht gefahren.
+  // - Die Positionen ihre `rateVersionId` beim Lesen aus dem aktuellen Satz
+  //   aufloesen lassen: die benannte Zusicherung auf `satzImSnapshot` wird rot.
+  //   AUSFALLANALYSE, nicht gefahren.
+  // - `pruefeAbloesung` die Reihenfolgepruefung nehmen: der Vorgaengervergleich
+  //   unten (`neue.predecessorId`) bleibt gruen, aber `9a` und die
+  //   Domaenensuite fangen es — hier steht es nur der Vollstaendigkeit halber.
+  await test.step("9g3 — eine neue Satzversion nach dem Snapshot laesst ihn unveraendert", async () => {
+    const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+    /** Die Form, in der `GET /kosten/snapshots/:id` antwortet (Auszug). */
+    interface SnapshotAntwort {
+      readonly id: string;
+      readonly planVersionId: string;
+      readonly worksiteId: string | null;
+      readonly weekKey: string;
+      readonly ruleVersion: string;
+      readonly totalMinorUnits: string;
+      readonly days: readonly { localDate: string; amountMinorUnits: string }[];
+      readonly positions: readonly {
+        id: string;
+        employeeId: string;
+        localDate: string;
+        durationMilliseconds: string;
+        rateVersionId: string;
+        amountMinorUnits: string;
+      }[];
+    }
+
+    // 1 — der gespeicherte Stand VOR der Satzaenderung, ueber den realen
+    // Lesepfad geholt. Nicht aus 9e uebernommen: dort stand die Antwort des
+    // SCHREIBENS, hier soll der Vergleich zweier LESEVORGAENGE stehen.
+    const vorherAntwort = await page.request.get(`/api/v1/kosten/snapshots/${kostenSnapshotId}`);
+    expect(vorherAntwort.status()).toBe(200);
+    const snapshotVorher = (await vorherAntwort.json()) as SnapshotAntwort;
+    expect(snapshotVorher.id).toBe(kostenSnapshotId);
+    expect(snapshotVorher.positions).toHaveLength(1);
+    const positionVorher = snapshotVorher.positions[0]!;
+    const satzImSnapshot = positionVorher.rateVersionId;
+    expect(satzImSnapshot).not.toBe("");
+
+    // 2 — die offene Satzversion. `validTo === null` und nicht `activeVersionId`:
+    // die beiden fallen hier auseinander (siehe Kopfkommentar), und nur die
+    // offene ist ein zulaessiger Vorgaenger.
+    const historieAntwort = await page.request.get(
+      `/api/v1/kosten/stundensaetze/${MITARBEITER_ID}`,
+    );
+    expect(historieAntwort.status()).toBe(200);
+    const historie = (await historieAntwort.json()) as {
+      activeVersionId: string | null;
+      versions: {
+        id: string;
+        validFrom: string;
+        validTo: string | null;
+        amountMinorUnits: string;
+      }[];
+    };
+    expect(historie.versions).toHaveLength(2);
+    const offene = historie.versions.filter((v) => v.validTo === null);
+    expect(offene, "es gibt nicht genau eine offene Satzversion").toHaveLength(1);
+    const vorgaenger = offene[0]!;
+    expect(vorgaenger.validFrom).toBe(ABLOESE_DATUM);
+
+    // Die Praemisse, die den Nachweis ueberhaupt aussagekraeftig macht: der
+    // Snapshot haengt am STARTSATZ, nicht an der Version, die gleich abgeloest
+    // wird. Haenge er an der offenen, waere „unveraendert" trivial — dann
+    // beruehrte die Abloesung seine Herkunft ohnehin nicht.
+    expect(
+      satzImSnapshot,
+      "der Snapshot haengt an der offenen Version — der Nachweis waere trivial",
+    ).not.toBe(vorgaenger.id);
+    const startsatz = historie.versions.find((v) => v.id === satzImSnapshot);
+    expect(startsatz, "die Satzversion des Snapshots steht nicht in der Historie").toBeDefined();
+    // EYT-109 D1: die API fuehrt den LETZTEN wirksamen Tag, nicht die
+    // halboffene Datenbankgrenze. Der Startsatz endet am 31.08., der
+    // Nachfolger beginnt am 01.09. — lueckenlos und ueberlappungsfrei.
+    expect(startsatz?.validTo).toBe(LETZTER_TAG_VOR_ABLOESUNG);
+    expect(vorgaenger.validFrom).toBe(ABLOESE_DATUM);
+
+    // 3 — die neue Version, ueber die echte Route. Lokale Bindung statt
+    // Konstante direkt im Header (gitleaks, siehe {@link SATZ_VORGANG_3}).
+    const schluessel3 = SATZ_VORGANG_3;
+    const angelegt = await page.request.post("/api/v1/kosten/stundensaetze", {
+      headers: { "Idempotency-Key": schluessel3 },
+      data: {
+        employeeId: MITARBEITER_ID,
+        amountMinorUnits: ABLOESE_BETRAG_3,
+        currency: "EUR",
+        validFrom: ABLOESE_DATUM_3,
+        validTo: null,
+        reason: ABLOESE_GRUND_3,
+        expectedActiveVersionId: vorgaenger.id,
+      },
+    });
+    expect(angelegt.status()).toBe(201);
+    const neue = (await angelegt.json()) as {
+      id: string;
+      validFrom: string;
+      amountMinorUnits: string;
+      predecessorId: string | null;
+    };
+    expect(neue.id).not.toBe(vorgaenger.id);
+    expect(neue.id).not.toBe(satzImSnapshot);
+    expect(neue.predecessorId).toBe(vorgaenger.id);
+    expect(neue.validFrom).toBe(ABLOESE_DATUM_3);
+    expect(neue.amountMinorUnits).toBe(ABLOESE_BETRAG_3);
+    // Und die Abloesung hat wirklich stattgefunden: drei Versionen, der
+    // Vorgaenger geschlossen. Ohne das bewiese der 201 nur, dass die Route
+    // antwortet.
+    const historieDanach = (await (
+      await page.request.get(`/api/v1/kosten/stundensaetze/${MITARBEITER_ID}`)
+    ).json()) as { versions: { id: string; validTo: string | null }[] };
+    expect(historieDanach.versions).toHaveLength(3);
+    // Wieder fachlich: der Vorgaenger endet am Tag VOR dem Beginn des
+    // Nachfolgers (EYT-109 D1). In der Datenbank steht unveraendert
+    // `2026-10-01` — das misst `rate-succession.integration.test.ts` roh.
+    expect(historieDanach.versions.find((v) => v.id === vorgaenger.id)?.validTo).toBe(
+      LETZTER_TAG_VOR_ABLOESUNG_3,
+    );
+
+    // 4 — DERSELBE Snapshot, noch einmal ueber den realen Lesepfad. Die
+    // Tiefengleichheit ist die tragende Zusicherung; die benannten Felder
+    // darunter stehen zusaetzlich, damit ein spaeteres Aufweichen von `toEqual`
+    // nicht unbemerkt den ganzen Nachweis entwertet.
+    const nachherAntwort = await page.request.get(`/api/v1/kosten/snapshots/${kostenSnapshotId}`);
+    expect(nachherAntwort.status()).toBe(200);
+    const snapshotNachher = (await nachherAntwort.json()) as SnapshotAntwort;
+    expect(snapshotNachher).toEqual(snapshotVorher);
+
+    expect(snapshotNachher.id).toBe(kostenSnapshotId);
+    expect(snapshotNachher.planVersionId).toBe(veroeffentlichteVersionId);
+    expect(snapshotNachher.worksiteId).toBeNull();
+    expect(snapshotNachher.weekKey).toBe(PLANWOCHE);
+    expect(snapshotNachher.ruleVersion).toBe("personnel-plan-cost-v1");
+    expect(snapshotNachher.totalMinorUnits).toBe(ERWARTETE_KOSTEN_MINOR);
+    expect(snapshotNachher.days).toEqual(snapshotVorher.days);
+    expect(snapshotNachher.positions).toHaveLength(1);
+    const positionNachher = snapshotNachher.positions[0]!;
+    expect(positionNachher.id).toBe(positionVorher.id);
+    expect(positionNachher.employeeId).toBe(MITARBEITER_ID);
+    expect(positionNachher.localDate).toBe(positionVorher.localDate);
+    expect(positionNachher.durationMilliseconds).toBe(positionVorher.durationMilliseconds);
+    expect(positionNachher.amountMinorUnits).toBe(ERWARTETE_KOSTEN_MINOR);
+    // Die HERKUNFT: weiterhin der Startsatz, ausdruecklich NICHT der neue.
+    expect(positionNachher.rateVersionId).toBe(satzImSnapshot);
+    expect(positionNachher.rateVersionId).not.toBe(neue.id);
+    expect(positionNachher.rateVersionId).not.toBe(vorgaenger.id);
+
+    // 5 — und die Oberflaeche zeigt nach der Satzaenderung dieselben Zahlen.
+    // Ohne diesen Teil bewiese der Schritt die Aussage nur fuer die API.
+    await page.goto(`/kosten?snapshot=${kostenSnapshotId}`);
+    const ansicht = page.getByTestId("kosten-snapshot");
+    await expect(ansicht).toBeVisible();
+    await expect(ansicht).toHaveAttribute("data-snapshot-id", kostenSnapshotId);
+    await expect(page.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_KOSTEN_ANZEIGE);
+    await expect(page.getByTestId("kosten-position")).toHaveAttribute(
+      "data-amount-minor-units",
+      ERWARTETE_KOSTEN_MINOR,
+    );
+
+    // 6 — und in PostgreSQL steht weiterhin GENAU EIN Snapshot mit denselben
+    // gespeicherten Werten. Dasselbe Skript wie in 9e und 9g, unveraendert:
+    // `koepfe=1` faellt, sobald der Lesepfad einen zweiten angelegt haette.
+    const gepruefte = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt144-snapshot-pruefen.sql"),
+      [
+        "-v",
+        `snapshot_id=${kostenSnapshotId}`,
+        "-v",
+        `summe=${ERWARTETE_KOSTEN_MINOR}`,
+        "-v",
+        "positionen=1",
+        "-v",
+        `woche=${PLANWOCHE}`,
+      ],
+      "[eyt144-snapshot]",
+    );
+    console.log(`  ${gepruefte}`);
+    expect(gepruefte).toContain("koepfe=1");
+
+    schritte["9g3_satz_nach_snapshot"] = {
+      route: "POST /api/v1/kosten/stundensaetze",
+      status: angelegt.status(),
+      vorgaengerVersionId: vorgaenger.id,
+      neueVersionId: neue.id,
+      neuesValidFrom: neue.validFrom,
+      versionenDanach: historieDanach.versions.length,
+      snapshotId: snapshotNachher.id,
+      positionsId: positionNachher.id,
+      rateVersionIdImSnapshot: positionNachher.rateVersionId,
+      summe: snapshotNachher.totalMinorUnits,
+      tiefengleich: true,
+      datenbank: gepruefte,
+    };
+  });
+
+  // ---------------------------------------------------------------------
+  // 9h — Der Baustellenfilter (EYT-146)
+  // ---------------------------------------------------------------------
+  // NACH 9g und 9g3 und nicht davor: `eyt144-snapshot-pruefen.sql` verlangt
+  // `koepfe=1` fuer die ganze Organisation, und BEIDE Schritte rufen es auf.
+  // Ein zweiter Snapshot vor einem dieser Aufrufe machte den abgenommenen
+  // EYT-144-Nachweis rot — an der falschen Stelle und mit der falschen
+  // Begruendung.
+  //
+  // Umgekehrt beruehren 9g2 und 9g3 diesen Schritt nicht: die Leihgabe ist vor
+  // ihm zurueckgegeben, und die in 9g3 angelegte Satzversion beginnt am
+  // 01.10.2026 — der Leistungstag dieser Woche ist der 10.08.2026, bewertet
+  // wird er weiterhin mit dem Startsatz. Die Zahlen unten bleiben deshalb die
+  // abgenommenen.
+  //
+  // Eigene Woche, eigene Planversion, zwei Baustellen (siehe `fixtures.sql`).
+  // Damit bleiben die Zahlen von EYT-144 unangetastet.
+  await test.step("9h — /kosten filtert den Snapshot auf EINE reale Baustelle", async () => {
+    const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+    // Die W33-Version ist ein Entwurf. Erst der ECHTE Publish-Endpunkt macht
+    // sie zu einer Kostenquelle — dieselbe Naht wie in 9d, nur ueber die API,
+    // weil die Planungsoberflaeche dafuer nichts Neues beweisen wuerde.
+    // Ueber eine lokale Bindung, wie in 9d — und nicht direkt die Konstante im
+    // Header. Gemessen (gitleaks 8.24.3, Lauf 31737022667): die Regel
+    // `generic-api-key` schlaegt auf das Muster `Key": <bezeichner>` an, sobald
+    // der BEZEICHNER genug Entropie hat; `PUBLISH_VORGANG_146` kam auf 4.04 und
+    // wurde als Fund gemeldet. Der Wert ist kein Geheimnis, aber eine Ausnahme
+    // in `.gitleaksignore` waere der falsche Weg (EYT-133 hat den Secret-Guard
+    // gerade gegen genau solche Bypaesse gehaertet).
+    const schluessel146 = PUBLISH_VORGANG_146;
+    const veroeffentlicht = await page.request.post("/api/v1/planung/versionen", {
+      headers: { "Idempotency-Key": schluessel146 },
+      data: { weekKey: PLANWOCHE_146, expectedVersionId: ENTWURF_146 },
+    });
+    expect(veroeffentlicht.status()).toBe(201);
+    const version146 = (await veroeffentlicht.json()) as { versionId: string };
+    expect(version146.versionId).toBe(ENTWURF_146);
+
+    const listenAntwort = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/kosten/planversionen" &&
+        r.request().method() === "GET",
+    );
+    await page.goto("/kosten");
+    await page.getByLabel("Von Woche").fill(PLANWOCHE_146);
+    await page.getByLabel("Bis Woche").fill(PLANWOCHE_146);
+    await page.getByRole("button", { name: "Planversionen laden" }).click();
+    expect((await listenAntwort).status()).toBe(200);
+
+    // Die Baustellenauswahl wird ERST nach der Versionswahl geholt — und sie
+    // kommt aus dem Kostenmodul, nicht aus einer Planungsroute.
+    const baustellenAntwort = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === `/api/v1/kosten/planversionen/${ENTWURF_146}/baustellen` &&
+        r.request().method() === "GET",
+    );
+    await page.getByLabel("Veröffentlichte Planversion").selectOption({ value: ENTWURF_146 });
+
+    const baustellen = await baustellenAntwort;
+    expect(baustellen.status()).toBe(200);
+    const auswahl = (await baustellen.json()) as { worksites: { id: string; label: string }[] };
+    // GENAU die beiden Baustellen dieser Version, mit ihren ECHTEN Namen aus
+    // `public.worksites` — in der zugesicherten Reihenfolge (Bezeichnung
+    // aufsteigend). Kein Name ist hier erfunden oder aus der Id abgeleitet.
+    expect(auswahl.worksites).toEqual([
+      { id: BAUSTELLE_AUSGESCHLOSSEN, label: "E2E-Baustelle Filter B" },
+      { id: BAUSTELLE_GEFILTERT, label: "E2E-Baustelle Reise" },
+    ]);
+
+    const sichtbar = page.getByLabel("Baustelle");
+    await expect(sichtbar).toBeVisible();
+    await expect(sichtbar.locator("option")).toHaveText([
+      "Alle Baustellen",
+      "E2E-Baustelle Filter B",
+      "E2E-Baustelle Reise",
+    ]);
+
+    // Gefiltert wird auf „E2E-Baustelle Reise" (…e241) — die Baustelle, die es
+    // schon vorher gab. Die andere (…e242) darf danach nirgends auftauchen.
+    const erzeugt = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/kosten/snapshots" && r.request().method() === "POST",
+    );
+    await sichtbar.selectOption({ value: BAUSTELLE_GEFILTERT });
+    await page.getByRole("button", { name: "Snapshot erzeugen" }).click();
+
+    const post = await erzeugt;
+    expect(post.status()).toBe(201);
+    // Der Rumpf, den der Browser WIRKLICH gesendet hat — nicht der, den die
+    // Ansicht anzeigt. Ohne diese Zeile bewiese der Rest nur, dass der Server
+    // richtig filtert, nicht dass die Oberflaeche die gewaehlte Id sendet.
+    expect(post.request().postDataJSON()).toEqual({
+      publishedPlanVersionId: ENTWURF_146,
+      worksiteId: BAUSTELLE_GEFILTERT,
+    });
+
+    const gefiltert = (await post.json()) as {
+      id: string;
+      worksiteId: string | null;
+      totalMinorUnits: string;
+      positions: { worksiteId: string; worksiteLabel: string }[];
+    };
+    expect(gefiltert.worksiteId).toBe(BAUSTELLE_GEFILTERT);
+    expect(gefiltert.totalMinorUnits).toBe(ERWARTETE_FILTER_MINOR);
+    expect(gefiltert.positions).toHaveLength(1);
+    expect(gefiltert.positions[0]?.worksiteId).toBe(BAUSTELLE_GEFILTERT);
+    const gefilterteId = gefiltert.id;
+    expect(gefilterteId).not.toBe(kostenSnapshotId);
+
+    // Die Oberflaeche zeigt den gefilterten GESPEICHERTEN Stand.
+    await expect(page.getByTestId("kosten-baustellenfilter")).toHaveText(BAUSTELLE_GEFILTERT);
+    await expect(page.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_FILTER_ANZEIGE);
+    const positionen = page.getByTestId("kosten-position");
+    await expect(positionen).toHaveCount(1);
+    await expect(positionen.first()).toContainText("E2E-Baustelle Reise");
+    // Und die andere Baustelle steht nirgends IM SNAPSHOT.
+    //
+    // Bewusst auf den Snapshot-Bereich eingegrenzt und NICHT auf `page.content()`:
+    // die ausgeschlossene Baustelle MUSS als `<option>` in der Auswahl stehen
+    // bleiben, sonst koennte niemand den Filter wieder aendern. Eine seitenweite
+    // Zusicherung verbot genau das und war damit eine Behauptung ueber die
+    // Oberflaeche, die dem Zweck der Auswahl widersprach (gemessen: Lauf
+    // 31739153815, auth-journey rot an dieser Zeile — bei korrektem Snapshot).
+    // Die Aussage, um die es geht, ist der gespeicherte Stand.
+    await expect(page.getByTestId("kosten-snapshot")).not.toContainText("E2E-Baustelle Filter B");
+
+    // UND er liegt so in PostgreSQL: Filter im Kopf, keine fremde Position.
+    // `koepfe_gesamt=2` — der ungefilterte aus 9e und dieser.
+    const gepruefte = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt146-snapshot-pruefen.sql"),
+      [
+        "-v",
+        `snapshot_id=${gefilterteId}`,
+        "-v",
+        `baustelle=${BAUSTELLE_GEFILTERT}`,
+        "-v",
+        `fremde_baustelle=${BAUSTELLE_AUSGESCHLOSSEN}`,
+        "-v",
+        `summe=${ERWARTETE_FILTER_MINOR}`,
+        "-v",
+        "positionen=1",
+        "-v",
+        `woche=${PLANWOCHE_146}`,
+        "-v",
+        "koepfe_gesamt=2",
+      ],
+      "[eyt146-snapshot]",
+    );
+    console.log(`  ${gepruefte}`);
+
+    await page.screenshot({ path: join(ARTEFAKTE, "09-kosten-gefiltert.png"), fullPage: true });
+
+    // Reload: derselbe gefilterte Snapshot, ohne zweite Erzeugung und ohne
+    // Baustellenabfrage — der Reload-Vertrag gilt auch mit Filter.
+    const vorher = apiAufrufe.length;
+    await page.reload();
+    await expect(page.getByTestId("kosten-snapshot")).toHaveAttribute(
+      "data-snapshot-id",
+      gefilterteId,
+    );
+    await expect(page.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_FILTER_ANZEIGE);
+    const seitReload = apiAufrufe.slice(vorher);
+    expect(seitReload).toContain(`GET /api/v1/kosten/snapshots/${gefilterteId}`);
+    expect(seitReload).not.toContain("POST /api/v1/kosten/snapshots");
+    expect(seitReload.filter((a) => a.includes("/baustellen"))).toEqual([]);
+    expect(seitReload.filter((a) => a.includes("/kosten/planversionen"))).toEqual([]);
+
+    // Zweiter Browserkontext: eigene Cookies, eigener Speicher, derselbe Stand.
+    const zweiter = await page.context().browser()?.newContext();
+    if (zweiter === undefined) throw new Error("[auth-journey] kein zweiter Browserkontext.");
+    try {
+      const seite2 = await zweiter.newPage();
+      const aufrufe2: string[] = [];
+      seite2.on("request", (anfrage) => {
+        const pfad = new URL(anfrage.url()).pathname;
+        if (pfad.startsWith("/api/")) aufrufe2.push(`${anfrage.method()} ${pfad}`);
+      });
+
+      await seite2.goto("/anmelden");
+      await seite2.getByLabel("E-Mail").fill(email);
+      await seite2.getByLabel("Passwort").fill(passwort);
+      await seite2.getByRole("button", { name: "Anmelden" }).click();
+      await seite2.waitForURL((u) => !u.pathname.startsWith("/anmelden"));
+
+      await seite2.goto(`/kosten?snapshot=${gefilterteId}`);
+      await expect(seite2.getByTestId("kosten-snapshot")).toHaveAttribute(
+        "data-snapshot-id",
+        gefilterteId,
+      );
+      await expect(seite2.getByTestId("kosten-baustellenfilter")).toHaveText(BAUSTELLE_GEFILTERT);
+      await expect(seite2.getByTestId("kosten-gesamtsumme")).toHaveText(ERWARTETE_FILTER_ANZEIGE);
+      expect(aufrufe2).toContain(`GET /api/v1/kosten/snapshots/${gefilterteId}`);
+      expect(aufrufe2).not.toContain("POST /api/v1/kosten/snapshots");
+
+      await seite2.screenshot({ path: join(ARTEFAKTE, "10-kosten-gefiltert-zweiter.png") });
+    } finally {
+      await zweiter.close();
+    }
+
+    // Nach Reload UND zweitem Kontext: immer noch GENAU ZWEI Snapshots.
+    const danach = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt146-snapshot-pruefen.sql"),
+      [
+        "-v",
+        `snapshot_id=${gefilterteId}`,
+        "-v",
+        `baustelle=${BAUSTELLE_GEFILTERT}`,
+        "-v",
+        `fremde_baustelle=${BAUSTELLE_AUSGESCHLOSSEN}`,
+        "-v",
+        `summe=${ERWARTETE_FILTER_MINOR}`,
+        "-v",
+        "positionen=1",
+        "-v",
+        `woche=${PLANWOCHE_146}`,
+        "-v",
+        "koepfe_gesamt=2",
+      ],
+      "[eyt146-snapshot]",
+    );
+    console.log(`  ${danach}`);
+    expect(danach).toContain("koepfe_gesamt=2");
+    expect(danach).toContain("fremde_positionen=0");
+
+    schritte["9h_baustellenfilter"] = {
+      planVersionId: ENTWURF_146,
+      baustellen: auswahl.worksites.map((b) => b.label),
+      gewaehlt: BAUSTELLE_GEFILTERT,
+      snapshotId: gefilterteId,
+      summe: gefiltert.totalMinorUnits,
+      datenbank: danach,
+    };
+  });
+
   await test.step("10 — ein fremder Organisationskontext wird abgelehnt", async () => {
     // Dieselbe gueltige Sitzung, aber eine Organisation, in der der Reisende
     // nicht Mitglied ist. Der Header waehlt aus, er autorisiert nicht.
@@ -1626,6 +2719,18 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
  * Kostenpfad liesse B durch. Beides wird hier gemessen.
  *
  * Eigener Browserkontext: B darf nichts von As Sitzung erben.
+ *
+ * ## Abgrenzung zu Schritt 9g2 (EYT-109 Task 17)
+ *
+ * Die beiden messen VERSCHIEDENE Grenzen und ersetzen einander nicht. Hier hat
+ * B keine Mitgliedschaft: die Kostenpolicy kommt ueber die
+ * Organisationsaufloesung nicht hinaus und antwortet ohne Header 400
+ * (`ORG_CONTEXT_REQUIRED`). In 9g2 hat B eine aktive `member`-Mitgliedschaft
+ * IN DERSELBEN Organisation und antwortet dieselbe Route ohne Header 403 — die
+ * Organisation war eindeutig, es fehlte das Recht. Das Statuspaar 400/403 hier
+ * gegen 403/403 dort ist der einzige von aussen sichtbare Unterschied, weil die
+ * Policy `ORG_NOT_A_MEMBER` und `PERMISSION_MISSING` absichtlich gleich
+ * beantwortet.
  *
  * ## Zweite Aufgabe seit EYT-136: SEKUNDAERE Gegenprobe auf die Leihgabe in 9c5
  *
@@ -1748,6 +2853,67 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
       expect(koerper).not.toContain(MITARBEITER_NAME);
       expect(koerper).not.toContain(MITARBEITER_ID);
       bericht["kein_datenabfluss"] = true;
+    });
+
+    // EYT-144: B sieht auch keine KOSTEN — weder die Auswahlliste noch den
+    // gespeicherten Snapshot, den A gerade erzeugt hat. Ohne diesen Schritt
+    // bewiese die Reise nur, dass ein Berechtigter Kosten sehen kann.
+    await test.step("B erreicht weder Planversionsliste noch fremden Snapshot", async () => {
+      const snapshotId = reiseSnapshotId === "" ? ID_OHNE_SNAPSHOT : reiseSnapshotId;
+
+      await seite.goto(`/kosten?snapshot=${snapshotId}`);
+      // Der Waechter blockt VOR jedem Gateway-Aufruf: B hat keine bestaetigte
+      // Organisation, also gibt es keine Kostenansicht.
+      await expect(seite.getByTestId("kosten-snapshot")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-gesamtsumme")).toHaveCount(0);
+      await expect(seite.getByLabel("Von Woche")).toHaveCount(0);
+
+      // Und im DOM steht kein Betrag — auch nicht versteckt. Geprueft wird der
+      // gerenderte Inhalt, nicht das Sichtbare: ein `display:none`-Element
+      // truege den Wert trotzdem aus.
+      //
+      // Was hier BEWUSST NICHT geprueft wird: die Abwesenheit der Snapshot-Id.
+      // Sie steht im Auslieferungspayload der Seite — gemessen am 13.08.2026
+      // gegen den echten Build, genau einmal. Das ist kein Leck, sondern Bs
+      // EIGENER URL-Parameter: `/kosten` reicht ihn als Prop an die
+      // Client-Komponente weiter, und Next serialisiert die Props der Kinder
+      // unabhaengig davon, ob der Zugangswaechter sie rendert. Eine Zusicherung
+      // darauf waere rot geworden und haette dabei nichts ueber Zugriffsrechte
+      // gesagt. Die Aussage, um die es geht, sind die BETRAEGE — und derselbe
+      // Build enthielt davon null.
+      const inhalt = await seite.content();
+      expect(inhalt).not.toContain(ERWARTETE_KOSTEN_ANZEIGE);
+      expect(inhalt).not.toContain(ERWARTETE_KOSTEN_MINOR);
+
+      // Der Server lehnt unabhaengig von der Oberflaeche ab — zweimal je Route:
+      // ohne Organisationskontext (400) und mit dem Kontext von A (403). Der
+      // zweite Fall ist der eigentliche: er fragt genau die Organisation an, in
+      // der die Daten liegen.
+      const listeOhne = await seite.request.get(
+        `/api/v1/kosten/planversionen?fromWeekKey=${PLANWOCHE}&toWeekKey=${PLANWOCHE}`,
+      );
+      expect(listeOhne.status()).toBe(400);
+      const listeMit = await seite.request.get(
+        `/api/v1/kosten/planversionen?fromWeekKey=${PLANWOCHE}&toWeekKey=${PLANWOCHE}`,
+        { headers: { "X-EasyTree-Organization-Id": ORG_ID } },
+      );
+      expect(listeMit.status()).toBe(403);
+      expect(await listeMit.text()).not.toContain(snapshotId);
+
+      const snapshotMit = await seite.request.get(`/api/v1/kosten/snapshots/${snapshotId}`, {
+        headers: { "X-EasyTree-Organization-Id": ORG_ID },
+      });
+      expect(snapshotMit.status()).toBe(403);
+      const koerper = await snapshotMit.text();
+      expect(koerper).not.toContain(ERWARTETE_KOSTEN_MINOR);
+      expect(koerper).not.toContain(MITARBEITER_NAME);
+
+      bericht["kostenansicht_verweigert"] = {
+        planversionen_ohne_kontext: listeOhne.status(),
+        planversionen_mit_kontext_von_a: listeMit.status(),
+        snapshot_mit_kontext_von_a: snapshotMit.status(),
+        snapshot_id_im_dom: false,
+      };
     });
 
     // EYT-107: B darf auch nicht veroeffentlichen — weder sichtbar noch ueber

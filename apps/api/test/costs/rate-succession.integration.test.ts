@@ -69,6 +69,8 @@ const EMPLOYEE_BETA = "00000000-0000-4000-8000-0000004020b2";
 const EMPLOYEE_KONFLIKT = "00000000-0000-4000-8000-00000040e801";
 const EMPLOYEE_MANDANT = "00000000-0000-4000-8000-00000040e802";
 const EMPLOYEE_ROLLBACK = "00000000-0000-4000-8000-00000040e803";
+/** Eigene Person fuer die Persistenzgrenze aus EYT-109 D1. */
+const EMPLOYEE_GRENZE = "00000000-0000-4000-8000-00000040e804";
 
 /**
  * Aufraeummarke.
@@ -154,7 +156,7 @@ beforeAll(async () => {
   await aufraeumen();
   // Eigene Personen fuer die Faelle 3 und 4, damit keine offene Version des
   // vorigen Falls in ihr Intervall ragt.
-  for (const id of [EMPLOYEE_KONFLIKT, EMPLOYEE_MANDANT, EMPLOYEE_ROLLBACK]) {
+  for (const id of [EMPLOYEE_KONFLIKT, EMPLOYEE_MANDANT, EMPLOYEE_ROLLBACK, EMPLOYEE_GRENZE]) {
     await admin.query(
       `insert into public.employees (id, org_id, user_id, display_name, active)
        values ($1::uuid, $2::uuid, null, $3, true)
@@ -244,6 +246,116 @@ describe("Abloesung unter echter Nebenlaeufigkeit (EYT-108)", () => {
     expect(zustand.rows[0]?.valid_to).toBe("2030-07-01");
     expect(zustand.rows[1]?.valid_to).toBeNull();
     expect(zustand.rows[1]?.predecessor_id).toBe(vorgaengerId);
+  });
+});
+
+describe("Die Persistenzgrenze uebersetzt in beide Richtungen (EYT-109 D1)", () => {
+  dbIt("persistiert den fachlichen Endtag als exklusive DB-Grenze", async () => {
+    // Gegenmutation: `validToZuDbEnde` im INSERT entfernen -> die DB hielte
+    // `2026-06-30`, und der Nahtstellentag verschoebe sich um einen Tag.
+    const ergebnis = await repositoryFuer(runnerA, USER_A).append({
+      organisationId: ORG_ALPHA,
+      employeeId: EMPLOYEE_GRENZE,
+      amountMinorUnits: "4200",
+      validFrom: "2026-06-01",
+      // FACHLICH: letzter wirksamer Tag. In der Datenbank muss daraus die
+      // exklusive Grenze `2026-07-01` werden (Migration 0013, `[)`).
+      validTo: "2026-06-30",
+      reason: `${MARKE}-grenze`,
+      expectedActiveVersionId: null,
+      correlationId: "korr-grenze",
+      idempotencyKey: `${MARKE}-grenze-key`,
+    });
+    expect(ergebnis.ok, JSON.stringify(ergebnis)).toBe(true);
+    if (!ergebnis.ok) return;
+
+    // Die ROHE Zeile ueber eine Adminverbindung. Der Rundlauf allein genuegt
+    // NICHT: zwei sich aufhebende Vorzeichenfehler blieben gruen. Erst diese
+    // Abfrage trennt „richtig gespeichert" von „symmetrisch falsch"
+    // (`net-count-checks-cancel-out`). Sie laeuft auf `postgres`, nicht auf
+    // `easytree_app` (`runtime-channel-tests-need-observer-connection`).
+    const roh = await admin.query<{ valid_from: string; valid_to: string | null }>(
+      `select to_char(valid_from,'YYYY-MM-DD') as valid_from,
+              to_char(valid_to,'YYYY-MM-DD')   as valid_to
+         from public.employee_rate_versions where id = $1`,
+      [ergebnis.version.id],
+    );
+    expect(roh.rows[0]?.valid_from).toBe("2026-06-01");
+    expect(roh.rows[0]?.valid_to).toBe("2026-07-01");
+
+    // Und der Rundlauf: was zurueckkommt, ist wieder fachlich.
+    expect(ergebnis.version.validTo).toBe("2026-06-30");
+
+    // Ein direkt anschliessender Nachfolger ab dem Folgetag ist zulaessig —
+    // lueckenlos UND ueberlappungsfrei. Waere die Grenze falsch uebersetzt,
+    // schluege hier der EXCLUDE-Constraint aus Migration 0013 zu.
+    const nachfolger = await repositoryFuer(runnerA, USER_A).append({
+      organisationId: ORG_ALPHA,
+      employeeId: EMPLOYEE_GRENZE,
+      amountMinorUnits: "4400",
+      validFrom: "2026-07-01",
+      validTo: null,
+      reason: `${MARKE}-grenze-nachfolger`,
+      expectedActiveVersionId: null,
+      correlationId: "korr-grenze-2",
+      idempotencyKey: `${MARKE}-grenze-2-key`,
+    });
+    expect(nachfolger.ok, JSON.stringify(nachfolger)).toBe(true);
+    if (!nachfolger.ok) return;
+    // `null` bleibt `null` — in beide Richtungen, ueber die echte Datenbank.
+    expect(nachfolger.version.validTo).toBeNull();
+    const rohOffen = await admin.query<{ valid_to: string | null }>(
+      `select to_char(valid_to,'YYYY-MM-DD') as valid_to
+         from public.employee_rate_versions where id = $1`,
+      [nachfolger.version.id],
+    );
+    expect(rohOffen.rows[0]?.valid_to).toBeNull();
+  });
+
+  dbIt("ein Retry mit demselben Koerper bleibt eine Wiederholung (EYT-108 T9)", async () => {
+    // `anfrageFingerabdruck` hasht `version.validTo` — den FACHLICHEN Wert, auf
+    // beiden Seiten von D1 derselbe. Ein Abdruck ueber dem umgerechneten Wert
+    // haette hier still falsch sein koennen: derselbe Koerper erzeugte dann
+    // einen anderen Abdruck, und der Retry haette `IDEMPOTENCY_KEY_REUSED`
+    // gemeldet statt die erste Antwort zu wiederholen.
+    const wieder = await repositoryFuer(runnerB, USER_A).append({
+      organisationId: ORG_ALPHA,
+      employeeId: EMPLOYEE_GRENZE,
+      amountMinorUnits: "4200",
+      validFrom: "2026-06-01",
+      validTo: "2026-06-30",
+      reason: `${MARKE}-grenze`,
+      expectedActiveVersionId: null,
+      // Andere Korrelations-Id, gleicher Schluessel — genau ein echter Retry.
+      correlationId: "korr-grenze-retry",
+      idempotencyKey: `${MARKE}-grenze-key`,
+    });
+    expect(wieder.ok, JSON.stringify(wieder)).toBe(true);
+    if (!wieder.ok) return;
+    expect(wieder.version.validTo).toBe("2026-06-30");
+
+    // Und es entstand KEINE zweite Zeile.
+    const anzahl = await admin.query<{ n: string }>(
+      `select count(*)::text as n from public.employee_rate_versions
+        where employee_id = $1 and reason = $2`,
+      [EMPLOYEE_GRENZE, `${MARKE}-grenze`],
+    );
+    expect(anzahl.rows[0]?.n).toBe("1");
+  });
+
+  dbIt("liest die Historie einschliessend zurueck — beide Zeilen, eine Lesart", async () => {
+    // Der Lesepfad ueber den Laufzeitkanal, nicht ueber die Adminverbindung:
+    // `versionsFor` ist das, was Controller und Montage benutzen.
+    // Gegenmutation: `dbEndeZuValidTo` aus `toRecord` entfernen -> der
+    // Vorgaenger meldete `2026-07-01` und der Wechseltag stuende zweimal da.
+    const historie = await repositoryFuer(runnerA, USER_A).versionsFor(EMPLOYEE_GRENZE);
+    const unsere = [...historie]
+      .filter((v) => v.reason.startsWith(`${MARKE}-grenze`))
+      .sort((a, b) => (a.validFrom < b.validFrom ? -1 : a.validFrom > b.validFrom ? 1 : 0));
+    expect(unsere.map((v) => [v.validFrom, v.validTo])).toEqual([
+      ["2026-06-01", "2026-06-30"],
+      ["2026-07-01", null],
+    ]);
   });
 });
 

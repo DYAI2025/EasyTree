@@ -98,14 +98,23 @@ before acting on it. Do **not** use local `master` as the reference — compare 
   clickable week view). EYT-75/87/72/81/11 are **not** in the open sprint.
 - **Correction (03.08.2026, measured on `origin/master` + EYT-107):** an earlier revision said
   "eight of the nine contract operations are still unimplemented". That count is stale. Measured
-  now, `NOT_YET_IMPLEMENTED` holds **five** entries — all under `/einsatz/`, all waiting on the
-  subject model from EYT-14. Implemented are the planning window read, the draft validation, the
-  assignment write and, since EYT-107, `POST /planung/versionen` (publish). The list is not
-  documentation — it is the
+  now, `NOT_YET_IMPLEMENTED` holds **five** entries, all under `/einsatz/`, **four** of them
+  waiting on the subject model from EYT-14 — `GET /einsatz/plan` gives its own reason (the
+  employee read view, without which AK9 cannot be evidenced) and does not name EYT-14.
+  Implemented are the planning window read, the draft validation, the
+  assignment write and, since EYT-107, `POST /planung/versionen` (publish).
+  **Correction (14.08.2026, measured on `feat/eyt-109-daily-plan-cost-snapshot`):** the contract
+  now carries **19** operations, not nine. `NOT_YET_IMPLEMENTED` still holds exactly the same
+  **five**, all under `/einsatz/`; the other **14** have routes — three under `/auth/`, four
+  under `/planung/` and **seven under `/kosten/`** (`GET /kosten/mitarbeiter`,
+  `/kosten/planversionen`, `/kosten/planversionen/{planVersionId}/baustellen`,
+  `/kosten/snapshots/{snapshotId}`, `/kosten/stundensaetze/{employeeId}`, `POST /kosten/snapshots`,
+  `POST /kosten/stundensaetze`). Count them from the artifact, never from this file. The list is
+  not documentation — it is the
   `NOT_YET_IMPLEMENTED` map inside `apps/api/test/openapi-route-conformance.test.ts`, each entry
   carrying its reason, and the test fails both ways: a contract operation with neither a route
   nor an entry, **and** an entry for an operation that has since been implemented. Writes and
-  the draft/conflict path are **EYT-50** (Story); three of the eight additionally wait on the
+  the draft/conflict path are **EYT-50** (Story); three of the five additionally wait on the
   subject model from EYT-14. **Correction (28.07.2026, measured against Jira):** an earlier
   revision of this file said "writes and publish are EYT-88". That is false. **EYT-88 is the
   Bug "Planungswochen-Schlüssel erlaubt ungültige ISO-Wochen in Vertrag und Datenbank"** — the
@@ -126,6 +135,34 @@ pnpm typecheck     # turbo run typecheck  (depends on ^build)
 pnpm test          # turbo run test       (depends on ^build)
 pnpm build         # turbo run build
 ```
+
+**⚠️ Four of those five run through Turbo, and a Turbo replay is not a run.** `pnpm test` can
+print `Cached: 10 cached, 10 total >>> FULL TURBO`, show a complete green summary — "1061
+passed" — and have executed **not one package** (measured 08.08.2026). It bites hardest right
+after a counter-mutation: reverting the file restores the pre-mutation cache key, so the very
+run that is supposed to prove the test went red replays the green one. **Any number that is
+meant to serve as evidence needs `pnpm exec turbo run <task> --force`** (or the direct package
+call), **and a look at the `Cached:` line** — `0 cached` is the only value that proves the work
+happened. Two further traps in the same family: the cache is shared across git worktrees, so a
+"cache hit" can be a replay from a worktree where the task never ran at all; and a `vitest` path
+filter that matches nothing exits 0 without having checked anything.
+
+`pnpm build` at the repository root **fails today, and that is pre-existing, not a defect of
+your branch**: `turbo.json` declares no `env` for the `build` task, so Turbo's strict env mode
+strips `EASYTREE_API_PROXY_TARGET`, and `apps/web` refuses to build in production without it
+(deliberately — see `lib/api-proxy-target.ts`). Setting the variable does **not** help through
+Turbo. CI never hits this because it builds through pnpm, not Turbo — measured 14.08.2026, both
+of these are green locally:
+
+```bash
+EASYTREE_API_PROXY_TARGET=http://127.0.0.1:3001 pnpm --filter @easytree/web... build
+pnpm --filter @easytree/api... build
+```
+
+Two more local-only red herrings: `pnpm format` reports untracked working files that CI never
+sees (scope it with `pnpm exec prettier --check apps packages docs`), and `.nvmrc` pins Node 22
+while `engines.node` only says `>=22` — a local Node 24 therefore runs silently on a different
+major version than every CI proof.
 
 Six workspace packages — `@easytree/api`, `@easytree/web`, `@easytree/contracts`,
 `@easytree/domain`, `@easytree/ui`, `@easytree/config`:
@@ -268,15 +305,27 @@ PostgREST **Data API**. Three rules, all on `public.plan_versions`:
   blind outside the runtime channel and silently disarmed the trigger.
 
 Consequences worth knowing before you touch any of this: moving the app onto the Supavisor
-transaction pooler makes `session_user` `postgres.<tenant>` and **breaks publishing** — loudly,
-via the zero-rows exception in `planning-write.repository.ts`. And `service_role`/`postgres`
+transaction pooler makes `session_user` `postgres.<tenant>` and is **expected to break
+publishing** — loudly, via the zero-rows exception in `planning-write.repository.ts` — and,
+since migration `0018`, to break **creating cost snapshots** too, there via a typed
+`WRITE_CHANNEL_REJECTED` return rather than a throw. Reading snapshots survives: the `_select`
+policies carry no channel condition. All three statements are **derived** from `session_user`
+plus the policies and are **not measured against a pooler connection** — pgTAP runs as
+`postgres`, not `postgres.<pooler-tenant>`. And `service_role`/`postgres`
 carry `BYPASSRLS`, so none of it constrains them. See
 [`docs/runbooks/planning-publish.md`](docs/runbooks/planning-publish.md).
 
-**Web never talks to Supabase or bare `fetch`.** Components get an `ApiClient` and a
-`PlanningGateway` from React context (`lib/api-client-provider.tsx`,
-`lib/planning-gateway-provider.tsx`); the single construction site for both is the composition
-root `app/providers.tsx` (ADR-001 §5). `apps/web/test/no-supabase-import.test.ts` is a static
+**Web never talks to Supabase or bare `fetch`.** Components get an `ApiClient` and — measured
+14.08.2026 on `providers.tsx` — **three** gateways from React context: `PlanningGateway`,
+`AuthGateway` and, since EYT-109, `CostsGateway` (`lib/api-client-provider.tsx`,
+`lib/planning-gateway-provider.tsx`, `lib/auth-gateway-provider.tsx`,
+`lib/costs-gateway-provider.tsx`), wrapped by `SessionProvider`. That provider does **not** hand
+the selected organisation to the costs gateway itself: it _reports_ it upward via
+`onOrganisationChange`, the composition root stores it in a ref (`providers.tsx:45,56-58`), and
+the gateway reads that ref on **every** call to send `X-EasyTree-Organization-Id`. The handover
+is therefore not synchronous — the report runs in a parent effect, so a costs request fired from
+a child effect in the same commit goes out **without** the header. The single construction site
+for all of them is the composition root `app/providers.tsx` (ADR-001 §5). `apps/web/test/no-supabase-import.test.ts` is a static
 guard that fails if the Supabase JS SDK name appears anywhere under `apps/web` — that guard
 string is assembled from parts on purpose, so don't "fix" it by inlining the literal.
 
@@ -288,10 +337,16 @@ surface, and a `NEXT_PUBLIC_*` value would be baked into the browser bundle at b
 `lib/api-proxy-target.ts` validates that target strictly (absolute http/https, no credentials,
 no query/fragment, no trailing slash) and has **no default in production** — the build fails
 there instead of silently proxying to localhost, which would look like an empty week in the
-browser rather than an error. The URL itself is assembled in exactly one place,
-`lib/planning-gateway-factory.ts`, because the test that checks it must call the same function
-production does — an earlier version built its own gateway and would have stayed green whatever
-`providers.tsx` did.
+browser rather than an error. Each gateway's URL is assembled in exactly one place — its own
+factory — because the test that checks it must call the same function production does; an
+earlier version built its own gateway and would have stayed green whatever `providers.tsx` did.
+There are **three** such factories (`lib/planning-gateway-factory.ts`,
+`lib/auth-gateway-factory.ts`, `lib/costs-gateway-factory.ts`), and measured 14.08.2026 only the
+planning one is **asserted** by that test (`apps/web/test/api-base-path.test.ts`). Mind the
+distinction: `buildCostsApiBaseUrl` and `buildAuthApiBaseUrl` are **executed** on every page
+load — `app/layout.tsx` renders `<Providers>`, so every browser e2e run goes through them — but
+**no test names them or says anything about the URLs they build**. Executed is not asserted; the
+guarantee this paragraph describes does **not** hold for those two yet (EYT-109 Task 16, open).
 
 **The contract is generated from Zod, and the generated file is checked in.**
 `packages/contracts/src/**/schemas.ts` are the source; `packages/contracts/openapi/v1.json` is
@@ -401,14 +456,25 @@ logs in through the real GoTrue signup and real HttpOnly cookies, and drives a s
 context. `read-through` substitutes `REQUEST_IDENTITY` in its harness and therefore proves the
 data path, never the login. Do not cite `read-through` as evidence that authentication works.
 
-**A green job is not a blocking job.** `read-through` passes but is _not_ a required status
-check — the ruleset has not been re-applied since it was added, so it cannot block a merge.
-Never report it as a gate until `scripts/verify-branch-protection.sh` says otherwise; it
-currently prints `FAIL AC3 — fehlende Pflichtchecks: read-through`.
+**A green job is not automatically a blocking job — but as of 14.08.2026 every one of them is.**
+An earlier revision of this file said `read-through` "passes but is _not_ a required status
+check" and that the verifier "currently prints `FAIL AC3 — fehlende Pflichtchecks:
+read-through`". **Both statements are stale.** Measured 14.08.2026 with
+`bash scripts/verify-branch-protection.sh` (read-only, reads GitHub's _effective_ rules):
 
-All nine `master` jobs are required status checks in repository ruleset `19718704` (`enforcement: active`,
-`bypass_actors: []`, `~DEFAULT_BRANCH`), alongside `pull_request`, `non_fast_forward` and
-`deletion`. That the gates actually block is measured, not assumed: negative PR #7 carried a
+```
+PASS  AC3 — alle 11 Pflichtchecks sind als required_status_checks gesetzt.
+PASS  AC3 — strict_required_status_checks_policy=true; der Branch muss vor dem Merge aktuell sein.
+PASS  AC1 — kein Bypass-Akteur in allen 1 gelesenen Ruleset(s); die Sperre gilt auch fuer Repo-Admins.
+=== Ergebnis: 0 offen, 1 uebersprungen ===
+```
+
+The ruleset was re-applied at some point after the note above was written; nobody recorded when.
+So **all eleven** `ci.yml` jobs — `read-through` and `auth-journey` included — are required
+status checks in ruleset `19718704` (`enforcement: active`, `bypass_actors: []`,
+`~DEFAULT_BRANCH`), alongside `pull_request`, `non_fast_forward` and `deletion`.
+
+That the gates actually block is measured, not assumed: negative PR #7 carried a
 deliberately unformatted file → `format` failed, `mergeable_state` went to `blocked`, and the
 merge attempt was rejected server-side with `the base branch policy prohibits the merge`
 (EYT-67 AC 8; PR closed without merging). Re-check any time, read-only, with
@@ -437,6 +503,31 @@ planning-invariants gate (EYT-49 — two real connections, because one session c
 constraint _rejecting_ but not _serialising_), then the API/worker process smokes. Every gate
 asserts its own greppable `[…] mode=required executed=… skipped=0` line.
 
+That sentence names the first gates, not all of them. Measured 14.08.2026 the job has **32
+steps** (30 with a `name:`, plus `actions/checkout` and `setup-pnpm`) and emits **13 gate
+lines** — count the lines, not the steps, because one step can emit two (the EYT-108 step runs
+both `rate-timestamp` and `rate-http-contract`, and the tenant gate appears twice: direct
+connection and transaction pooler). On run `31759500751` (head `4e409fb`) they were:
+
+```
+[cost-access] [cost-snapshot] [planning-invariants] [planning-publish]
+[planning-published-reads] [planning-write] [rate-http-contract] [rate-succession]
+[rate-timestamp] [snapshot-http] [snapshot-immutability] [tenant-isolation] [tenant-pooling]
+```
+
+each `mode=required`, `passed=executed`, `skipped=0`. Read the job, not this paragraph, before
+claiming what `db-gates` covers — and read the gate LINES, not the job's green tick. What a red
+`db-gates` does and does not tell you, measured on two real red runs: the step list **does** name
+the failing step (`23 failure — Kosten-Snapshot … EYT-138`), and `Tenant report -> step summary`
+still runs because it carries `if: always()`. What is lost is everything **after** the red step —
+those gates are `skipped`, so a red run says nothing about whether they would have held. Extract
+the lines with:
+
+```bash
+gh run view <run> --log --job <db-gates-job-id> \
+  | grep -oE '\[[a-z-]+\] mode=[a-z]+ executed=[0-9]+ passed=[0-9]+ skipped=[0-9]+' | sort -u
+```
+
 ## Deployment (Railway) — measured 01.08.2026
 
 - The API runs as Railway service `EasyTree` (project `EasyTree`, environment `production`),
@@ -452,7 +543,7 @@ asserts its own greppable `[…] mode=required executed=… skipped=0` line.
 - TLS chain verification runs against `DATABASE_SSL_ROOT_CERT` (Supabase Root 2021 CA,
   cryptographically verified against the live chain before use). See the config section
   above for why the factory strips the whole URL query.
-- The hosted customer DB carries all twelve migrations since 01.08.2026 (`supabase db push
+- The hosted customer DB carried **twelve** migrations as of 01.08.2026 (`supabase db push
 --db-url`, verified by reading `supabase_migrations.schema_migrations` — count 12) and the
   role `easytree_app` (NOSUPERUSER, NOBYPASSRLS, NOINHERIT, LOGIN; password provisioned out
   of band, stored nowhere but the Railway variable). On the hosted EasyTree customer
@@ -460,6 +551,12 @@ asserts its own greppable `[…] mode=required executed=… skipped=0` line.
   **BYPASSRLS** — the EYT-45 start gate refuses it by design, so `DATABASE_URL` must
   connect as `easytree_app`. `seed.sql` is synthetic dev data and was **not** applied
   to production.
+- **That "twelve" is a dated measurement, not a current one, and the repository has moved past
+  it.** Measured 14.08.2026: `origin/master` carries **17** migrations, and
+  `feat/eyt-109-daily-plan-cost-snapshot` adds `0018_cost_snapshots` for **18**. How many of
+  them are applied to the hosted DB is **not measured here** — do not infer it from the file
+  count. Count the files with `ls -1 supabase/migrations/*.sql | wc -l`; the production side
+  needs its own read of `supabase_migrations.schema_migrations`.
 - Evidence for "it runs" (01.08.2026): single Nest boot, role gate passed, `/health` and
   `/ready` HTTP 200 with `database: true`, 11/11 probes over 5m20s Online, zero restarts,
   zero `self-signed` and zero pg SSL warnings in the deployment log.

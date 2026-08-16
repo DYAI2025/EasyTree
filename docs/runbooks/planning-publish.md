@@ -3,6 +3,13 @@
 Stand: 04.08.2026 · Basis-SHA `4a605de` (PR #52 gemergt) · offene Nachbesserung
 in `fix/eyt-107-f1-insert-boundary` (Migration 0016, Reviewbefunde F1–F3)
 
+**Nachtrag 14.08.2026 (EYT-109, Migration `0018`).** Abschnitt 5 trägt seither
+einen zweiten Vorgang: das **Erzeugen eines Kosten-Snapshots**. Er hängt an
+derselben Kanalbedingung, bricht aber über einen **anderen Mechanismus** —
+siehe „Kosten-Snapshots hängen am selben Kanal, brechen aber anders". Abschnitt 6
+(_Handoff an EYT-109_) ist damit erfüllt und nur noch als Vorgeschichte lesbar;
+er ist dort als überholt gekennzeichnet.
+
 Dieses Dokument beantwortet drei Fragen, und zwar in dieser Reihenfolge:
 **Was wird beim Veröffentlichen tatsächlich geprüft? Was ausdrücklich nicht?
 Was folgt daraus für EYT-109?**
@@ -213,11 +220,24 @@ Publish-Frage hält, unterschätzt die Auswirkung um den Unterschied zwischen
 „der Veröffentlichen-Knopf scheitert" und „keinerlei Planungsschreiben
 funktioniert noch".
 
-| Situation                                                           | `session_user`             | Planungsschreiben (Entwurf, Zuweisung, Publish)       |
-| ------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------- |
-| Railway → direkter Supabase-Host, `DATABASE_URL` als `easytree_app` | `easytree_app`             | ja                                                    |
-| Supavisor-Transaktionspooler                                        | `postgres.<pooler-tenant>` | **nein — alle drei**                                  |
-| Notfallzugriff als `postgres`                                       | `postgres`                 | nein (RLS wird aber ohnehin per `BYPASSRLS` umgangen) |
+**Seit Migration `0018` (EYT-109) gilt dieselbe Bedingung zusätzlich für das
+Erzeugen von Kosten-Snapshots** — `cost_snapshots_insert` (Migration `0018`,
+Z. 269–276) und `cost_snapshot_positions_insert` (Z. 287–293) tragen
+`app.is_runtime_channel()` als ersten Konjunktionsterm ihrer `with check`-Klausel.
+Das **Lesen** von Snapshots hängt ausdrücklich **nicht** am Kanal: beide
+`_select`-Policies prüfen nur Organisation und `costs.read` (Z. 254–263 und
+278–283).
+
+> Die Reihenfolge innerhalb der `and`-Kette ist Lesbarkeit, keine Zusicherung —
+> unter `and` ist sie semantisch folgenlos, und kein Test bewacht sie. Bewacht
+> ist nur, **dass** die Bedingung vorkommt (pgTAP `0013`, C2/C3:
+> `with_check like '%is_runtime_channel%'`).
+
+| Situation                                                           | `session_user`             | Planungsschreiben (Entwurf, Zuweisung, Publish)       | Snapshot erzeugen | Snapshot lesen |
+| ------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------- | ----------------- | -------------- |
+| Railway → direkter Supabase-Host, `DATABASE_URL` als `easytree_app` | `easytree_app`             | ja                                                    | ja                | ja             |
+| Supavisor-Transaktionspooler                                        | `postgres.<pooler-tenant>` | **nein — alle drei**                                  | **nein**          | ja             |
+| Notfallzugriff als `postgres`                                       | `postgres`                 | nein (RLS wird aber ohnehin per `BYPASSRLS` umgangen) | nein              | (BYPASSRLS)    |
 
 Ein Wechsel auf den Pooler bricht damit **jedes** Planungsschreiben — **laut**,
 nicht still. `planning-write.repository.ts` wirft an drei Stellen eine benannte
@@ -235,6 +255,77 @@ oder falscher Kanal). Die beiden EYT-92-Meldungen stammen aus der Zeit vor der
 Kanalbindung und sagen den Kanal **nicht** — wer sie im Betrieb sieht, prüft
 zuerst `select session_user, current_user, app.is_runtime_channel();`.
 
+#### Kosten-Snapshots hängen am selben Kanal, brechen aber anders
+
+Die Null-Zeilen-Mechanik von oben lässt sich **nicht** auf Kosten übertragen,
+und der Versuch war einmal genau der Fehler. Gemessen am 12.08.2026 im ersten
+`db-gates`-Lauf der Snapshot-Suite:
+
+| Vorgang                     | SQL-Art  | Policy-Klausel | Verhalten der DATENBANK bei falschem Kanal                             |
+| --------------------------- | -------- | -------------- | ---------------------------------------------------------------------- |
+| Planversion veröffentlichen | `update` | `using`        | **filtert** → null betroffene Zeilen → benannte Ausnahme im Repository |
+| Snapshot erzeugen           | `insert` | `with check`   | **filtert nicht** → wirft SQLSTATE 42501                               |
+
+**Die Spalte beschreibt die Datenbank, nicht den API-Pfad.** Im echten
+Kostenpfad tritt der `42501` gar nicht auf: das Repository fragt den Kanal
+vorher (siehe unten), die Policy feuert dann nie. Wer die Zeile für das
+Laufzeitverhalten hält, sucht im Betrieb nach einem SQLSTATE, den es dort nicht
+gibt.
+
+Eine verletzte `with check`-Klausel liefert bei `insert` also keine leere
+Ergebnismenge, sondern wirft. Und `42501` ist mehrdeutig: es bedeutet
+**fehlendes Tabellen-/Spaltenrecht** _oder_ **Verletzung der Insert-Policy** —
+und die zweite Ursache zerfällt noch einmal in **vier ununterscheidbare
+Konjunkte derselben Klausel** (Migration `0018`, Z. 271–276): Laufzeitkanal,
+Organisationszugehörigkeit, `costs.calculate` und Urheberschaft. Ein fehlendes
+`costs.calculate` ist damit kein dritter Fall neben dem RLS-Verstoß, sondern
+einer seiner vier. Das schwächt das Argument nicht, es verschärft es: ein
+`catch (42501) → WRITE_CHANNEL_REJECTED` wäre die bequeme und die falsche
+Reparatur, weil er ein Rechteproblem als Kanalproblem ausgäbe.
+
+`cost-snapshot-repository.pg.ts:221` fragt deshalb **vor** dem Schreiben genau
+das, was gemeint ist:
+
+```sql
+select app.is_runtime_channel() as ok;
+```
+
+Ist die Antwort nicht `true`, gibt das Repository `WRITE_CHANNEL_REJECTED`
+**als Rückgabewert** zurück (Z. 223) — kein Wurf. Ein fehlendes Recht bleibt
+dagegen ein Wurf und wird nicht zu einer fachlichen Antwort geglättet.
+
+Nach außen ist das **HTTP 500** mit dem stabilen Typ
+`urn:easytree:costs:write-channel-rejected` — bewusst weder 401/403 (das Subjekt
+kann korrekt angemeldet und berechtigt sein) noch 409 (ein Retry behebt nichts)
+noch 400 (die Aufruferin hat nichts falsch gemacht). Es ist ein Betriebsfehler,
+und die Antwort sagt das mitsamt Korrelations-Id
+(`costs.controller.ts:937-942`).
+
+Ein Wechsel auf den Pooler bricht das Erzeugen von Snapshots damit **laut**,
+nicht still — aber über einen anderen Weg als beim Planungsschreiben. **Lesen**
+bleibt möglich, weil die `_select`-Policies keinen Kanalvorbehalt tragen: eine
+Betreiberin sieht dann bestehende Snapshots weiter und kann nur keine neuen
+erzeugen. Diese Asymmetrie ist gewollt (Migration `0018`, Z. 254–257) und im
+Störungsfall die schnellste Unterscheidung zwischen „Kanal falsch" und
+„Rechte fehlen".
+
+> **Was hier gemessen ist und was nicht.** Gemessen sind die Policy-Wirkung
+> (pgTAP `0013`, Fälle D1/D3: ein `insert` außerhalb des Laufzeitkanals
+> scheitert; D2: ein `select` in derselben Sitzung liefert die Zeile) und der
+> Rückgabepfad (`snapshot-http.test.ts`) — beide zweimal grün im
+> `db-gates`-Job. **Nicht** gemessen ist der Pooler selbst: in pgTAP ist
+> `session_user` `postgres`, nicht `postgres.<pooler-tenant>`. Die Pooleraussage
+> ist also eine Ableitung aus `session_user` plus Policy, keine Messung an einer
+> Poolerverbindung. Wer den Wechsel vorbereitet, misst zuerst mit dem SQL unten.
+>
+> **Offene Lücke im Wächtersatz:** dass die `_select`-Policies **keinen**
+> Kanalvorbehalt tragen, ist von keinem Test bewacht — `0013` C4/C5 prüfen nur
+> `qual like '%has_permission%'` und `'%costs.read%'`. Wer
+> `app.is_runtime_channel() and` in die Lesepolicy einfügt und damit das Lesen
+> über die Data-API abschaltet, bleibt grün. Die Asymmetrie ist gewollt
+> (Migration `0018`, Z. 254–257), aber sie ist heute nur dokumentiert, nicht
+> gesichert.
+
 Wer den Kanal ändern muss, ändert `app.is_runtime_channel()` in einer neuen
 Vorwärtsmigration — nicht die Policy, und schon gar nicht durch Entfernen der
 Bedingung.
@@ -247,7 +338,15 @@ select session_user, current_user, app.is_runtime_channel();
 
 ---
 
-## 6. Handoff an EYT-109
+## 6. Handoff an EYT-109 — ⚠️ eingelöst, nur noch Vorgeschichte
+
+> **Überholt seit 14.08.2026 (EYT-109).** Dieser Abschnitt beschreibt den Stand
+> vom 04.08.2026. Der unten als „ausdrücklich NICHT geliefert" bezeichnete
+> Halbsatz aus Jira AK8 ist inzwischen erfüllt: der Kosten-Snapshot-Command
+> existiert (`create-cost-snapshot.use-case.ts`), ist verdrahtet und hat einen
+> HTTP-Aufrufer (`costs.controller.ts`). Die Zusagentabelle darunter gilt
+> unverändert; die beiden Absätze danach gelten **nicht** mehr und bleiben nur
+> stehen, damit die Begründung der damaligen Entscheidung nachlesbar ist.
 
 EYT-107 erzeugt die Vorbedingung, mehr nicht. Verfügbar ist ab jetzt:
 

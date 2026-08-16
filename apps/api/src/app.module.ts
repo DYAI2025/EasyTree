@@ -37,11 +37,17 @@ import {
 import {
   COST_ACCESS_AUDIT,
   COST_ACCESS_POLICY,
+  COST_SNAPSHOT_REPOSITORY_FACTORY,
   CostsController,
   MembershipCostAccessPolicy,
   NestCostAccessAuditLog,
+  PLAN_COST_FACTS_FACTORY,
+  PgCostSnapshotRepository,
   PgRateRepository,
   RATE_REPOSITORY_FACTORY,
+  planCostFactsFactory,
+  type CostSnapshotRepositoryFactory,
+  type PlanCostFactsFactory,
   type RateRepositoryFactory,
 } from "./modules/costs";
 import {
@@ -133,6 +139,22 @@ import {
       },
     },
     {
+      // EYT-139: Snapshot-Persistenz je Subjekt — NIE ein Singleton. Gleiche
+      // Begruendung wie beim Satzrepository: ein fest eingebautes Subjekt truege
+      // die Identitaet der ERSTEN Anfrage in alle folgenden, und ein Snapshot
+      // traegt `created_by` aus `app.current_user_id()` in ein Dokument, das
+      // sich nicht mehr korrigieren laesst (Migration 0018, kein update).
+      provide: COST_SNAPSHOT_REPOSITORY_FACTORY,
+      inject: [TENANT_QUERY_RUNNER, IDEMPOTENCY_STORE],
+      useFactory: (
+        runner: TenantQueryRunnerProvider,
+        idempotenz: IdempotencyStore,
+      ): CostSnapshotRepositoryFactory => {
+        return (subjectUserId: string) =>
+          new PgCostSnapshotRepository(runner, subjectUserId, idempotenz);
+      },
+    },
+    {
       // Plattformdienst, kein Modulbestand: `public.idempotency_records`
       // (0012) ist generisch entworfen und traegt im Besitzregister
       // `owner: null`. Der Adapter ist zustandslos und darf deshalb ein
@@ -178,8 +200,19 @@ import {
       provide: PLANNING_QUERIES_FACTORY,
       inject: [TENANT_QUERY_RUNNER],
       useFactory: (runner: TenantQueryRunnerProvider): PlanningQueriesFactory => {
-        return (subjectUserId: string) => new PlanningWindowRepository(runner, subjectUserId);
+        return (subjectUserId: string, organisationId?: string | null) =>
+          new PlanningWindowRepository(runner, subjectUserId, organisationId ?? null);
       },
+    },
+    {
+      // EYT-109: Kostenpfad -> Planungsfakten, mit dem BEREITS aufgeloesten
+      // Organisationskontext. Die Fabrik steht in `costs/infrastructure`, damit
+      // Test und Produktion dieselbe Funktion rufen — ein Closure hier waere
+      // eine zweite Baustelle, die kein Test erreichen kann.
+      provide: PLAN_COST_FACTS_FACTORY,
+      inject: [PLANNING_QUERIES_FACTORY],
+      useFactory: (queriesFor: PlanningQueriesFactory): PlanCostFactsFactory =>
+        planCostFactsFactory(queriesFor),
     },
     {
       // Schreibport, gleiche Begruendung wie oben: Subjekt je Anfrage.

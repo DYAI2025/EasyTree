@@ -86,3 +86,57 @@ export function dayAfter(date: LocalBusinessDate): LocalBusinessDate {
   }
   return { year: date.year + 1, month: 1, day: 1 };
 }
+
+/**
+ * Der vorherige Kalendertag — die sichtbare Naht zwischen zwei
+ * Intervallsemantiken (EYT-109).
+ *
+ * ## Warum es diese Funktion gibt
+ *
+ * Im Repository leben zwei Lesarten von `validTo` nebeneinander, und beide sind
+ * an ihrem Ort richtig. `rate-version.ts` liest sie EINSCHLIESSEND und
+ * normalisiert intern mit {@link dayAfter} (V3);
+ * `apps/api/src/modules/costs/domain/rate-effectivity.ts` vergleicht HALBOFFEN
+ * (`businessDate < validTo`), genau wie der EXCLUDE-Constraint der Migration
+ * 0013 die Ueberlappung ausschliesst. Fuer gespeicherte Zeilen entscheidet die
+ * Datenbank, also gilt dort die halboffene Lesart.
+ *
+ * Der Snapshotpfad waehlt deshalb halboffen aus und muss die gewaehlte Zeile
+ * danach in eine geprueft einschliessende `HourlyRateVersion` giessen. Diese
+ * eine Umrechnung ist `dayBefore`: `validTo_einschliessend = dayBefore(valid_to)`,
+ * und `null` bleibt `null`. Als benannte Funktion statt als `tag - 1` an der
+ * Aufrufstelle, weil die naheliegende Subtraktion am Monats-, Jahres- und
+ * Schaltjahresanfang falsch ist — der 01.08. haette dann den „0. August" zum
+ * Vorgaenger — und dort niemandem auffiele. Eine Naht, die man sieht, kann man
+ * pruefen.
+ *
+ * Reine Ganzzahlarithmetik, **ohne** `Date`, aus demselben Grund wie bei
+ * {@link dayAfter}: V3 verbietet, Kalendertage in Zeitpunkte zu wandeln.
+ *
+ * ## Spiegelbild der Entscheidungen von {@link dayAfter}
+ *
+ * Ein Tag ausserhalb des Kalenders wird **normalisiert, nicht abgewiesen**: wo
+ * `dayAfter` einen ueberzaehligen Tag auf den Ersten des Folgemonats schiebt,
+ * faellt hier jedes `day <= 1` — also auch `0` oder negativ — auf den letzten
+ * Tag des Vormonats. Beide Richtungen bilden dabei mehrere Eingaben auf dasselbe
+ * Ergebnis ab (`dayAfter` schon beim 28.02. und beim 30.02. eines Gemeinjahrs);
+ * das ist kein Versehen, sondern der Preis dafuer, hier nicht zu urteilen.
+ *
+ * Ein Monat ausserhalb 1..12 bricht dagegen laut ab. Die Pruefung steht bewusst
+ * vor der ersten Verzweigung, obwohl die Monatslaenge dort noch nicht gebraucht
+ * wird: ohne sie liefe `dayBefore({ 2026, 13, 5 })` still durch, waehrend
+ * `dayAfter` derselben Eingabe abbricht — zwei Nachbarn mit verschiedener
+ * Strenge waeren die schlechtere Ueberraschung.
+ */
+export function dayBefore(date: LocalBusinessDate): LocalBusinessDate {
+  // Aufruf nur wegen der Monatspruefung; das Ergebnis wird hier nicht gebraucht.
+  daysInMonth(date.year, date.month);
+  if (date.day > 1) {
+    return { year: date.year, month: date.month, day: date.day - 1 };
+  }
+  if (date.month > 1) {
+    const vormonat = date.month - 1;
+    return { year: date.year, month: vormonat, day: daysInMonth(date.year, vormonat) };
+  }
+  return { year: date.year - 1, month: 12, day: 31 };
+}

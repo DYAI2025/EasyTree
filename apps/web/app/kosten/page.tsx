@@ -1,20 +1,39 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { Card, EmptyState, PageHeader } from "@easytree/ui";
+import { IdSchema } from "@easytree/contracts";
+import { Card, PageHeader } from "@easytree/ui";
 
+import { KostenAnsicht } from "../../components/kosten-ansicht";
 import { KostenZugang } from "../../components/kosten-zugang";
 
 export const metadata: Metadata = { title: "Kosten — easyTree" };
 
 /**
- * `/kosten` — Tageskosten und Snapshotuebersicht (EYT-109, Basisdesign §5).
+ * `/kosten` — Tageskosten aus veroeffentlichten Planversionen (EYT-109/EYT-144).
  *
- * Die Route steht VOR der Berechnung: bis der Tageskosten-Endpunkt
- * angeschlossen ist (Slice-Schritt 5), zeigt sie den ehrlichen Leerzustand —
- * keinen Mock, keine erfundenen Betraege, keine 0,00-€-Attrappe.
+ * Hier stand bis EYT-144 der ehrliche Leerzustand: die Berechnung war noch
+ * nicht angeschlossen, und easyTree zeigt lieber nichts als eine 0,00-€-Attrappe.
+ * Angeschlossen ist sie jetzt — an die ECHTE API, ueber das `CostsGateway`.
+ *
+ * Die Snapshot-Id kommt aus der URL: `/kosten?snapshot=<id>`. Damit ist ein
+ * gespeicherter Stand teilbar und ueberlebt einen Reload — die Ansicht LIEST
+ * ihn dann und rechnet nichts neu.
+ *
+ * Kein stiller Default: ein unbrauchbarer Parameter wird SICHTBAR abgelehnt und
+ * das Gateway gar nicht erst gerufen (dasselbe Muster wie `/planung`). Ein
+ * mehrfach angegebener Parameter ist keine Id, sondern eine mehrdeutige Angabe.
  */
-export default function KostenPage() {
+export default async function KostenPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const roh = params["snapshot"];
+  const geprueft =
+    roh === undefined ? null : IdSchema.safeParse(typeof roh === "string" ? roh : "");
+
   return (
     <>
       <PageHeader
@@ -22,24 +41,23 @@ export default function KostenPage() {
         description="Geplante Personalkosten je Baustelle und Tag — aus veröffentlichten Planversionen, bis zur Einzelposition."
       />
       <KostenZugang>
-        <div className="eyt-card-grid">
-          <Card title="Tageskosten">
-            <EmptyState
-              data-testid="kosten-leer"
-              title="Noch keine Kostenberechnung verfügbar"
-              description="Die Tageskostenberechnung wird in diesem Sprint angeschlossen. Bis dahin gibt es hier bewusst keine Zahlen — easyTree zeigt nie erfundene Beträge."
-            />
-          </Card>
-          <Card title="Stundensätze">
-            <p>
-              Interne Netto-Stundensätze je Mitarbeiter, versioniert mit Gültigkeit — die Grundlage
-              jeder Kostenberechnung.
-            </p>
-            <p>
-              <Link href="/kosten/stundensaetze">Zur Stundensatzverwaltung</Link>
-            </p>
-          </Card>
-        </div>
+        {geprueft !== null && !geprueft.success ? (
+          <p data-testid="kosten-parameterfehler" role="alert">
+            Keine gültige Snapshot-Id in der Adresse. Erwartet wird
+            `?snapshot=&lt;id-aus-der-Kostenansicht&gt;`.
+          </p>
+        ) : (
+          <KostenAnsicht snapshotId={geprueft === null ? null : geprueft.data} />
+        )}
+        <Card title="Stundensätze">
+          <p>
+            Interne Netto-Stundensätze je Mitarbeiter, versioniert mit Gültigkeit — die Grundlage
+            jeder Kostenberechnung.
+          </p>
+          <p>
+            <Link href="/kosten/stundensaetze">Zur Stundensatzverwaltung</Link>
+          </p>
+        </Card>
       </KostenZugang>
     </>
   );
