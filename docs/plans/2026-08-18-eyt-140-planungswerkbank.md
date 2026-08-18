@@ -273,6 +273,18 @@ von `2020-W01`.
 > Testhelfer statt der Produktion · **K6** Ablehnungstests in keinem Registerslot · **K7**
 > irreführende Fehlermeldung beim Überlauf.
 >
+> _Zur Begründung von **K1**, präzisiert nach dem Watcher-Urteil vom 18.08.2026:_ die obere
+> Jahresgrenze `MAX_ISO_JAHR = 9999` schützt **nicht** das Jahr 10000 — kein Nutzer plant
+> jemals `9999-W52`. Ihr Wert ist ein anderer und ein messbarer: die Zeile
+> `assertRealIsoWeek(verschoben, …)` war **unbelegt** — ersatzlos entfernt blieben alle 30
+> Tests grün. Die Obergrenze ist die Stelle, an der diese Ergebnisprüfung überhaupt beißt;
+> mit ihr wird aus Dekoration eine gemessene Zusicherung (gemessen: 2 rot). Wer diesen
+> Absatz später liest, soll die Rechtfertigung an der **Messbarkeit** festmachen, nicht an
+> einer Jahreszahl. Hätte K1 eine eigene Reviewrunde gekostet, wäre es fehlallozierter
+> Aufwand gewesen; als eine Zeile in einer Runde, die auch K2–K4 schloss, ist es
+> proportional. Die Commit-Botschaft von `697b488` ist bereits gepusht und formuliert es
+> noch anders — maßgeblich ist dieser Absatz.
+>
 > Ursprünglich stand hier: „für 520 Verschiebungen … muss `formatIsoWeekKey`(Ergebnis) von
 > `isValidIsoWeekKey` akzeptiert werden." **Diese Vorgabe ist an der genannten Stelle
 > architektonisch nicht erfüllbar** — beide Funktionen liegen in `@easytree/contracts`, und
