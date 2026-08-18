@@ -84,7 +84,9 @@ function readHandoff(): string {
 
 function readRepositoryIdentityEval(): RepositoryIdentityEval {
   if (!existsSync(evalAbs)) {
-    throw new Error(`${EVAL_PATH} fehlt. Der Wrong-Repository-Regressionsfall ist damit unbewacht.`);
+    throw new Error(
+      `${EVAL_PATH} fehlt. Der Wrong-Repository-Regressionsfall ist damit unbewacht.`,
+    );
   }
   return JSON.parse(readFileSync(evalAbs, "utf8")) as RepositoryIdentityEval;
 }
@@ -171,7 +173,13 @@ describe("Coding-Agent-Handoff (EYT-89)", () => {
       ]),
     );
     expect(negative.forbiddenActions).toEqual(
-      expect.arrayContaining(["modify files", "create branch", "commit", "push", "open pull request"]),
+      expect.arrayContaining([
+        "modify files",
+        "create branch",
+        "commit",
+        "push",
+        "open pull request",
+      ]),
     );
   });
 
