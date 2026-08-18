@@ -246,6 +246,28 @@ export const INVARIANTS: readonly Invariant[] = [
     positive: { file: WEEK, title: "erkennt gleiche Wochen ueber die Jahresgrenze hinweg" },
     negative: { file: WEEK, title: "ordnet ueber den Jahreswechsel korrekt zu" },
   },
+  {
+    exportName: "shiftPlanningWeek",
+    statement:
+      "Verschoben wird ueber den MONTAG der Woche, nicht ueber isoWeek + delta: 2026 hat 53 ISO-Wochen, also ist 2026-W53 + 1 gleich 2027-W01 und 2027-W01 - 1 gleich 2026-W53. Eine Woche, die es in ihrem ISO-Jahr nicht gibt, wird abgelehnt statt fortgerechnet — in beide Richtungen, Eingang wie Ergebnis.",
+    kind: "regel",
+    positive: { file: WEEK, title: "traegt ueber die Jahresgrenze — die drei Randvektoren aus B3" },
+    negative: {
+      file: WEEK,
+      title: "weicht an der 53-Wochen-Grenze nachweislich von isoWeek + delta ab",
+    },
+  },
+  {
+    exportName: "planningWeekDateRange",
+    statement:
+      "Montag und Sonntag einer ISO-Woche sind Kalendertage ohne Zone und umschliessen die Woche exakt: der Vortag des Montags und der Folgetag des Sonntags liegen in anderen Wochen.",
+    kind: "regel",
+    positive: { file: WEEK, title: "liefert Montag und Sonntag der Woche als Kalendertage" },
+    negative: {
+      file: WEEK,
+      title: "grenzt die Woche exakt ab — der Vortag und der Folgetag liegen in anderen Wochen",
+    },
+  },
 
   // -------------------------------------------------------------------------
   // weekly-capacity
