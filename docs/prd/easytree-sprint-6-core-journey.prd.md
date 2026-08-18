@@ -64,21 +64,37 @@ Post-MVP. Kein Implementierungsblocker, aber die Quelle genau dieses Fehlalarms.
 - multi-day sites
 - machine/resource cost expansion
 - new AI/optimization
-- Excel EYT-110
+- Excel EYT-110 — **bewusst engerer Schnitt, kein Widerspruch.** Confluence PRD v1.4 §7 führt
+  den Excel-Export unter „Im MVP". Sprint 6 schneidet enger und verschiebt ihn auf EYT-110,
+  genau wie das Sprint-5-PRD es getan hat. Der MVP-Anspruch aus v1.4 bleibt unangetastet; nur
+  dieser Sprint liefert ihn nicht.
 - D1 / Containers
 - production release
 - new business rules invented for UI convenience
 
 ## Assumptions
 
-- `ASSUMPTION` Existing planning read/write/publish and EYT-109 snapshot path remain functional on current master.
+- `ASSUMPTION` (`ASM-001`, prüfbar — **nicht mehr nur behauptet**) Existing planning
+  read/write/publish and EYT-109 snapshot path remain functional on current master.
+  Diese Annahme trägt 11 der 17 Requirements und darf deshalb nicht unbelegt bleiben. Sie ist
+  messbar und wird gemessen: der `db-gates`-Job muss auf dem Sprint-6-Head die Gate-Zeilen
+  `[planning-write]`, `[planning-publish]`, `[planning-published-reads]`, `[cost-snapshot]` und
+  `[snapshot-immutability]` je mit `mode=required … skipped=0` emittieren. Extraktion:
+  `gh run view <run> --log --job <db-gates-job-id> | grep -oE '\[[a-z-]+\] mode=[a-z]+ executed=[0-9]+ passed=[0-9]+ skipped=[0-9]+' | sort -u`.
+  Falsifier und Trace-Zeile: `TRC-S6-ASM-001` in [`../traceability.md`](../traceability.md).
+  Fehlt eine dieser Zeilen oder ist sie `skipped>0`, ist die Annahme **nicht** bestätigt und
+  jede darauf gestützte Aussage fällt.
 - `ASSUMPTION` Existing cost snapshot is reused, not reimplemented.
 - `ASSUMPTION` Cloudflare API remains a candidate until current remote evidence falsifies it.
 
 ## Open Questions
 
 - ~~`OQ-001 CONTRADICTION`~~ **RESOLVED 18.08.2026** — ja, wörtlich erteilt; und die Frage war enger gestellt als nötig: PRD v1.4 §7/§10 führt interne Plan-Kosten bereits im MVP. Siehe Source Summary.
-- `OQ-002 BLOCKER` Which Supabase project/environment is the verified non-production staging boundary for write E2E?
+- `OQ-002 BLOCKER` Which Supabase project/environment is the verified non-production staging
+  boundary for write E2E? **Der Weg ist entschieden (PO, 18.08.2026): ein separates Supabase-Projekt
+  `easytree-staging`, spezifiziert als `REQ-017`. Das Anlegen des Projekts ist eine Laufzeitmutation
+  und ist ausdrücklich NOCH NICHT freigegeben.** `OQ-002` bleibt deshalb `BLOCKER`, bis diese
+  Freigabe vorliegt — die Entscheidung über den Weg ist keine Erledigung der Frage.
 - `OQ-003 MISSING` Does a disposable remote Cloudflare API worker pass current Free CPU/startup gates?
 - `OQ-004 MISSING` Is remote Cloudflare deploy/delete explicitly authorized for the measurement slice?
 - `OQ-005 MISSING` Has developer feasibility/capacity for the whole Sprint been confirmed?
@@ -151,6 +167,11 @@ Der Sprint-6-Head muss auf dem gewählten non-production Stagingziel eindeutig i
 `EXPLICIT`
 Cloudflare Workers ist primäres Stagingziel, Railway bleibt dokumentierter kompatibler Fallback. Cloudflare wird nur akzeptiert, wenn aktuelle Bundle-, CPU-/Startup-, TLS/RLS- und Request-Isolation-Gates ohne Sicherheitsabschwächung bestehen. D1/Containers bleiben out of scope.
 
+**Vorbedingung: `REQ-016`.** Cloudflare bleibt primär — diese Anforderung wird nicht
+abgeschwächt. Sie ist aber erst erfüllbar, wenn der für Cloudflare gewählte Datenpfad
+(Hyperdrive oder Direktverbindung) den bestehenden Schreibkanal nachweislich trägt. Ohne grünen
+`REQ-016`-Nachweis startet die Staging-Abnahme (Slice 3) nicht. Siehe `RISK-006`.
+
 ### REQ-014 — Security, privacy and tenant isolation
 
 `EXPLICIT`
@@ -160,6 +181,100 @@ Auth-/Rechte- und Cross-Tenant-Negativfälle dürfen keine fremden Kosten-/Manda
 
 `EXPLICIT`
 Vor Sprintabnahme müssen Health/Ready, exact deployment head, relevante CI/E2E-Evidenz, reale Staging-Screenshots, Diagnose-/Deploy-Runbook und ein reproduzierbarer Rollbackweg vorliegen.
+
+### REQ-016 — Nachgewiesener Workers-Datenpfad (Vorbedingung für Slice 3)
+
+`EXPLICIT` (neu 18.08.2026, PO-Entscheidung: Cloudflare bleibt primär)
+
+Der für Cloudflare Workers gewählte Datenpfad — Hyperdrive oder Direktverbindung — muss den
+**bestehenden Schreibkanal** tragen, ohne eine Sicherheitsgrenze abzuschwächen. Nachweis gegen
+die reale Staging-Verbindung, nicht gegen eine lokale Nachbildung. `REQ-016` ist **Vorbedingung
+für Slice 3**: ohne grünen Nachweis startet die Staging-Abnahme nicht.
+
+**Warum diese Anforderung existiert — der Konflikt, ehrlich benannt.** `REQ-013` erklärt
+Cloudflare Workers zum primären Stagingziel. EYT-142 verbietet dort den prozessweiten `pg.Pool`.
+Der naheliegende Ersatz, der Supavisor-Transaktionspooler, macht `session_user` zu
+`postgres.<pooler-tenant>`; `app.is_runtime_channel()` vergleicht genau diesen Wert gegen
+`easytree_app`. Laut [`../runbooks/planning-publish.md`](../runbooks/planning-publish.md) (Tabelle
+bei Z. 236 ff., Aussage bei Z. 239) fallen damit **Zuweisung, Publish und Snapshot-Erzeugung**
+aus — genau die drei Fähigkeiten, die `REQ-004`, `REQ-005` und `REQ-007` fordern und die
+`REQ-012`/`AC-023` auf dem Stagingziel verlangen. Lesen überlebt, weil die `_select`-Policies
+keine Kanalbedingung tragen.
+
+**Was daran gemessen ist und was nicht.** Die Pooleraussage im Runbook ist eine **Ableitung**
+aus `session_user` plus Policy, **keine Messung an einer Poolerverbindung** — das Runbook sagt
+das ab Z. 316 selbst („in pgTAP ist `session_user` `postgres`, nicht `postgres.<pooler-tenant>`
+… also eine Ableitung aus `session_user` plus Policy, keine Messung"). `REQ-016` existiert genau
+deshalb: **um die Ableitung durch eine Messung zu ersetzen.** Der Nachweis kann die Ableitung
+bestätigen oder widerlegen; beides ist ein Ergebnis. Was er nicht darf, ist ausbleiben.
+
+Akzeptanzkriterien: `AC-031`, `AC-032`, `AC-033`. Risiko: `RISK-006`.
+
+### REQ-017 — Verifizierte NON-PROD-Datengrenze
+
+`EXPLICIT` (neu 18.08.2026, PO-Entscheidung: separates Supabase-Projekt)
+
+Schreibender Staging-E2E läuft gegen ein **separates Supabase-Projekt `easytree-staging`**, das
+ausschließlich aus `supabase/migrations/*` gefüttert wird und die Rolle `easytree_app`
+provisioniert hat. Die Grenze zur Produktion ist **positiv nachgewiesen**, bevor irgendein
+Schreibpfad sie berührt — ein „ist bestimmt getrennt" ist kein Nachweis.
+
+**Ausgangsmessung 18.08.2026.** `supabase/config.toml:5` trägt nur `project_id = "easytree"`
+(lokaler Stackname), kein `project_ref`. Ein repo-weiter `git grep` nach `project_ref` bzw.
+`easytree-staging` findet nur den Traceability-Eintrag selbst. `.github/workflows/` enthält
+keinen Staging-Job. Es gibt heute also **keine** getrennte NON-PROD-Grenze, weder konfiguriert
+noch dokumentiert.
+
+**Ausdrücklich vermerkt: noch nicht freigegeben.** Das Anlegen des Projekts ist eine
+Laufzeitmutation. Der Product Owner hat am 18.08.2026 **den Weg** freigegeben, **nicht die
+Ausführung**. `OQ-002` bleibt bis zur ausdrücklichen Ausführungsfreigabe offen und ist nicht als
+erledigt zu führen.
+
+**Riskanteste unbenannte Position, hier benannt.** Die Supabase-GitHub-Integration spielt beim
+Merge auf `master` Migrationen automatisch ins Produktivprojekt ein — Merge ist damit
+Produktivmigration. Ein Staging-Projekt **darf diese Automatik nicht erben**: die Verdrahtung
+des neuen Projekts muss ausdrücklich prüfen, dass kein zweiter automatischer Migrationspfad
+entsteht und dass der bestehende produktive Pfad unverändert bleibt.
+
+Akzeptanzkriterien: `AC-034`, `AC-035`, `AC-036`. Risiko: `RISK-001`.
+
+## Schnittgrenze zu EYT-80 und EYT-72
+
+`EXPLICIT` (ergänzt 18.08.2026 — vorher unbenannte Abhängigkeit)
+
+EYT-137 führt **EYT-80** (Komponentenbibliothek) und **EYT-72** als Commit-Enabler, und kein
+Sprint-6-Artefakt hat sie bisher erwähnt. Gleichzeitig schließt **EYT-141** die „vollständige
+EYT-80-Komponentenbibliothek" ausdrücklich aus, während `REQ-009` und `REQ-010` Zustände und
+Wochennavigation brauchen. Die Grenze ist damit:
+
+- **In Sprint 6:** genau die Primitive und Zustände, die die Kernreise dieses Slices braucht —
+  nicht mehr. Erweiterungen an `@easytree/ui` nur in dem konkret benötigten Ausschnitt
+  (Canvas `Allowed Scope`).
+- **Nicht in Sprint 6:** die vollständige EYT-80-Bibliothek, ein generisches Designsystem-Release
+  und jede Komponente ohne Abnehmer in dieser Reise.
+- **Gemessen 18.08.2026:** eine Komponente `DateRangeControl` existiert im Repository **nicht**
+  (`grep -rn "DateRangeControl" --include='*.ts' --include='*.tsx' apps packages` → 0 Treffer).
+  Die Wochennavigation aus `REQ-002` ist deshalb Neubau in diesem Slice, kein Wiederverwenden —
+  und sie ist der einzige EYT-80-Zuwachs, den dieser Sprint rechtfertigt.
+
+## FR-Namensraum — welche FR aus welchem Dokument
+
+`EXPLICIT` (ergänzt 18.08.2026)
+
+FR-Nummern in diesem Slice stammen aus **zwei verschiedenen Dokumenten** und sind ohne
+Dokumentangabe mehrdeutig. Gemessen 18.08.2026:
+`grep -n "FR-009\|FR-011\|FR-062" docs/prd/CURRENT_PRD_v1.3.md` → **kein Treffer** (Exit 1).
+Keine dieser Nummern steht in der Repository-Kopie v1.3.
+
+| FR-Nennung        | Dokument                                   | Bedeutung hier                                            |
+| ----------------- | ------------------------------------------ | --------------------------------------------------------- |
+| `FR-009`          | Confluence **PRD v1.4** (7766017) §7       | Plan-Kosten aus veröffentlichter Planversion              |
+| `FR-010`          | Confluence **PRD v1.4** (7766017) §7       | Ist-Kosten — in Sprint 6 ausgeschlossen                   |
+| `FR-011`          | Confluence **PRD v1.4** (7766017) §7       | Kostenübersicht bis zur Einzelposition                    |
+| `FR-062`–`FR-070` | **PRD v1.3-Nummernkreis**, Post-MVP-Grenze | Planungsökonomie/Maschinenverleih — bleibt ausgeschlossen |
+
+Jede weitere FR-Nennung in Sprint-6-Artefakten trägt die Dokumentangabe mit. Eine nackte
+FR-Nummer ist ab hier ein Reviewbefund.
 
 ## Acceptance Criteria
 
@@ -226,8 +341,19 @@ Then wird `/kosten` erreichbar und der reale Snapshotpfad verwendet.
 ### AC-011
 
 Given ein Nutzer ohne `costs.read`  
-When er Planung oder Navigation sieht  
-Then sind Kostenlink, Sätze und Beträge nicht sichtbar; direkter API-Zugriff bleibt verweigert.
+When er `/planung` und `/kosten` lädt  
+Then **enthält die Serverantwort** — HTML-Dokument, RSC-Flight-Payload und jede API-Antwort
+dieses Aufrufs — weder Kostenbeträge noch Sätze noch Positionen noch den Kostennavigationslink,
+und der direkte API-Zugriff wird serverseitig verweigert.
+
+> **Warum „nicht enthalten" und nicht „nicht sichtbar".** „Nicht sichtbar" ist keine
+> Nicht-Auslieferung: Props einer Client-Komponente stehen im RSC-Flight-Payload und damit im
+> ausgelieferten HTML, auch wenn der Zugangswächter sie nie rendert. Ein Test gegen
+> Sichtbarkeit ist durch eine grüne Attrappe erfüllbar — `display:none` trüge den Wert
+> mit. Geprüft wird deshalb der **Inhalt der Serverantwort**, und die Zusicherung richtet sich
+> auf **Serverdaten**, nicht auf Werte, die der Client selbst in die URL geschrieben hat
+> (deren Rückkehr im Payload beweist kein Leck). `apps/web/e2e/auth-journey/journey.pwtest.ts`
+> zieht diese Grenze bereits ausdrücklich; `AC-011` übernimmt sie.
 
 ### AC-012
 
@@ -255,15 +381,32 @@ Then sind Snapshot-ID, Planversion, Erstellungszeit, Regelversion und Währung s
 
 ### AC-016
 
-Given Planung und Kosten  
-When beide Sprint-6-Flächen gerendert werden  
-Then verwenden sie dieselbe Admin-Shell und dieselben verbindlichen semantischen Tokens.
+Given die in Sprint 6 **neu gebauten oder geänderten** Flächen und Komponenten (Wochennavigation
+aus `REQ-002`, Planungswerkbank, Kostenzustände aus `REQ-010`)  
+When sie gerendert werden  
+Then beziehen sie Farbe, Abstand und Typografie **ausschließlich** über die semantischen
+`--eyt-*`-Tokens, tragen keinen eigenen Farb- oder Abstandsliteralwert, und der Token-Wächter
+aus `AC-037` weist das für jede dieser Flächen nach.
+
+> **Warum geschärft.** In der alten Fassung („beide Sprint-6-Flächen verwenden dieselbe
+> Admin-Shell und dieselben Tokens") war das Kriterium auf `origin/master` **bereits erfüllt**
+> und maß deshalb nichts: gemessen 18.08.2026 umschließt `apps/web/app/layout.tsx:29` beide
+> Seiten mit `<AppShell>`, `apps/web/app/planung/page.tsx` und `apps/web/app/kosten/page.tsx`
+> existieren, und `apps/web/app/globals.css` trägt 79 `--eyt-*`-Deklarationen
+> (`grep -c -- "--eyt-" apps/web/app/globals.css` → `79`). Ein Kriterium, das der Ausgangszustand
+> erfüllt, kann den Sprint-6-Zuwachs nicht bewerten. Es misst ab hier den **Zuwachs**.
 
 ### AC-017
 
 Given die implementierten Sprint-6-Flächen  
-When sie bei 1440/1920 px und 200-%-Zoom geprüft werden  
-Then bleiben Hierarchie, Inhalte und primäre Aktionen bedienbar und verständlich.
+When sie bei 1440 px und 1920 px Viewport-Breite sowie bei 200-%-Zoom geprüft werden  
+Then gilt jeweils **prüfbar**: (a) das Dokument scrollt nicht horizontal, (b) kein Text und
+kein Bedienelement ist abgeschnitten oder überlappt, (c) der primäre CTA der Fläche ist ohne
+horizontales Scrollen erreichbar und auslösbar, und (d) axe meldet null Verstöße.
+
+> **Warum umformuliert.** Die alte Fassung endete auf „bedienbar und verständlich".
+> „Verständlich" ist nicht falsifizierbar — es gibt keine Mutation, die es widerlegt, und
+> deshalb keinen Test, der daran rot werden kann. Die vier Punkte oben sind je einzeln messbar.
 
 ### AC-018
 
@@ -343,6 +486,112 @@ Given ein fehlerhafter Staging-Deploy
 When Rollback ausgelöst wird  
 Then kann der vorherige erfolgreiche Staging-Stand reaktiviert werden; destruktiver Schema-Rollback wird nicht improvisiert.
 
+### AC-031
+
+Given den für Cloudflare Workers gewählten Datenpfad (Hyperdrive oder Direktverbindung) gegen
+die **reale** Staging-Verbindung — nicht gegen einen lokalen Stack  
+When über genau diesen Pfad `select session_user, current_user, app.is_runtime_channel();`
+ausgeführt wird  
+Then liefert die Abfrage `session_user` = `easytree_app` und `app.is_runtime_channel()` = `true`,
+und die rohe Ausgabe ist als Evidenz abgelegt.
+
+### AC-032
+
+Given denselben nachgewiesenen Datenpfad  
+When über ihn nacheinander (a) ein realer Assignment-Write, (b) ein Publish der Planversion und
+(c) eine Snapshot-Erzeugung ausgeführt werden  
+Then gelingen **alle drei** und liefern serverseitige IDs zurück; ein Fehlschlag auch nur einer
+der drei falsifiziert den Pfad und `REQ-016` gilt als nicht erfüllt.
+
+> **Ein reiner Lesepfad ist ausdrücklich KEIN Nachweis.** Die `_select`-Policies tragen keine
+> Kanalbedingung — Lesen gelingt auch über einen Pooler, der jedes Schreiben abweist. Ein
+> grüner Lesetest würde die Frage also beantworten, ohne sie zu stellen.
+
+### AC-033
+
+Given ein Cloudflare-Datenpfad, der `AC-031` oder `AC-032` nicht besteht  
+When über die Sprint-6-Staging-Abnahme entschieden wird  
+Then startet Slice 3 **nicht** auf diesem Pfad; die Alternativen sind ein anderer
+Cloudflare-Datenpfad mit erneutem `AC-031`/`AC-032`-Nachweis oder der dokumentierte
+Railway-Fallback aus `REQ-013`. Eine Abschwächung von `app.is_runtime_channel()`, der
+Spaltenrechte oder der RLS-Policies ist als Lösungsweg ausgeschlossen.
+
+### AC-034
+
+Given das separate Supabase-Projekt `easytree-staging`  
+When seine Datenbank inspiziert wird  
+Then stammt ihr Schema ausschließlich aus `supabase/migrations/*` — nachgewiesen durch einen Read
+von `supabase_migrations.schema_migrations`, dessen Versionsliste der Dateiliste in
+`supabase/migrations/` entspricht — und die Rolle `easytree_app` existiert als
+`NOSUPERUSER, NOBYPASSRLS, NOINHERIT, LOGIN`.
+
+### AC-035
+
+Given die Staging- und die Produktionsumgebung  
+When die Datengrenze vor dem ersten Schreibpfad geprüft wird  
+Then ist **positiv nachgewiesen**, dass die Staging-`DATABASE_URL` auf einen anderen
+Projekt-Host als die Produktions-`DATABASE_URL` zeigt (Projekt-Ref-Vergleich, beide Werte
+protokolliert, keine Secrets), und dass in Staging keine produktiven Personendaten liegen.
+Ein „ist getrennt konfiguriert" ohne diesen Read zählt nicht.
+
+### AC-036
+
+Given die Supabase-GitHub-Integration, die beim Merge auf `master` Migrationen automatisch
+ins Produktivprojekt einspielt  
+When das Staging-Projekt verdrahtet wird  
+Then erbt es diese Automatik **nicht**: es ist nachgewiesen, dass kein zweiter automatischer
+Migrationspfad entsteht und dass der bestehende produktive Pfad unverändert bleibt.
+
+### AC-037
+
+Given die Sprint-6-Flächen aus `REQ-009`  
+When der Token-Wächter läuft  
+Then geht er rot, sobald in einer Sprint-6-Fläche ein Farb- oder Abstandsliteralwert
+(Hex, `rgb(`, `hsl(`, freie `px`-Abstände außerhalb des Rasters) statt eines `--eyt-*`-Tokens
+steht.
+
+> **Der Wächter existiert heute nicht.** Gemessen 18.08.2026:
+> `grep -rln token apps/web/test packages/ui/test` → kein Treffer (Exit 1). Ohne ihn kann der
+> Falsifier zu `REQ-009` nichts rot machen. **Seine Erstellung ist damit Teil der Anforderung**,
+> nicht deren Nachweis. Der Testname wird beim Anlegen vergeben und in
+> [`../traceability.md`](../traceability.md) `TRC-S6-009` nachgetragen — er wird hier
+> ausdrücklich **nicht** vorab erfunden.
+
+### AC-038
+
+Given jede Sprint-6-Fläche  
+When ihr Layout geprüft wird  
+Then liegt jeder vertikale und horizontale Abstand auf dem 8-pt-Raster (Vielfache von 8 px,
+4 px nur innerhalb einer Komponente und dann als Token), und die Fläche trägt **genau einen**
+als primär ausgezeichneten CTA — null oder zwei sind ein Fehlschlag.
+
+### AC-039
+
+Given jede datenladende Sprint-6-Fläche  
+When sie sich in einem der Zustände Loading, Empty, Error, Forbidden oder Stale befindet  
+Then rendert sie für diesen Zustand ein **eigenes, per `data-testid` adressierbares** Element
+mit erklärendem Text — kein leeres Raster, keine stille Weiterleitung, kein Zustand, der nur
+durch Abwesenheit von Inhalt erkennbar wäre. Alle fünf Zustände sind je Fläche einzeln geprüft.
+
+### AC-040
+
+Given eine berechtigte Nutzerin mit ausgewählter Organisation  
+When die Kostenansicht ihren **ersten** Request absetzt  
+Then trägt dieser Request den Header `X-EasyTree-Organization-Id` mit der ausgewählten
+Organisation — auch dann, wenn der Request aus einem Kind-Effekt derselben Commit-Phase stammt,
+in der die Organisation gemeldet wurde. Ein Retry darf nicht die Bedingung sein, unter der der
+Header ankommt.
+
+> **Warum das ein eigenes Kriterium braucht.** Gemessen 18.08.2026 an
+> `apps/web/app/providers.tsx:45,51,56-58`: die Organisation wird über eine Ref an das
+> `CostsGateway` gereicht. `SessionProvider` meldet sie per `onOrganisationChange` nach oben,
+> die Kompositionswurzel legt sie in die Ref, und das Gateway liest die Ref bei **jedem**
+> Aufruf. Die Übergabe ist damit **nicht synchron**: der Report läuft in einem Eltern-Effekt,
+> ein Kostenrequest aus einem Kind-Effekt derselben Commit-Phase geht **ohne** Header raus.
+> Das ist ein Flakiness-Kanal für `AC-010`, `AC-012`, `AC-021` und `AC-022`. Die übliche
+> Reaktion — ein Retry — **maskiert** ihn: der zweite Versuch findet die Ref gefüllt und wird
+> grün, während die Ursache bleibt. Siehe `RISK-007`.
+
 ## Non-Functional Requirements
 
 ### Security
@@ -388,11 +637,31 @@ Do not infer current `origin/master` from this document. Re-read it.
 
 ## Risks
 
-- RISK-001 — non-prod environment separation
-- RISK-002 — Cloudflare remote CPU/startup
-- RISK-003 — cross-request DB lifecycle
-- RISK-004 — canonical economics-scope contradiction
-- RISK-005 — hosting overengineering / forcing Cloudflare
+- `RISK-001` — non-prod environment separation → adressiert durch `REQ-017`; bleibt offen, bis
+  dessen Laufzeitfreigabe erteilt und `AC-034`–`AC-036` belegt sind.
+- `RISK-002` — Cloudflare remote CPU/startup (`OQ-003`) — remote ungemessen.
+- `RISK-003` — cross-request DB lifecycle. **Achtung:** benennt nur das Symptom
+  (prozessweiter `pg.Pool` unbrauchbar), nicht dessen Konsequenz für den Schreibkanal. Die
+  Konsequenz trägt `RISK-006`.
+- `RISK-004` — canonical economics-scope contradiction — **aufgelöst 18.08.2026**, verbleibt als
+  Dokumentationsdrift `DOC-DRIFT-S5-001` (kein Blocker; im Sprint-6-Branch angeglichen, siehe
+  `CLAUDE.md` und `docs/handoff/AGENT_HANDOFF_v1.3.md`).
+- `RISK-005` — hosting overengineering / forcing Cloudflare.
+- `RISK-006` (neu 18.08.2026) — **Der primäre Stagingpfad und der Schreibkanal können sich
+  gegenseitig ausschließen.** `REQ-013` macht Cloudflare Workers primär; EYT-142 verbietet dort
+  den prozessweiten `pg.Pool`; der naheliegende Ersatz (Supavisor-Transaktionspooler) setzt
+  `session_user` auf `postgres.<pooler-tenant>` und lässt damit — abgeleitet, nicht gemessen —
+  Zuweisung, Publish **und** Snapshot-Erzeugung ausfallen. Das trifft `REQ-004`, `REQ-005`,
+  `REQ-007` und `REQ-012`/`AC-023` gleichzeitig. Weder `RISK-002` noch `RISK-003` noch `RISK-005`
+  decken das ab. **Behandlung:** `REQ-016` als Vorbedingung für Slice 3; die Ableitung wird durch
+  eine Messung ersetzt, nicht durch eine Einschätzung.
+- `RISK-007` (neu 18.08.2026) — **Org-Header-Rennfall als Flakiness-Kanal.** Die
+  Organisationsauswahl erreicht das `CostsGateway` über eine Ref und damit nicht synchron
+  (`apps/web/app/providers.tsx:45,51,56-58`); ein Kostenrequest aus einem Kind-Effekt derselben
+  Commit-Phase geht ohne `X-EasyTree-Organization-Id` raus. Betroffen: `AC-010`, `AC-012`,
+  `AC-021`, `AC-022`. Die naheliegende Reaktion — ein Retry — maskiert das Risiko, statt es zu
+  beseitigen. **Zugeordnet zu `REQ-011`** (übergreifend wirksam auch für `REQ-006`/`REQ-007`),
+  Nachweis über `AC-040`.
 
 ## Evidence Needed
 
@@ -414,12 +683,32 @@ Do not infer current `origin/master` from this document. Re-read it.
 - Vision: `../vision/easytree-sprint-6-core-journey.vision.md`
 - Canvas: `../canvas/easytree-sprint-6-core-journey.canvas.md`
 - Traceability: `../traceability.md`
+- Intake-Manifest (eingefrorener Vor-Auflösungsstand): `../context/easytree-sprint-6-core-journey.intake-manifest.md`
+- Runbook Schreibkanal/Publish: `../runbooks/planning-publish.md`
 
 ## User Confirmation
 
-Beide Bedingungen am 18.08.2026 erfüllt und geprüft:
+Beide Bedingungen am 18.08.2026 erfüllt und geprüft. Der **Wortlaut beider Formeln** ist hier
+abgelegt — nicht referenziert, sondern zitiert.
 
-1. **Product Vision und Canvas ausdrücklich bestätigt** — wörtliche Formel erteilt, Product Owner Benjamin Poersch.
-2. **Der EYT-109-economics-scope-Widerspruch ist ausdrücklich reconciliert** — wörtliche enge Freigabe erteilt, gestützt auf Confluence PRD v1.4 §7/§10 (live gelesen 18.08.2026) und den PO-Beschluss vom 30.07.2026. Kein Scope-Zuwachs.
+### Formel 1 — Canvas- und Vision-Bestätigung
 
-Damit ist dieses PRD `user-confirmed`. **Nicht mitbestätigt** sind `OQ-002` bis `OQ-005`; sie bleiben eigenständige Blocker für die von ihnen betroffenen Slices.
+Erteilt am **2026-08-18** durch den Product Owner **Benjamin Poersch**, wörtlich:
+
+> Ich bestätige, dass Product Canvas und Product Vision meine Absicht korrekt wiedergeben und als Grundlage für AgileTeam Planning verwendet werden dürfen.
+
+### Formel 2 — enge EYT-109-Kostenfreigabe
+
+Erteilt am **2026-08-18** durch den Product Owner **Benjamin Poersch**, wörtlich:
+
+> Ich bestätige ausdrücklich: Sprint 6 darf den bereits implementierten EYT-109-Personalkosten-Snapshot in die reale Planen → Publish → Kosten-Kernreise integrieren und auf Staging abnehmen. Diese Freigabe erweitert den Scope nicht auf weitere Planungsökonomie oder Maschinenverleih.
+
+**Diese beiden Blöcke sind die Ablage der Bestätigung.** Vorher belegten die Artefakte die
+Nutzerbestätigung nur durch Selbstauskunft und verwiesen auf ein „Sitzungsprotokoll", das kein
+Repository-Artefakt ist und deshalb nichts belegen kann. Ab hier ist der Wortlaut versioniert
+und diffbar; `docs/traceability.md` verweist auf diese Stellen statt auf das Protokoll.
+
+Damit ist dieses PRD `user-confirmed`. **Nicht mitbestätigt** sind `OQ-002` bis `OQ-005`; sie
+bleiben eigenständige Blocker für die von ihnen betroffenen Slices. `REQ-017` benennt den vom
+Product Owner freigegebenen **Weg** zur NON-PROD-Grenze; die dafür nötige **Laufzeitmutation**
+(Anlegen des Supabase-Projekts) ist damit ausdrücklich **nicht** freigegeben.

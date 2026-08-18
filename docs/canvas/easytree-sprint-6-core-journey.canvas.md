@@ -86,7 +86,11 @@ Post-MVP. Kein Implementierungsblocker, aber die Quelle genau dieses Fehlalarms.
 
 ### CAN-013
 
-`EXPLICIT` Kein Mobile-Client, keine Wetter-/Feiertagsintegration, keine alternativen Planner-Ansichten, keine Monats-/Mehrwochen-Erweiterung, keine Mehrtagesbaustellen, keine Maschinen-/Ressourcenkosten, keine neue KI-/Optimierung, kein Excel, kein D1, keine Containers, keine Produktionsfreigabe.
+`EXPLICIT` Kein Excel-Export in diesem Sprint — **engerer Schnitt, kein Widerspruch:** PRD v1.4
+§7 führt ihn unter „Im MVP", Sprint 6 verschiebt ihn auf EYT-110 (wie schon Sprint 5). Ebenso
+nicht in Sprint 6: die vollständige EYT-80-Komponentenbibliothek (EYT-137 führt EYT-80/EYT-72
+als Commit-Enabler, EYT-141 schließt die Bibliothek aus; geliefert wird nur der von dieser Reise
+gebrauchte Ausschnitt). Darüber hinaus: kein Mobile-Client, keine Wetter-/Feiertagsintegration, keine alternativen Planner-Ansichten, keine Monats-/Mehrwochen-Erweiterung, keine Mehrtagesbaustellen, keine Maschinen-/Ressourcenkosten, keine neue KI-/Optimierung, kein Excel, kein D1, keine Containers, keine Produktionsfreigabe.
 
 ## Constraints
 
@@ -120,11 +124,55 @@ Post-MVP. Kein Implementierungsblocker, aber die Quelle genau dieses Fehlalarms.
 
 `ASSUMPTION` Ein zu früher Cloudflare-Commit könnte eine Hostingpräferenz statt Produktnutzen optimieren und einen material rewrite erzwingen.
 
+### RISK-006
+
+`BLOCKER` (neu 18.08.2026) **Primäres Stagingziel und Schreibkanal können sich gegenseitig
+ausschließen.** `REQ-013` erklärt Cloudflare Workers zum primären Stagingziel; EYT-142 verbietet
+dort den prozessweiten `pg.Pool`; der naheliegende Ersatz, der
+Supavisor-Transaktionspooler, macht `session_user` zu `postgres.<pooler-tenant>` und lässt damit
+laut [`../runbooks/planning-publish.md`](../runbooks/planning-publish.md) (Z. 236 ff./239)
+Zuweisung, Publish **und** Snapshot-Erzeugung ausfallen — genau die drei Fähigkeiten, die
+`REQ-004`, `REQ-005` und `REQ-007` fordern und die `REQ-012`/`AC-023` auf dem Stagingziel
+verlangen. Lesen überlebt, weil die `_select`-Policies keine Kanalbedingung tragen.
+
+`RISK-002`, `RISK-003` und `RISK-005` decken das **nicht** ab: `RISK-003` nennt nur das Symptom
+(`pg.Pool` unbrauchbar), ohne dessen Konsequenz für den Schreibkanal zu benennen.
+
+Die Pooleraussage ist eine **Ableitung** aus `session_user` plus Policy, **keine Messung an
+einer Poolerverbindung** — das Runbook sagt das ab Z. 316 selbst. **Behandlung:** `REQ-016`
+ersetzt die Ableitung durch eine Messung und ist Vorbedingung für Slice 3.
+
+### RISK-007
+
+`EXPLICIT` (neu 18.08.2026) **Org-Header-Rennfall.** Die Organisationsauswahl erreicht das
+`CostsGateway` über eine Ref (`apps/web/app/providers.tsx:45,51,56-58`) und damit nicht
+synchron: ein Kostenrequest aus einem Kind-Effekt derselben Commit-Phase geht ohne
+`X-EasyTree-Organization-Id` raus. Das ist ein Flakiness-Kanal für `AC-010`, `AC-012`, `AC-021`
+und `AC-022`; die übliche Reaktion — ein Retry — **maskiert** ihn. Zugeordnet zu `REQ-011`,
+Nachweis über `AC-040`.
+
 ## Success Signal
 
-### CAN-014
+### CAN-014 — Staging-Erfolgssignal (nur staging-verifizierbar)
 
 `EXPLICIT` Ein realer berechtigter Nutzer kann auf Staging die komplette Reise Login → Woche → Assignment → Reload → Publish → Snapshot → Positionen durchlaufen; ein zweiter Browser sieht dieselben IDs; Negativ-, Accessibility-, Security- und Rollback-Gates sind belegt.
+
+**Reichweite, ehrlich.** `CAN-014` ist **erst nach** `REQ-017` (NON-PROD-Grenze) und `REQ-016`
+(Workers-Datenpfad) erreichbar. Solange beide offen sind, ist `CAN-014` für **jede** Anforderung
+unerreichbar — und damit als alleiniges Erfolgssignal untauglich, weil es sonst den Bauvorgang
+mitblockiert, den es gar nicht blockiert. Dafür gibt es `CAN-015`.
+
+### CAN-015 — CI-Erfolgssignal (CI-verifizierbar, ohne Staging erreichbar)
+
+`EXPLICIT` (neu 18.08.2026) Die Fähigkeit ist auf dem Sprint-6-Head durch die benannten
+Pflichtjobs belegt — `unit-tests`, `web-smoke`, `read-through`, `auth-journey`, `db-gates` mit
+ihren `mode=required … skipped=0`-Gate-Zeilen — und der zugehörige Falsifier ist ausgeführt
+worden und war rot.
+
+**Was `CAN-015` beweist und was nicht.** Es beweist, dass die Fähigkeit gebaut ist und gegen
+eine Gegenmutation hält. Es beweist **nicht** die reale Staging-Reise; das bleibt `CAN-014`.
+Der **Bauvorgang** von Slice 1 und Slice 2 ist damit **nicht** blockiert — nur ihr
+**Abnahmenachweis** ist es.
 
 ## Evidence
 
@@ -147,7 +195,10 @@ Post-MVP. Kein Implementierungsblocker, aber die Quelle genau dieses Fehlalarms.
 ## Unresolved Questions
 
 - ~~OQ-001 canonical economics-scope reconciliation~~ — **AUFGELÖST 18.08.2026** (PRD v1.4 §7/§10 live gelesen + PO-Freigabe wörtlich; siehe Kopfabschnitt)
-- OQ-002 non-production Supabase environment — BLOCKER
+- OQ-002 non-production Supabase environment — **BLOCKER, bleibt offen.** Der Product Owner hat
+  am 18.08.2026 den **Weg** freigegeben (separates Supabase-Projekt `easytree-staging`,
+  spezifiziert als `REQ-017`), **nicht die Ausführung**: das Anlegen des Projekts ist eine
+  Laufzeitmutation und ist ausdrücklich noch nicht freigegeben. Nicht als erledigt führen.
 - OQ-003 Cloudflare remote CPU/startup — MISSING
 - OQ-004 deployment authorization for disposable worker — MISSING
 - OQ-005 developer feasibility/capacity confirmation — MISSING

@@ -59,6 +59,12 @@ Login → Woche wählen → Einsatz anlegen → Reload → Publish → Kosten-Sn
 
 `EXPLICIT` Primäres Stagingziel ist Cloudflare Workers, Railway bleibt kompatibler Fallback. Cloudflare D1/Containers, Mobile, Wetter, Feiertage, alternative Planner-Ansichten, Mehrtagesbaustellen, neue KI-/Optimierungslogik, Excel und Produktionsfreigabe gehören nicht in Sprint 6.
 
+**Vorbedingung `REQ-016` (18.08.2026).** Cloudflare bleibt primär und wird nicht abgeschwächt.
+Der dort gewählte Datenpfad muss aber den bestehenden Schreibkanal nachweislich tragen, bevor
+die Staging-Abnahme startet — der prozessweite `pg.Pool` ist auf Workers verboten, und der
+naheliegende Ersatz (Supavisor-Transaktionspooler) lässt abgeleitet Zuweisung, Publish und
+Snapshot-Erzeugung ausfallen. Siehe `RISK-006` im Canvas und `REQ-016` im PRD.
+
 ## Target Group
 
 - `EXPLICIT` Planerin / Administrator
@@ -113,6 +119,10 @@ Login → Woche wählen → Einsatz anlegen → Reload → Publish → Kosten-Sn
 
 ### Out
 
+- die **vollständige EYT-80-Komponentenbibliothek** — EYT-137 führt EYT-80 und EYT-72 als
+  Commit-Enabler, EYT-141 schließt die vollständige Bibliothek aus. In Sprint 6 liegt nur der
+  Ausschnitt, den diese Reise braucht (Wochennavigation, Zustände). Die Schnittgrenze steht im
+  PRD unter „Schnittgrenze zu EYT-80 und EYT-72".
 - Mobile employee client
 - alternative planner views
 - month/multiweek expansion
@@ -121,13 +131,19 @@ Login → Woche wählen → Einsatz anlegen → Reload → Publish → Kosten-Sn
 - multi-day sites
 - machine/resource costs
 - new optimization/AI
-- Excel EYT-110
+- Excel EYT-110 — **engerer Schnitt, kein Widerspruch:** PRD v1.4 §7 führt den Excel-Export
+  unter „Im MVP"; Sprint 6 verschiebt ihn auf EYT-110, wie schon das Sprint-5-PRD.
 - D1 / Containers
 - production release or production personal data
 
 ## Assumptions
 
-- `ASSUMPTION` Existing planning read/write/publish and EYT-109 snapshot capabilities remain intact on current master.
+- `ASSUMPTION` (`ASM-001` — **prüfbar gemacht**) Existing planning read/write/publish and EYT-109
+  snapshot capabilities remain intact on current master. Diese Annahme trägt den größten Teil des
+  Slices und wird deshalb gemessen statt geglaubt: die `db-gates`-Gate-Zeilen `[planning-write]`,
+  `[planning-publish]`, `[planning-published-reads]`, `[cost-snapshot]`, `[snapshot-immutability]`
+  müssen auf dem Sprint-6-Head je `mode=required … skipped=0` melden. Trace-Zeile
+  `TRC-S6-ASM-001`.
 - `ASSUMPTION` Railway fallback can be preserved without creating a second application truth.
 - `ASSUMPTION` Cloudflare API-worker viability is still open pending remote measurement.
 
@@ -138,6 +154,25 @@ Login → Woche wählen → Einsatz anlegen → Reload → Publish → Kosten-Sn
 - `MISSING` Remote Cloudflare Free CPU/startup evidence.
 - `MISSING` Explicit runtime deployment authorization for disposable Cloudflare measurement.
 
-## Confirmation Status
+## Confirmation Status — Wortlaut
+
+Der **Wortlaut beider Formeln** ist hier abgelegt, nicht bloß referenziert.
+
+### Formel 1 — Canvas- und Vision-Bestätigung
+
+Erteilt am **2026-08-18** durch den Product Owner **Benjamin Poersch**, wörtlich:
+
+> Ich bestätige, dass Product Canvas und Product Vision meine Absicht korrekt wiedergeben und als Grundlage für AgileTeam Planning verwendet werden dürfen.
+
+### Formel 2 — enge EYT-109-Kostenfreigabe
+
+Erteilt am **2026-08-18** durch den Product Owner **Benjamin Poersch**, wörtlich:
+
+> Ich bestätige ausdrücklich: Sprint 6 darf den bereits implementierten EYT-109-Personalkosten-Snapshot in die reale Planen → Publish → Kosten-Kernreise integrieren und auf Staging abnehmen. Diese Freigabe erweitert den Scope nicht auf weitere Planungsökonomie oder Maschinenverleih.
+
+**Diese beiden Blöcke sind die Ablage der Bestätigung.** Vorher belegten die Artefakte die
+Nutzerbestätigung nur durch Selbstauskunft und verwiesen auf ein „Sitzungsprotokoll", das kein
+Repository-Artefakt ist und deshalb nichts belegen kann. Ab hier ist der Wortlaut versioniert
+und diffbar; `docs/traceability.md` verweist auf diese Stellen statt auf das Protokoll.
 
 `user-confirmed` (18.08.2026, Product Owner Benjamin Poersch). Der economics-scope-Widerspruch ist aufgelöst (Kopfabschnitt). **Weiterhin offen und ausdrücklich nicht mitbestätigt:** `OQ-002` (verifizierte NON-PROD-Supabase-Grenze, BLOCKER für REQ-012 / Slice 3), `OQ-003`/`OQ-004` (remote Cloudflare-Messung und deren Laufzeitfreigabe) sowie `OQ-005` (Kapazität). Die Bestätigung deckt den fachlichen Scope, nicht die Machbarkeit.

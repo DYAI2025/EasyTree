@@ -1,6 +1,30 @@
 # Plumbline AgileTeam Intake — EasyTree Sprint 6
 
-Readiness-Level: BLOCKED_CONTRADICTION
+> ## ⚠️ EINGEFRORENER INTAKE-STAND — NICHT DER AKTUELLE STAND
+>
+> **Dieses Dokument gibt den Stand vom 18.08.2026 _vor_ der Auflösung des
+> Produktautoritäts-Widerspruchs wieder. Es ist Provenienz, keine Auskunft über heute.**
+>
+> Alles darunter — insbesondere `Readiness-Level: BLOCKED_CONTRADICTION`,
+> „User confirmation: NOT YET PROVIDED" und „Contradiction handling: BLOCKED_CONTRADICTION" —
+> beschreibt den Zustand **vor** der Entscheidung. Es steht damit maschinenlesbar im Widerspruch
+> zu den vier bestätigten Artefakten im selben Commit. Der historische Inhalt wird deshalb
+> **nicht umgeschrieben**: er belegt, worauf sich die Entscheidung bezog. Wer den aktuellen Stand
+> braucht, liest ihn dort:
+>
+> | Frage                              | Aktueller Stand steht in                                                                                                                                                                                                                           |
+> | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | Ist der Widerspruch aufgelöst?     | [`../canvas/easytree-sprint-6-core-journey.canvas.md`](../canvas/easytree-sprint-6-core-journey.canvas.md), Kopfabschnitt „Auflösung `OQ-001`"                                                                                                     |
+> | Liegt die Nutzerbestätigung vor?   | [`../vision/easytree-sprint-6-core-journey.vision.md`](../vision/easytree-sprint-6-core-journey.vision.md) und [`../prd/easytree-sprint-6-core-journey.prd.md`](../prd/easytree-sprint-6-core-journey.prd.md) — **beide Formeln wörtlich zitiert** |
+> | Was ist zu bauen, mit welchen IDs? | [`../prd/easytree-sprint-6-core-journey.prd.md`](../prd/easytree-sprint-6-core-journey.prd.md) — `REQ-001` … `REQ-017`, `AC-001` … `AC-040`                                                                                                        |
+> | Was ist belegt, was blockiert?     | [`../traceability.md`](../traceability.md), Abschnitt „Sprint 6 — Core Journey"                                                                                                                                                                    |
+>
+> **Kurzfassung der Auflösung (18.08.2026):** `OQ-001` ist aufgelöst — die kanonische fachliche
+> Baseline ist Confluence PRD v1.4 (7766017), nicht die Repository-Kopie v1.3. Der Product Owner
+> hat beide Formeln wörtlich erteilt. `OQ-002` bis `OQ-005` bleiben offen; hinzugekommen sind
+> `OQ-008` bis `OQ-010` sowie die Anforderungen `REQ-016` und `REQ-017`.
+
+Readiness-Level: BLOCKED_CONTRADICTION (**eingefroren, Stand vor der Auflösung — siehe Kopf**)
 Mode: PLUMBLINE_READY_PACKAGE
 Target Agent: Claude Code Opus 5
 Feature Slug: `easytree-sprint-6-core-journey`
@@ -66,7 +90,12 @@ Bis diese Entscheidung bestätigt bzw. in der kanonischen Produkt-Autorität rec
 - `docs/canvas/easytree-sprint-6-core-journey.canvas.md`
 - `docs/prd/easytree-sprint-6-core-journey.prd.md`
 - `docs/traceability.md`
-- `CLAUDE_CODE_OPUS_5_START.md`
+- ~~`CLAUDE_CODE_OPUS_5_START.md`~~ — **FEHLT im Repository.** Gemessen 18.08.2026:
+  `ls CLAUDE_CODE_OPUS_5_START.md` → `No such file or directory` (Exit 1); die Datei ist auch in
+  keinem Commit dieses Repositories versioniert. Sie wurde bewusst **nicht** übernommen. Der
+  Eintrag bleibt als fehlend gekennzeichnet stehen und wird **nicht still gestrichen** — ein
+  Paketindex, der eine nie existierende Datei stillschweigend verliert, verwischt genau die
+  Frage, ob sie einmal Inhalt trug.
 
 Die vier Plumbline-Kernartefakte bleiben getrennt. Dieses Manifest ist nur Paketindex, Source Map und Readiness-Gate.
 
@@ -86,9 +115,9 @@ Die vier Plumbline-Kernartefakte bleiben getrennt. Dieses Manifest ist nur Paket
 
 - Vision items: VIS-001 … VIS-008
 - Canvas items: CAN-001 … CAN-014
-- Requirements: REQ-001 … REQ-015
-- Acceptance criteria: AC-001 … AC-030
-- Trace rows: TRC-001 … TRC-015
+- Requirements: REQ-001 … REQ-015 (**eingefroren**; heute REQ-001 … REQ-017)
+- Acceptance criteria: AC-001 … AC-030 (**eingefroren**; heute AC-001 … AC-040)
+- Trace rows: TRC-001 … TRC-015 (**eingefroren**; heute TRC-S6-001 … TRC-S6-017 plus TRC-S6-ASM-001)
 - All REQ IDs appear in `docs/traceability.md`.
 - Each REQ is linked to Vision, Canvas, Acceptance Criteria and expected evidence.
 - Traceability completeness: PASS
@@ -114,8 +143,10 @@ Additional EasyTree-specific authority decision required:
 - Given/When/Then acceptance criteria: PASS
 - Every REQ linked in traceability: PASS
 - Missing/Blocker ledger: PASS
-- User confirmation: NOT YET PROVIDED
-- Contradiction handling: BLOCKED_CONTRADICTION
+- User confirmation: NOT YET PROVIDED — **eingefrorener Stand.** Beide Formeln wurden am
+  18.08.2026 wörtlich erteilt und liegen zitiert in Vision und PRD; siehe Kopf.
+- Contradiction handling: BLOCKED_CONTRADICTION — **eingefrorener Stand.** `OQ-001` ist am
+  18.08.2026 aufgelöst; siehe Kopf.
 - Repository mutation performed by this package generator: NO
 - Jira mutation performed by this package generator: NO
 - Runtime mutation performed by this package generator: NO
