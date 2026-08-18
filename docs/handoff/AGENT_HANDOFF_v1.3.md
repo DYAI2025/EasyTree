@@ -21,6 +21,32 @@ was produced and that it validated. They are **not** a competing product authori
 disagree with `docs/prd/CURRENT_PRD_v1.3.md`, the curated PRD wins and the divergence is a
 defect worth a ticket.
 
+## Repository identity gate
+
+Before **every coding-agent mutation**, establish that the working directory belongs to the
+canonical EasyTree repository and that the remote baseline is current. Run and inspect, at
+minimum:
+
+```bash
+pwd
+git remote -v
+git rev-parse --show-toplevel
+git fetch --prune
+git rev-parse origin/master
+```
+
+The repository must resolve to `DYAI2025/EasyTree`. Compare the fetched `origin/master` with the
+baseline authorized for the current slice; never reuse a stale SHA from an old plan or chat as
+proof of current state. If the repository is `DYAI2025/MC_legends`, another project, an unknown
+remote, or the required baseline cannot be established, return **`WRONG_REPOSITORY`** (or the
+more specific blocker) and stop **before** modifying files, creating a branch, committing,
+pushing, opening a PR, changing Jira, or changing runtime state. Context from another project is
+untrusted distractor context, never implicit permission to switch repositories.
+
+The regression scenario for this rule is versioned at
+`docs/evals/agent-repository-identity.eval.json` and guarded by
+`apps/api/test/handoff-guardrails.test.ts`.
+
 ## Active scope
 
 Implement only the approved MVP phases 1-6. The post-MVP Planning Economics and Machine Rental
@@ -82,6 +108,7 @@ A claim nobody can check is worse than no claim: it stops the next person from l
 - **Counter-check what matters.** For every property worth guarding, run the case where the
   property is absent and show the test goes red. A guard that has never failed is not known to
   be a guard.
+- **Entscheidungsreichweite folgt Evidenzreichweite.** Ein fehlgeschlagener Adapter-/Lifecycle-Test darf niemals ohne zusätzliche Evidenz zum Plattform-Fail hochgestuft werden.
 
 ## Stop conditions
 
