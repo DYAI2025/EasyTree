@@ -29,24 +29,59 @@
  * aus einem Zeitpunkt — dort und nur dort wird sie verwendet
  * (Entwurfsentscheidung `E4`).
  *
- * ## Zwei Faelle, die als `fehlerhaft` enden
+ * ## Zwei Faelle, die als `fehlerhaft` enden — und warum sie trotzdem einen Weg tragen
  *
- * 1. **Mehrfach angegebener Parameter.** Steht `weekKey` mehrfach in der
- *    Adresse, liefert Next ein Array. Das ist eine mehrdeutige Angabe und keine
- *    Woche; ein stilles Reduzieren auf den ersten Wert waere eine Antwort auf
- *    eine Frage, die so nicht gestellt wurde. Die Regel stammt unveraendert aus
- *    `app/planung/page.tsx`.
- * 2. **Eine Woche ohne darstellbaren Nachbarn.** `9999-W52` und `0001-W01` sind
- *    fuer sich gueltige Schluessel und koennen in der Adresse stehen, aber ihre
+ * 1. **`parameter-unbrauchbar`.** Was in der Adresse steht, ist keine Woche.
+ *    Zwei Wege fuehren hierher, und sie teilen sich den Grund bewusst: ein
+ *    mehrfach angegebener `weekKey` (Next liefert dann ein Array — eine
+ *    mehrdeutige Angabe, deren stilles Reduzieren auf den ersten Wert eine
+ *    Antwort auf eine nicht gestellte Frage waere; die Regel stammt unveraendert
+ *    aus `app/planung/page.tsx`), und ein vorhandener, aber ungueltiger
+ *    Schluessel. Fuer die Planerin ist der Unterschied keiner, auf den sie
+ *    anders reagieren koennte.
+ * 2. **`woche-ohne-nachbarwoche`.** `9999-W52` und `0001-W01` sind fuer sich
+ *    GUELTIGE Schluessel und koennen in der Adresse stehen, aber ihre
  *    Nachbarwoche liegt ausserhalb der Vertragsgrenze 0001–9999;
- *    `shiftPlanningWeek` wirft dort (gemessen 18.08.2026). Ein
- *    durchgereichter Fehler wuerde die Server-Komponente sprengen, ein halbes
- *    Modell mit einem Link, der nirgends hinfuehrt, waere die stille Variante.
- *    Also: entweder ein vollstaendig benutzbares Navigationsmodell oder keins.
+ *    `shiftPlanningWeek` wirft dort (gemessen 18.08.2026). Ein durchgereichter
+ *    Fehler wuerde die Server-Komponente sprengen, ein halbes Modell mit einem
+ *    Link, der nirgends hinfuehrt, waere die stille Variante. Also: entweder ein
+ *    vollstaendig benutzbares Navigationsmodell oder keins.
+ *
+ * Dass diese beiden Faelle ueberhaupt unterscheidbar sind, ist Korrekturbefund
+ * `B3`: bis dahin sah eine gueltige Randwoche fuer die Planerin genauso aus wie
+ * ein Tippfehler. Das Modell trennt sie jetzt; ob die Darstellung den
+ * Unterschied zeigt, entscheidet M4 — der M4-Abnahmevertrag sagt heute nichts
+ * darueber, und diese Datei behauptet deshalb auch nichts darueber.
+ *
+ * **Beide Fehlerfaelle tragen `heuteUrl`** (Korrekturbefund `K8`). Der
+ * M4-Abnahmevertrag verlangt aus dem Parameterfehler heraus den Klick auf
+ * „Heute" zurueck zur laufenden Woche. Traege die Fehlervariante nur `art`,
+ * muesste M4 sich dieses Ziel woanders holen: entweder ueber eine eigene
+ * Wochenableitung — genau die zweite Wochenregel, gegen die diese Datei gebaut
+ * ist — oder ueber ein zweites hartkodiertes `/planung`. Deshalb wird die
+ * laufende Woche VOR jeder Ablehnung abgeleitet, und der Rueckweg kommt aus
+ * derselben Quelle wie jede andere Adresse hier.
  *
  * Ein FEHLENDER Parameter ist etwas anderes als ein ungueltiger: er ergibt die
  * laufende Woche (`AC-003`), ein vorhandener, aber ungueltiger bleibt
  * `fehlerhaft` (`E2`).
+ *
+ * ## Was diese Datei NICHT zusichert
+ *
+ * - **Fremde Adressparameter gehen verloren** (Korrekturbefund `B6`). Die
+ *   Funktion bekommt ausschliesslich `weekKeyAusUrl`, nicht die ganze Abfrage,
+ *   und jede erzeugte Adresse traegt genau einen Parameter. Heute ist das
+ *   schadenfrei, weil `/planung` nur `weekKey` liest. Das ist eine bewusste
+ *   Zusage fuer M3/M4 und kein Versehen — sobald die Seite einen zweiten
+ *   Parameter liest, muss die Eingabe erweitert werden, sonst wirft das
+ *   Blaettern ihn still weg.
+ * - **Die Einengung auf `RangeError` ist heute ungemessen** (Korrekturbefund
+ *   `B4`). Im `try` stehen ausschliesslich Domainaufrufe, die nur `RangeError`
+ *   werfen; ein blankes `catch { … }` liesse den ganzen Testsatz gruen. Die
+ *   Einengung steht trotzdem da, weil ein anderer Fehler ein echter Defekt
+ *   waere und nicht als „ungueltige Eingabe" getarnt werden darf — aber sie ist
+ *   eine Absicht, kein Nachweis. Wer im `try` etwas ergaenzt, das anders wirft,
+ *   schuldet dieser Zeile einen Test.
  */
 import {
   isSameWeek,
@@ -80,8 +115,23 @@ export interface WochenmodellEingabe {
  * Bewusst serialisierbar: es ueberquert in M5 die Grenze von der Server- zur
  * Client-Komponente. Eine Funktion oder eine Klasse koennte das nicht.
  */
+/**
+ * Warum die Woche nicht dargestellt werden kann. Zwei Werte, nicht drei: der
+ * mehrfach angegebene und der ungueltige Parameter teilen sich bewusst einen
+ * Grund (siehe Dateikopf).
+ */
+export type Fehlergrund = "parameter-unbrauchbar" | "woche-ohne-nachbarwoche";
+
 export type Wochenmodell =
-  | { readonly art: "fehlerhaft" }
+  | {
+      readonly art: "fehlerhaft";
+      readonly grund: Fehlergrund;
+      /**
+       * Auch der Fehlerfall traegt den Rueckweg zur LAUFENDEN Woche — sonst
+       * waere er eine Sackgasse und M4 muesste sich das Ziel selbst ausrechnen.
+       */
+      readonly heuteUrl: string;
+    }
   | {
       readonly art: "woche";
       /** Kanonischer Schluessel der angezeigten Woche, etwa `2026-W32`. */
@@ -96,8 +146,6 @@ export type Wochenmodell =
       readonly heuteUrl: string;
       readonly istAktuelleWoche: boolean;
     };
-
-const FEHLERHAFT: Wochenmodell = { art: "fehlerhaft" };
 
 function zweistellig(wert: number): string {
   return String(wert).padStart(2, "0");
@@ -127,30 +175,50 @@ function planungsUrl(schluessel: string): string {
  * Leitet Beschriftung, Zeitraum und Ziel-Adressen einer Planungswoche ab.
  *
  * @param eingabe Rohparameter aus der Adresse, Zeitpunkt und Zone.
- * @returns Ein vollstaendiges Navigationsmodell oder `{ art: "fehlerhaft" }`.
+ * @returns Ein vollstaendiges Navigationsmodell, oder die Fehlervariante mit
+ *   `grund` und dem Rueckweg `heuteUrl` — nie ein halbes Modell.
  */
 export function wochenmodell(eingabe: WochenmodellEingabe): Wochenmodell {
   const { weekKeyAusUrl, jetzt, zone } = eingabe;
 
-  // Fall 1: mehrdeutige Angabe. Vor jeder weiteren Auswertung, damit der
-  // Rohwert gar nicht erst auf einen Einzelwert reduziert wird.
-  if (Array.isArray(weekKeyAusUrl)) return FEHLERHAFT;
-
+  // Die laufende Woche steht VOR jeder Ablehnung: sie ist der Rueckweg, den
+  // auch der Fehlerfall tragen muss (`K8`). Sie haengt an keiner Eingabe aus
+  // der Adresse und kann deshalb hier oben nicht scheitern.
   const laufende = isoWeekOfLocalDate(localBusinessDate(jetzt, zone));
+  const heuteUrl = planungsUrl(planningWeekKey(laufende));
+  const fehlerhaft = (grund: Fehlergrund): Wochenmodell => ({
+    art: "fehlerhaft",
+    grund,
+    heuteUrl,
+  });
+
+  // Fall 1a: mehrdeutige Angabe. Vor jeder weiteren Auswertung, damit der
+  // Rohwert gar nicht erst auf einen Einzelwert reduziert wird.
+  if (Array.isArray(weekKeyAusUrl)) return fehlerhaft("parameter-unbrauchbar");
 
   let angezeigt: PlanningWeek;
   if (weekKeyAusUrl === undefined) {
     angezeigt = laufende;
   } else {
+    // Fall 1b: vorhanden, aber keine Woche.
     const geprueft = parseIsoWeekKey(weekKeyAusUrl);
-    if (!geprueft.ok) return FEHLERHAFT;
+    if (!geprueft.ok) return fehlerhaft("parameter-unbrauchbar");
     angezeigt = geprueft.week;
   }
 
   // Fall 2: die Nachbarwochen. Nur `RangeError` wird abgefangen — das ist die
   // Klasse, mit der die Domain eine unerreichbare Woche meldet. Jede andere
   // Ausnahme waere ein echter Defekt und darf nicht als „ungueltige Eingabe"
-  // getarnt werden.
+  // getarnt werden; dass heute kein Test diese Einengung einloest, steht im
+  // Dateikopf (`B4`).
+  //
+  // Die REIHENFOLGE der drei Zuweisungen traegt eine ungeschriebene Bedingung
+  // (`B5`): `planningWeekDateRange({ isoYear: 9999, isoWeek: 52 })` wirft nicht,
+  // sondern liefert als Sonntag den 02.01.10000 — gemessen 19.08.2026 gegen
+  // `packages/domain/dist`. Unerreichbar ist dieser Sonntag allein deshalb, weil
+  // `shiftPlanningWeek(angezeigt, 1)` zwei Zeilen frueher wirft. Wer die
+  // Zeitraumzeile nach oben zieht, gibt der Planerin einen fuenfstelligen
+  // Jahreswert zu sehen, ohne dass ein Test es meldet.
   let vorherige: PlanningWeek;
   let naechste: PlanningWeek;
   let zeitraum: PlanningWeekDateRange;
@@ -159,7 +227,7 @@ export function wochenmodell(eingabe: WochenmodellEingabe): Wochenmodell {
     naechste = shiftPlanningWeek(angezeigt, 1);
     zeitraum = planningWeekDateRange(angezeigt);
   } catch (fehler) {
-    if (fehler instanceof RangeError) return FEHLERHAFT;
+    if (fehler instanceof RangeError) return fehlerhaft("woche-ohne-nachbarwoche");
     throw fehler;
   }
 
@@ -170,7 +238,7 @@ export function wochenmodell(eingabe: WochenmodellEingabe): Wochenmodell {
     zeitraumText: `${tagText(zeitraum.monday)} – ${tagText(zeitraum.sunday)}`,
     vorherigeUrl: planungsUrl(planningWeekKey(vorherige)),
     naechsteUrl: planungsUrl(planningWeekKey(naechste)),
-    heuteUrl: planungsUrl(planningWeekKey(laufende)),
+    heuteUrl,
     istAktuelleWoche: isSameWeek(angezeigt, laufende),
   };
 }

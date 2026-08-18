@@ -261,7 +261,13 @@ export const INVARIANTS: readonly Invariant[] = [
     statement: "Gleichheit gilt ueber ISO-Jahr UND ISO-Woche, nicht ueber das Kalenderjahr.",
     kind: "regel",
     positive: { file: WEEK, title: "erkennt gleiche Wochen ueber die Jahresgrenze hinweg" },
-    negative: { file: WEEK, title: "ordnet ueber den Jahreswechsel korrekt zu" },
+    // Korrekturbefund K9 (19.08.2026). Hier stand „ordnet ueber den
+    // Jahreswechsel korrekt zu" — ein Test, der `weekKeyOf` aufruft und
+    // `isSameWeek` NIE anfasst. Der Coverage-Test misst nur, ob der Titel
+    // woertlich in der Datei steht, nicht ob der Test die Funktion beruehrt;
+    // der Eintrag war damit gruen und ohne Aussage. Gemessen: eine Gleichheit,
+    // die das ISO-Jahr ignoriert, ueberlebte den gesamten Testsatz.
+    negative: { file: WEEK, title: "trennt gleiche Wochennummern in verschiedenen ISO-Jahren" },
   },
   {
     exportName: "shiftPlanningWeek",

@@ -60,6 +60,18 @@ function alsWoche(modell: Wochenmodell): Extract<Wochenmodell, { art: "woche" }>
   return modell;
 }
 
+/**
+ * Das Gegenstueck zu {@link alsWoche} fuer den Fehlerzweig. Ohne diesen Umweg
+ * wuerde ein `expect(modell.heuteUrl)` still auf dem Wochenzweig landen, sobald
+ * jemand die Eingabe aendert — der Fehlerfall waere dann ungemessen.
+ */
+function alsFehlerhaft(modell: Wochenmodell): Extract<Wochenmodell, { art: "fehlerhaft" }> {
+  if (modell.art !== "fehlerhaft") {
+    throw new Error(`Erwartet: art="fehlerhaft". Erhalten: art="${modell.art}".`);
+  }
+  return modell;
+}
+
 /** Ein Zeitpunkt, der in Europe/Berlin sicher in der Woche 2026-W32 liegt. */
 const IN_W32 = new Date("2026-08-05T10:00:00Z");
 
@@ -204,6 +216,24 @@ describe("wochenmodell — welche Woche `heute` ist", () => {
     );
     expect(modell.istAktuelleWoche).toBe(true);
   });
+
+  it("trennt dieselbe Wochennummer in einem anderen ISO-Jahr von der laufenden", () => {
+    // Korrekturbefund K9. Der uebrige Testsatz kommt ohne diesen Fall aus:
+    // gemessen 19.08.2026 ueberlebte eine Gleichheit, die NUR `isoWeek`
+    // vergleicht und das ISO-Jahr ignoriert, alle 43 vorherigen Zusicherungen.
+    // Im Alltag erreichbar — ein Jahr zurueckgeblaettert, ein gemerkter Link —
+    // und die Folge waere, dass „Heute" die falsche Woche als die laufende
+    // markiert.
+    const modell = alsWoche(
+      wochenmodell({ weekKeyAusUrl: "2025-W32", jetzt: IN_W32, zone: EUROPE_BERLIN }),
+    );
+    expect(modell.schluessel).toBe("2025-W32");
+    expect(modell.istAktuelleWoche).toBe(false);
+    // Gegenprobe in derselben Zusicherung: die laufende Woche traegt dieselbe
+    // Wochennummer. Ohne sie waere nicht belegt, dass genau das ISO-Jahr den
+    // Unterschied macht und nicht die Nummer.
+    expect(modell.heuteUrl).toBe("/planung?weekKey=2026-W32");
+  });
 });
 
 describe("wochenmodell — die Nachbarwochen, absolut", () => {
@@ -244,12 +274,73 @@ describe("wochenmodell — die Nachbarwochen, absolut", () => {
   });
 });
 
+describe("wochenmodell — der Fehlerfall ist eine Aussage, keine Sackgasse", () => {
+  // Korrekturbefund K8. Die Fehlervariante trug bis hierher nur `art` und war
+  // damit eine Sackgasse: der M4-Abnahmevertrag
+  // (`wochennavigation.test.tsx`, „laesst die Planerin aus dem Parameterfehler
+  // heraus zur laufenden Woche zurueck") verlangt aus genau diesem Zustand den
+  // Klick auf „Heute". M4 muesste sich das Ziel sonst woanders holen — entweder
+  // ueber eine eigene Wochenableitung, also die zweite Wochenregel, gegen die
+  // diese Datei gebaut ist, oder ueber ein zweites hartkodiertes `/planung`.
+  const FEHLERFAELLE: ReadonlyArray<readonly [string | string[], string, string]> = [
+    [["2026-W32", "2026-W33"], "parameter-unbrauchbar", "mehrfach angegeben"],
+    [["2026-W32"], "parameter-unbrauchbar", "einelementiges Array"],
+    ["2026-W99", "parameter-unbrauchbar", "unmoegliche Wochennummer"],
+    ["2025-W53", "parameter-unbrauchbar", "53. Woche in einem Jahr mit 52"],
+    ["", "parameter-unbrauchbar", "leere Zeichenkette"],
+    ["heute", "parameter-unbrauchbar", "gar kein Schluessel"],
+    ["9999-W52", "woche-ohne-nachbarwoche", "gueltig, aber ohne Nachfolger"],
+    ["0001-W01", "woche-ohne-nachbarwoche", "gueltig, aber ohne Vorgaenger"],
+  ];
+
+  it.each(FEHLERFAELLE)("traegt aus %s heraus den Rueckweg zur laufenden Woche (%s, %s)", (roh) => {
+    const modell = alsFehlerhaft(
+      wochenmodell({ weekKeyAusUrl: roh, jetzt: IN_W32, zone: EUROPE_BERLIN }),
+    );
+    // Dieselbe Adresse wie im Wochenfall, aus derselben Quelle. Eine Umsetzung,
+    // die hier `/planung` ohne Parameter liefert, faellt durch — ein Link ohne
+    // Parameter waere zwar bequem, aber er waere eine ZWEITE Zusage darueber,
+    // was „ohne Parameter" bedeutet.
+    expect(modell.heuteUrl).toBe("/planung?weekKey=2026-W32");
+  });
+
+  it.each(FEHLERFAELLE)("nennt fuer %s den Grund %s (%s)", (roh, grund) => {
+    // Korrekturbefund B3: `9999-W52` und `0001-W01` sind GUELTIGE Schluessel,
+    // deren Nachbarwoche ausserhalb der Vertragsgrenze 0001–9999 liegt. Sie
+    // landeten bis hierher auf derselben ununterscheidbaren Variante wie ein
+    // Tippfehler. Der Grund trennt beides im Modell; ob die Darstellung ihn
+    // nutzt, entscheidet M4 — der M4-Vertrag sagt heute nichts darueber.
+    expect(
+      alsFehlerhaft(wochenmodell({ weekKeyAusUrl: roh, jetzt: IN_W32, zone: EUROPE_BERLIN })).grund,
+    ).toBe(grund);
+  });
+
+  it("leitet den Rueckweg aus `jetzt` ab, nicht aus einer Konstanten", () => {
+    // Ohne diese Zusicherung waere ein fest eingebautes
+    // `heuteUrl: "/planung?weekKey=2026-W32"` in jeder Zeile oben gruen.
+    const modell = alsFehlerhaft(
+      wochenmodell({
+        weekKeyAusUrl: "2026-W99",
+        jetzt: new Date("2027-01-01T12:00:00Z"),
+        zone: EUROPE_BERLIN,
+      }),
+    );
+    expect(modell.heuteUrl).toBe("/planung?weekKey=2026-W53");
+  });
+});
+
 describe("wochenmodell — die Texte", () => {
   it.each([
     // schluessel | zeitraumText
     ["2026-W53", "28.12.2026 – 03.01.2027"],
     ["2026-W01", "29.12.2025 – 04.01.2026"],
     ["2026-W32", "03.08.2026 – 09.08.2026"],
+    // Korrekturbefund B7: die einzige Zeile, in der die VIERSTELLIGKEIT etwas
+    // aendert. `0999-W01` ist ein gueltiger Schluessel mit darstellbaren
+    // Nachbarn (`0998-W52` / `0999-W02`, gemessen 19.08.2026 gegen
+    // `packages/domain/dist`), und ihr Montag liegt im Vorjahr — die Zeile pinnt
+    // damit beide Aufrufstellen der Auffuellung auf einmal.
+    ["0999-W01", "31.12.0998 – 06.01.0999"],
   ])("nennt fuer %s den Zeitraum %s", (schluessel, erwartet) => {
     // Absolute Kalendertage mit fuehrenden Nullen. Die Zeile 2026-W53 faengt
     // zusaetzlich eine Vertauschung von Tag und Monat: „28.12." waere als
@@ -264,6 +355,8 @@ describe("wochenmodell — die Texte", () => {
     ["2026-W01", "KW 01 · 2026"],
     ["2026-W53", "KW 53 · 2026"],
     ["2025-W52", "KW 52 · 2025"],
+    // B7, zweite Aufrufstelle: ohne Auffuellung stuende hier „KW 01 · 999".
+    ["0999-W01", "KW 01 · 0999"],
   ])("beschriftet %s als %s", (schluessel, erwartet) => {
     // 2026-W01 ist die tragende Zeile: ihr Montag ist der 29.12.2025. Wer das
     // Jahr aus dem Zeitraum statt aus der ISO-Woche nimmt, schreibt hier

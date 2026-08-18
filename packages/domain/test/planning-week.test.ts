@@ -89,6 +89,22 @@ describe("isoWeekOfLocalDate — belegte Grenzfaelle", () => {
       ),
     ).toBe(true);
   });
+
+  it("trennt gleiche Wochennummern in verschiedenen ISO-Jahren", () => {
+    // Der unterscheidende Gegenfall zum Test darueber, und der Negativbeleg des
+    // Registereintrags zu `isSameWeek` (Korrekturbefund K9). Bis 19.08.2026 wies
+    // das Register hier auf „ordnet ueber den Jahreswechsel korrekt zu" — ein
+    // Test, der `weekKeyOf` aufruft und `isSameWeek` gar nicht anfasst. Gemessen:
+    // eine Gleichheit, die NUR `isoWeek` vergleicht, ueberlebte den gesamten
+    // Testsatz von `apps/web/test/wochenmodell.test.ts` (43/43 gruen).
+    //
+    // Die drei Zeilen pruefen die Konjunktion von beiden Seiten: nur so faellt
+    // sowohl ein weggelassenes `isoYear` als auch ein weggelassenes `isoWeek`
+    // auf, und ein konstantes `false` ebenfalls.
+    expect(isSameWeek({ isoYear: 2025, isoWeek: 32 }, { isoYear: 2026, isoWeek: 32 })).toBe(false);
+    expect(isSameWeek({ isoYear: 2026, isoWeek: 32 }, { isoYear: 2026, isoWeek: 33 })).toBe(false);
+    expect(isSameWeek({ isoYear: 2026, isoWeek: 32 }, { isoYear: 2026, isoWeek: 32 })).toBe(true);
+  });
 });
 
 describe("planningWeekOf — der Zeitzonenfehler aus FIND-003", () => {

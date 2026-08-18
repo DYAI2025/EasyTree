@@ -354,10 +354,26 @@ des Meilenstein-Commits; nichts anderes hängt zu diesem Zeitpunkt daran.
 
 ```
 wochenmodell({ weekKeyAusUrl: string | string[] | undefined, jetzt: Date, zone: IanaTimeZone })
-  → { art: "fehlerhaft" }
+  → { art: "fehlerhaft", grund: "parameter-unbrauchbar" | "woche-ohne-nachbarwoche", heuteUrl }
   | { art: "woche", schluessel, isoWochenText, zeitraumText, vorherigeUrl, naechsteUrl,
       heuteUrl, istAktuelleWoche }
 ```
+
+**Die Fehlervariante trug ursprünglich nur `art`** (nachgezogen 19.08.2026, Korrekturbefunde
+`K8` und `B3`). Das war ein Planfehler, keine Umsetzungsabweichung: der bereits geschriebene
+M4-Abnahmevertrag verlangt in „laesst die Planerin aus dem Parameterfehler heraus zur laufenden
+Woche zurueck" (`apps/web/test/wochennavigation.test.tsx`) genau aus diesem Zustand den Klick auf
+„Heute". Mit der alten Rückgabeform müsste M4 sich das Ziel woanders holen — entweder über eine
+**eigene Wochenableitung**, also die zweite Wochenregel, gegen die M3 überhaupt gebaut wird, oder
+über ein zweites hartkodiertes `/planung`. Deshalb trägt jetzt auch der Fehlerfall `heuteUrl`,
+und die Ableitung der laufenden Woche steht **vor** der Array-Prüfung.
+
+`grund` schließt zusätzlich `B3`: `9999-W52` und `0001-W01` sind **gültige** Schlüssel, deren
+Nachbarwoche außerhalb der Vertragsgrenze 0001–9999 liegt; sie landeten bis dahin auf derselben
+ununterscheidbaren Variante wie ein Tippfehler. Der M4-Vertrag sagt zum Fehlertext heute nichts
+(geprüft: er fragt nur `data-testid="planungsfenster-parameterfehler"` ab) — das Feld ist damit
+verträglich, aber **B3 ist nur im Modell geschlossen**, nicht in der Darstellung. Ob M4 den
+Unterschied zeigt, ist dort zu entscheiden.
 
 Kein React, keine Uhr, kein `Intl`. Parsen über `parseIsoWeekKey` (contracts), Rechnen über
 `shiftPlanningWeek`/`planningWeekDateRange` (domain), „heute" über
@@ -407,6 +423,24 @@ ebenfalls mit 0 und hätte nichts geprüft.
 in den Domain. **Gegenmaßnahme:**
 `grep -c -E "getUTCDay|86_?400_?000|isoWeek [+-]" apps/web/lib/wochennavigation.ts` → `0`.
 **Rücknahme:** Datei löschen, M4 hängt noch nicht daran.
+
+**Ausgeführte Gegenmutationen der Korrekturrunde 19.08.2026** (eingespielt, gemessen,
+zurückgenommen; die Rücknahme je über `shasum -a 256` gegen die Sicherungskopie belegt, für
+`planning-week.ts` zusätzlich über `git diff --exit-code`):
+
+| Mutation                                                                | Vorher                                                           | Nachher                                                                                                             |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Fehlervariante ohne `heuteUrl` und `grund` — der Stand vor dieser Runde | die Variante trug nur `art`, der Rückweg fehlte (**K8**, **B3**) | `Tests 17 failed \| 28 passed (45)`                                                                                 |
+| `isSameWeek` vergleicht nur `isoWeek`                                   | 43/43 grün — das ISO-Jahr war unbelegt (**K9**)                  | je `1 failed` in `wochenmodell.test.ts` und `planning-week.test.ts`, genau bei `2025-W32` gegen laufende `2026-W32` |
+| `vierstellig` füllt nicht auf (`String(wert)`)                          | keine Zeile mit `isoYear < 1000` (**B7**)                        | `Tests 2 failed \| 45 passed (47)` — je eine der beiden Aufrufstellen                                               |
+
+Der `isSameWeek`-Lauf misst nur mit **neu gebautem** `packages/domain/dist`: `apps/web` liest den
+Build, nicht die Quelle. Ohne den Neubau bliebe die Mutation unsichtbar und der Beleg wertlos.
+
+**Ungemessen und als solches gekennzeichnet:** die Einengung `fehler instanceof RangeError`
+(`B4`). Im `try` stehen nur Domainaufrufe, die ausschließlich `RangeError` werfen; ein blankes
+`catch { … }` ließe den ganzen Testsatz grün. Der Dateikopf hält das als Absicht ohne Nachweis
+fest, statt es als Zusage zu behaupten.
 
 ---
 
