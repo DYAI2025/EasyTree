@@ -188,9 +188,14 @@ Der **Bauvorgang** von Slice 1 und Slice 2 ist damit **nicht** blockiert — nur
 - runbook and rollback evidence
 - remote Cloudflare CPU/startup measurement before API-worker acceptance
 
-## Allowed Scope
+## Allowed change scope
 
 `EXPLICIT` Nur Arbeit, die direkt EYT-137 über EYT-140/141/142 voranbringt. Breite Enabler werden nur in dem konkret benötigten Ausschnitt erweitert.
+
+Die verbindliche Pfadliste steht nicht hier, sondern im kanonischen Manifest — dieser Abschnitt
+bleibt die fachliche Absicht, das Manifest ist die maschinell durchgesetzte Grenze.
+
+Scope manifest: `docs/scope/easytree-sprint-6-core-journey.scope.json`
 
 ## Unresolved Questions
 
