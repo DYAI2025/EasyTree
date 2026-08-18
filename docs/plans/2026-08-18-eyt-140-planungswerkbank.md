@@ -369,16 +369,34 @@ messbar werden, ohne dass ein DOM nötig ist. Läge sie in der Komponente, prüf
 Rechnung durch die Darstellung hindurch — und ein Darstellungsfehler wäre von einem Rechenfehler
 nicht zu unterscheiden.
 
-**Dateien.** `apps/web/lib/wochennavigation.ts`, `apps/web/test/wochennavigation.test.ts`.
+**Dateien.** `apps/web/lib/wochennavigation.ts`, `apps/web/test/wochenmodell.test.ts`.
+
+**Warum die Testdatei `wochenmodell.test.ts` heißt** (nachgezogen 18.08.2026, `R6`). Die
+ursprüngliche Vorgabe lautete `apps/web/test/wochennavigation.test.ts`. Unter `apps/web/test/`
+liegt jedoch bereits `wochennavigation.test.tsx` — der Abnahmevertrag, den M4 erfüllt. Ein
+`vitest`-Pfadfilter ist ein **Substring**-Vergleich auf dem Dateipfad, und
+`test/wochennavigation.test.ts` ist ein Teilstring von `test/wochennavigation.test.tsx`.
+Gemessen vor dem Anlegen der Datei:
+
+```
+$ pnpm --filter @easytree/web exec vitest run test/wochennavigation.test.ts
+FAIL  test/wochennavigation.test.tsx > ...
+Test Files  1 failed (1)
+```
+
+Das Fertigkriterium dieses Meilensteins ist `Test Files  1 passed`. Unter dem ursprünglichen
+Namen ist es unerreichbar, solange der M4-Vertrag rot ist — die Umbenennung ist damit die
+Bedingung dafür, dass M3 überhaupt messbar wird, nicht Kosmetik. Die Lib-Datei behält ihren
+Namen; sie kollidiert mit nichts, und die beiden `grep`-Kriterien unten nennen sie wörtlich.
 
 **AC.** `AC-003`, `AC-004` (`REQ-002`).
 
-**Test.** `apps/web/test/wochennavigation.test.ts`.
+**Test.** `apps/web/test/wochenmodell.test.ts`.
 
 **Fertig, wenn:**
 
 ```bash
-pnpm --filter @easytree/web exec vitest run test/wochennavigation.test.ts   # Exit 0
+pnpm --filter @easytree/web exec vitest run test/wochenmodell.test.ts   # Exit 0
 grep -c -E "toLocaleDateString|toLocaleString|Intl\.|new Date\(\)" apps/web/lib/wochennavigation.ts  # 0
 ```
 
@@ -649,7 +667,7 @@ Und der Traceability-Nachtrag ist belegt, nicht behauptet: der dort genannte Tes
 wörtlich in der dort genannten Datei stehen —
 
 ```bash
-grep -cF "<eingetragener Testtitel>" apps/web/test/wochennavigation.test.ts   # ≥ 1
+grep -cF "<eingetragener Testtitel>" apps/web/test/wochenmodell.test.ts   # ≥ 1
 ```
 
 **Risiko.** `pnpm format` meldet lokal Dateien, die CI nie sieht (untracked `penpot/`,
@@ -726,7 +744,7 @@ packages/domain/src/index.ts
 packages/domain/test/planning-week.test.ts
 apps/api/test/domain-invariants/registry.ts
 apps/web/lib/wochennavigation.ts
-apps/web/test/wochennavigation.test.ts
+apps/web/test/wochenmodell.test.ts
 apps/web/components/wochen-navigation.tsx
 apps/web/test/wochen-navigation.test.tsx
 apps/web/app/planung/page.tsx
@@ -755,7 +773,7 @@ Modify: `apps/api/test/domain-invariants/registry.ts`
 
 Create: `apps/web/lib/wochennavigation.ts`
 
-Create: `apps/web/test/wochennavigation.test.ts`
+Create: `apps/web/test/wochenmodell.test.ts`
 
 Create: `apps/web/components/wochen-navigation.tsx`
 
