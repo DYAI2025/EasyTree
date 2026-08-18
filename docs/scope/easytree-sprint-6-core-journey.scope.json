@@ -23,6 +23,7 @@
       "docs/plans/**",
       "docs/context/**",
       "docs/scope/**",
+      "docs/reality/**",
       "docs/traceability.md",
       "CLAUDE.md",
       "docs/handoff/AGENT_HANDOFF_v1.3.md"
@@ -136,6 +137,43 @@
         ]
       },
       "scope_digest": "sha256:50a023ece02a51b9c035f7271ad8fc2b901b60bb461874e9126d937585362468"
+    },
+    {
+      "revision": 4,
+      "origin": "PO-Entscheidung 19.08.2026: Reality-Ledger fuer Sprint 6 einfuehren",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-19T00:06:31+0200",
+      "rationale": "Revision 4 nimmt docs/reality/** auf. Der Watcher meldete plumbline-reality-check mit Exit 2: die Evidenzledger-Datei fehlte, docs/reality/ existierte im Repository ueberhaupt nicht \u2014 auch nicht fuer Sprint 4 und Sprint 5. Der PO hat entschieden, den Ledger fuer Sprint 6 einzufuehren; das Gate ist damit erstmals passierbar und meldet jetzt den tatsaechlichen Stand (unit-fake) statt Abwesenheit.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/reality/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md"
+        ]
+      },
+      "scope_digest": "sha256:e1b3563f1b529b82e510e97724f538b718e9ef164e02235e08d1c2f3c8579c5c"
     }
   ]
 }
