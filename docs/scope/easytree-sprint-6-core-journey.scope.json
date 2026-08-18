@@ -22,7 +22,9 @@
       "docs/plans/**",
       "docs/context/**",
       "docs/scope/**",
-      "docs/traceability.md"
+      "docs/traceability.md",
+      "CLAUDE.md",
+      "docs/handoff/AGENT_HANDOFF_v1.3.md"
     ]
   },
   "artifacts": {
@@ -62,6 +64,41 @@
         ]
       },
       "scope_digest": "sha256:8f034755fbf1b91473ee93e8c0109da86f64d5796d7cefd8ad34b337515fb970"
+    },
+    {
+      "revision": 2,
+      "origin": "PO-Entscheidung 18.08.2026 zu Spec-Audit-BLOCKER-5: \"Ja, im Sprint-6-Branch angleichen\"",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-18T22:03:15+0200",
+      "rationale": "Revision 2 ergaenzt CLAUDE.md und docs/handoff/AGENT_HANDOFF_v1.3.md als Governance-Pfade. Grund: die Doku-Drift ist CI-verankert (handoff-guardrails.test.ts:54/118 fixiert PRD v1.3 als Produktautoritaet im Pflichtjob unit-tests); der PO hat die Angleichung im Sprint-6-Branch ausdruecklich freigegeben. Beide Dateien wurden in 1cecf0c rein additiv geaendert (-0/+10 bzw. -0/+17), die vom Test geprueften Ueberschriften und ID-Listen sind unangetastet.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "packages/ui/src/**",
+          "packages/ui/test/**"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md"
+        ]
+      },
+      "scope_digest": "sha256:404102276869affcdc71928e924bd128541aa6451fb508f2299ff2f9f6e5d60b"
     }
   ]
 }
