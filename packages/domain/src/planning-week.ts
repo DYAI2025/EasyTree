@@ -364,12 +364,35 @@ export function isSameWeek(a: PlanningWeek, b: PlanningWeek): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * Darstellbare ISO-Jahre. Beide Grenzen sind bewusst DIESELBEN wie im Vertrag
+ * (`MIN_ISO_JAHR`/`MAX_ISO_JAHR` in `packages/contracts/src/planning/iso-week.ts`):
+ * unten, weil PostgreSQL kein Jahr null kennt; oben, weil der Wochenschluessel
+ * vierstellig ist. Dass beide Seiten dieselbe Spanne ziehen, misst
+ * `apps/api/test/iso-week-parity.test.ts` — importieren darf `packages/domain`
+ * den Vertrag nicht.
+ */
+const MIN_ISO_JAHR = 1;
+const MAX_ISO_JAHR = 9999;
+
+/**
  * UTC-Mitternacht des Montags einer ISO-Woche.
  *
  * Ankerpunkt ist der 4. Januar: er liegt per Definition immer in Woche 1,
- * gleichgueltig auf welchen Wochentag der 1. Januar faellt. Dieselbe Konstruktion
- * verwendet `packages/contracts/src/planning/iso-week.ts`; die Uebereinstimmung
- * beider Seiten misst `apps/api/test/iso-week-parity.test.ts`.
+ * gleichgueltig auf welchen Wochentag der 1. Januar faellt. Dieselbe
+ * Konstruktion verwendet `montagDerIsoWoche` in
+ * `packages/contracts/src/planning/iso-week.ts` — das hier ist die ZWEITE
+ * KOPIE, und zwei Kopien laufen auseinander, ohne dass eine von beiden fuer
+ * sich rot wird.
+ *
+ * Gemessen wird die Uebereinstimmung im Block "Rueckrichtung" von
+ * `apps/api/test/iso-week-parity.test.ts`. Nicht durch einen direkten Vergleich
+ * der beiden Montage — `montagDerIsoWoche` ist im Vertrag nicht exportiert —,
+ * sondern gegen die Regel, aus der der Vertrag den seinen ableitet: der Montag
+ * gehoert zur Woche des vom Vertrag geparsten Schluessels, sein VORTAG nicht
+ * mehr, die Wochenzahl je Jahr stimmt mit `isoWochenImJahr` ueberein, und der
+ * 4. Januar liegt in Woche 1. Bis 18.08.2026 stand hier dieselbe Zusage,
+ * waehrend jener Test ausschliesslich die Hinrichtung Tag -> Woche anfasste
+ * (Korrekturbefund K2) — die Zusage war unbelegt.
  */
 function mondayOfIsoWeekMs(week: PlanningWeek): number {
   const jan4 = utcMidnightOfCalendarDay(week.isoYear, 1, 4);
@@ -395,9 +418,32 @@ function mondayOfIsoWeekMs(week: PlanningWeek): number {
  * @throws {RangeError} wenn Jahr oder Woche keine reale ISO-Woche bezeichnen.
  */
 function assertRealIsoWeek(week: PlanningWeek, caller: string): number {
-  if (!Number.isInteger(week.isoYear) || week.isoYear < 1) {
+  // Ein NaN kann hier nicht aus der Eingabe stammen, sondern nur aus einem
+  // Ueberlauf der Rechnung: ein Zeitpunkt ausserhalb des von `Date`
+  // darstellbaren Bereichs (±8,64e15 ms) ergibt ein Invalid Date, und jede
+  // Folgerechnung darauf wird NaN. Deshalb bekommt dieser Fall eine eigene
+  // Meldung — die alte sprach von einem "Jahr NaN", das der Aufrufer nie
+  // uebergeben hat, und schickte jeden Leser des Logs ans falsche Ende.
+  if (Number.isNaN(week.isoYear) || Number.isNaN(week.isoWeek)) {
+    throw new RangeError(
+      `${caller}: Ueberlauf der Wochenrechnung — das Ergebnis liegt ausserhalb des darstellbaren Zeitbereichs (Date: ±8,64e15 ms), deshalb NaN. Pruefe delta.`,
+    );
+  }
+  if (!Number.isInteger(week.isoYear) || week.isoYear < MIN_ISO_JAHR) {
     throw new RangeError(
       `${caller}: Jahr ${week.isoYear} ist nicht darstellbar (kein Jahr null, keine negativen Jahre).`,
+    );
+  }
+  // Obergrenze wie im Vertrag (`MAX_ISO_JAHR` in
+  // packages/contracts/src/planning/iso-week.ts): der Wochenschluessel ist
+  // vierstellig. Ohne diese Zeile lieferte `shiftPlanningWeek({9999, 52}, 1)`
+  // den Schluessel "10000-W01" — den `isValidIsoWeekKey` ablehnt. Eine
+  // Rechenfunktion, die Schluessel ERZEUGT, die der Transport verwirft, ist
+  // genau das Leck, dessen Ausschluss der Kommentar an `shiftPlanningWeek`
+  // behauptet. Gemessen, nicht angenommen: der Fall trat auf.
+  if (week.isoYear > MAX_ISO_JAHR) {
+    throw new RangeError(
+      `${caller}: Jahr ${week.isoYear} liegt oberhalb der Vertragsgrenze ${MAX_ISO_JAHR}; ein Wochenschluessel hat vier Stellen.`,
     );
   }
   if (!Number.isInteger(week.isoWeek) || week.isoWeek < 1 || week.isoWeek > 53) {

@@ -254,13 +254,45 @@ den Jahreswechsel trägt — und der Fehler wäre in einer Komponente unsichtbar
 Komponententest natürlicherweise eine Woche aus der Jahresmitte wählt.
 
 **Dateien.** `packages/domain/src/planning-week.ts`, `packages/domain/src/index.ts`,
-`packages/domain/test/planning-week.test.ts`, `apps/api/test/domain-invariants/registry.ts`.
+`packages/domain/test/planning-week.test.ts`, `apps/api/test/domain-invariants/registry.ts`,
+`apps/api/test/domain-invariants/weitere-belege.test.ts`, `apps/api/test/iso-week-parity.test.ts`.
 
 **AC.** Vorleistung für `AC-004` (`REQ-002`).
 
 **Test.** `packages/domain/test/planning-week.test.ts` — je ein Positiv- und ein Negativtest pro
-neuem Export, mit den Randvektoren aus **B3** und einem Sweep: für 520 Verschiebungen ausgehend
-von `2020-W01` muss `formatIsoWeekKey`(Ergebnis) von `isValidIsoWeekKey` akzeptiert werden.
+neuem Export, mit den Randvektoren aus **B3** und einem Sweep über 520 Verschiebungen ausgehend
+von `2020-W01`.
+
+> **Korrektur 18.08.2026 — die Vertragsprüfung des Sweeps zieht nach `apps/api` um.**
+>
+> _Nummernkreis:_ Befunde der Review-Korrekturrunde zu M2 heißen hier **K1–K7**, damit sie nicht
+> mit den planeigenen Befunden **B1–B6** aus Abschnitt 0 verwechselt werden. **K1** unbelegte und
+> an der oberen Jahresgrenze unwahre Ergebnisprüfung · **K2** ungewächterte zweite Kopie der
+> ISO-Wochen-Konstruktion · **K3** Sweep prüft mit dem von EYT-88 verworfenen Muster · **K4** Sweep
+> blind gegen eine gleichförmige Tagesverschiebung · **K5** drei Zusicherungen prüfen den
+> Testhelfer statt der Produktion · **K6** Ablehnungstests in keinem Registerslot · **K7**
+> irreführende Fehlermeldung beim Überlauf.
+>
+> Ursprünglich stand hier: „für 520 Verschiebungen … muss `formatIsoWeekKey`(Ergebnis) von
+> `isValidIsoWeekKey` akzeptiert werden." **Diese Vorgabe ist an der genannten Stelle
+> architektonisch nicht erfüllbar** — beide Funktionen liegen in `@easytree/contracts`, und
+> `packages/domain` darf dieses Paket weder als Abhängigkeit führen noch importieren
+> (`domain-allowlist` in `apps/api/test/architecture/rules.ts`; Begründung im Dateikopf von
+> `packages/contracts/src/planning/schemas.ts`). Die Vorgabe wird **nicht gestrichen, sondern
+> verlagert**: sie läuft wörtlich in `apps/api/test/iso-week-parity.test.ts` (Block „Sweep gegen
+> isValidIsoWeekKey, nicht gegen ein Muster"), der einzigen Stelle, die beide Pakete sieht — dafür
+> hat der PO in Scope-Revision 3 den Pfad freigegeben.
+>
+> Im Domainpaket bleibt eine reine **Formprüfung** per Regex zurück. Sie ist dort ausdrücklich als
+> das gekennzeichnet, was sie ist: das Muster `^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$` lässt `W53` in
+> **jedem** Jahr durch (gemessen: `2025-W53` und `2027-W53` bestehen es, der Vertrag lehnt beide
+> ab) — genau der Grund, aus dem EYT-88 es verworfen hat. Der erste Umsetzungsversuch hatte es
+> ohne diesen Hinweis eingesetzt und damit die Planvorgabe scheinbar erfüllt; das war der
+> Korrekturbefund **K3**.
+>
+> Gleichfalls nach `apps/api` gehört seit **K2** die Messung der zweiten Kopie der
+> ISO-Wochen-Konstruktion: `mondayOfIsoWeekMs` (Domain) gegen `montagDerIsoWoche` (Vertrag),
+> Block „Rückrichtung" derselben Datei.
 
 **Fertig, wenn — vier Zahlen, keine Prosa:**
 
@@ -269,6 +301,7 @@ pnpm --filter @easytree/domain exec vitest run test/planning-week.test.ts   # Ex
 pnpm --filter @easytree/config build && pnpm --filter @easytree/domain build
 pnpm --filter @easytree/api exec vitest run test/domain-invariant-coverage.test.ts  # Exit 0
 pnpm --filter @easytree/api exec vitest run test/iso-week-parity.test.ts            # Exit 0
+pnpm --filter @easytree/api exec vitest run test/domain-invariants/weitere-belege.test.ts  # Exit 0
 node -e 'const d=require("./packages/domain/dist/index.js");
  const k=d.planningWeekKey;
  console.log(k(d.shiftPlanningWeek({isoYear:2027,isoWeek:1},-1)));   // erwartet 2026-W53
@@ -286,6 +319,16 @@ Danach zurücknehmen; Beleg ist der **auf die Datei eingegrenzte** leere Diff:
 ```bash
 git diff --exit-code -- packages/domain/src/planning-week.ts   # Exit 0 nach der Rücknahme
 ```
+
+**Ausgeführte Gegenmutationen der Korrekturrunde 18.08.2026** (eingespielt, gemessen,
+zurückgenommen; Rücknahme je über `shasum -a 256` gegen die Sicherungskopie belegt):
+
+| Mutation                                                                     | Vorher                                                     | Nachher                                                               |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------- |
+| `assertRealIsoWeek(verschoben, …)` in `shiftPlanningWeek` ersatzlos entfernt | 30/30 grün — die Zeile war unbelegt (**K1**)               | 2 rot: Überlauf- und Jahresgrenzentest                                |
+| Montagsanker `+ DAY_MS` in `mondayOfIsoWeekMs`                               | Sweep grün, nur die drei Fixtures rot (**K4**)             | Sweep rot bei `2020-W01`; ohne die neue `dayBefore`-Zeile wieder grün |
+| derselbe Anker, gemessen in `apps/api/test/iso-week-parity.test.ts`          | alle Paritätstests grün — Rückrichtung ungemessen (**K2**) | 2 rot: „grenzt … exakt ab" und „legt den 4. Januar in Woche 1"        |
+| Titel in `weitereBelege` verfälscht                                          | Registerbeleg ungewächtert (**K6**)                        | `weitere-belege.test.ts` rot, nennt Export, Titel und Datei           |
 
 **Risiko.** Der Registereintrag verlangt einen echten Negativtest — „erwartet einen Fehler" ist
 keiner; er muss die Invariante **widerlegen**, wenn sie nicht gilt. **Rücknahme:** `git revert`
