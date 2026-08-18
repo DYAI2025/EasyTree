@@ -12,6 +12,7 @@
       "packages/domain/src/**",
       "packages/domain/test/**",
       "apps/api/test/domain-invariants/**",
+      "apps/api/test/iso-week-parity.test.ts",
       "packages/ui/src/**",
       "packages/ui/test/**"
     ],
@@ -99,6 +100,42 @@
         ]
       },
       "scope_digest": "sha256:404102276869affcdc71928e924bd128541aa6451fb508f2299ff2f9f6e5d60b"
+    },
+    {
+      "revision": 3,
+      "origin": "PO-Entscheidung 18.08.2026: Scope erweitern, Paritaetstest ergaenzen",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-18T23:18:06+0200",
+      "rationale": "Revision 3 nimmt apps/api/test/iso-week-parity.test.ts auf. Grund: die Test-Vorgabe des freigegebenen M2-Abschnitts verlangt die Kopplung an isValidIsoWeekKey; packages/domain darf @easytree/contracts nicht importieren, apps/api ist die einzige Stelle, die beide Pakete sieht. Damit werden Reviewbefund N1 (die zweite Kopie von montagDerIsoWoche ist ungewaechtert) und N4 (Sweep prueft mit genau der Regex, die EYT-88 verworfen hat) gemeinsam geschlossen.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md"
+        ]
+      },
+      "scope_digest": "sha256:50a023ece02a51b9c035f7271ad8fc2b901b60bb461874e9126d937585362468"
     }
   ]
 }
