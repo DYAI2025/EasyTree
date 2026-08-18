@@ -2,12 +2,13 @@
 
 ## Featureregister
 
-Diese Datei trägt inzwischen **zwei** Features. Die Kopfzeile darunter gehört zum ersten.
+Diese Datei trägt inzwischen **drei** Features. Die Kopfzeile darunter gehört zum ersten.
 
-| Feature Slug                    | Abschnitt                                             | Bestätigungsstand               |
-| ------------------------------- | ----------------------------------------------------- | ------------------------------- |
-| `planning-draft-conflict-slice` | alles bis „Sprint 5 — Daily Cost Export"              | **user-confirmed** (28.07.2026) |
-| `sprint-5-daily-cost-export`    | Abschnitt „Sprint 5 — Daily Cost Export" am Dateiende | **user-confirmed** (30.07.2026) |
+| Feature Slug                     | Abschnitt                                        | Bestätigungsstand               |
+| -------------------------------- | ------------------------------------------------ | ------------------------------- |
+| `planning-draft-conflict-slice`  | alles bis „Sprint 5 — Daily Cost Export"         | **user-confirmed** (28.07.2026) |
+| `sprint-5-daily-cost-export`     | Abschnitt „Sprint 5 — Daily Cost Export"         | **user-confirmed** (30.07.2026) |
+| `easytree-sprint-6-core-journey` | Abschnitt „Sprint 6 — Core Journey" am Dateiende | **user-confirmed** (18.08.2026) |
 
 > **Warnung an Leser und an `plumbline-context-check`.** Das Werkzeug prüft _eine_ Datei
 > `docs/traceability.md` auf _einen_ Bestätigungsmarker. Der Marker unten gehört zu
@@ -406,3 +407,131 @@ markieren. Bedingung geprüft: keine materielle Abweichung offen. Wortlaut der F
 **Nicht mitbestätigt:** technische Kapazität für die Fertigstellung (nur der Start), die lokalen
 Zusätze REQ-G01/REQ-G02, und das **Vision-GO** für den Entwicklungsstart — ein eigenes Signal,
 das weiterhin beim Product Owner liegt.
+
+---
+
+# Sprint 6 — Core Journey
+
+Feature Slug: `easytree-sprint-6-core-journey`
+Status: **user-confirmed** (18.08.2026, Product Owner Benjamin Poersch) — Vision-GO für den
+Entwicklungsstart zum Zeitpunkt dieses Eintrags noch offen
+Baseline: Confluence **PRD v1.4** (7766017, live gelesen 18.08.2026) + Jira EYT-137/140/141/142
+(offener Sprint, live gelesen 18.08.2026, alle _Zu erledigen_) + Basisdesign v2.0 (8814623)
+
+- Canvas: [`docs/canvas/easytree-sprint-6-core-journey.canvas.md`](canvas/easytree-sprint-6-core-journey.canvas.md)
+- Vision: [`docs/vision/easytree-sprint-6-core-journey.vision.md`](vision/easytree-sprint-6-core-journey.vision.md)
+- PRD: [`docs/prd/easytree-sprint-6-core-journey.prd.md`](prd/easytree-sprint-6-core-journey.prd.md)
+- Intake-Manifest (Quellenkarte): [`docs/context/easytree-sprint-6-core-journey.intake-manifest.md`](context/easytree-sprint-6-core-journey.intake-manifest.md)
+
+**Schlüsselraum.** Sprint 6 nummeriert im eigenen PRD ab `REQ-001`. Um die Kollision mit den
+Schlüsselräumen von Sprint 4 und Sprint 5 in derselben Datei zu vermeiden, sind Sprint-6-Zeilen
+als `S6·REQ-0nn` geschrieben. `canvas-link` und `vision-link` sind für alle Zeilen die oben
+verlinkten Dateien.
+
+**Startzustand, ehrlich.** Zum Zeitpunkt der Bestätigung ist **keine** Sprint-6-Anforderung
+implementiert. Jede `evidence-class` steht deshalb auf `none` und jedes `wired-in-prod?` auf
+`no`. Das ist kein Mangel der Matrix, sondern ihr Nullpunkt — die Spalten sind erst dann
+aussagekräftig, wenn sie sich gegen eine Messung bewegen.
+
+## S6 Tabelle A — Requirement Traceability
+
+| Trace ID   | Vision           | Canvas           | Requirement | AC              | Jira    | Evidence Needed                                                   | Falsifier (Gegenmutation, in Phase 1 auszuführen)                                                                | Status                     |
+| ---------- | ---------------- | ---------------- | ----------- | --------------- | ------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| TRC-S6-001 | VIS-001, VIS-007 | CAN-002          | S6·REQ-001  | AC-001, AC-002  | EYT-140 | reale Supabase-Session; API-Negativprobe ohne Recht               | Serverautorisierung entfernen → Negativfall muss rot werden, nicht nur die Navigation verschwinden               | offen                      |
+| TRC-S6-002 | VIS-002, VIS-003 | CAN-005          | S6·REQ-002  | AC-003, AC-004  | EYT-140 | Browser-E2E ohne manuellen `weekKey` in der URL                   | `weekKey`-Ableitung durch Konstante ersetzen → „Heute"/„nächste Woche" müssen abweichen, nicht identisch bleiben | offen                      |
+| TRC-S6-003 | VIS-003, VIS-004 | CAN-004, CAN-005 | S6·REQ-003  | AC-005          | EYT-140 | Netzwerk-/API-Evidenz; kein Mock/LocalStorage                     | Gateway auf Fixture umbiegen → Test muss rot werden; bleibt er grün, misst er den Mock                           | offen                      |
+| TRC-S6-004 | VIS-003, VIS-004 | CAN-006          | S6·REQ-004  | AC-006, AC-007  | EYT-140 | serverseitige Assignment-ID vor **und** nach Reload               | Server-ID durch clientseitig erzeugte ID ersetzen → Reload-Vergleich muss rot werden                             | offen                      |
+| TRC-S6-005 | VIS-003          | CAN-007          | S6·REQ-005  | AC-008, AC-009  | EYT-140 | Publish-Ergebnis, Planversion, Konflikt-Negativfall               | Konfliktprüfung deaktivieren → AC-009 muss rot werden (fail-closed statt Schein-Publish)                         | offen                      |
+| TRC-S6-006 | VIS-007          | CAN-008          | S6·REQ-006  | AC-010, AC-011  | EYT-140 | `costs.read` positiv/negativ; Serverautorisierung                 | nur den Navigationslink ausblenden, Route offen lassen → Negativprobe muss trotzdem 403 belegen                  | offen                      |
+| TRC-S6-007 | VIS-003, VIS-004 | CAN-008          | S6·REQ-007  | AC-012, AC-013  | EYT-141 | persistierter EYT-109-Snapshot; unveränderliche IDs               | Clientberechnung als Fallback einziehen → Snapshot-ID-Vergleich muss rot werden                                  | offen (`OQ-001` aufgelöst) |
+| TRC-S6-008 | VIS-003, VIS-005 | CAN-009          | S6·REQ-008  | AC-014, AC-015  | EYT-141 | gerenderte Metadaten/Summen/Positionen aus dem Snapshot           | eine Positionsspalte aus dem Snapshot durch einen Konstantwert ersetzen → Anzeige-Test muss rot werden           | offen                      |
+| TRC-S6-009 | VIS-005          | CAN-010          | S6·REQ-009  | AC-016, AC-017  | EYT-141 | Shell-/Token-Implementierung + visuelle Evidenz                   | eine Fläche auf eigene Farbwerte statt semantische Tokens umstellen → Kohärenztest muss rot werden               | offen                      |
+| TRC-S6-010 | VIS-005, VIS-007 | CAN-010, CAN-011 | S6·REQ-010  | AC-018 – AC-020 | EYT-141 | axe, Tastatur, Fokus, Zoom, fail-closed Zustände                  | fehlenden Satz als `0,00 €` rendern → AC-020 muss rot werden                                                     | offen                      |
+| TRC-S6-011 | VIS-006          | CAN-006, CAN-008 | S6·REQ-011  | AC-021, AC-022  | EYT-142 | Reload + zweiter Browserkontext, identische IDs                   | zweiten Kontext auf denselben Storage-State setzen → der Test misst dann nichts; er muss unabhängig anmelden     | offen                      |
+| TRC-S6-012 | VIS-006, VIS-007 | CAN-012          | S6·REQ-012  | AC-023, AC-024  | EYT-142 | Staging exact head, realer Netzpfad, health/ready                 | `/ready` fest auf 200 verdrahten → Pflicht-Smoke muss rot werden                                                 | **blockiert** (`OQ-002`)   |
+| TRC-S6-013 | VIS-008          | CAN-012          | S6·REQ-013  | AC-025, AC-026  | EYT-142 | aktuelle **remote** Cloudflare-CPU-/Startup-/Runtime-Evidenz      | lokale workerd-Zahl als Beleg akzeptieren → AC-025 verlangt ausdrücklich remote; der Beleg zählt dann nicht      | **offen** (`OQ-003/004`)   |
+| TRC-S6-014 | VIS-007          | CAN-012          | S6·REQ-014  | AC-027, AC-028  | EYT-142 | Cross-Tenant-/Auth-Negativtests, Secret-Scan über Bundle und Logs | fremde Org-ID im Client setzen → Antwort muss leer/403 sein, nicht fremde Daten liefern                          | offen                      |
+| TRC-S6-015 | VIS-006, VIS-008 | CAN-012, CAN-014 | S6·REQ-015  | AC-029, AC-030  | EYT-142 | CI/E2E, reale Staging-Screenshots, Runbook, Rollback-Nachweis     | Rollback nur dokumentieren, nie ausführen → AC-030 ist dann unbelegt, nicht erfüllt                              | **blockiert** (`OQ-002`)   |
+
+## S6 Tabelle B — Canvas-Pflichtfelder (sechs, je Top-Level-REQ)
+
+`canvas-link` ist für alle Zeilen [`docs/canvas/easytree-sprint-6-core-journey.canvas.md`](canvas/easytree-sprint-6-core-journey.canvas.md).
+
+| Requirement | canvas-problem | canvas-target-user | canvas-value-claim                                   | canvas-success-signal | canvas-risk-status                                                                     |
+| ----------- | -------------- | ------------------ | ---------------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------- |
+| S6·REQ-001  | CAN-001        | CAN-002            | CAN-003 — autorisierter Zugang, kein Rechtsschein    | CAN-014               | `aligned`                                                                              |
+| S6·REQ-002  | CAN-001        | CAN-002            | CAN-003 — Woche ohne technischen Parameter           | CAN-014               | `aligned`                                                                              |
+| S6·REQ-003  | CAN-001        | CAN-002            | CAN-003 — echte Serverdaten                          | CAN-014               | `aligned`                                                                              |
+| S6·REQ-004  | CAN-001        | CAN-002            | CAN-003 — persistierter Einsatz                      | CAN-014               | `aligned`                                                                              |
+| S6·REQ-005  | CAN-001        | CAN-002            | CAN-003 — konfliktfrei veröffentlichter Stand        | CAN-014               | `aligned`                                                                              |
+| S6·REQ-006  | CAN-001        | CAN-002            | CAN-003 — Kostenzugang nur mit Recht                 | CAN-014               | `aligned`                                                                              |
+| S6·REQ-007  | CAN-001        | CAN-002            | CAN-003 — unveränderlicher Kostenstand               | CAN-014               | `aligned` (war `value-risk` bis zur Auflösung von `OQ-001` am 18.08.2026)              |
+| S6·REQ-008  | CAN-001        | CAN-002            | CAN-003 — nachvollziehbar bis zur Einzelposition     | CAN-014               | `aligned`                                                                              |
+| S6·REQ-009  | CAN-001        | CAN-002            | CAN-003 — ein Produkt statt zweier Flächen           | CAN-014               | `aligned`                                                                              |
+| S6·REQ-010  | CAN-001        | CAN-002            | CAN-003 — bedienbar, auch ohne Farbunterscheidung    | CAN-014               | `aligned`                                                                              |
+| S6·REQ-011  | CAN-001        | CAN-002            | CAN-003 — dieselbe Wahrheit in zweitem Kontext       | CAN-014               | `aligned`                                                                              |
+| S6·REQ-012  | CAN-001        | CAN-002            | CAN-003 — real bedienbar statt lokal zusammengesetzt | CAN-014               | `blocked` — keine belegte NON-PROD-Datengrenze (`OQ-002`, RISK-001)                    |
+| S6·REQ-013  | CAN-001        | CAN-002            | CAN-003 — Hosting darf den Nutzen nicht diktieren    | CAN-014               | `risk-introduced` — Hostingpräferenz statt Produktnutzen (RISK-005), remote ungemessen |
+| S6·REQ-014  | CAN-001        | CAN-002            | CAN-003 — kein Datenleck über Mandantengrenzen       | CAN-014               | `aligned`                                                                              |
+| S6·REQ-015  | CAN-001        | CAN-002            | CAN-003 — reproduzierbar statt einmalig geglückt     | CAN-014               | `blocked` — Rollback-Nachweis setzt Staging voraus (`OQ-002`)                          |
+
+## S6 Tabelle C — True-Line-Felder und Reality Ledger
+
+| Requirement | value-check-id | true-line-status  | evidence-class | wired-in-prod? | CI-/Evidenzbindung (geplant)                                     |
+| ----------- | -------------- | ----------------- | -------------- | -------------- | ---------------------------------------------------------------- |
+| S6·REQ-001  | VC-S6-001      | `pending`         | `none`         | no             | `auth-journey` · reale Reise gegen `dist/main.js`                |
+| S6·REQ-002  | VC-S6-002      | `pending`         | `none`         | no             | `unit-tests` · `apps/web` + `web-smoke` · Chromium               |
+| S6·REQ-003  | VC-S6-003      | `pending`         | `none`         | no             | `read-through` · `scripts/read-through-harness.sh`               |
+| S6·REQ-004  | VC-S6-004      | `pending`         | `none`         | no             | `read-through` · Harness + `db-gates` · Planungsinvarianten      |
+| S6·REQ-005  | VC-S6-005      | `pending`         | `none`         | no             | `db-gates` · `[planning-publish]` + `[planning-invariants]`      |
+| S6·REQ-006  | VC-S6-006      | `pending`         | `none`         | no             | `db-gates` · `[cost-access]` + `auth-journey`                    |
+| S6·REQ-007  | VC-S6-007      | `pending`         | `none`         | no             | `db-gates` · `[cost-snapshot]` + `[snapshot-immutability]`       |
+| S6·REQ-008  | VC-S6-008      | `pending`         | `none`         | no             | `unit-tests` · `apps/web` + `db-gates` · `[snapshot-http]`       |
+| S6·REQ-009  | VC-S6-009      | `pending`         | `none`         | no             | `unit-tests` · `apps/web`/`packages/ui` + `web-smoke`            |
+| S6·REQ-010  | VC-S6-010      | `pending`         | `none`         | no             | `web-smoke` · axe + `unit-tests` · `apps/web/test/a11y.test.tsx` |
+| S6·REQ-011  | VC-S6-011      | `pending`         | `none`         | no             | `auth-journey` · zweiter Browserkontext                          |
+| S6·REQ-012  | VC-S6-012      | `blocked`         | `none`         | no             | **noch keine** — Stagingziel und NON-PROD-Grenze unbestimmt      |
+| S6·REQ-013  | VC-S6-013      | `review-required` | `none`         | no             | **noch keine** — remote Messung nicht autorisiert (`OQ-004`)     |
+| S6·REQ-014  | VC-S6-014      | `pending`         | `none`         | no             | `db-gates` · Tenant-Gate + `secret-scan`                         |
+| S6·REQ-015  | VC-S6-015      | `blocked`         | `none`         | no             | **noch keine** — setzt Staging voraus                            |
+
+`production-verified` ist in Sprint 6 unerreichbar — Produktionsfreigabe und produktive Echtdaten
+sind ausdrücklich out of scope. Höchster erreichbarer Wert: `real-boundary-smoke` auf Staging,
+und der ist bis zur Klärung von `OQ-002` nicht erreichbar.
+
+**Die geplante CI-Bindung ist eine Absicht, keine Messung.** Sie nennt den Job, der die Zeile
+tragen soll; ob er sie trägt, entscheidet der erste rote Lauf gegen die benannte Gegenmutation.
+
+## S6 Missing / Assumption / Blocker Ledger
+
+| ID     | Marker            | Stand 18.08.2026                                                                                                                                                                                                                                               | Wirkung                                                       |
+| ------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| OQ-001 | ~~CONTRADICTION~~ | **aufgelöst** — PRD v1.4 §7/§10 live gelesen; PO-Freigabe wörtlich erteilt                                                                                                                                                                                     | keine; verbleibt als `DOC-DRIFT-S5-001`                       |
+| OQ-002 | BLOCKER           | keine getrennte NON-PROD-Supabase-Grenze belegt. Gemessen: `supabase/config.toml` trägt nur `project_id = "easytree"` (lokal), kein `project_ref`; repo-weiter `git grep` nach `project_ref`/`easytree-staging` → 0 Treffer; `.github/workflows/` ohne Staging | blockiert S6·REQ-012, S6·REQ-015 und Slice 3                  |
+| OQ-003 | MISSING           | remote Cloudflare Free-CPU/Startup ungemessen                                                                                                                                                                                                                  | blockiert Akzeptanz des Cloudflare-API-Workers (AC-025)       |
+| OQ-004 | MISSING           | keine Laufzeitfreigabe für wegwerfbaren Remote-Deploy                                                                                                                                                                                                          | blockiert die Messung zu `OQ-003`, damit Slice 0              |
+| OQ-005 | MISSING           | Kapazitäts-/Machbarkeitszusage für den ganzen Sprint fehlt                                                                                                                                                                                                     | blockiert keine Arbeit, aber jede Commitment-Aussage          |
+| OQ-006 | ASSUMPTION        | Cloudflare-API-Worker bleibt tragfähig, falls CPU/Startup/TLS/RLS/Request-Isolation ohne Rewrite bestehen                                                                                                                                                      | muss durch Messung falsifiziert werden, nicht durch Präferenz |
+| OQ-007 | ASSUMPTION        | Railway-Fallback bleibt ohne doppelte Geschäftslogik kompatibel                                                                                                                                                                                                | nur prüfen, falls der Fallback nötig wird                     |
+
+## S6 Traceability Summary
+
+- Requirements: **15** · mit Vision-Verknüpfung: 15 · mit Canvas-Verknüpfung: 15
+- mit Akzeptanzkriterien: 15 · mit benanntem Falsifier: 15
+- mit allen sechs Canvas-Pflichtfeldern: 15 · mit True-Line-Feldern: 15
+- `evidence-class` besser als `none`: **0** · `wired-in-prod?` = yes: **0** — Nullpunkt, siehe
+  Startzustand oben
+- blockierte Requirements: **3** (S6·REQ-012, S6·REQ-013, S6·REQ-015) — alle drei an `OQ-002`
+  bzw. `OQ-003`/`OQ-004`, keine an einem Produktwiderspruch
+- offene Widersprüche: **0** (`OQ-001` aufgelöst) · Dokumentationsdrift: **1**
+  (`DOC-DRIFT-S5-001`, kein Blocker)
+
+## S6 User Confirmation
+
+**Erteilt am 18.08.2026** durch den Product Owner (Benjamin Poersch), in zwei getrennten
+wörtlichen Formeln: der Canvas-/Vision-Bestätigung und der engen EYT-109-Kostenfreigabe. Beide
+sind im Sitzungsprotokoll dieses Laufs nachlesbar und in Canvas, Vision und PRD im Kopfabschnitt
+protokolliert.
+
+**Nicht mitbestätigt** sind `OQ-002` bis `OQ-005`. Die Bestätigung deckt den fachlichen Scope,
+nicht die technische Machbarkeit und nicht die Kapazität.
