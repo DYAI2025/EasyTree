@@ -54,6 +54,17 @@ Deployment ist ausdrücklicher Non-Goal (CAN-006, VIS-007). Der höchste hier er
 ist `real-boundary-smoke`. Das ist keine Schwäche der Matrix, sondern die ehrliche Obergrenze
 des bestätigten Scopes.
 
+> **Abweichende Lesart im Abschnitt „Sprint 6 — Core Journey" — bewusst, korrigiert 18.08.2026.**
+> Die Zeile `none` in der Tabelle oben ist für die ersten beiden Features geschrieben, deren
+> Fähigkeiten mit ihnen erst entstanden sind. Für Sprint 6 gilt sie **nicht** in dieser Lesart.
+> Dort heißt `none` ausschließlich: **für dieses Sprint-6-Requirement noch nicht als
+> Sprint-6-Abnahmeevidenz gebunden.** Es behauptet **nichts** über die Existenz der zugrunde
+> liegenden Fähigkeit. Der Grund: Sprint 6 integriert überwiegend bereits implementierte
+> Fähigkeiten — reale Planning-Reads, Assignment-Write, Publish, den EYT-109-Kosten-Snapshot,
+> Auth und Teile der Basisdesign-Primitive. Ein `none`, das als „nicht implementiert" gelesen
+> wird, wäre dort ein **False Negative**. Der tatsächliche Fähigkeitsstand steht in
+> **S6 Tabelle D**, nicht in der `evidence-class`.
+
 ### Legende `wired-in-prod?`
 
 Bezieht sich auf die **Produktions-Kompositionswurzel** (`apps/web/app/providers.tsx`,
@@ -428,10 +439,24 @@ Schlüsselräumen von Sprint 4 und Sprint 5 in derselben Datei zu vermeiden, sin
 als `S6·REQ-0nn` geschrieben. `canvas-link` und `vision-link` sind für alle Zeilen die oben
 verlinkten Dateien.
 
-**Startzustand, ehrlich.** Zum Zeitpunkt der Bestätigung ist **keine** Sprint-6-Anforderung
-implementiert. Jede `evidence-class` steht deshalb auf `none` und jedes `wired-in-prod?` auf
-`no`. Das ist kein Mangel der Matrix, sondern ihr Nullpunkt — die Spalten sind erst dann
-aussagekräftig, wenn sie sich gegen eine Messung bewegen.
+**Ausgangszustand — bestehende Fähigkeiten, ausstehende Sprint-6-Evidenz.** Jede
+`evidence-class` steht zum Zeitpunkt der Bestätigung auf `none` und jedes `wired-in-prod?` auf
+`no`. Das bedeutet **nicht**, dass die zugrunde liegende EasyTree-Fähigkeit fehlt. Der
+kanonische Ausgangszustand auf `origin/master` trägt bereits reale Planning-Reads,
+Assignment-Write, Publish, den unveränderlichen EYT-109-Kosten-Snapshot, die Supabase-Anmeldung
+und einen Teil der Basisdesign-v2-Primitive. Die beiden Spalten sagen ausschließlich: **für
+dieses konkrete Sprint-6-Requirement innerhalb des aktuellen Feature-Gates noch nicht neu
+verifiziert und nicht als Sprint-6-Abnahmeevidenz gebunden.**
+
+Der Unterschied ist nicht kosmetisch. Ein Ledger, der bestehende Fähigkeiten als Fehlbestand
+liest, erzeugt zwei Fehler: er lässt Sprint 6 als Greenfield erscheinen, und er verleitet dazu,
+etwas neu zu bauen, das nur integriert, in der Oberfläche zugänglich gemacht oder an Evidenz
+gebunden werden muss. Welche Zeile welchen Fall hat, steht in **S6 Tabelle D** — dort ist jede
+Klassifikation an eine Messung auf `origin/master` gebunden, nicht an eine Einschätzung.
+
+_Korrigiert am 18.08.2026 auf Weisung des Product Owners. Ein früherer Stand dieses Absatzes
+behauptete „keine Sprint-6-Anforderung implementiert" — das war für elf der siebzehn Zeilen
+nachweislich falsch._
 
 ## S6 Tabelle A — Requirement Traceability
 
@@ -570,6 +595,45 @@ und der ist bis zur Klärung von `OQ-002` nicht erreichbar.
 **Die geplante CI-Bindung ist eine Absicht, keine Messung.** Sie nennt den Job, der die Zeile
 tragen soll; ob er sie trägt, entscheidet der erste rote Lauf gegen die benannte Gegenmutation.
 
+## S6 Tabelle D — Fähigkeitsstand je Requirement
+
+Jede Klassifikation ist an eine Messung auf `origin/master` (`f3b427d`, 18.08.2026) gebunden.
+Vier Werte, mehr nicht: `existing capability` — die Fähigkeit existiert und wird integriert,
+zugänglich gemacht oder an Evidenz gebunden; `partial capability` — Teile existieren, ein
+benannter Teil fehlt; `new capability` — auf `origin/master` nicht vorhanden; `runtime evidence
+only` — kein Codebestand messbar, weil das Requirement einen Laufzeit- oder Umgebungszustand
+verlangt.
+
+**Diese Tabelle ändert keine Requirement-, AC-, Vision-, Canvas- oder Scope-Bedeutung.** Sie
+sagt nur, was schon da ist.
+
+| Requirement | Klassifikation          | gemessener Bestand auf `origin/master`                                                                                                                                                        | was Sprint 6 daran tut                                                             |
+| ----------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| S6·REQ-001  | `existing capability`   | `apps/web/components/login-form.tsx`, `app-shell.tsx`; CI-Job `auth-journey` (8 Nennungen in `ci.yml`)                                                                                        | an die Sprint-6-Shell binden und als Abnahmeevidenz führen                         |
+| S6·REQ-002  | `new capability`        | Suche über `apps/web` nach „vorherige Woche / nächste Woche / Heute / ISO-Woche" → **kein Treffer**; `DateRangeControl` existiert nicht; `planung/page.tsx:8` verlangt `weekKey`              | **die einzige echte Neubauleistung der Kernreise**                                 |
+| S6·REQ-003  | `existing capability`   | `apps/web/components/planning-window-view.tsx`; CI-Job `read-through` · `scripts/read-through-harness.sh`                                                                                     | an die Werkbank binden, kein neuer Wahrheitspfad                                   |
+| S6·REQ-004  | `partial capability`    | `planning-assignment-form.tsx` schreibt über den realen autorisierten Pfad; „neu laden" bei `:158`                                                                                            | die automatische Rückbestätigung des Serverzustands nach `AC-007` belegen          |
+| S6·REQ-005  | `existing capability`   | `planning-publish-action.tsx`; `db-gates` · `[planning-publish]` (5 Nennungen in `ci.yml`)                                                                                                    | Entwurf/veröffentlicht sichtbar unterscheidbar machen                              |
+| S6·REQ-006  | `existing capability`   | `kosten-zugang.tsx`; `db-gates` · `[cost-access]`                                                                                                                                             | den Übergang aus der Planung heraus bedienbar machen                               |
+| S6·REQ-007  | `existing capability`   | Migration `0018_cost_snapshots`, Modul `apps/api/src/modules/costs/`, Gates `[cost-snapshot]` und `[snapshot-immutability]`                                                                   | **einbinden, nichts neu rechnen** — der Snapshot bleibt die einzige Kostenwahrheit |
+| S6·REQ-008  | `existing capability`   | `kosten-ansicht.tsx` rendert `snapshotId` (`:140`), `planVersionId` (`:473`), `createdAt` (`:481`), `ruleVersion` (`:492`), Währung (`:499`/`:500`), Gesamtsumme (`:510`), Positionen (`:21`) | Metadaten visuell nachordnen, Tagesstruktur ergänzen                               |
+| S6·REQ-009  | `partial capability`    | `layout.tsx:29` legt `<AppShell>` über beide Routen; `globals.css` trägt 79 `--eyt-*`-Tokens — **aber** kein Token-Wächter in den Tests und kein `DateRangeControl`                           | Wächter erstellen, fehlende Primitive ergänzen                                     |
+| S6·REQ-010  | `partial capability`    | `packages/ui/src/`: `empty-state`, `error-state`, `state-banner`, `status-badge`; `apps/web/test/a11y.test.tsx`; Kosten-Sonderzustände „fehlender Satz" (`:82`), „mehrdeutig" (`:83`)         | Zustände auf die neuen Flächen ziehen, Tastatur/Zoom dort prüfen                   |
+| S6·REQ-011  | `partial capability`    | zweiter Browserkontext existiert dreimal in `apps/web/e2e/auth-journey/journey.pwtest.ts` (`:845`, `:1672`, `:1863`)                                                                          | an veröffentlichte Plan- und Snapshot-IDs binden                                   |
+| S6·REQ-012  | `runtime evidence only` | kein Codebestand messbar — Requirement verlangt einen Deployment-Zustand                                                                                                                      | blockiert bis `OQ-002`                                                             |
+| S6·REQ-013  | `runtime evidence only` | kein Codebestand messbar — Requirement verlangt eine remote Messung                                                                                                                           | blockiert bis `OQ-003`/`OQ-004`                                                    |
+| S6·REQ-014  | `existing capability`   | `db-gates` Tenant-Gates und Job `secret-scan` (4 Nennungen in `ci.yml`)                                                                                                                       | Negativreisen der Sprint-6-Flächen ergänzen                                        |
+| S6·REQ-015  | `runtime evidence only` | kein Codebestand messbar — Requirement verlangt einen ausgeführten Rollback                                                                                                                   | blockiert bis `OQ-002`                                                             |
+| S6·REQ-016  | `runtime evidence only` | kein Codebestand messbar — Requirement verlangt eine Messung an der realen Staging-Verbindung                                                                                                 | Slice-3-Gate                                                                       |
+| S6·REQ-017  | `new capability`        | `supabase/config.toml:5` trägt nur `project_id = "easytree"` (lokal), kein `project_ref`; repo-weit kein Staging-Projekt                                                                      | Slice-3-Gate; Anlegen **nicht freigegeben**                                        |
+
+**Verteilung:** `existing capability` **7** · `partial capability` **4** · `new capability` **2**
+· `runtime evidence only` **4** — Summe 17.
+
+**Die praktische Konsequenz für Slice 1:** von den sechs Requirements der Planungsreise
+(`REQ-001` bis `REQ-006`) ist genau **eines** ein Neubau — die Wochennavigation. Vier sind
+vorhanden und werden gebunden, eines ist teilweise vorhanden. Wer hier neu baut, baut doppelt.
+
 ## S6 Missing / Assumption / Blocker Ledger
 
 | ID      | Marker            | Stand 18.08.2026                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Wirkung                                                                           |
@@ -608,8 +672,12 @@ Alle Zahlen sind aus den Tabellen A, B und C **gezählt**, nicht geschätzt.
 - Canvas-Pflichtfelder vollständig: 17 · True-Line-Felder: 17 (+ `ASM-001`)
 - CI-tragfähig (`CAN-015` erreichbar, Abnahme ohne Staging möglich): **12**
 - ausschließlich staging-verifizierbar: **5** (`S6·REQ-012`, `-013`, `-015`, `-016`, `-017`)
-- `evidence-class` besser als `none`: **0** · `wired-in-prod?` = yes: **0** — Nullpunkt, siehe
-  Startzustand oben
+- `evidence-class` besser als `none`: **0** · `wired-in-prod?` = yes: **0** — beides heißt
+  **„noch nicht als Sprint-6-Abnahmeevidenz gebunden"**, nicht „nicht implementiert"; siehe
+  Ausgangszustand oben und Tabelle D
+- **Fähigkeitsstand (Tabelle D, gegen `origin/master` gemessen):** `existing capability` **7** ·
+  `partial capability` **4** · `new capability` **2** (`REQ-002` Wochennavigation, `REQ-017`
+  NON-PROD-Umgebung) · `runtime evidence only` **4**
 - **blockierte Requirements: 4** — `S6·REQ-012`, `S6·REQ-015`, `S6·REQ-016`, `S6·REQ-017`, alle
   an `OQ-002` (NON-PROD-Grenze) bzw. `OQ-004` (Laufzeitfreigabe). Keine an einem
   Produktwiderspruch.
