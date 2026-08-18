@@ -212,13 +212,18 @@ export function wochenmodell(eingabe: WochenmodellEingabe): Wochenmodell {
   // getarnt werden; dass heute kein Test diese Einengung einloest, steht im
   // Dateikopf (`B4`).
   //
-  // Die REIHENFOLGE der drei Zuweisungen traegt eine ungeschriebene Bedingung
-  // (`B5`): `planningWeekDateRange({ isoYear: 9999, isoWeek: 52 })` wirft nicht,
-  // sondern liefert als Sonntag den 02.01.10000 — gemessen 19.08.2026 gegen
-  // `packages/domain/dist`. Unerreichbar ist dieser Sonntag allein deshalb, weil
-  // `shiftPlanningWeek(angezeigt, 1)` zwei Zeilen frueher wirft. Wer die
-  // Zeitraumzeile nach oben zieht, gibt der Planerin einen fuenfstelligen
-  // Jahreswert zu sehen, ohne dass ein Test es meldet.
+  // Die tragende Bedingung ist die GEMEINSAME BEWACHUNG, nicht die Reihenfolge
+  // (`B5`, korrigiert 19.08.2026): `planningWeekDateRange({ isoYear: 9999,
+  // isoWeek: 52 })` wirft nicht, sondern liefert als Sonntag den 02.01.10000 —
+  // gemessen gegen `packages/domain/dist`. Unerreichbar bleibt dieser Sonntag,
+  // weil `shiftPlanningWeek(angezeigt, 1)` im selben `try` wirft und das
+  // `return` erst NACH allen drei Zuweisungen steht. An einer umgeordneten
+  // Fassung gemessen (Zeitraumzeile zuerst): der Testsatz bleibt vollstaendig
+  // gruen — die Reihenfolge traegt nichts.
+  // Gefaehrlich ist deshalb etwas anderes: die Zeitraumzeile aus diesem Block
+  // herauszuziehen — vor das `try`, hinter das `catch` oder in den Rueckgabe-
+  // ausdruck. Dann steht der fuenfstellige Jahreswert vor der Planerin, ohne
+  // dass ein Test es meldet.
   let vorherige: PlanningWeek;
   let naechste: PlanningWeek;
   let zeitraum: PlanningWeekDateRange;

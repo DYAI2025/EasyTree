@@ -1,20 +1,61 @@
-import { PlanningWindowQuerySchema } from "@easytree/contracts";
+import { EUROPE_BERLIN } from "@easytree/domain";
 
 import { PlanungAnsicht } from "../../components/planung-ansicht";
+import { WochenNavigation } from "../../components/wochen-navigation";
+import { wochenmodell } from "../../lib/wochennavigation";
 
 /**
- * Referenzansicht des Planungsfensters (EYT-50).
+ * Einstieg in die Planungswerkbank (EYT-50, erweitert um EYT-140 M5).
  *
- * Die Woche kommt aus der URL: `/planung?weekKey=2026-W32`.
+ * ## Die einzige Uhrzeit-Lesestelle des Slices (`E3`)
+ *
+ * Die Uhr wird in diesem Slice an genau einer Stelle gelesen — unten in dieser
+ * Datei, und sonst nirgends. Das Fertigkriterium zaehlt den Aufruf hier und
+ * erwartet **genau einen**; deshalb steht er in diesem Kommentar nicht noch
+ * einmal wortwoertlich. Alles darunter bekommt die
+ * fertig berechnete Woche als Prop. Ohne diese Regel waere „welche Woche ist
+ * heute" in einer Client-Komponente nicht deterministisch pruefbar, und
+ * `no-local-time-construction` bekaeme eine zweite Baustelle. Die Zone wird
+ * BENANNT uebergeben (`EUROPE_BERLIN`), nie implizit aus der Laufzeit gelesen:
+ * welche sieben Kalendertage eine ISO-Woche ausmacht, ist zonenfrei — welche
+ * Woche „heute" ist, ist es nicht (`E4`).
+ *
+ * ## Fehlender Parameter ist etwas anderes als ungueltiger (`E2`)
  *
  * Hier stand zuvor eine Konstante `REFERENZWOCHE = "2026-W32"` — der Wert aus
  * dem Seed. Ein Produktionscode, der eine Testwoche kennt, zeigt in jeder
- * anderen Umgebung stillschweigend die falsche; und ein Browsertest, der ihn
- * nicht setzen kann, prueft nicht den Parameterpfad.
+ * anderen Umgebung stillschweigend die falsche. Danach galt: KEIN Parameter =
+ * Fehler. Das war ehrlich, aber eine Sackgasse — die Planerin musste den
+ * technischen Schluessel selbst in die Adresse schreiben.
  *
- * Kein stiller Default: fehlt oder faellt der Wert durch die Vertragspruefung,
- * wird das SICHTBAR und das Gateway gar nicht erst gerufen. Eine
- * Wochennavigation bleibt EYT-72.
+ * Seit M5 gilt die Trennung: **kein** `weekKey` ergibt die laufende Woche
+ * (`AC-003`); ein **vorhandener, aber ungueltiger** bleibt sichtbar abgelehnt
+ * und das Gateway wird gar nicht erst gerufen. Ein stiller Rueckfall auf die
+ * laufende Woche waere die schlimmere Variante: die Planerin saehe eine
+ * plausible Woche, aber nicht die aus ihrem Link. Ein mehrfach angegebener
+ * Parameter bleibt ebenfalls eine Ablehnung — Next liefert dann ein Array, und
+ * das stille Reduzieren auf den ersten Wert waere eine Antwort auf eine nicht
+ * gestellte Frage.
+ *
+ * Hier stand bis M5 „Eine Wochennavigation bleibt EYT-72". Das war ueberholt:
+ * die Navigation ist Gegenstand dieses Slices und steht unten im Baum.
+ *
+ * ## Warum die beiden Fehlergruende getrennte Texte bekommen
+ *
+ * `9999-W52` und `0001-W01` sind GUELTIGE Wochenschluessel; nur ihre
+ * Nachbarwoche liegt ausserhalb der Vertragsgrenze 0001–9999. Fuer die Planerin
+ * ist das etwas anderes als ein Tippfehler, und der Hinweis „erwartet wird
+ * `?weekKey=2026-W32`" waere dort schlicht falsch — der Schluessel war ja
+ * wohlgeformt. `grund` aus dem Modell trennt beides; ohne diesen Zweig haette
+ * das Feld keinen Leser.
+ *
+ * ## Was ueber die Server-/Client-Grenze geht
+ *
+ * Ausschliesslich Daten. `Wochenmodell` ist ein reines Objekt aus Zeichenketten
+ * und einem `boolean`; `PlanungAnsicht` bekommt eine Zeichenkette. Eine
+ * FUNKTION koennte diese Grenze nicht ueberqueren — daran ist EYT-107 schon
+ * einmal gescheitert, und weder `typecheck` noch `build-web` noch der
+ * jsdom-Test haben es bemerkt; rot wurde erst `auth-journey`.
  */
 export default async function PlanungPage({
   searchParams,
@@ -22,26 +63,30 @@ export default async function PlanungPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const roh = params["weekKey"];
-  // Mehrfach angegebener Parameter ist keine gueltige Woche, sondern eine
-  // mehrdeutige Angabe — und die wird abgelehnt statt stillschweigend auf den
-  // ersten Wert reduziert.
-  const query = PlanningWindowQuerySchema.safeParse({
-    weekKey: typeof roh === "string" ? roh : undefined,
+  const modell = wochenmodell({
+    weekKeyAusUrl: params["weekKey"],
+    jetzt: new Date(),
+    zone: EUROPE_BERLIN,
   });
 
   return (
     <main>
       <h1>Planung</h1>
-      {query.success ? (
+      <WochenNavigation modell={modell} />
+      {modell.art === "woche" ? (
         // Diese Seite ist eine SERVER-Komponente und reicht deshalb nur eine
         // Zeichenkette weiter. Waechter und Ansicht liegen zusammen in einer
         // Client-Komponente — warum, steht in `planung-ansicht.tsx`.
-        <PlanungAnsicht weekKey={query.data.weekKey} />
-      ) : (
+        <PlanungAnsicht weekKey={modell.schluessel} />
+      ) : modell.grund === "parameter-unbrauchbar" ? (
         <p data-testid="planungsfenster-parameterfehler" role="alert">
           Kein gültiger Wochenschlüssel. Erwartet wird `?weekKey=2026-W32` mit einer Woche zwischen
           01 und 53.
+        </p>
+      ) : (
+        <p data-testid="planungsfenster-randwoche" role="alert">
+          Diese Woche liegt am Rand des darstellbaren Kalenders — sie hat keine Nachbarwoche, zu der
+          geblättert werden könnte.
         </p>
       )}
     </main>

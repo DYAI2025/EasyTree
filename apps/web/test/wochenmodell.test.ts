@@ -159,6 +159,36 @@ describe("wochenmodell — welche Woche `heute` ist", () => {
     ).toBe("2026-W31");
   });
 
+  it("baut auch `heuteUrl` aus der GENANNTEN Zone", () => {
+    // Korrekturbefund A2. Die Zusicherung darueber prueft ausschliesslich
+    // `.schluessel` — und `.schluessel` ist im parameterlosen Fall dieselbe
+    // Ableitung wie `heuteUrl`. Gemessen 19.08.2026: eine ZWEITE Ableitung der
+    // laufenden Woche allein fuer `heuteUrl`, mit fest verdrahteter Zone
+    // `EUROPE_BERLIN`, ueberlebte alle 47 vorherigen Zusicherungen. Der Weg
+    // dorthin ist banal — wer „heute" spaeter noch einmal braucht und die Zone
+    // nicht zur Hand hat, schreibt genau das hin.
+    //
+    // Derselbe Instant wie oben: in Europe/Berlin (UTC+2) bereits Montag, der
+    // 03.08.2026 — Woche 32. In UTC noch Sonntag, der 02.08.2026 — Woche 31.
+    const grenze = new Date("2026-08-02T22:30:00Z");
+
+    expect(
+      alsWoche(wochenmodell({ weekKeyAusUrl: undefined, jetzt: grenze, zone: UTC })).heuteUrl,
+    ).toBe("/planung?weekKey=2026-W31");
+
+    // Zweite Zusicherung mit EXPLIZITEM Schluessel: hier faellt `heuteUrl`
+    // nicht mit `schluessel` zusammen, eine zweite Ableitung ist also auch
+    // nicht durch Zufall richtig.
+    expect(
+      alsWoche(wochenmodell({ weekKeyAusUrl: "2026-W10", jetzt: grenze, zone: UTC })).heuteUrl,
+    ).toBe("/planung?weekKey=2026-W31");
+
+    // Und der Fehlerzweig, der seinen Rueckweg aus derselben Quelle nimmt.
+    expect(
+      alsFehlerhaft(wochenmodell({ weekKeyAusUrl: "2026-W99", jetzt: grenze, zone: UTC })).heuteUrl,
+    ).toBe("/planung?weekKey=2026-W31");
+  });
+
   it("legt den 1. Januar 2027 noch in 2026-W53", () => {
     // Die Donnerstagsregel, absolut gepinnt. Wer das ISO-Jahr aus
     // `getFullYear()` nimmt, schreibt hier `2027-...` und faellt durch.
