@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "format": "prettier --check .",
+    "format": "prettier apps/web/lib/api-proxy-target.ts && prettier --check .",
     "format:fix": "prettier --write .",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
