@@ -551,3 +551,75 @@ body {
   color: var(--eyt-color-text-muted, #555);
   font-size: 0.875rem;
 }
+
+/*
+ * Der Werkbankrahmen der Planung (EYT-140 M6).
+ *
+ * Nur Anordnung — Farben kommen ausschliesslich aus den bestehenden Tokens
+ * oben in dieser Datei, es kommt kein einziges neues Farbliteral dazu. Die
+ * Bedienleiste bekommt hier erstmals ueberhaupt eine Darstellung: bis M6 trug
+ * `.wochennavigation` eine Klasse ohne jede Regel, die Bedienelemente standen
+ * also als nackte Absaetze untereinander.
+ */
+.werkbank {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+}
+
+.werkbank__kopf {
+  margin-block-end: 0;
+}
+
+.werkbank__flaeche {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+}
+
+/*
+ * Mobile-first: die Bedienleiste bricht um, statt zu scrollen. Die Woche steht
+ * zuerst, die Wege dahinter — auf einer schmalen Flaeche ist „welche Woche"
+ * die erste Frage, nicht „wohin als naechstes".
+ */
+.wochennavigation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem var(--space);
+  padding: var(--space);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--eyt-bg-surface);
+}
+
+.wochennavigation__woche {
+  margin: 0;
+  font-weight: 700;
+  /* Woche und Zeitraum gehoeren zusammen und bleiben deshalb beieinander,
+     auch wenn die Wege in die naechste Zeile rutschen. */
+  flex-basis: 100%;
+}
+
+.wochennavigation__zeitraum {
+  margin: 0;
+  flex-basis: 100%;
+  color: var(--eyt-text-secondary);
+}
+
+/*
+ * Die laufende Woche ist ueber TEXT kenntlich (`AC-018`) — diese Regel gibt
+ * ihr nur Platz, sie traegt die Aussage nicht.
+ */
+.wochennavigation__marke {
+  margin: 0;
+  color: var(--eyt-text-secondary);
+  font-size: 0.875rem;
+}
+
+.wochennavigation__ziel {
+  /* 40 px Mindesthoehe fuer Zeigegeraete (Basisdesign v2.0 §2.3). */
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.5rem;
+}

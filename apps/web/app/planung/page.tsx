@@ -1,7 +1,7 @@
 import { EUROPE_BERLIN } from "@easytree/domain";
 
 import { PlanungAnsicht } from "../../components/planung-ansicht";
-import { WochenNavigation } from "../../components/wochen-navigation";
+import { PlanungsWerkbank } from "../../components/planungs-werkbank";
 import { wochenmodell, type Fehlergrund } from "../../lib/wochennavigation";
 
 /**
@@ -52,9 +52,10 @@ import { wochenmodell, type Fehlergrund } from "../../lib/wochennavigation";
  * ## Was ueber die Server-/Client-Grenze geht
  *
  * Genau ein Wert: `weekKey: string` an `PlanungAnsicht`, unveraendert seit
- * EYT-107. `WochenNavigation` traegt KEIN `"use client"` und wird nur von
- * dieser Server-Komponente importiert — sie ist damit selbst eine
- * Server-Komponente, und `Wochenmodell` ueberquert gar keine Grenze. Hier stand
+ * EYT-107. `PlanungsWerkbank` und die von ihr gerenderte `WochenNavigation`
+ * tragen KEIN `"use client"` und werden nur aus Server-Komponenten importiert
+ * — sie sind damit selbst welche, und `Wochenmodell` ueberquert gar keine
+ * Grenze; seit M6 endet sein Weg in der Werkbank statt hier. Hier stand
  * bis zum 19.08.2026 das Gegenteil, und der Meilenstein M4 im Plan sagt
  * woertlich „Client-Komponente": eine Abweichung des Entwurfs vom Plan, die
  * niemand gemeldet hatte (`K12`). Der Entwurf ist die bessere Variante — eine
@@ -81,18 +82,10 @@ export default async function PlanungPage({
   });
 
   return (
-    // `werkbank-planungsflaeche` markiert die Planungsflaeche als Bereich, nicht
-    // als Einzelelement (EYT-140 M8). Ohne diesen Anker liesse sich „der
-    // Kostenuebergang liegt IN der Planungsflaeche" gar nicht messen: die Tests
-    // suchen mit `screen.findByTestId` dokumentweit, und `AppShell` liegt im
-    // selben Suchraum — ein Uebergang, der komplett in die Shell verlegt waere,
-    // bliebe unbemerkt gruen. Gemessen am 19.08.2026: genau diese Verlegung
-    // liess 21/21 Dateien und 245/245 Tests unveraendert gruen.
-    // `apps/web/test/kosten-uebergang.test.tsx` bindet den Anker an den
-    // Wochenschluessel, damit er nicht auf ein beliebiges Element wandern kann.
-    <main data-testid="werkbank-planungsflaeche">
-      <h1>Planung</h1>
-      <WochenNavigation modell={modell} />
+    // Rahmen, Kopf, Wochennavigation und der Anker `werkbank-planungsflaeche`
+    // liegen seit M6 in `planungs-werkbank.tsx`. Diese Seite entscheidet nur
+    // noch, WAS in der Flaeche steht — die Ansicht oder der Fehlerhinweis.
+    <PlanungsWerkbank modell={modell}>
       {modell.art === "woche" ? (
         // Diese Seite ist eine SERVER-Komponente und reicht deshalb nur eine
         // Zeichenkette weiter. Waechter und Ansicht liegen zusammen in einer
@@ -101,7 +94,7 @@ export default async function PlanungPage({
       ) : (
         fehlerhinweis(modell.grund)
       )}
-    </main>
+    </PlanungsWerkbank>
   );
 }
 
