@@ -5,8 +5,13 @@ import Link from "next/link";
 import { Card } from "@easytree/ui";
 
 /**
- * Der Kostenuebergang aus der Planungsflaeche heraus (EYT-140 M6, `REQ-006`,
+ * Der Kostenuebergang aus der Planungsflaeche heraus (EYT-140, `REQ-006`,
  * `AC-010`).
+ *
+ * Meilensteinnummer: im Plan ist das **M8** (`:714`). Der Commit `036a5b3` nennt
+ * ihn „M6"; unter M6 fuehrt der Plan aber den Werkbankrahmen
+ * (`planungs-werkbank.tsx`, `:619`), der unerledigt ist. Hier steht die
+ * Plannummer, damit „M6 erledigt" nicht als Werkbankrahmen gelesen wird.
  *
  * ## Was hier NICHT entsteht
  *
@@ -21,18 +26,17 @@ import { Card } from "@easytree/ui";
  *
  * ## Warum hier keine Rechtefrage gestellt wird
  *
- * Diese Komponente liest die Sitzung NICHT. Ob sie ueberhaupt entsteht,
- * entscheidet `PlanungZugang` — derselbe Waechter, der schon
- * `darfVeroeffentlichen` beantwortet, aus derselben einen Sitzungsquelle
- * (`useSession` ueber `GET /auth/session`). Ein eigener `useSession`-Aufruf
- * waere eine zweite Stelle, an der dieselbe Frage anders beantwortet werden
- * koennte; genau das haelt der Dateikopf von `planung-zugang.tsx` seit EYT-107
- * fest, und `PlanningWindowView` folgt derselben Regel.
+ * Diese Komponente liest die Sitzung NICHT — die Begruendung steht an EINER
+ * Stelle, im Dateikopf von `planung-zugang.tsx`. Sie stand bis zum 19.08.2026
+ * hier, dort und in `planung-ansicht.tsx` in nahezu gleicher Laenge; drei
+ * Fassungen desselben Arguments driften auseinander, sobald eine von ihnen
+ * angefasst wird. Gemessen wird die Regel von
+ * `apps/web/test/kosten-uebergang.test.tsx` („der Uebergang stellt die
+ * Rechtefrage nicht selbst"), nicht von diesem Absatz.
  *
- * Sichtbarkeit ersetzt keine Autorisierung: `costs.read` steuert hier
- * ausschliesslich die Anzeige. Entschieden wird serverseitig in
- * `cost-access.policy.ts`, und `app.has_permission` entscheidet noch einmal
- * unabhaengig davon.
+ * Sichtbarkeit ersetzt keine Autorisierung: entschieden wird in
+ * `cost-access.policy.ts`, und `app.has_permission` entscheidet unabhaengig
+ * davon noch einmal.
  *
  * ## Warum das kein Leck nach `AC-011` ist
  *
@@ -54,13 +58,29 @@ import { Card } from "@easytree/ui";
  * Verhalten, das kein Dokument verlangt. Der Bezug zur Woche steht deshalb im
  * TEXT, und der Text bleibt in beiden Staenden wahr: Kosten entstehen aus der
  * veroeffentlichten Planversion, nicht aus dem Entwurf.
+ *
+ * Bis zum 19.08.2026 endete dieser Satz mit „— ein Entwurf traegt noch keine".
+ * Der Halbsatz las sich als Aussage ueber DIESE Woche und blieb nach einem
+ * erfolgreichen Publish unveraendert stehen — also ausgerechnet dann falsch,
+ * wenn die Planerin ihn am ehesten liest. Die Alternative waere gewesen, den
+ * veroeffentlichten Stand hier hereinzureichen; das haette aus dem Uebergang
+ * eine zweite Anzeigebedingung gemacht, die kein Dokument verlangt (siehe
+ * Absatz darueber). Gewaehlt ist deshalb die Formulierung, die in beiden
+ * Staenden dasselbe behauptet: eine Aussage ueber die HERKUNFT der Kosten,
+ * keine ueber den Stand der Woche.
  */
 export function KostenUebergang({ weekKey }: { weekKey: string }) {
   return (
-    <Card title="Kosten">
+    // Die Testid auf der Karte umfasst Text UND Verweis. Ohne sie liesse sich
+    // der Wochenbezug nur dokumentweit pruefen — der Wochenschluessel steht
+    // aber auch in der Wochennavigation, eine dokumentweite Zusicherung waere
+    // also selbst dann gruen, wenn dieser Text eine feste Woche naeme.
+    // Gemessen wird der Bezug in `apps/web/test/kosten-uebergang.test.tsx`
+    // („nennt die Woche aus der Adresse").
+    <Card title="Kosten" data-testid="werkbank-kostenuebergang-karte">
       <p>
-        Die Personalkosten der Woche {weekKey} entstehen aus der veröffentlichten Planversion — ein
-        Entwurf trägt noch keine.
+        Die Personalkosten der Woche {weekKey} entstehen aus der veröffentlichten Planversion, nicht
+        aus dem Entwurf.
       </p>
       <p>
         {/*

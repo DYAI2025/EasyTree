@@ -188,6 +188,25 @@ zwei für die Bindung bestehender Fähigkeiten an Evidenz (M7 Publish/Rückbest�
 Kostenübergang) und ein Abschlussgate (M9). **Ändert sich der Schnitt, wird `M` in dieser Zeile
 sichtbar korrigiert und die Änderung begründet.**
 
+### Abweichungsvermerk zur Meilensteinnummer (19.08.2026) — `M` bleibt 9
+
+Der Schnitt hat sich **nicht** geändert, die Reihenfolge der Ausführung schon. Festgehalten wird
+hier, was ist, nicht eine nachträgliche Umnummerierung:
+
+- Der Auftrag an den ausführenden Agenten nannte den Kostenübergang **„M6"**. Gebaut und
+  committet wurde er unter diesem Namen: `036a5b3` — „feat(web): EYT-140 M6 — den Kostenübergang
+  aus der Planungsfläche erreichbar machen".
+- Inhaltlich ist das der Meilenstein **`M8`** dieses Plans (`kosten-uebergang.tsx`,
+  `kosten-uebergang.test.tsx`, `AC-010`/`AC-011`) — siehe Abschnitt `### M8` weiter unten.
+- **`M6` dieses Plans (Werkbankrahmen, `planungs-werkbank.tsx`, „genau ein primärer CTA") und
+  `M7` (Entwurf/veröffentlicht per `StatusBadge`, gezählte Nachlade-Aufrufe) sind unerledigt.**
+- Die Commitnachricht bleibt, wie sie ist — Historie wird nicht umgeschrieben. Wer künftig
+  „EYT-140 M6 erledigt" liest, muss hier nachsehen: gemeint ist der Kostenübergang, **nicht** der
+  Werkbankrahmen. Der Dateikopf von `apps/web/components/kosten-uebergang.tsx` trägt denselben
+  Vermerk, damit er auch beim Lesen des Codes auffällt.
+- Eine Umnummerierung des Plans wäre die schlechtere Wahl: sie würde die drei Fertigkriterien von
+  `M6`/`M7` unsichtbar machen, die noch offen sind.
+
 ---
 
 ### M1 — Ausgangsmessung, damit späteres Rot zuordenbar ist
@@ -618,6 +637,10 @@ bleiben nutzbar und ungenutzt.
 
 ### M6 — Der Werkbankrahmen
 
+> **Stand 19.08.2026: unerledigt.** Der Commit `036a5b3` heißt „EYT-140 M6", baut aber den
+> Kostenübergang, also `M8`. Dieser Meilenstein hier — `planungs-werkbank.tsx`, genau ein primärer
+> CTA — ist nicht angefangen. Siehe „Abweichungsvermerk zur Meilensteinnummer".
+
 **Was.** `apps/web/components/planungs-werkbank.tsx` fasst zusammen, was heute
 `planung-ansicht.tsx` lose aneinanderreiht: `PageHeader` mit dem Wochentitel, darunter die
 `WochenNavigation`, darunter das bestehende `PlanningWindowView`. `planung-ansicht.tsx` wird auf
@@ -712,6 +735,18 @@ verschwindet.
 ---
 
 ### M8 — Der Kostenübergang aus der Planung heraus
+
+> **Stand 19.08.2026: gebaut, unter dem Commitnamen „M6"** (`036a5b3`, Produktionscode) und
+> nachgemessen im Folgecommit (Testdatei `apps/web/test/kosten-uebergang.test.tsx`, Anker
+> `werkbank-planungsflaeche`). Siehe „Abweichungsvermerk zur Meilensteinnummer".
+>
+> **Abweichung in den Dateien:** eingehängt ist der Übergang in `planung-ansicht.tsx`, nicht in
+> `planungs-werkbank.tsx` — den gibt es noch nicht, weil `M6` unerledigt ist. Der unten genannte
+> Test heißt und liegt genau wie geplant.
+>
+> **Fertigkriterium erfüllt:** der Negativfall prüft das Markup
+> (`document.body.innerHTML` enthält weder `werkbank-kostenuebergang` noch `/kosten`), nicht die
+> Sichtbarkeit.
 
 **Was.** `apps/web/components/kosten-uebergang.tsx` — ein Übergang zu `/kosten`, der
 **ausschließlich** mit `costs.read` aus der realen Session gerendert wird und den Bezug zur

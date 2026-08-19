@@ -74,21 +74,26 @@ const orgMit = (permissions: readonly string[], id: string = ORG) => ({
   permissions: [...permissions],
 });
 
-function zeichneWaechter(gateway: AuthGateway): { gesehen: boolean[] } {
+function zeichneWaechter(gateway: AuthGateway): {
+  gesehen: boolean[];
+  kostenGesehen: boolean[];
+} {
   const gesehen: boolean[] = [];
+  const kostenGesehen: boolean[] = [];
   render(
     <AuthGatewayProvider gateway={gateway}>
       <SessionProvider>
         <PlanungZugang>
-          {({ darfVeroeffentlichen }) => {
+          {({ darfVeroeffentlichen, darfKostenLesen }) => {
             gesehen.push(darfVeroeffentlichen);
+            kostenGesehen.push(darfKostenLesen);
             return <p data-testid="planung-inhalt">Inhalt</p>;
           }}
         </PlanungZugang>
       </SessionProvider>
     </AuthGatewayProvider>,
   );
-  return { gesehen };
+  return { gesehen, kostenGesehen };
 }
 
 describe("PlanungZugang", () => {
@@ -163,6 +168,30 @@ describe("PlanungZugang", () => {
     );
     await waitFor(() => expect(screen.queryByTestId("planung-inhalt")).not.toBeNull());
     expect(gesehen).toContain(true);
+  });
+
+  // Dieselbe Doppelprobe fuer `costs.read` (EYT-140, Plan-Meilenstein `M8`). Sie
+  // fehlte, seit der Waechter `darfKostenLesen` ausliefert: der Kostenuebergang
+  // haengt daran, aber KEIN Test sagte, dass der Waechter die Frage ueberhaupt
+  // beantwortet — geschweige denn in beide Richtungen.
+  it("reicht costs.read als false durch, wenn die Rolle es nicht traegt", async () => {
+    const { kostenGesehen } = zeichneWaechter(
+      sitzungMit([orgMit(["planning.read", "planning.write"])]),
+    );
+    await waitFor(() => expect(screen.queryByTestId("planung-inhalt")).not.toBeNull());
+    expect(kostenGesehen).toContain(false);
+    expect(kostenGesehen).not.toContain(true);
+  });
+
+  it("reicht costs.read als true durch, wenn die Rolle es traegt", async () => {
+    // Gegenprobe: ohne sie waere die Zeile darueber auch dann gruen, wenn der
+    // Waechter fuer Kosten konstant `false` liefert — und der Uebergang
+    // erschiene nie, ohne dass ein Test es meldet.
+    const { kostenGesehen } = zeichneWaechter(
+      sitzungMit([orgMit(["planning.read", "costs.read"])]),
+    );
+    await waitFor(() => expect(screen.queryByTestId("planung-inhalt")).not.toBeNull());
+    expect(kostenGesehen).toContain(true);
   });
 });
 

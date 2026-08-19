@@ -81,7 +81,16 @@ export default async function PlanungPage({
   });
 
   return (
-    <main>
+    // `werkbank-planungsflaeche` markiert die Planungsflaeche als Bereich, nicht
+    // als Einzelelement (EYT-140 M8). Ohne diesen Anker liesse sich „der
+    // Kostenuebergang liegt IN der Planungsflaeche" gar nicht messen: die Tests
+    // suchen mit `screen.findByTestId` dokumentweit, und `AppShell` liegt im
+    // selben Suchraum — ein Uebergang, der komplett in die Shell verlegt waere,
+    // bliebe unbemerkt gruen. Gemessen am 19.08.2026: genau diese Verlegung
+    // liess 21/21 Dateien und 245/245 Tests unveraendert gruen.
+    // `apps/web/test/kosten-uebergang.test.tsx` bindet den Anker an den
+    // Wochenschluessel, damit er nicht auf ein beliebiges Element wandern kann.
+    <main data-testid="werkbank-planungsflaeche">
       <h1>Planung</h1>
       <WochenNavigation modell={modell} />
       {modell.art === "woche" ? (
