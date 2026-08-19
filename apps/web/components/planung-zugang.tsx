@@ -32,11 +32,19 @@ import { useSession } from "../lib/session-provider";
  * Kontext gelesen: `PlanningWindowView` soll ohne Sitzungsinfrastruktur
  * pruefbar bleiben, und ein zweiter `useSession`-Aufruf tiefer im Baum waere
  * eine zweite Stelle, an der dieselbe Frage anders beantwortet werden koennte.
+ *
+ * Seit EYT-140 M6 gilt dasselbe fuer `darfKostenLesen` (`REQ-006`): der
+ * Kostenuebergang der Planungsflaeche haengt an `costs.read`, und die Antwort
+ * kommt aus DIESEM Waechter — aus derselben Sitzung, die auch `planning.read`
+ * beantwortet hat. Ein eigener Waechter im Uebergang waere eine zweite
+ * Autorisierungslogik; ausgerechnet an der Kostengrenze ist das die teuerste
+ * Stelle fuer zwei Antworten. Gefiltert wird hier, entschieden in
+ * `cost-access.policy.ts`.
  */
 export function PlanungZugang({
   children,
 }: {
-  children: (rechte: { darfVeroeffentlichen: boolean }) => ReactNode;
+  children: (rechte: { darfVeroeffentlichen: boolean; darfKostenLesen: boolean }) => ReactNode;
 }) {
   const { sitzung, organisation, hatRecht, neuLaden } = useSession();
 
@@ -111,5 +119,12 @@ export function PlanungZugang({
     );
   }
 
-  return <>{children({ darfVeroeffentlichen: hatRecht("planning.publish") })}</>;
+  return (
+    <>
+      {children({
+        darfVeroeffentlichen: hatRecht("planning.publish"),
+        darfKostenLesen: hatRecht("costs.read"),
+      })}
+    </>
+  );
 }
