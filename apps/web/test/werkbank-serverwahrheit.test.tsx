@@ -161,9 +161,31 @@ describe("REQ-003 / AC-005 — angezeigt wird, was der Server geantwortet hat", 
 });
 
 describe("REQ-004 / AC-006, AC-007 — Schreiben in die angesehene Woche, danach der Serverstand", () => {
-  /** Formular ausfuellen und absenden. Datum liegt in der ANGESEHENEN Woche. */
+  /**
+   * Formular ausfuellen und absenden. Datum liegt in der ANGESEHENEN Woche.
+   *
+   * Der erste Zugriff WARTET (`findByTestId`), und er wartet auf das Formular
+   * selbst. Bis zum 19.08.2026 stand hier `getByTestId` — ein Zugriff ohne jede
+   * Wartezeit, unmittelbar nach einem `findByTestId("werkbank-woche-iso")` an
+   * der Aufrufstelle. Das war ein Warten auf das FALSCHE: die Wochennavigation
+   * kommt aus der Server-Komponente `app/planung/page.tsx` und steht schon da,
+   * waehrend `PlanningWindowView` noch `planungsfenster-laedt` zeigt und das
+   * Formular gar nicht gerendert ist. Gemessen am 19.08.2026 mit einer Sonde am
+   * Anfang dieser Funktion, drei Einzellaeufe: bei JEDEM Fehlschlag lautete der
+   * Zustand `laedt` und das Formular `fehlt`, bei jedem Durchlauf `geladen` und
+   * `da`. Drei Laeufe ergaben drei verschiedene Fehlermengen (2, 1 und 3 rot).
+   *
+   * Gewartet wird auf einen ZUSTAND, nicht auf eine Frist: kein `waitFor` mit
+   * fester Zeit, keine Wiederholung, kein `retry`. Die Zusicherungen darunter
+   * bleiben unveraendert — es wird spaeter gemessen, nicht weniger.
+   *
+   * Die uebrigen vier Felder duerfen danach mit `getByTestId` geholt werden.
+   * Sie sind keine zweite Wettlaufbedingung: `planning-assignment-form.tsx`
+   * rendert alle fuenf in derselben Darstellung, ist `feld-employee` da, sind
+   * sie es auch.
+   */
   async function einsatzAnlegen(datum: string): Promise<void> {
-    await userEvent.selectOptions(screen.getByTestId("feld-employee"), PERSON_ID);
+    await userEvent.selectOptions(await screen.findByTestId("feld-employee"), PERSON_ID);
     await userEvent.selectOptions(screen.getByTestId("feld-worksite"), BAUSTELLE_ID);
     await userEvent.type(screen.getByTestId("feld-datum"), datum);
     await userEvent.type(screen.getByTestId("feld-beginn"), "08:00");
