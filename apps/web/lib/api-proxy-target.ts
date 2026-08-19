@@ -36,7 +36,8 @@ export const DEFAULT_API_PROXY_TARGET = "http://127.0.0.1:3001";
  * immer Vorrang und kann spaeter ohne Codeaenderung auf einen Cloudflare-API-
  * Endpunkt zeigen.
  */
-export const CLOUDFLARE_API_FALLBACK_TARGET = "https://easytree-production.up.railway.app";
+export const CLOUDFLARE_API_FALLBACK_TARGET =
+  "https://easytree-production.up.railway.app";
 
 export class InvalidProxyTargetError extends Error {}
 
@@ -108,9 +109,7 @@ export type ProxyBuildEnvironment = {
  * fehlendem EASYTREE_API_PROXY_TARGET der dokumentierte Railway-Fallback
  * verwendet werden. Ein expliziter Wert gewinnt immer.
  */
-export function resolveBuildProxyTarget(
-  env: ProxyBuildEnvironment = process.env,
-): string {
+export function resolveBuildProxyTarget(env: ProxyBuildEnvironment): string {
   const explicit = env.EASYTREE_API_PROXY_TARGET?.trim();
   if (explicit) {
     return normalizeProxyTarget(explicit, env.NODE_ENV);
