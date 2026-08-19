@@ -87,6 +87,32 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/**
+ * Ein Bedienelement, gleich ob es als Schaltflaeche oder Link umgesetzt ist.
+ *
+ * Wortgleich mit dem Helfer in `wochennavigation.test.tsx` und dem Selektor in
+ * `e2e/planungswerkbank.spec.ts`. Bis zum 19.08.2026 stand an der einen
+ * Aufrufstelle unten stattdessen `getByRole("button", …)` — die einzige Stelle
+ * im ganzen Vertragssatz, die sich auf eine Rolle festlegte. Die Zusicherung
+ * war nie die Rolle, sondern das Ergebnis: es wird eine Woche vorwaerts
+ * geblaettert und in DIE Woche geschrieben. Geaendert am 19.08.2026 auf
+ * Entscheidung des Product Owners — sichtbar jetzt statt still spaeter —, weil
+ * die Umsetzung in M4 `next/link` gewaehlt hat und die Zeile damit dauerhaft
+ * aus dem falschen Grund rot bliebe.
+ */
+function bedienelement(name: string): HTMLElement {
+  const treffer = [
+    ...screen.queryAllByRole("button", { name }),
+    ...screen.queryAllByRole("link", { name }),
+  ];
+  if (treffer.length !== 1) {
+    throw new Error(
+      `Erwartet: genau ein Bedienelement „${name}“ (Schaltflaeche oder Link). Gefunden: ${treffer.length}.`,
+    );
+  }
+  return treffer[0] as HTMLElement;
+}
+
 const VORHANDEN = {
   id: EINSATZ_VOM_SERVER,
   startUtc: "2026-08-18T06:00:00.000Z",
@@ -193,7 +219,7 @@ describe("REQ-004 / AC-006, AC-007 — Schreiben in die angesehene Woche, danach
     const { gesendet } = werkbankMitSchreibpfad();
     await screen.findByTestId("werkbank-woche-iso");
 
-    await userEvent.click(screen.getByRole("button", { name: "Nächste Woche" }));
+    await userEvent.click(bedienelement("Nächste Woche"));
     await waitFor(() =>
       expect(screen.getByTestId("werkbank-woche-iso").textContent ?? "").toContain("2026-W35"),
     );

@@ -3,20 +3,25 @@
  *
  * ## Diese Komponente rechnet nicht, sie zeigt
  *
- * Sie bekommt das fertige Modell aus `lib/wochennavigation.ts` als Prop: keine
- * Uhr, keine Wochenverschiebung, keine Schluesselpruefung. Das ist als Zahl
- * nachgeprueft — das Fertigkriterium des Meilensteins zaehlt genau diese drei
- * Namen in dieser Datei und erwartet null Treffer. Der Wortlaut steht in
- * `test/wochen-navigation.test.tsx`, „statischer Waechter"; er wird hier
- * bewusst NICHT wiederholt, sonst zaehlte der Waechter seine eigene
- * Beschreibung mit.
- *
- * Der Grund ist nicht Geschmack. Eine Wochenrechnung in der Darstellung waere
- * die ZWEITE Wochenregel neben der in `lib/wochennavigation.ts`, und die beiden
- * wuerden genau an den Jahresgrenzen auseinanderlaufen, an denen ein
- * `isoWeek ± 1` falsch ist (2026 hat 53 ISO-Wochen, 2025 und 2027 haben 52).
- * Ein Darstellungsfehler waere dann von einem Rechenfehler nicht mehr zu
+ * Sie bekommt das fertige Modell aus `lib/wochennavigation.ts` als Prop: kein
+ * `new Date()`, kein `shiftPlanningWeek`, kein `parseIsoWeekKey`. Der Grund ist
+ * nicht Geschmack. Eine Wochenrechnung in der Darstellung waere die ZWEITE
+ * Wochenregel neben der in `lib/wochennavigation.ts`, und die beiden wuerden
+ * genau an den Jahresgrenzen auseinanderlaufen, an denen ein `isoWeek ± 1`
+ * falsch ist (2026 hat 53 ISO-Wochen, 2025 und 2027 haben 52). Ein
+ * Darstellungsfehler waere dann von einem Rechenfehler nicht mehr zu
  * unterscheiden.
+ *
+ * Getragen wird diese Zusicherung von den SENTINELS in
+ * `test/wochen-navigation.test.tsx`, nicht von einem Namensvergleich auf dem
+ * Quelltext. Bis zum 19.08.2026 stand hier ein statischer Waechter, der genau
+ * die drei oben genannten Namen zaehlte — er ist ersatzlos entfallen, weil
+ * gemessen wurde, dass er nichts haelt: `new Date (Date.now())` mit einem
+ * einzigen zusaetzlichen Leerzeichen laesst ihn gruen, und eine selbst gebaute
+ * `naechsteWoche()` ohne einen der drei Namen ebenfalls. Beide Male schlugen
+ * stattdessen die Sentinels an. Die Kosten trug dieser Dateikopf: er durfte die
+ * drei Namen nicht schreiben, weil der Waechter seine eigene Beschreibung
+ * mitgezaehlt haette. Diese Einschraenkung ist damit aufgehoben.
  *
  * ## Warum `Link` und nicht `router.push`
  *
@@ -26,6 +31,15 @@
  * Enter/Space und „Link kopieren" nachbauen. Ausserdem traegt die Adresse den
  * Zustand (Entwurfsentscheidung `E1`): Neuladen und ein zweiter Browserkontext
  * zeigen dieselbe Woche.
+ *
+ * ## Der Wochenschluessel steht im Text, aber nicht auf der Flaeche
+ *
+ * Der Abnahmevertrag verlangt den kanonischen Schluessel im `textContent` von
+ * `werkbank-woche-iso` — er ist das, was in der Adresse steht und was geteilt
+ * wird. Sichtbar hingestellt widerspraeche er dem Inkrement selbst: „die
+ * Planerin blaettert OHNE technischen Parameter". `VisuallyHidden` loest beides
+ * zugleich — der Schluessel bleibt im Accessibility-Tree und im `textContent`,
+ * die Flaeche zeigt „KW 34 · 2026".
  *
  * ## Der Fehlerfall ist keine Sackgasse
  *
@@ -42,6 +56,7 @@
  * „Aktuelle Woche" steht deshalb als Wort da; `aria-current="page"` auf dem
  * Rueckweg ist die maschinenlesbare Zugabe, nicht der Traeger.
  */
+import { VisuallyHidden } from "@easytree/ui";
 import Link from "next/link";
 
 import type { Wochenmodell } from "../lib/wochennavigation";
@@ -77,7 +92,9 @@ export function WochenNavigation({ modell }: { modell: Wochenmodell }) {
 
       <p className="wochennavigation__woche" data-testid="werkbank-woche-iso">
         <span className="wochennavigation__woche-text">{modell.isoWochenText}</span>{" "}
-        <span className="wochennavigation__woche-schluessel">{modell.schluessel}</span>
+        <VisuallyHidden className="wochennavigation__woche-schluessel">
+          {modell.schluessel}
+        </VisuallyHidden>
       </p>
       <p className="wochennavigation__zeitraum" data-testid="werkbank-woche-bereich">
         {modell.zeitraumText}

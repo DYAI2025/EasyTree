@@ -446,16 +446,53 @@ fest, statt es als Zusage zu behaupten.
 
 ### M4 — Die Wochennavigation als Komponente
 
-**Was.** `apps/web/components/wochen-navigation.tsx` — Client-Komponente, bekommt das in M3
-berechnete Modell **als Prop**. Rendert `<nav aria-label="Wochennavigation">` mit „vorherige
-Woche", „Heute", „nächste Woche" als `next/link` sowie ISO-Woche und Datumsbereich als Text.
-`data-testid`: `wochennavigation`, `wochennavigation-vorherige`, `wochennavigation-heute`,
-`wochennavigation-naechste`, `wochennavigation-woche`, `wochennavigation-zeitraum`. Die aktuelle
-Woche ist zusätzlich über Text kenntlich, nicht nur über Farbe.
+**Was.** `apps/web/components/wochen-navigation.tsx` — bekommt das in M3 berechnete Modell **als
+Prop**. Rendert `<nav aria-label="Wochennavigation">` mit „vorherige Woche", „Heute", „nächste
+Woche" als `next/link` sowie ISO-Woche und Datumsbereich als Text. Die aktuelle Woche ist
+zusätzlich über Text kenntlich, nicht nur über Farbe.
+
+**Korrektur 19.08.2026 (`K12`) — es ist eine SERVER-Komponente, keine Client-Komponente.** Hier
+stand „Client-Komponente"; umgesetzt wurde eine Komponente **ohne** `"use client"`, die nur von
+der Server-Komponente `app/planung/page.tsx` importiert wird. Das ist die bessere Variante — sie
+schickt keinen Code in den Browser —, aber es war eine **nicht gemeldete Planabweichung**. Folge
+für M5: über die Server-/Client-Grenze geht ausschließlich `weekKey: string` an `PlanungAnsicht`;
+`Wochenmodell` überquert **keine** Grenze. Serialisierbar bleibt es trotzdem mit Absicht, damit
+ein späteres `"use client"` kein Umbau ist.
+
+**Korrektur 19.08.2026 (`NB-3`) — es gelten die Vertragsnamen.** Hier standen
+`wochennavigation-woche` und `wochennavigation-zeitraum`; verbindlich sind die Namen aus den
+Abnahmeverträgen `test/wochennavigation.test.tsx` und `e2e/planungswerkbank.spec.ts`:
+**`werkbank-woche-iso`** (ISO-Woche) und **`werkbank-woche-bereich`** (Datumsbereich). Die
+umgesetzte Komponente trägt diese. Die vier übrigen hier genannten `data-testid` —
+`wochennavigation`, `wochennavigation-vorherige`, `wochennavigation-heute`,
+`wochennavigation-naechste` — existieren im Code, werden aber von **keinem** Test genannt (die
+Tests greifen die Bedienelemente über ihren zugänglichen Namen). Sie **bleiben**: die e2e-Reisen
+von M6/M7 brauchen stabile Anker, und ein entfernter `data-testid` bricht eine Playwright-Reise
+still, weil `pnpm test` sie nicht ausführt.
+
+**Stand nach der Umsetzung (für M6 zu wissen).** Die Fläche ist **funktionsfähig, aber
+ungestylt**: `apps/web/app/globals.css` enthält für keine der sechs `wochennavigation__*`-Klassen
+eine Regel, und es gibt **keine axe-Abdeckung** der neuen Fläche (`NB-6`, `NB-7`). Beides gehört
+zu M6 bzw. EYT-141 und ist bewusst offen — die Commitnachricht von `5c2b9e9` liest sich fertiger,
+als die Fläche aussieht.
+
+**Der Wochenschlüssel ist im Text, aber nicht auf der Fläche (`K15`, 19.08.2026).** Der Vertrag
+verlangt den kanonischen Schlüssel im `textContent` von `werkbank-woche-iso`. Sichtbar
+hingestellt widerspräche er dem Inkrement selbst („die Planerin blättert **ohne** technischen
+Parameter"), deshalb steht er in `VisuallyHidden` aus `@easytree/ui`: im Accessibility-Tree und
+im `textContent`, nicht auf dem Schirm.
 
 **Warum `Link` und nicht `router.push`.** Ein `<a href>` ist mit der Tastatur bedienbar, im
 Kontextmenü teilbar und braucht kein JavaScript, um ein Ziel zu haben. `AC-019` (Tastatur) fällt
 damit ohne Zusatzarbeit an; ein `onClick`-Button müsste sie nachbauen.
+
+**Folge für den Vertragssatz (`K11`, PO-Entscheidung 19.08.2026).** Die Wahl `next/link` gibt den
+Bedienelementen die Rolle `link`. `test/wochennavigation.test.tsx` und `e2e/planungswerkbank.spec.ts`
+akzeptieren bewusst beide Rollen; `test/werkbank-serverwahrheit.test.tsx` legte sich an **einer**
+Stelle auf `button` fest und wäre dadurch dauerhaft aus dem falschen Grund rot geblieben. Der
+Product Owner hat entschieden, das **jetzt sichtbar** zu ändern statt später still in M6: die Zeile
+benutzt nun denselben rollenneutralen Helfer wie die beiden anderen Verträge. Damit gilt „der
+Vertrag wurde nie angefasst" ab jetzt für **drei von vier** Vertragsdateien.
 
 **Dateien.** `apps/web/components/wochen-navigation.tsx`,
 `apps/web/test/wochen-navigation.test.tsx`.
@@ -467,11 +504,43 @@ damit ohne Zusatzarbeit an; ein `onClick`-Button müsste sie nachbauen.
 **Fertig, wenn:**
 
 ```bash
-pnpm --filter @easytree/web exec vitest run test/wochen-navigation.test.tsx   # Exit 0
-grep -c -E "new Date\(\)|shiftPlanningWeek|parseIsoWeekKey" apps/web/components/wochen-navigation.tsx  # 0
+pnpm --filter @easytree/web exec vitest run test/wochen-navigation.test.tsx   # Exit 0, 1 Datei, 11 Fälle
 ```
 
-Die zweite Zahl ist die eigentliche Zusicherung: die Komponente **rechnet nicht**, sie zeigt.
+**Korrektur 19.08.2026 (`K13`) — die Zusicherung sind die SENTINELS, nicht ein Namensvergleich.**
+Hier stand zusätzlich `grep -c -E "new Date\(\)|shiftPlanningWeek|parseIsoWeekKey" … # 0` mit dem
+Satz „Die zweite Zahl ist die eigentliche Zusicherung". Beides ist gestrichen, und der daraus
+gebaute statische Wächtertest (`describe("WochenNavigation — statischer Waechter")`) ebenfalls —
+**gemessen**, dass er nichts hält:
+
+Beide Zeilen der Tabelle wurden am **Stand mit Wächter** gemessen (Review, 19.08.2026) — nur dort
+ist die `grep`-Spalte überhaupt aussagekräftig, weil der Dateikopf die drei Namen damals nicht
+nennen durfte:
+
+| ausgeführte Gegenmutation                                             | `grep -c` | Wächtertest | Rest des Testsatzes                            |
+| --------------------------------------------------------------------- | --------- | ----------- | ---------------------------------------------- |
+| `new Date (Date.now()).getUTCFullYear()` — **ein Leerzeichen**        | 0         | **grün**    | 3 Dateien / 37 Fälle grün                      |
+| lokale `naechsteWoche()` mit `Number(woche) + 1`, ohne die drei Namen | 0         | **grün**    | **rot** über Sentinel und Jahreswechsel-Vektor |
+
+Die zweite Zeile wurde am **Stand nach dieser Korrektur** nachgemessen (19.08.2026, dieselbe
+Mutation, Wächter bereits entfernt): `test/wochen-navigation.test.tsx` → `1 failed | 10 passed`,
+gemeldet als `Received: "/planung?weekKey=SENTINEL-SCHLUESSEL-W01"`; der Abnahmevertrag
+`test/wochennavigation.test.tsx` → `1 failed | 10 passed`, rot ist genau
+„überschreitet den Jahreswechsel vorwärts richtig (2026-W53 → 2027-W01)". Der Fall „blättert eine
+Woche vorwärts" bleibt dabei **grün** — `+1` ist in der Jahresmitte richtig. Genau deshalb ist der
+Jahreswechsel-Vektor kein Beiwerk, sondern die einzige Stelle, an der eine zweite Wochenregel
+auffällt.
+
+Gefangen hat die zweite Wochenregel also nicht der Wächter, sondern die Sentinel-Zusicherungen in
+`test/wochen-navigation.test.tsx` und der Jahreswechsel-Vektor im Abnahmevertrag. Ein Textvergleich
+auf Quellcode ist mit jedem Leerzeichen, jedem Alias und jeder Umbenennung aushebelbar; bezahlt
+wurde er mit der Lesbarkeit des Dateikopfes, der die drei Namen nicht schreiben durfte, weil der
+Wächter seine eigene Beschreibung mitgezählt hätte. Die Namen stehen wieder im Kopf.
+
+Die eigentliche Zusicherung: die Komponente **rechnet nicht**, sie **reicht durch**. Belegt durch
+ein Modell mit Werten, die keine Rechnung erzeugen kann (`SENTINEL-VOR`, `SENTINEL-NACH`,
+`SENTINEL-HEUTE`) plus je eine Zusicherung pro Bedienelement — rechnet die Komponente selbst, steht
+dort ein Wochenschlüssel statt des Sentinels.
 
 **Risiko.** Die `href`-Werte werden im Test gegen selbst gebaute Konstanten verglichen — dann
 prüft der Test seine eigene Reimplementierung. **Gegenmaßnahme:** der Test übergibt ein Modell
@@ -483,8 +552,9 @@ im DOM stehen; die echten URLs sind in M3 geprüft. **Rücknahme:** Datei lösch
 ### M5 — `/planung` ohne Parameter zeigt die aktuelle Woche
 
 **Was.** `apps/web/app/planung/page.tsx` liest den Zeitpunkt (`new Date()` — die **einzige**
-Uhrzeit-Lesestelle, **E3**), ruft `wochenmodell(...)` mit `EUROPE_BERLIN` und reicht das Modell
-plus den Wochenschlüssel als serialisierbare Werte an die Client-Grenze. Der Fehlerzweig bleibt
+Uhrzeit-Lesestelle, **E3**), ruft `wochenmodell(...)` mit `EUROPE_BERLIN` und reicht das Modell an
+die (ebenfalls serverseitige) `WochenNavigation` sowie den Wochenschlüssel an die
+Client-Komponente `PlanungAnsicht` weiter. Der Fehlerzweig bleibt
 wörtlich erhalten (**E2**, **B5**): vorhandener, aber ungültiger Parameter → weiterhin
 `planungsfenster-parameterfehler`, Gateway ungerufen. Der veraltete Kommentar „Eine
 Wochennavigation bleibt EYT-72" wird durch die tatsächliche Begründung ersetzt.
@@ -493,7 +563,9 @@ Wochennavigation bleibt EYT-72" wird durch die tatsächliche Begründung ersetzt
 Server-Komponente, und nur eine Zeichenkette bzw. ein einfaches Objekt darf die Grenze
 überqueren — eine Funktion nicht. Genau daran ist EYT-107 schon einmal gescheitert, und weder
 `typecheck` noch `build-web` noch der jsdom-Test haben es gemerkt; rot wurde erst `auth-journey`.
-Das Modell aus M3 ist ein reines Datenobjekt und überquert die Grenze problemlos.
+Das Modell aus M3 ist ein reines Datenobjekt und **könnte** die Grenze problemlos überqueren —
+gemessen 19.08.2026 tut es das gar nicht, weil `WochenNavigation` selbst serverseitig bleibt
+(`K12`). Die Serialisierbarkeit ist damit Vorsorge, keine aktuelle Notwendigkeit.
 
 **Dateien.** `apps/web/app/planung/page.tsx`, `apps/web/test/planung-page.test.tsx`.
 
@@ -508,9 +580,26 @@ wird es **nicht** gerufen und der Parameterfehler steht im DOM.
 ```bash
 pnpm --filter @easytree/web exec vitest run test/planung-page.test.tsx      # Exit 0
 grep -c "new Date()" apps/web/app/planung/page.tsx                          # genau 1
-grep -c "new Date()" apps/web/components/wochen-navigation.tsx apps/web/lib/wochennavigation.ts apps/web/components/planungs-werkbank.tsx  # je 0
+grep -c "new Date()" apps/web/components/wochen-navigation.tsx apps/web/lib/wochennavigation.ts  # je 0
 grep -c "planungsfenster-parameterfehler" apps/web/app/planung/page.tsx     # ≥ 1
 ```
+
+**Korrektur 19.08.2026 (`NB-8`).** Die dritte Zeile nannte zusätzlich
+`apps/web/components/planungs-werkbank.tsx`. Diese Datei entsteht erst in **M6** und existiert zum
+Zeitpunkt von M5 nicht — `grep` bricht dort mit „No such file or directory" ab, das Kriterium war
+also nicht lauffähig. Sie ist gestrichen; **M6 nimmt sie in sein eigenes Fertigkriterium auf**,
+sobald sie existiert.
+
+**Und was diese `grep`-Zeilen NICHT sind.** Hygiene, keine Zusicherung — dieselbe Schwäche wie beim
+gestrichenen Wächter aus M4 (`K13`): `new Date ()` mit einem Leerzeichen zählt als 0. Die
+belastbare Aussage über die einzige Uhrzeit-Lesestelle kommt aus `test/planung-page.test.tsx`, das
+den Zeitpunkt festnagelt und die abgeleitete Woche gegen den Gateway-Aufruf prüft.
+
+**Korrektur 19.08.2026 (`NB-5`).** Der Fehlerzweig war als Fragezeichenkette
+`grund === "parameter-unbrauchbar" ? … : (randwoche)` umgesetzt und damit nicht erschöpfend: ein
+dritter `Fehlergrund` fiele stillschweigend in den Randwochentext. Er ist jetzt ein `switch` mit
+`never`-Rest in `fehlerhinweis(...)` — ein neuer Grund macht `typecheck` rot, statt der Planerin
+eine Erklärung zu zeigen, die auf ihren Fall nicht zutrifft.
 
 **Risiko A.** Ein Uhrzeit-Lesevorgang in einer Server-Komponente macht die Route dynamisch; Next
 könnte sie sonst vorrendern und die Woche würde einfrieren. **Gegenmaßnahme:** `build-web` lokal

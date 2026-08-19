@@ -2,7 +2,7 @@ import { EUROPE_BERLIN } from "@easytree/domain";
 
 import { PlanungAnsicht } from "../../components/planung-ansicht";
 import { WochenNavigation } from "../../components/wochen-navigation";
-import { wochenmodell } from "../../lib/wochennavigation";
+import { wochenmodell, type Fehlergrund } from "../../lib/wochennavigation";
 
 /**
  * Einstieg in die Planungswerkbank (EYT-50, erweitert um EYT-140 M5).
@@ -51,11 +51,22 @@ import { wochenmodell } from "../../lib/wochennavigation";
  *
  * ## Was ueber die Server-/Client-Grenze geht
  *
- * Ausschliesslich Daten. `Wochenmodell` ist ein reines Objekt aus Zeichenketten
- * und einem `boolean`; `PlanungAnsicht` bekommt eine Zeichenkette. Eine
- * FUNKTION koennte diese Grenze nicht ueberqueren — daran ist EYT-107 schon
- * einmal gescheitert, und weder `typecheck` noch `build-web` noch der
- * jsdom-Test haben es bemerkt; rot wurde erst `auth-journey`.
+ * Genau ein Wert: `weekKey: string` an `PlanungAnsicht`, unveraendert seit
+ * EYT-107. `WochenNavigation` traegt KEIN `"use client"` und wird nur von
+ * dieser Server-Komponente importiert — sie ist damit selbst eine
+ * Server-Komponente, und `Wochenmodell` ueberquert gar keine Grenze. Hier stand
+ * bis zum 19.08.2026 das Gegenteil, und der Meilenstein M4 im Plan sagt
+ * woertlich „Client-Komponente": eine Abweichung des Entwurfs vom Plan, die
+ * niemand gemeldet hatte (`K12`). Der Entwurf ist die bessere Variante — eine
+ * Server-Komponente schickt keinen Code in den Browser —, also wurde der Plan
+ * nachgezogen, nicht der Code.
+ *
+ * Serialisierbar bleibt `Wochenmodell` trotzdem mit Absicht: braucht die
+ * Navigation spaeter ein `"use client"` (Fokusverwaltung, Tastenkuerzel), soll
+ * das Modell die Grenze ohne Umbau ueberqueren koennen. Eine FUNKTION koennte
+ * das nicht — daran ist EYT-107 schon einmal gescheitert, und weder `typecheck`
+ * noch `build-web` noch der jsdom-Test haben es bemerkt; rot wurde erst
+ * `auth-journey`.
  */
 export default async function PlanungPage({
   searchParams,
@@ -78,17 +89,41 @@ export default async function PlanungPage({
         // Zeichenkette weiter. Waechter und Ansicht liegen zusammen in einer
         // Client-Komponente — warum, steht in `planung-ansicht.tsx`.
         <PlanungAnsicht weekKey={modell.schluessel} />
-      ) : modell.grund === "parameter-unbrauchbar" ? (
+      ) : (
+        fehlerhinweis(modell.grund)
+      )}
+    </main>
+  );
+}
+
+/**
+ * Der sichtbare Text zu einem Fehlergrund.
+ *
+ * Bewusst ein `switch` mit `never`-Rest statt einer Kette aus Fragezeichen
+ * (`NB-5`, 19.08.2026): mit `grund === "parameter-unbrauchbar" ? … : …` fiele
+ * ein spaeter ergaenzter dritter Grund stillschweigend in den Randwochentext —
+ * die Planerin bekaeme eine Erklaerung, die auf ihren Fall nicht zutrifft. So
+ * geht stattdessen `typecheck` rot, bevor irgendetwas gerendert wird.
+ */
+function fehlerhinweis(grund: Fehlergrund) {
+  switch (grund) {
+    case "parameter-unbrauchbar":
+      return (
         <p data-testid="planungsfenster-parameterfehler" role="alert">
           Kein gültiger Wochenschlüssel. Erwartet wird `?weekKey=2026-W32` mit einer Woche zwischen
           01 und 53.
         </p>
-      ) : (
+      );
+    case "woche-ohne-nachbarwoche":
+      return (
         <p data-testid="planungsfenster-randwoche" role="alert">
           Diese Woche liegt am Rand des darstellbaren Kalenders — sie hat keine Nachbarwoche, zu der
           geblättert werden könnte.
         </p>
-      )}
-    </main>
-  );
+      );
+    default: {
+      const unerreichbar: never = grund;
+      throw new Error(`Unbekannter Fehlergrund: ${String(unerreichbar)}`);
+    }
+  }
 }

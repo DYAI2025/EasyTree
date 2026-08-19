@@ -23,17 +23,34 @@
  * unterscheidbare Werte plus eine Zusicherung je Bedienelement machen jede
  * Vertauschung sichtbar.
  *
- * ## Gegenmutation (ausgefuehrt, 19.08.2026)
+ * ## Die Sentinels sind die Zusicherung — nicht ein Namensvergleich
  *
- * In `wochen-navigation.tsx` `href={modell.naechsteUrl}` durch die selbst
- * gebaute Adresse `` href={`/planung?weekKey=${modell.schluessel}`} `` ersetzen
- * — also die Komponente rechnen lassen. „verlinkt vorwaerts auf genau die
- * uebergebene Adresse" wird rot und meldet `/planung?weekKey=SENTINEL-SCHLUESSEL`
- * gegen `/planung?weekKey=SENTINEL-NACH`.
+ * Hier stand bis zum 19.08.2026 zusaetzlich ein statischer Waechter, der die
+ * Quelldatei nach `new Date()`, `shiftPlanningWeek` und `parseIsoWeekKey`
+ * durchsuchte. Er ist ersatzlos entfallen, weil zwei ausgefuehrte
+ * Gegenmutationen gezeigt haben, dass er nichts haelt: `new Date (Date.now())`
+ * mit einem einzigen zusaetzlichen Leerzeichen liess ihn gruen, und eine selbst
+ * gebaute `naechsteWoche()` ohne einen der drei Namen ebenfalls. In beiden
+ * Faellen schlugen die Sentinels an (bzw. der Jahreswechsel-Vektor im
+ * Abnahmevertrag). Ein Textvergleich auf Quellcode ist mit jedem Leerzeichen,
+ * jedem Alias und jeder Umbenennung aushebelbar; er kostete ausserdem den
+ * Dateikopf der Komponente die drei Namen, weil er seine eigene Beschreibung
+ * mitgezaehlt haette.
+ *
+ * ## Gegenmutationen (ausgefuehrt, 19.08.2026)
+ *
+ * 1. In `wochen-navigation.tsx` `href={modell.naechsteUrl}` durch die selbst
+ *    gebaute Adresse `` href={`/planung?weekKey=${modell.schluessel}`} ``
+ *    ersetzen — also die Komponente rechnen lassen. „verlinkt vorwaerts auf
+ *    genau die uebergebene Adresse" wird rot und meldet
+ *    `/planung?weekKey=SENTINEL-SCHLUESSEL` gegen `/planung?weekKey=SENTINEL-NACH`.
+ * 2. In `werkbank-woche-iso` ein zweites `<span>(Planstand 2026-W01)</span>`
+ *    ergaenzen — eine zweite, widersprechende Wochenaussage in derselben
+ *    Flaeche, wie sie M7 mit „Entwurf/veroeffentlicht" realistisch erzeugt.
+ *    „zeigt Wochentext und kanonischen Schluessel unveraendert an" wird rot,
+ *    seit die Zusicherung dort auf GLEICHHEIT statt auf Enthaltensein steht.
  */
 import { cleanup, render, screen } from "@testing-library/react";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WochenNavigation } from "../components/wochen-navigation";
@@ -86,11 +103,17 @@ describe("WochenNavigation — der Wochenfall", () => {
 
   it("zeigt Wochentext und kanonischen Schluessel unveraendert an", () => {
     render(<WochenNavigation modell={WOCHE} />);
-    const iso = screen.getByTestId("werkbank-woche-iso").textContent ?? "";
-    expect(iso).toContain("SENTINEL-WOCHENTEXT");
-    // Der kanonische Schluessel steht mit im Element: er ist das, was in der
-    // Adresse steht und was geteilt wird.
-    expect(iso).toContain("SENTINEL-SCHLUESSEL");
+    // GLEICHHEIT, nicht Enthaltensein (Korrekturbefund `K14`, 19.08.2026): mit
+    // `toContain` blieb diese Zusicherung gruen, als ein zweites
+    // `<span>(Planstand 2026-W01)</span>` in dasselbe Element gesetzt wurde.
+    // Die Planerin saehe dann zwei einander widersprechende Wochenaussagen
+    // nebeneinander — genau der Fall, den M7 mit „Entwurf/veroeffentlicht" in
+    // dieselbe Flaeche traegt. Der kanonische Schluessel steht mit im Element:
+    // er ist das, was in der Adresse steht und was geteilt wird — sichtbar ist
+    // er nicht, siehe `VisuallyHidden` in der Komponente.
+    expect(screen.getByTestId("werkbank-woche-iso").textContent).toBe(
+      "SENTINEL-WOCHENTEXT SENTINEL-SCHLUESSEL",
+    );
   });
 
   it("zeigt den Zeitraum unveraendert an", () => {
@@ -142,23 +165,5 @@ describe("WochenNavigation — der Fehlerfall ist keine Sackgasse", () => {
     expect(screen.queryByRole("link", { name: "Nächste Woche" })).toBeNull();
     expect(screen.queryByTestId("werkbank-woche-iso")).toBeNull();
     expect(screen.queryByTestId("werkbank-woche-bereich")).toBeNull();
-  });
-});
-
-describe("WochenNavigation — statischer Waechter", () => {
-  it("enthaelt keine eigene Wochenrechnung und keine Uhr", () => {
-    // Das Fertigkriterium des Meilensteins als bleibende Zusicherung statt als
-    // einmaliger `grep`: eine zweite Wochenregel in der Darstellung liefe an
-    // den Jahresgrenzen von der ersten weg (2026 hat 53 ISO-Wochen, 2025 und
-    // 2027 haben 52), und der Fehler saehe wie ein Darstellungsfehler aus.
-    const quelle = readFileSync(join(process.cwd(), "components", "wochen-navigation.tsx"), "utf8");
-    // Geprueft wird die GANZE Datei, Kommentare eingeschlossen — genau das tut
-    // auch der `grep -c` des Fertigkriteriums, und zwei Zaehlungen mit
-    // verschiedenem Geltungsbereich waeren zwei Aussagen, von denen eine still
-    // falsch werden koennte. Der Preis: der Dateikopf darf die drei Namen nicht
-    // nennen. Er verweist stattdessen hierher.
-    for (const verboten of ["new Date()", "shiftPlanningWeek", "parseIsoWeekKey"]) {
-      expect(quelle).not.toContain(verboten);
-    }
   });
 });
