@@ -23,7 +23,7 @@ import { resolveBuildProxyTarget } from "./lib/api-proxy-target";
  */
 const nextConfig: NextConfig = {
   async rewrites() {
-    const target = resolveBuildProxyTarget();
+    const target = resolveBuildProxyTarget(process.env);
     return [
       { source: "/api/:path*", destination: `${target}/api/:path*` },
       { source: "/health", destination: `${target}/health` },
