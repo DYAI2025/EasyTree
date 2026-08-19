@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-import { normalizeProxyTarget } from "./lib/api-proxy-target";
+import { resolveBuildProxyTarget } from "./lib/api-proxy-target";
 
 /**
  * easyTree Web-/PWA-Shell (EYT-41, Same-Origin seit EYT-50).
@@ -23,7 +23,7 @@ import { normalizeProxyTarget } from "./lib/api-proxy-target";
  */
 const nextConfig: NextConfig = {
   async rewrites() {
-    const target = normalizeProxyTarget(process.env.EASYTREE_API_PROXY_TARGET);
+    const target = resolveBuildProxyTarget(process.env);
     return [
       { source: "/api/:path*", destination: `${target}/api/:path*` },
       { source: "/health", destination: `${target}/health` },

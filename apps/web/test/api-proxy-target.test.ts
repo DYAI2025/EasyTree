@@ -1,16 +1,14 @@
 /**
- * Das Proxyziel wird geprueft, nicht geglaubt (EYT-50).
- *
- * Ein Tippfehler hier erzeugt keinen sichtbaren Fehler, sondern eine
- * Weiterleitung ins Leere — und die sieht im Browser aus wie eine leere Woche.
- * Genau die Verwechslung, die der Slice ausschliessen soll.
+ * Das Proxyziel wird geprueft, nicht geglaubt (EYT-50/EYT-142).
  */
 import { describe, expect, it } from "vitest";
 
 import {
+  CLOUDFLARE_API_FALLBACK_TARGET,
   DEFAULT_API_PROXY_TARGET,
   InvalidProxyTargetError,
   normalizeProxyTarget,
+  resolveBuildProxyTarget,
 } from "../lib/api-proxy-target";
 
 describe("normalizeProxyTarget", () => {
@@ -21,15 +19,11 @@ describe("normalizeProxyTarget", () => {
   });
 
   it("bricht in production ohne Wert ab", () => {
-    // Fail-closed: ein Proxy auf localhost, waehrend die API woanders laeuft,
-    // erzeugt keinen Fehler beim Bauen — sondern eine Weiterleitung ins Leere,
-    // die im Browser wie eine leere Woche aussieht.
     expect(() => normalizeProxyTarget(undefined, "production")).toThrow(InvalidProxyTargetError);
     expect(() => normalizeProxyTarget("", "production")).toThrow(InvalidProxyTargetError);
   });
 
   it("lehnt Zugangsdaten in der Ziel-URL ab", () => {
-    // Sie landen sonst in Konfiguration, Logs und Fehlermeldungen.
     expect(() => normalizeProxyTarget("http://nutzer:geheim@127.0.0.1:3001")).toThrow(
       InvalidProxyTargetError,
     );
@@ -44,7 +38,6 @@ describe("normalizeProxyTarget", () => {
   });
 
   it("entfernt abschliessende Slashes", () => {
-    // `//api/...` ist ein anderer Pfad als `/api/...`.
     expect(normalizeProxyTarget("http://127.0.0.1:3001/")).toBe("http://127.0.0.1:3001");
     expect(normalizeProxyTarget("http://127.0.0.1:3001///")).toBe("http://127.0.0.1:3001");
   });
@@ -63,5 +56,35 @@ describe("normalizeProxyTarget", () => {
     ["mit Fragment", "http://127.0.0.1:3001#frag"],
   ])("lehnt ein %s Ziel ab", (_name, wert) => {
     expect(() => normalizeProxyTarget(wert)).toThrow(InvalidProxyTargetError);
+  });
+});
+
+describe("resolveBuildProxyTarget", () => {
+  it("nimmt in Cloudflare Workers Builds den dokumentierten Railway-Fallback", () => {
+    expect(resolveBuildProxyTarget({ NODE_ENV: "production", WORKERS_CI: "1" })).toBe(
+      CLOUDFLARE_API_FALLBACK_TARGET,
+    );
+  });
+
+  it("nimmt in Cloudflare Pages den dokumentierten Railway-Fallback", () => {
+    expect(resolveBuildProxyTarget({ NODE_ENV: "production", CF_PAGES: "1" })).toBe(
+      CLOUDFLARE_API_FALLBACK_TARGET,
+    );
+  });
+
+  it("bevorzugt ein explizites API-Ziel auch in Cloudflare", () => {
+    expect(
+      resolveBuildProxyTarget({
+        NODE_ENV: "production",
+        WORKERS_CI: "1",
+        EASYTREE_API_PROXY_TARGET: "https://api.example.org/",
+      }),
+    ).toBe("https://api.example.org");
+  });
+
+  it("bleibt ausserhalb Cloudflare in production fail-closed", () => {
+    expect(() => resolveBuildProxyTarget({ NODE_ENV: "production" })).toThrow(
+      InvalidProxyTargetError,
+    );
   });
 });
