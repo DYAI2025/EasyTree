@@ -23,15 +23,20 @@
 
 /**
  * Standard fuer development und test — und NUR dort.
- *
- * Hier stand "Produktion und CI setzen den Wert explizit". Das war eine
- * Absicht, keine Tatsache: die Workflows setzten die Variable nicht und liefen
- * still ueber diesen lokalen Wert. Ein Default, auf den sich niemand berufen
- * darf, aber alle verlassen, ist die schlechteste Sorte Vorgabe.
- *
- * In production gibt es deshalb keinen Default mehr — dort bricht der Build ab.
  */
 export const DEFAULT_API_PROXY_TARGET = "http://127.0.0.1:3001";
+
+/**
+ * Sprint-6-Fallback fuer Cloudflare Builds.
+ *
+ * Cloudflare ist die primaere Web-Staging-Grenze. Solange der API-Worker die
+ * separaten Runtime-/TLS-/RLS-Gates aus EYT-142 noch nicht bestanden hat,
+ * bleibt der bereits existierende Railway-API-Service der ausdruecklich
+ * dokumentierte Fallback. Ein explizit gesetztes EASYTREE_API_PROXY_TARGET hat
+ * immer Vorrang und kann spaeter ohne Codeaenderung auf einen Cloudflare-API-
+ * Endpunkt zeigen.
+ */
+export const CLOUDFLARE_API_FALLBACK_TARGET = "https://easytree-production.up.railway.app";
 
 export class InvalidProxyTargetError extends Error {}
 
@@ -49,9 +54,6 @@ export function normalizeProxyTarget(
   const explizit = raw?.trim() ?? "";
 
   if (explizit === "") {
-    // Fail-closed in production: ein Proxy, der auf localhost zeigt, waehrend
-    // die API woanders laeuft, erzeugt keinen Fehler beim Bauen — sondern eine
-    // Weiterleitung ins Leere, die im Browser wie eine leere Woche aussieht.
     if (nodeEnv === "production") {
       throw new InvalidProxyTargetError(
         "EASYTREE_API_PROXY_TARGET ist in production Pflicht. Es gibt hier bewusst keinen Default.",
@@ -77,22 +79,47 @@ export function normalizeProxyTarget(
     );
   }
   if (url.username !== "" || url.password !== "") {
-    // Zugangsdaten in einer Ziel-URL landen in Konfiguration, Logs und
-    // Fehlermeldungen. CLAUDE.md verbietet das Protokollieren von Zugangsdaten;
-    // der sicherste Weg ist, sie hier gar nicht erst anzunehmen.
     throw new InvalidProxyTargetError(
       "EASYTREE_API_PROXY_TARGET darf keine Zugangsdaten enthalten.",
     );
   }
   if (url.search !== "" || url.hash !== "") {
-    // Ein Querystring am Ziel wuerde beim Zusammensetzen mit `/api/:path*`
-    // stillschweigend verschluckt oder verdoppelt.
     throw new InvalidProxyTargetError(
       "EASYTREE_API_PROXY_TARGET darf weder Querystring noch Fragment enthalten.",
     );
   }
 
-  // Ohne abschliessenden Slash: die Ziele werden mit `/api/:path*` verkettet,
-  // und `//api/...` ist ein anderer Pfad.
   return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+}
+
+export type ProxyBuildEnvironment = {
+  EASYTREE_API_PROXY_TARGET?: string;
+  NODE_ENV?: string;
+  WORKERS_CI?: string;
+  CF_PAGES?: string;
+};
+
+/**
+ * Loest das Build-Ziel auf, ohne die allgemeine Production-Fail-Closed-Regel
+ * aufzuweichen.
+ *
+ * Cloudflare Workers Builds setzt WORKERS_CI=1, Cloudflare Pages setzt
+ * CF_PAGES=1. Nur in diesen beiden expliziten Build-Kontexten darf bei
+ * fehlendem EASYTREE_API_PROXY_TARGET der dokumentierte Railway-Fallback
+ * verwendet werden. Ein expliziter Wert gewinnt immer.
+ */
+export function resolveBuildProxyTarget(
+  env: ProxyBuildEnvironment = process.env,
+): string {
+  const explicit = env.EASYTREE_API_PROXY_TARGET?.trim();
+  if (explicit) {
+    return normalizeProxyTarget(explicit, env.NODE_ENV);
+  }
+
+  const isCloudflareBuild = env.WORKERS_CI === "1" || env.CF_PAGES === "1";
+  if (isCloudflareBuild) {
+    return normalizeProxyTarget(CLOUDFLARE_API_FALLBACK_TARGET, env.NODE_ENV);
+  }
+
+  return normalizeProxyTarget(undefined, env.NODE_ENV);
 }
