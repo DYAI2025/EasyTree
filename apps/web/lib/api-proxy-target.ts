@@ -115,7 +115,8 @@ export function resolveBuildProxyTarget(env: ProxyBuildEnvironment): string {
     return normalizeProxyTarget(explicit, env.NODE_ENV);
   }
 
-  const isCloudflareBuild = env.WORKERS_CI === "1" || env.CF_PAGES === "1";
+  const isCloudflareBuild =
+    env.WORKERS_CI === "1" || env.CF_PAGES === "1";
   if (isCloudflareBuild) {
     return normalizeProxyTarget(CLOUDFLARE_API_FALLBACK_TARGET, env.NODE_ENV);
   }
