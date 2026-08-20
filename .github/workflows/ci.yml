@@ -65,6 +65,50 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @easytree/web... build
+      # EYT-142: OpenNext-Build plus Dry-Run, und die gzip-Groesse wandert in
+      # die Zusammenfassung. Das Free-Tier-Limit liegt bei 3 MiB gzip; ohne
+      # eine dauerhaft sichtbare Zahl faellt ein langsames Anwachsen erst auf,
+      # wenn das Deploy abgelehnt wird (Risiko R-BUNDLE).
+      - name: Cloudflare Web-Worker buendelbar + Groesse (EYT-142)
+        run: |
+          set -euo pipefail
+          pnpm --filter @easytree/web run build:cf
+          pnpm --filter @easytree/web run cf:dry-run | tee /tmp/cf-web-dry.log
+
+          # Drei Stufen, absichtlich in dieser Reihenfolge. Wrangler ist ein
+          # Fremdwerkzeug; sein Ausgabeformat ist keine Zusage an uns. Eine
+          # Formataenderung soll die Zusammenfassung verschlechtern, nicht den
+          # Build faellen — aber ein voelliges Fehlen der Messung MUSS laut sein.
+          erwartet='Total Upload: [0-9.]+ KiB / gzip: [0-9.]+ KiB'
+          groesse="$(grep -oE "$erwartet" /tmp/cf-web-dry.log | tail -1 || true)"
+          hinweis=""
+          if [ -z "$groesse" ]; then
+            # Stufe 2: Zeile existiert, aber anders formatiert — verbatim melden.
+            groesse="$(grep -aF 'Total Upload' /tmp/cf-web-dry.log | tail -1 | sed 's/^[[:space:]]*//' || true)"
+            if [ -n "$groesse" ]; then
+              hinweis="> Hinweis: Wrangler hat das Format geaendert; erwartet war \`$erwartet\`. Die Zeile steht unveraendert oben — die Schwellenpruefung unten ist damit NICHT automatisiert."
+            fi
+          fi
+          if [ -z "$groesse" ]; then
+            # Stufe 3: gar keine Groessenangabe — der Schritt haette nichts gemessen.
+            echo "Keine 'Total Upload'-Zeile im Wrangler-Output. Der Schritt misst nichts und ist deshalb rot." >&2
+            exit 1
+          fi
+
+          {
+            echo "### Cloudflare Web-Worker (EYT-142)"
+            echo ""
+            echo "\`$groesse\`"
+            echo ""
+            echo "Free-Tier-Grenze: 3072 KiB gzip."
+            # Bewusst ein `if` und keine `&&`-Kette: unter `set -e` liefert
+            # `[ -n "" ] && …` den Status 1 und faellt den ganzen Schritt — im
+            # NORMALFALL, in dem gar kein Hinweis noetig ist. Lokal gemessen.
+            if [ -n "$hinweis" ]; then
+              echo ""
+              echo "$hinweis"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Real-Browser-Smoke der Web-Shell (EYT-58b): Tastatur, Fokus,
   # Viewports und axe inkl. color-contrast in echtem Chromium.
@@ -88,6 +132,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @easytree/api... build
+      # EYT-142: der Cloudflare-Entry muss buendelbar BLEIBEN. Ohne diesen
+      # Schritt faellt ein Bruch erst beim Deploy auf — und der Build davor
+      # war gruen. Kein eigener Job: ein neuer Job waere ein Status-Check, den
+      # das Ruleset nicht kennt, und setup-/verify-branch-protection.sh
+      # meldeten Drift.
+      - name: Cloudflare API-Worker buendelbar (EYT-142)
+        run: pnpm --filter @easytree/api run cf:dry-run
 
   secret-scan:
     runs-on: ubuntu-latest

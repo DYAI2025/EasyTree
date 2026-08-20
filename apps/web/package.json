@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:cf": "opennextjs-cloudflare build",
+    "cf:dry-run": "wrangler deploy --dry-run --outdir .wrangler-dry"
   },
   "dependencies": {
     "@easytree/contracts": "workspace:*",
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
+    "@opennextjs/cloudflare": "^1.20.2",
     "@playwright/test": "^1.61.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
@@ -33,6 +36,7 @@
     "eslint": "^10.7.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.124.0"
   }
 }

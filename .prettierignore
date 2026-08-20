@@ -17,3 +17,9 @@ packages/contracts/openapi
 # eingecheckt mit a559df2). Eine 596-KB-Seite in EINER Zeile laesst sich nicht
 # sinnvoll formatieren, und ihr Inhalt ist Beleg, kein Quelltext.
 docs/ux
+
+# Cloudflare-Buildartefakte (EYT-142). Generierter Next-Server und
+# Wrangler-Zwischenstaende — kein Quelltext.
+.open-next
+.wrangler
+.wrangler-dry

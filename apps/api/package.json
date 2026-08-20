@@ -12,7 +12,9 @@
     "start": "node dist/main.js",
     "start:worker": "node dist/worker.js",
     "build:harness": "tsc -p tsconfig.harness.json",
-    "start:harness": "node dist-harness/test/harness/main.js"
+    "start:harness": "node dist-harness/test/harness/main.js",
+    "build:cf": "pnpm build",
+    "cf:dry-run": "wrangler deploy --dry-run --outdir .wrangler-dry"
   },
   "dependencies": {
     "@easytree/config": "workspace:*",
@@ -34,9 +36,11 @@
     "@types/pg": "^8.20.0",
     "@types/supertest": "^6.0.2",
     "eslint": "^10.7.0",
+    "jsonc-parser": "^3.3.1",
     "supertest": "^7.2.2",
     "typescript": "^5.9.3",
     "unplugin-swc": "^1.5.9",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.124.0"
   }
 }
