@@ -70,6 +70,128 @@ const ABNAHME_BREITEN = [
   { name: "1440 px bei 200-%-Zoom (720 px CSS)", width: 720, height: 450 },
 ] as const;
 
+/**
+ * Tastaturbedienbarkeit und SICHTBARER Fokus auf einer angemeldeten Flaeche
+ * (EYT-141/EYT-137: „Tastatur, sichtbarer Fokus").
+ *
+ * ## Warum das hier fehlte
+ *
+ * Gemessen 20.08.2026: `shell-smoke.spec.ts` prueft den Tab-Zyklus — aber
+ * ausschliesslich auf `/`. In dieser Datei kam `keyboard` bis eben **null Mal**
+ * vor. `/planung` und `/kosten`, die beiden Flaechen der Kernreise, hatten also
+ * keinen einzigen Tastaturnachweis; nur die Startseite hatte einen.
+ *
+ * ## Warum dieselbe Technik wie in `shell-smoke`
+ *
+ * Die Sichtbarkeitspruefung (`outline` mit Breite > 0 ODER `box-shadow`) ist
+ * woertlich uebernommen und nicht neu erfunden. Zwei Definitionen von
+ * „sichtbarer Fokus" waeren zwei Wahrheiten, die auseinanderlaufen koennen —
+ * und die schwaechere gaebe dann den Ausschlag.
+ *
+ * ## Was NICHT geprueft wird
+ *
+ * Die DOM-Reihenfolge. `shell-smoke` vergleicht die Tab-Reihenfolge gegen die
+ * DOM-Reihenfolge; das ist auf einer statischen Seite sinnvoll. Hier stehen
+ * Formulare mit Zustaenden, die waehrend des Durchtabbens nachladen koennen —
+ * eine Reihenfolgezusicherung waere dort flaky und wuerde als „Fokusfehler"
+ * gelesen, obwohl sie ein Timingartefakt ist. Zugesichert wird deshalb das,
+ * was hier wirklich traegt: **jedes** erreichte Element zeigt einen sichtbaren
+ * Fokus, und es gibt keine Tastaturfalle.
+ */
+async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<void> {
+  const fokussierbare = await seite.evaluate(
+    () =>
+      document.querySelectorAll(
+        "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])",
+      ).length,
+  );
+  // Nicht-vakuoes: eine Flaeche ohne fokussierbare Elemente wuerde die
+  // Schleife unten null Mal durchlaufen und truege gruen nichts bei.
+  expect(fokussierbare, `fokussierbare Elemente auf ${flaeche}`).toBeGreaterThan(0);
+
+  const ohneIndikator: string[] = [];
+  let beurteilt = 0;
+  for (let i = 0; i < fokussierbare; i++) {
+    await seite.keyboard.press("Tab");
+    const halt = await seite.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (el === null || el === document.body) return null;
+      // `document.activeElement` ist KEIN verlaesslicher Beleg dafuer, dass der
+      // Browser das Element als fokussiert ansieht. Gemessen am 20.08.2026 im
+      // echten Chromium: `input[type="date"]` auf `/planung` ist
+      // `activeElement`, matcht aber `:focus` NICHT — vermutlich, weil der
+      // Fokus in der UA-Shadow-Root auf einem Segment sitzt.
+      //
+      // Ueber ein solches Element laesst sich ueber den Fokusrahmen nichts
+      // aussagen: keine `:focus`-Regel kann greifen, und ein Befund waere ein
+      // erfundener Fehler. Es wird deshalb uebersprungen — nicht stillschweigend,
+      // sondern gezaehlt (siehe `beurteilt` unten).
+      if (!el.matches(":focus")) return { uebersprungen: true } as const;
+      const s = getComputedStyle(el);
+      // `outline-width: auto` ist der Browser-Fokusring und ein ECHTER
+      // Indikator — aber `parseFloat("auto")` ist `NaN`, und `NaN > 0` ist
+      // `false`. Eine Sonde, die nur auf eine Zahl prueft, meldet ihn als
+      // fehlend und erfindet damit einen Barrierefreiheitsfehler, den es nicht
+      // gibt. `auto` zaehlt deshalb ausdruecklich mit.
+      const breite = parseFloat(s.outlineWidth);
+      const hatOutline = s.outlineStyle !== "none" && (s.outlineWidth === "auto" || breite > 0);
+      const sichtbarerFokus = hatOutline || s.boxShadow !== "none";
+      return {
+        uebersprungen: false as const,
+        id: `${el.tagName}:${el.getAttribute("data-testid") ?? el.textContent?.trim()?.slice(0, 40)}`,
+        sichtbarerFokus,
+        // Die gemessenen Werte reisen mit. Ohne sie sagt ein Fehlschlag nur
+        // "kein Indikator" und die Diagnose beginnt bei null — genau das ist
+        // beim ersten roten Lauf dieser Sonde passiert.
+        // `:focus` und `:focus-visible` reisen mit, weil sie die beiden
+        // moeglichen Ursachen TRENNEN: matcht `:focus` nicht, ist das Element
+        // gar nicht wirklich fokussiert (z. B. weil das Dokument den
+        // Fensterfokus verloren hat) und die Messung sagt nichts ueber das
+        // CSS. Matcht es, greift die Regel wirklich nicht.
+        befund:
+          `outline-style=${s.outlineStyle} outline-width=${s.outlineWidth} box-shadow=${s.boxShadow}` +
+          ` :focus=${el.matches(":focus")} :focus-visible=${el.matches(":focus-visible")}`,
+      };
+    });
+    if (halt === null || halt.uebersprungen) continue;
+    beurteilt += 1;
+    if (!halt.sichtbarerFokus) {
+      ohneIndikator.push(`${halt.id} (${halt.befund})`);
+    }
+  }
+
+  // Der Schutz gegen einen vakuoesen Nachweis: haette der `:focus`-Filter oben
+  // ALLE Elemente aussortiert, waere die Liste unten leer und der Test gruen,
+  // ohne ein einziges Bedienelement geprueft zu haben.
+  expect(beurteilt, `tatsaechlich beurteilte Bedienelemente auf ${flaeche}`).toBeGreaterThan(0);
+
+  // Die Elemente werden BENANNT, nicht gezaehlt: „2 Elemente ohne Indikator"
+  // zwingt zur Suche, die Liste zeigt sofort, welches Bedienelement gemeint ist.
+  expect(ohneIndikator, `Elemente ohne sichtbaren Fokusindikator auf ${flaeche}`).toEqual([]);
+
+  // Keine Tastaturfalle: ein weiterer Tab verlaesst das zuletzt fokussierte
+  // Element. Ein Bedienelement, das den Fokus festhaelt, sperrt die ganze
+  // Flaeche fuer alle, die nicht mit der Maus arbeiten.
+  //
+  // Ein Tab genuegt dafuer NICHT, und das ist gemessen, nicht vermutet: bei
+  // `input[type="time"]` und `input[type="date"]` wandert Tab zuerst zwischen
+  // den INNEREN Segmenten (Stunde/Minute bzw. Tag/Monat/Jahr). Der Fokus
+  // bleibt dabei auf demselben Element, und ein Vergleich ueber einen einzigen
+  // Tab meldet eine Falle, wo nur ein zusammengesetztes Bedienelement steht.
+  // Die Reise hat genau diesen Fehlalarm auf `feld-beginn` erzeugt.
+  //
+  // Eine echte Falle gibt den Fokus NIE frei. Ein Budget von sechs Tabs deckt
+  // die laengste hier vorkommende Segmentkette (Datum: drei) mit Reserve ab.
+  const vorher = await seite.evaluate(() => document.activeElement?.outerHTML?.slice(0, 80) ?? "");
+  let entkommen = false;
+  for (let versuch = 0; versuch < 6 && !entkommen; versuch++) {
+    await seite.keyboard.press("Tab");
+    const jetzt = await seite.evaluate(() => document.activeElement?.outerHTML?.slice(0, 80) ?? "");
+    entkommen = jetzt !== vorher;
+  }
+  expect(entkommen, `Tastaturfalle auf ${flaeche}: Fokus bleibt auf ${vorher}`).toBe(true);
+}
+
 async function pruefeBarrierefreiheit(seite: Page, flaeche: string): Promise<void> {
   const urspruenglich = seite.viewportSize();
 
@@ -101,6 +223,8 @@ async function pruefeBarrierefreiheit(seite: Page, flaeche: string): Promise<voi
   if (urspruenglich !== null) {
     await seite.setViewportSize(urspruenglich);
   }
+
+  await pruefeTastaturUndFokus(seite, flaeche);
 
   const ergebnis = await new AxeBuilder({ page: seite })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])

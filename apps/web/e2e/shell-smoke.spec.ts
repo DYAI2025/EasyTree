@@ -119,8 +119,15 @@ test("Tab-Zyklus: alle interaktiven Elemente erreichbar, sichtbarer Fokus, keine
     const stop = await page.evaluate(() => {
       const el = document.activeElement as HTMLElement;
       const s = getComputedStyle(el);
+      // `outline-width: auto` ist der Browser-Fokusring und ein ECHTER
+      // Indikator; `parseFloat("auto")` ist aber `NaN`, und `NaN > 0` ist
+      // `false`. Ohne den `auto`-Zweig meldet diese Sonde ihn als fehlend.
+      // Hier faellt das nicht auf, weil `/` kein Bedienelement mit
+      // `outline-width: auto` enthaelt — auf `/planung` schon (EYT-141).
       const visibleFocus =
-        (s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0) || s.boxShadow !== "none";
+        (s.outlineStyle !== "none" &&
+          (s.outlineWidth === "auto" || parseFloat(s.outlineWidth) > 0)) ||
+        s.boxShadow !== "none";
       return {
         id: `${el.tagName}:${el.getAttribute("href") ?? el.textContent?.trim()}`,
         visibleFocus,
