@@ -172,10 +172,24 @@ async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<voi
   // Keine Tastaturfalle: ein weiterer Tab verlaesst das zuletzt fokussierte
   // Element. Ein Bedienelement, das den Fokus festhaelt, sperrt die ganze
   // Flaeche fuer alle, die nicht mit der Maus arbeiten.
+  //
+  // Ein Tab genuegt dafuer NICHT, und das ist gemessen, nicht vermutet: bei
+  // `input[type="time"]` und `input[type="date"]` wandert Tab zuerst zwischen
+  // den INNEREN Segmenten (Stunde/Minute bzw. Tag/Monat/Jahr). Der Fokus
+  // bleibt dabei auf demselben Element, und ein Vergleich ueber einen einzigen
+  // Tab meldet eine Falle, wo nur ein zusammengesetztes Bedienelement steht.
+  // Die Reise hat genau diesen Fehlalarm auf `feld-beginn` erzeugt.
+  //
+  // Eine echte Falle gibt den Fokus NIE frei. Ein Budget von sechs Tabs deckt
+  // die laengste hier vorkommende Segmentkette (Datum: drei) mit Reserve ab.
   const vorher = await seite.evaluate(() => document.activeElement?.outerHTML?.slice(0, 80) ?? "");
-  await seite.keyboard.press("Tab");
-  const nachher = await seite.evaluate(() => document.activeElement?.outerHTML?.slice(0, 80) ?? "");
-  expect(nachher, `Tastaturfalle auf ${flaeche}`).not.toBe(vorher);
+  let entkommen = false;
+  for (let versuch = 0; versuch < 6 && !entkommen; versuch++) {
+    await seite.keyboard.press("Tab");
+    const jetzt = await seite.evaluate(() => document.activeElement?.outerHTML?.slice(0, 80) ?? "");
+    entkommen = jetzt !== vorher;
+  }
+  expect(entkommen, `Tastaturfalle auf ${flaeche}: Fokus bleibt auf ${vorher}`).toBe(true);
 }
 
 async function pruefeBarrierefreiheit(seite: Page, flaeche: string): Promise<void> {
