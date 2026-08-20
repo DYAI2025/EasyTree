@@ -65,6 +65,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @easytree/web... build
+      # EYT-142: OpenNext-Build plus Dry-Run, und die gzip-Groesse wandert in
+      # die Zusammenfassung. Das Free-Tier-Limit liegt bei 3 MiB gzip; ohne
+      # eine dauerhaft sichtbare Zahl faellt ein langsames Anwachsen erst auf,
+      # wenn das Deploy abgelehnt wird (Risiko R-BUNDLE).
+      - name: Cloudflare Web-Worker buendelbar + Groesse (EYT-142)
+        run: |
+          set -euo pipefail
+          pnpm --filter @easytree/web run build:cf
+          pnpm --filter @easytree/web run cf:dry-run | tee /tmp/cf-web-dry.log
+          groesse="$(grep -oE 'Total Upload: [0-9.]+ KiB / gzip: [0-9.]+ KiB' /tmp/cf-web-dry.log | tail -1)"
+          if [ -z "$groesse" ]; then
+            echo "Keine Groessenzeile im Wrangler-Output gefunden — der Schritt misst nichts." >&2
+            exit 1
+          fi
+          echo "### Cloudflare Web-Worker (EYT-142)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$groesse\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Free-Tier-Grenze: 3072 KiB gzip." >> "$GITHUB_STEP_SUMMARY"
 
   # Real-Browser-Smoke der Web-Shell (EYT-58b): Tastatur, Fokus,
   # Viewports und axe inkl. color-contrast in echtem Chromium.
@@ -88,6 +107,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm --filter @easytree/api... build
+      # EYT-142: der Cloudflare-Entry muss buendelbar BLEIBEN. Ohne diesen
+      # Schritt faellt ein Bruch erst beim Deploy auf — und der Build davor
+      # war gruen. Kein eigener Job: ein neuer Job waere ein Status-Check, den
+      # das Ruleset nicht kennt, und setup-/verify-branch-protection.sh
+      # meldeten Drift.
+      - name: Cloudflare API-Worker buendelbar (EYT-142)
+        run: pnpm --filter @easytree/api run cf:dry-run
 
   secret-scan:
     runs-on: ubuntu-latest
