@@ -44,17 +44,24 @@ export type {
   LocalBusinessDate,
   LocalWallTime,
   PlanningWeek,
+  PlanningWeekDateRange,
   TimeZoneResult,
   WallTimeResult,
 } from "./planning-week.js";
+// EYT-140 — `shiftPlanningWeek` und `planningWeekDateRange` rechnen ueber den
+// MONTAG der Woche. Wer stattdessen `isoWeek ± 1` schreibt, faellt an den drei
+// Jahresgrenzen der 53-Wochen-Jahre auf einen Schluessel, den der Vertrag
+// ablehnt.
 export {
   createTimeZone,
   EUROPE_BERLIN,
   isoWeekOfLocalDate,
   isSameWeek,
   localBusinessDate,
+  planningWeekDateRange,
   planningWeekKey,
   planningWeekOf,
+  shiftPlanningWeek,
   utcInstantOfLocalWallTime,
 } from "./planning-week.js";
 

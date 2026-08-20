@@ -71,6 +71,28 @@ When separately approved:
 - no payroll, invoice, VAT/gross, payment, ledger, tax, or unrelated revenue functionality is
   permitted.
 
+### MVP-Scope-Baseline: Confluence PRD v1.4 (7766017)
+
+This boundary is **narrowed, not lifted**, by Confluence **PRD v1.4** (page 7766017, dated
+28.07.2026). That page is the **product baseline for MVP scope**, and it supersedes v1.3 §10 on
+MVP scope and phasing: „Die gesamte Planungsökonomie ist nicht mehr pauschal Post-MVP."
+
+- **Now in MVP** per v1.4 §7: internal hourly/daily rates, planned and actual costs, and the
+  Excel export.
+- **Still Post-MVP**, unchanged by v1.4: machine-rental revenue, invoicing, tax/VAT, payment,
+  ledger, and payroll. The ID lists above (`FR-062`–`FR-070`, `DATA-023`–`DATA-026`,
+  `API-019`–`API-021`, `PHASE-007`, `TASK-032`–`TASK-036`) remain out of scope and are not
+  weakened by this note.
+
+Basis: the Product Owner decision of 30.07.2026 (`CONTRA-S5-001` =
+`FALSE_POSITIVE_SOURCE_SCOPE_ERROR` / `RESOLVED_NO_SCOPE_CHANGE`) and the narrow Sprint-6 release
+of 18.08.2026 authorising integration of the already-implemented EYT-109 personnel-cost snapshot
+into the planning → publish → costs journey. That release does **not** extend scope to any
+further planning economics or machine rental.
+
+`docs/prd/CURRENT_PRD_v1.3.md` remains the canonical repository authority for everything else;
+v1.4 lives in Confluence, not in this repository, which is why this note exists here.
+
 ## Required working method
 
 1. Inspect the repository and current contracts before changing code.

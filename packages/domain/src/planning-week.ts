@@ -306,7 +306,18 @@ export function isoWeekOfLocalDate(date: LocalBusinessDate): PlanningWeek {
       `isoWeekOfLocalDate: Jahr ${date.year} ist nicht darstellbar (kein Jahr null, keine negativen Jahre).`,
     );
   }
-  const utcMidnight = utcMidnightOfCalendarDay(date.year, date.month, date.day);
+  return isoWeekOfUtcMidnight(utcMidnightOfCalendarDay(date.year, date.month, date.day));
+}
+
+/**
+ * Dieselbe Donnerstagsregel, aber auf einem UTC-Mitternachtszeitpunkt statt auf
+ * einem {@link LocalBusinessDate}.
+ *
+ * Steht als eigene Funktion da, weil {@link shiftPlanningWeek} genau diese
+ * Rechnung braucht — und eine zweite Kopie davon wuerde irgendwann auseinander
+ * laufen, ohne dass ein Test es merkt: beide Kopien waeren fuer sich gruen.
+ */
+function isoWeekOfUtcMidnight(utcMidnight: number): PlanningWeek {
   // Montag = 0 … Sonntag = 6.
   const weekdayIndex = (new Date(utcMidnight).getUTCDay() + 6) % 7;
   const thursdayMs = utcMidnight + (3 - weekdayIndex) * DAY_MS;
@@ -339,4 +350,172 @@ export function planningWeekKey(week: PlanningWeek): string {
 /** Gleichheit zweier Planungswochen. */
 export function isSameWeek(a: PlanningWeek, b: PlanningWeek): boolean {
   return a.isoYear === b.isoYear && a.isoWeek === b.isoWeek;
+}
+
+// ---------------------------------------------------------------------------
+// Wochenarithmetik (EYT-140, Vorleistung fuer AC-004/REQ-002)
+//
+// Beide Funktionen rechnen ueber den MONTAG der Woche. Der naheliegende Weg —
+// `isoWeek + delta` — ist in der Jahresmitte fehlerfrei und an genau drei
+// Stellen im Jahr kaputt: 2026 hat 53 ISO-Wochen, 2025 und 2027 haben 52.
+// `2026-W53 + 1` ergibt naiv `2026-W54`, `2027-W01 - 1` ergibt `2027-W00`.
+// Beides sind Schluessel, die `IsoWeekKeySchema` ablehnt — die Planerin saehe
+// beim Blaettern ueber den Jahreswechsel einen Parameterfehler statt der Woche.
+// ---------------------------------------------------------------------------
+
+/**
+ * Darstellbare ISO-Jahre. Beide Grenzen sind bewusst DIESELBEN wie im Vertrag
+ * (`MIN_ISO_JAHR`/`MAX_ISO_JAHR` in `packages/contracts/src/planning/iso-week.ts`):
+ * unten, weil PostgreSQL kein Jahr null kennt; oben, weil der Wochenschluessel
+ * vierstellig ist. Dass beide Seiten dieselbe Spanne ziehen, misst
+ * `apps/api/test/iso-week-parity.test.ts` — importieren darf `packages/domain`
+ * den Vertrag nicht.
+ */
+const MIN_ISO_JAHR = 1;
+const MAX_ISO_JAHR = 9999;
+
+/**
+ * UTC-Mitternacht des Montags einer ISO-Woche.
+ *
+ * Ankerpunkt ist der 4. Januar: er liegt per Definition immer in Woche 1,
+ * gleichgueltig auf welchen Wochentag der 1. Januar faellt. Dieselbe
+ * Konstruktion verwendet `montagDerIsoWoche` in
+ * `packages/contracts/src/planning/iso-week.ts` — das hier ist die ZWEITE
+ * KOPIE, und zwei Kopien laufen auseinander, ohne dass eine von beiden fuer
+ * sich rot wird.
+ *
+ * Gemessen wird die Uebereinstimmung im Block "Rueckrichtung" von
+ * `apps/api/test/iso-week-parity.test.ts`. Nicht durch einen direkten Vergleich
+ * der beiden Montage — `montagDerIsoWoche` ist im Vertrag nicht exportiert —,
+ * sondern gegen die Regel, aus der der Vertrag den seinen ableitet: der Montag
+ * gehoert zur Woche des vom Vertrag geparsten Schluessels, sein VORTAG nicht
+ * mehr, die Wochenzahl je Jahr stimmt mit `isoWochenImJahr` ueberein, und der
+ * 4. Januar liegt in Woche 1. Bis 18.08.2026 stand hier dieselbe Zusage,
+ * waehrend jener Test ausschliesslich die Hinrichtung Tag -> Woche anfasste
+ * (Korrekturbefund K2) — die Zusage war unbelegt.
+ */
+function mondayOfIsoWeekMs(week: PlanningWeek): number {
+  const jan4 = utcMidnightOfCalendarDay(week.isoYear, 1, 4);
+  // Montag = 0 … Sonntag = 6.
+  const weekdayIndex = (new Date(jan4).getUTCDay() + 6) % 7;
+  const mondayOfWeek1 = jan4 - weekdayIndex * DAY_MS;
+  return mondayOfWeek1 + (week.isoWeek - 1) * 7 * DAY_MS;
+}
+
+/**
+ * Prueft, dass die Woche in ihrem ISO-Jahr wirklich existiert, und liefert
+ * UTC-Mitternacht ihres Montags.
+ *
+ * Die Rueckrechnung ist kein Zierrat: ein reiner Bereichstest `1 <= isoWeek <= 53`
+ * laesst `2025-W53` durch — ein Jahr mit 52 Wochen. Der Montag dieser
+ * nicht existenten Woche faellt in die erste Woche des Folgejahres, und genau
+ * das faengt der Vergleich.
+ *
+ * `PlanningWeek` ist ein offenes Interface; TypeScript haelt niemanden davon
+ * ab, `{ isoYear: 2025, isoWeek: 53 }` zusammenzubauen. Dieselbe Entscheidung
+ * trifft `formatIsoWeekKey` im Vertrag (EYT-88).
+ *
+ * @throws {RangeError} wenn Jahr oder Woche keine reale ISO-Woche bezeichnen.
+ */
+function assertRealIsoWeek(week: PlanningWeek, caller: string): number {
+  // Ein NaN kann hier nicht aus der Eingabe stammen, sondern nur aus einem
+  // Ueberlauf der Rechnung: ein Zeitpunkt ausserhalb des von `Date`
+  // darstellbaren Bereichs (±8,64e15 ms) ergibt ein Invalid Date, und jede
+  // Folgerechnung darauf wird NaN. Deshalb bekommt dieser Fall eine eigene
+  // Meldung — die alte sprach von einem "Jahr NaN", das der Aufrufer nie
+  // uebergeben hat, und schickte jeden Leser des Logs ans falsche Ende.
+  if (Number.isNaN(week.isoYear) || Number.isNaN(week.isoWeek)) {
+    throw new RangeError(
+      `${caller}: Ueberlauf der Wochenrechnung — das Ergebnis liegt ausserhalb des darstellbaren Zeitbereichs (Date: ±8,64e15 ms), deshalb NaN. Pruefe delta.`,
+    );
+  }
+  if (!Number.isInteger(week.isoYear) || week.isoYear < MIN_ISO_JAHR) {
+    throw new RangeError(
+      `${caller}: Jahr ${week.isoYear} ist nicht darstellbar (kein Jahr null, keine negativen Jahre).`,
+    );
+  }
+  // Obergrenze wie im Vertrag (`MAX_ISO_JAHR` in
+  // packages/contracts/src/planning/iso-week.ts): der Wochenschluessel ist
+  // vierstellig. Ohne diese Zeile lieferte `shiftPlanningWeek({9999, 52}, 1)`
+  // den Schluessel "10000-W01" — den `isValidIsoWeekKey` ablehnt. Eine
+  // Rechenfunktion, die Schluessel ERZEUGT, die der Transport verwirft, ist
+  // genau das Leck, dessen Ausschluss der Kommentar an `shiftPlanningWeek`
+  // behauptet. Gemessen, nicht angenommen: der Fall trat auf.
+  if (week.isoYear > MAX_ISO_JAHR) {
+    throw new RangeError(
+      `${caller}: Jahr ${week.isoYear} liegt oberhalb der Vertragsgrenze ${MAX_ISO_JAHR}; ein Wochenschluessel hat vier Stellen.`,
+    );
+  }
+  if (!Number.isInteger(week.isoWeek) || week.isoWeek < 1 || week.isoWeek > 53) {
+    throw new RangeError(`${caller}: Woche ${week.isoWeek} liegt ausserhalb 1–53.`);
+  }
+  const mondayMs = mondayOfIsoWeekMs(week);
+  const zurueck = isoWeekOfUtcMidnight(mondayMs);
+  if (zurueck.isoYear !== week.isoYear || zurueck.isoWeek !== week.isoWeek) {
+    throw new RangeError(
+      `${caller}: ${planningWeekKey(week)} bezeichnet keine reale ISO-Woche; der Montag dieser Woche liegt in ${planningWeekKey(zurueck)}.`,
+    );
+  }
+  return mondayMs;
+}
+
+/**
+ * Verschiebt eine Planungswoche um `delta` Wochen — vorwaerts wie rueckwaerts.
+ *
+ * Gerechnet wird ueber den Montag: `delta * 7` Tage weiter, dann dieselbe
+ * Donnerstagsregel wie {@link isoWeekOfLocalDate}. Damit traegt die Rechnung
+ * ueber jede Jahresgrenze, auch ueber die der 53-Wochen-Jahre.
+ *
+ * Das Ergebnis wird noch einmal geprueft. Eine Rechenfunktion, die ungueltige
+ * Wochen ERZEUGT, waere ein Leck in genau der Grenze, die EYT-88 zieht — und
+ * es faellt an einem Aufrufer auf, der sie nur noch formatiert.
+ *
+ * @throws {RangeError} bei nicht ganzzahligem `delta` sowie bei einer Eingangs-
+ *   oder Ergebniswoche, die in ihrem ISO-Jahr nicht existiert.
+ */
+export function shiftPlanningWeek(week: PlanningWeek, delta: number): PlanningWeek {
+  if (!Number.isInteger(delta)) {
+    throw new RangeError(`shiftPlanningWeek: delta ${delta} ist keine ganze Zahl.`);
+  }
+  const mondayMs = assertRealIsoWeek(week, "shiftPlanningWeek");
+  const verschoben = isoWeekOfUtcMidnight(mondayMs + delta * 7 * DAY_MS);
+  assertRealIsoWeek(verschoben, "shiftPlanningWeek");
+  return verschoben;
+}
+
+/** Montag und Sonntag einer Planungswoche — beide einschliessend. */
+export interface PlanningWeekDateRange {
+  readonly monday: LocalBusinessDate;
+  readonly sunday: LocalBusinessDate;
+}
+
+/**
+ * Kalendertag eines UTC-Mitternachtszeitpunkts.
+ *
+ * Ausschliesslich `getUTC*`: hier wird kein Instant in eine Zone gerechnet,
+ * sondern eine reine Kalenderrechnung wieder in ihre Bestandteile zerlegt.
+ */
+function calendarDayOfUtcMidnight(utcMidnight: number): LocalBusinessDate {
+  const tag = new Date(utcMidnight);
+  return { year: tag.getUTCFullYear(), month: tag.getUTCMonth() + 1, day: tag.getUTCDate() };
+}
+
+/**
+ * Montag und Sonntag einer Planungswoche als Kalendertage.
+ *
+ * **Zonenfrei, und das ist keine Nachlaessigkeit.** Welche sieben Kalendertage
+ * eine ISO-Woche ausmacht, folgt allein aus `isoYear`/`isoWeek` — eine Zone
+ * braucht erst die Frage „welche Woche ist heute", weil dafuer ein Instant in
+ * einen Ortstag gewandelt werden muss. Der Rueckgabewert ist deshalb
+ * ausdruecklich ein Paar {@link LocalBusinessDate} und kein Paar `Date`: ein
+ * `Date` waere ein Zeitpunkt und truege eine Zone, die es hier nicht gibt.
+ *
+ * @throws {RangeError} wenn die Woche in ihrem ISO-Jahr nicht existiert.
+ */
+export function planningWeekDateRange(week: PlanningWeek): PlanningWeekDateRange {
+  const mondayMs = assertRealIsoWeek(week, "planningWeekDateRange");
+  return {
+    monday: calendarDayOfUtcMidnight(mondayMs),
+    sunday: calendarDayOfUtcMidnight(mondayMs + 6 * DAY_MS),
+  };
 }

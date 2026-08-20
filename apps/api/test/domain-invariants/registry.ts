@@ -59,6 +59,23 @@ export interface Invariant {
   readonly positive: TestRef;
   /** `null` NUR bei `kind: "konstante"`. */
   readonly negative: TestRef | null;
+  /**
+   * Weitere Tests, die zu DIESEM Eintrag gehoeren (EYT-140, Korrekturbefund K6).
+   *
+   * `positive`/`negative` sind zwei Plaetze, und `domain-invariant-coverage`
+   * verbietet einen zweiten Eintrag zum selben Export ("vergibt jeden Eintrag
+   * genau einmal"). Eine Aussage, die MEHRERE Zusagen buendelt, hat damit Tests,
+   * die in keinem Registerslot stehen — konkret die beiden Ablehnungstests
+   * `lehnt eine im ISO-Jahr nicht existierende Woche ab …`, die die zweite
+   * Haelfte des `shiftPlanningWeek`-Satzes tragen. Ein Umbenennen bliebe
+   * unbemerkt.
+   *
+   * Diese Liste schliesst die Luecke. Ihre Titel misst
+   * `apps/api/test/domain-invariants/weitere-belege.test.ts` mit derselben
+   * Methode wie `domain-invariant-coverage` die beiden Hauptslots: der Titel
+   * muss in der genannten Datei woertlich vorkommen.
+   */
+  readonly weitereBelege?: readonly TestRef[];
 }
 
 const INTERVAL = "packages/domain/test/time-interval.test.ts";
@@ -244,7 +261,52 @@ export const INVARIANTS: readonly Invariant[] = [
     statement: "Gleichheit gilt ueber ISO-Jahr UND ISO-Woche, nicht ueber das Kalenderjahr.",
     kind: "regel",
     positive: { file: WEEK, title: "erkennt gleiche Wochen ueber die Jahresgrenze hinweg" },
-    negative: { file: WEEK, title: "ordnet ueber den Jahreswechsel korrekt zu" },
+    // Korrekturbefund K9 (19.08.2026). Hier stand „ordnet ueber den
+    // Jahreswechsel korrekt zu" — ein Test, der `weekKeyOf` aufruft und
+    // `isSameWeek` NIE anfasst. Der Coverage-Test misst nur, ob der Titel
+    // woertlich in der Datei steht, nicht ob der Test die Funktion beruehrt;
+    // der Eintrag war damit gruen und ohne Aussage. Gemessen: eine Gleichheit,
+    // die das ISO-Jahr ignoriert, ueberlebte den gesamten Testsatz.
+    negative: { file: WEEK, title: "trennt gleiche Wochennummern in verschiedenen ISO-Jahren" },
+  },
+  {
+    exportName: "shiftPlanningWeek",
+    statement:
+      "Verschoben wird ueber den MONTAG der Woche, nicht ueber isoWeek + delta: 2026 hat 53 ISO-Wochen, also ist 2026-W53 + 1 gleich 2027-W01 und 2027-W01 - 1 gleich 2026-W53. Eine Woche, die es in ihrem ISO-Jahr nicht gibt, wird abgelehnt statt fortgerechnet — in beide Richtungen, Eingang wie Ergebnis, und ebenso oberhalb der Vertragsgrenze 9999 sowie beim Ueberlauf der Zeitrechnung.",
+    kind: "regel",
+    positive: { file: WEEK, title: "traegt ueber die Jahresgrenze — die drei Randvektoren aus B3" },
+    negative: {
+      file: WEEK,
+      title: "weicht an der 53-Wochen-Grenze nachweislich von isoWeek + delta ab",
+    },
+    // Die Ablehnungsrichtung des Satzes oben. Ohne diese Liste stuenden die drei
+    // Tests in keinem Registerslot, und ein Umbenennen bliebe unbemerkt (K6).
+    weitereBelege: [
+      {
+        file: WEEK,
+        title: "lehnt eine im ISO-Jahr nicht existierende Woche ab, statt sie fortzurechnen",
+      },
+      { file: WEEK, title: "meldet einen Ueberlauf als Ueberlauf, statt still NaN zurueckzugeben" },
+      { file: WEEK, title: "haelt die obere Jahresgrenze ein, statt 10000-W01 zu erzeugen" },
+    ],
+  },
+  {
+    exportName: "planningWeekDateRange",
+    statement:
+      "Montag und Sonntag einer ISO-Woche sind Kalendertage ohne Zone und umschliessen die Woche exakt: der Vortag des Montags und der Folgetag des Sonntags liegen in anderen Wochen. Eine Woche, die es in ihrem ISO-Jahr nicht gibt, bekommt keinen Zeitraum.",
+    kind: "regel",
+    positive: { file: WEEK, title: "liefert Montag und Sonntag der Woche als Kalendertage" },
+    negative: {
+      file: WEEK,
+      title: "grenzt die Woche exakt ab — der Vortag und der Folgetag liegen in anderen Wochen",
+    },
+    weitereBelege: [
+      {
+        file: WEEK,
+        title:
+          "lehnt eine im ISO-Jahr nicht existierende Woche ab, statt einen Zeitraum zu erfinden",
+      },
+    ],
   },
 
   // -------------------------------------------------------------------------

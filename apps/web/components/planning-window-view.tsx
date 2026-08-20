@@ -34,7 +34,7 @@ import {
   type PlanningResource,
   type PlanningWindow,
 } from "@easytree/contracts";
-import { Card } from "@easytree/ui";
+import { Card, StatusBadge, type StatusTone } from "@easytree/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { usePlanningGateway } from "../lib/planning-gateway-provider";
@@ -72,6 +72,33 @@ const STAND_TEXT: Record<Stand, string> = {
   veroeffentlicht: "Veroeffentlichter Stand.",
   "entwurf-ueber-veroeffentlicht":
     "Entwurf auf Basis einer bereits veroeffentlichten Version — die Anzeige zeigt den ENTWURF.",
+};
+
+/**
+ * Kurzform des Standes als Abzeichen (EYT-140 M7, `AC-008`/`AC-018`).
+ *
+ * Der Satz in `STAND_TEXT` bleibt die Aussage; das Abzeichen traegt sie ein
+ * zweites Mal ueber Form und Zeichen. `StatusBadge` setzt je Ton eine eigene
+ * Glyphe (`●`, `◐`, `○`), sodass Entwurf und veroeffentlichter Stand auch ohne
+ * Farbwahrnehmung unterscheidbar bleiben — Basisdesign v2.0 §7 verlangt genau
+ * das, und eine reine CSS-Klasse erfuellt es nicht.
+ *
+ * `entwurf-ueber-veroeffentlicht` bekommt bewusst denselben Ton wie `entwurf`:
+ * angezeigt wird der ENTWURF, und ein veroeffentlicht-Ton daneben waere die
+ * Verwechslung, die `standKennung` gerade verhindert.
+ */
+const STAND_TON: Record<Stand, StatusTone> = {
+  "ohne-version": "neutral",
+  entwurf: "draft",
+  veroeffentlicht: "published",
+  "entwurf-ueber-veroeffentlicht": "draft",
+};
+
+const STAND_ABZEICHEN: Record<Stand, string> = {
+  "ohne-version": "Keine Version",
+  entwurf: "Entwurf",
+  veroeffentlicht: "Veroeffentlicht",
+  "entwurf-ueber-veroeffentlicht": "Entwurf",
 };
 
 function standKennung(fenster: PlanningWindow): Stand {
@@ -227,13 +254,17 @@ export function PlanningWindowView({
   }
 
   const { window: fenster } = state;
+  const stand = standKennung(fenster);
 
   return (
     <Card>
       <h2 data-testid="planungsfenster-woche">Wochenplan {fenster.weekKey}</h2>
       <p data-testid="planungsfenster-zone">Zeitzone: {fenster.timeZone}</p>
-      <p data-testid="planungsfenster-stand" data-stand={standKennung(fenster)}>
-        {STAND_TEXT[standKennung(fenster)]}
+      <p data-testid="planungsfenster-stand" data-stand={stand}>
+        <StatusBadge data-testid="planungsfenster-stand-abzeichen" tone={STAND_TON[stand]}>
+          {STAND_ABZEICHEN[stand]}
+        </StatusBadge>{" "}
+        {STAND_TEXT[stand]}
       </p>
       <p
         data-testid="planungsfenster-version"

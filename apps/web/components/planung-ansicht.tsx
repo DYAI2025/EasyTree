@@ -1,5 +1,6 @@
 "use client";
 
+import { KostenUebergang } from "./kosten-uebergang";
 import { PlanningWindowView } from "./planning-window-view";
 import { PlanungZugang } from "./planung-zugang";
 
@@ -26,12 +27,30 @@ import { PlanungZugang } from "./planung-zugang";
  * Beide Komponenten hier sind Client-Komponenten, die Kindfunktion bleibt also
  * innerhalb der Clientgrenze. Die Seite reicht nur noch `weekKey` durch — eine
  * Zeichenkette, und die ist serialisierbar.
+ *
+ * ## Warum der Kostenuebergang hier steht (EYT-140, Plan-Meilenstein `M8`)
+ *
+ * `REQ-006` verlangt den Uebergang in der PLANUNGSFLAECHE, nicht bloss in der
+ * Hauptnavigation. Er steht deshalb innerhalb des Zugangswaechters, unter dem
+ * Wochenplan — und nicht in `PlanningWindowView`: diese Ansicht zeigt den
+ * SERVERSTAND einer Woche und soll ohne Sitzungsinfrastruktur pruefbar bleiben.
+ * Ein weiterer Rechte-Prop durch sie hindurch waere Durchreichung ohne Leser.
+ * Warum die Rechtefrage nur der Waechter stellt, steht an einer Stelle: im
+ * Dateikopf von `planung-zugang.tsx`.
+ *
+ * Dass der Uebergang wirklich HIER entsteht und nicht in `AppShell`, misst
+ * `apps/web/test/kosten-uebergang.test.tsx` ueber den Anker
+ * `werkbank-planungsflaeche`. Ohne diese Messung war die Verlegung in die Shell
+ * am 19.08.2026 nachweislich unsichtbar: 21/21 Dateien, 245/245 Tests gruen.
  */
 export function PlanungAnsicht({ weekKey }: { weekKey: string }) {
   return (
     <PlanungZugang>
-      {({ darfVeroeffentlichen }) => (
-        <PlanningWindowView weekKey={weekKey} darfVeroeffentlichen={darfVeroeffentlichen} />
+      {({ darfVeroeffentlichen, darfKostenLesen }) => (
+        <>
+          <PlanningWindowView weekKey={weekKey} darfVeroeffentlichen={darfVeroeffentlichen} />
+          {darfKostenLesen ? <KostenUebergang weekKey={weekKey} /> : null}
+        </>
       )}
     </PlanungZugang>
   );

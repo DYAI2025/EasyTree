@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
+import { dayAfter, dayBefore } from "../src/local-business-date.js";
+import type { PlanningWeek } from "../src/planning-week.js";
 import {
   createTimeZone,
   EUROPE_BERLIN,
   isoWeekOfLocalDate,
   isSameWeek,
   localBusinessDate,
+  planningWeekDateRange,
   planningWeekKey,
   planningWeekOf,
+  shiftPlanningWeek,
 } from "../src/planning-week.js";
 import { TimeInterval } from "../src/time-interval.js";
 
@@ -85,6 +89,22 @@ describe("isoWeekOfLocalDate — belegte Grenzfaelle", () => {
       ),
     ).toBe(true);
   });
+
+  it("trennt gleiche Wochennummern in verschiedenen ISO-Jahren", () => {
+    // Der unterscheidende Gegenfall zum Test darueber, und der Negativbeleg des
+    // Registereintrags zu `isSameWeek` (Korrekturbefund K9). Bis 19.08.2026 wies
+    // das Register hier auf „ordnet ueber den Jahreswechsel korrekt zu" — ein
+    // Test, der `weekKeyOf` aufruft und `isSameWeek` gar nicht anfasst. Gemessen:
+    // eine Gleichheit, die NUR `isoWeek` vergleicht, ueberlebte den gesamten
+    // Testsatz von `apps/web/test/wochenmodell.test.ts` (43/43 gruen).
+    //
+    // Die drei Zeilen pruefen die Konjunktion von beiden Seiten: nur so faellt
+    // sowohl ein weggelassenes `isoYear` als auch ein weggelassenes `isoWeek`
+    // auf, und ein konstantes `false` ebenfalls.
+    expect(isSameWeek({ isoYear: 2025, isoWeek: 32 }, { isoYear: 2026, isoWeek: 32 })).toBe(false);
+    expect(isSameWeek({ isoYear: 2026, isoWeek: 32 }, { isoYear: 2026, isoWeek: 33 })).toBe(false);
+    expect(isSameWeek({ isoYear: 2026, isoWeek: 32 }, { isoYear: 2026, isoWeek: 32 })).toBe(true);
+  });
 });
 
 describe("planningWeekOf — der Zeitzonenfehler aus FIND-003", () => {
@@ -118,5 +138,214 @@ describe("planningWeekOf — der Zeitzonenfehler aus FIND-003", () => {
     // 2026-03-29 ist der Umstellungssonntag und der letzte Tag von 2026-W13.
     expect(weekKeyOf("2026-03-29T00:00:00Z", "2026-03-29T02:00:00Z")).toBe("2026-W13");
     expect(weekKeyOf("2026-03-30T06:00:00Z", "2026-03-30T14:00:00Z")).toBe("2026-W14");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EYT-140 M2 — Wochenarithmetik. Siehe Befund B3 des Plans
+// docs/plans/2026-08-18-eyt-140-planungswerkbank.md: 2026 hat 53 ISO-Wochen,
+// 2025 und 2027 haben 52. Daran zerbricht jede `isoWeek ± 1`-Rechnung.
+// ---------------------------------------------------------------------------
+
+/** Die naheliegende FALSCHE Implementierung — hier als Vergleichsmassstab. */
+function naiveVerschiebung(week: PlanningWeek, delta: number): PlanningWeek {
+  return { isoYear: week.isoYear, isoWeek: week.isoWeek + delta };
+}
+
+describe("shiftPlanningWeek — ueber den Montag gerechnet, nicht ueber isoWeek + delta", () => {
+  it("traegt ueber die Jahresgrenze — die drei Randvektoren aus B3", () => {
+    expect(planningWeekKey(shiftPlanningWeek({ isoYear: 2027, isoWeek: 1 }, -1))).toBe("2026-W53");
+    expect(planningWeekKey(shiftPlanningWeek({ isoYear: 2026, isoWeek: 53 }, 1))).toBe("2027-W01");
+    expect(planningWeekKey(shiftPlanningWeek({ isoYear: 2025, isoWeek: 52 }, 1))).toBe("2026-W01");
+  });
+
+  it("weicht an der 53-Wochen-Grenze nachweislich von isoWeek + delta ab", () => {
+    // Der unterscheidende Gegenfall: waere die Regel "ueber den Montag" nicht
+    // in Kraft, lieferte die Funktion genau diese drei Werte — und zwei davon
+    // bezeichnen keine reale Woche.
+    const jahresende2026 = { isoYear: 2026, isoWeek: 53 } as const;
+    const jahresanfang2027 = { isoYear: 2027, isoWeek: 1 } as const;
+    const jahresende2025 = { isoYear: 2025, isoWeek: 52 } as const;
+
+    // DOKUMENTATION, keine Zusicherung (Korrekturbefund K5). Hier standen drei Zeilen
+    // der Form `expect(planningWeekKey(naiveVerschiebung(…))).toBe("2026-W54")`.
+    // Sie waren wahr, gleichgueltig wie `shiftPlanningWeek` implementiert ist —
+    // gemessen wurde die Testfunktion `naiveVerschiebung`, nicht die Produktion.
+    // Was sie liefert, steht deshalb als Text da, damit niemand es fuer einen
+    // Beleg haelt:
+    //   naiveVerschiebung(2026-W53, +1) -> 2026-W54  (existiert nicht)
+    //   naiveVerschiebung(2027-W01, -1) -> 2027-W00  (existiert nicht)
+    //   naiveVerschiebung(2025-W52, +1) -> 2025-W53  (existiert nicht; 2025 hat 52)
+    // Tragend sind die drei Vergleiche darunter: sie messen die Produktion
+    // GEGEN diesen Massstab.
+    expect(shiftPlanningWeek(jahresende2026, 1)).not.toEqual(naiveVerschiebung(jahresende2026, 1));
+    expect(shiftPlanningWeek(jahresanfang2027, -1)).not.toEqual(
+      naiveVerschiebung(jahresanfang2027, -1),
+    );
+    expect(shiftPlanningWeek(jahresende2025, 1)).not.toEqual(naiveVerschiebung(jahresende2025, 1));
+
+    // 2026 hat 53 Wochen: 52 Schritte ab 2026-W01 landen deshalb NICHT in 2027.
+    // Ein Zaehler, der stillschweigend 52 Wochen pro Jahr annimmt, waere hier
+    // um genau eine Woche daneben.
+    expect(planningWeekKey(shiftPlanningWeek({ isoYear: 2026, isoWeek: 1 }, 52))).toBe("2026-W53");
+    expect(planningWeekKey(shiftPlanningWeek({ isoYear: 2026, isoWeek: 1 }, 53))).toBe("2027-W01");
+  });
+
+  it("ist bei delta 0 die Identitaet und in beiden Richtungen umkehrbar", () => {
+    const woche = { isoYear: 2026, isoWeek: 53 } as const;
+    expect(shiftPlanningWeek(woche, 0)).toEqual(woche);
+    expect(shiftPlanningWeek(shiftPlanningWeek(woche, 7), -7)).toEqual(woche);
+    expect(shiftPlanningWeek(shiftPlanningWeek(woche, -104), 104)).toEqual(woche);
+  });
+
+  it("lehnt eine im ISO-Jahr nicht existierende Woche ab, statt sie fortzurechnen", () => {
+    // 2025 hat 52 Wochen (B3) — "2025-W53" gibt es nicht.
+    expect(() => shiftPlanningWeek({ isoYear: 2025, isoWeek: 53 }, 1)).toThrow(RangeError);
+    expect(() => shiftPlanningWeek({ isoYear: 2027, isoWeek: 53 }, -1)).toThrow(RangeError);
+    expect(() => shiftPlanningWeek({ isoYear: 2026, isoWeek: 0 }, 1)).toThrow(RangeError);
+    expect(() => shiftPlanningWeek({ isoYear: 2026, isoWeek: 54 }, 1)).toThrow(RangeError);
+    // Dieselbe Jahresgrenze wie isoWeekOfLocalDate: kein Jahr null.
+    expect(() => shiftPlanningWeek({ isoYear: 0, isoWeek: 1 }, 1)).toThrow(RangeError);
+    expect(() => shiftPlanningWeek({ isoYear: 2026, isoWeek: 1.5 }, 1)).toThrow(RangeError);
+    // Und delta selbst muss eine ganze Zahl sein — sonst entstuende ein
+    // Zeitpunkt mitten in der Woche, aus dem stillschweigend eine Woche wuerde.
+    expect(() => shiftPlanningWeek({ isoYear: 2026, isoWeek: 1 }, 0.5)).toThrow(RangeError);
+    expect(() => shiftPlanningWeek({ isoYear: 2026, isoWeek: 1 }, Number.NaN)).toThrow(RangeError);
+  });
+
+  it("meldet einen Ueberlauf als Ueberlauf, statt still NaN zurueckzugeben", () => {
+    // Das ist der Test, der die ERGEBNISPRUEFUNG traegt (Korrekturbefund K1). Vorher war
+    // `assertRealIsoWeek(verschoben, …)` unbelegt: die Zeile ersatzlos zu
+    // entfernen liess alle Tests gruen. Ohne sie liefert `delta = 1e9` still
+    // `{ isoYear: NaN, isoWeek: NaN }` — 1e9 Wochen sind rund 6,0e17 ms und
+    // damit weit ausserhalb des von `Date` darstellbaren Bereichs (±8,64e15 ms).
+    // `planningWeekKey` formatierte daraus klaglos "0NaN-WNaN".
+    expect(() => shiftPlanningWeek({ isoYear: 2026, isoWeek: 1 }, 1_000_000_000)).toThrow(
+      RangeError,
+    );
+    expect(() => shiftPlanningWeek({ isoYear: 2026, isoWeek: 1 }, -1_000_000_000)).toThrow(
+      RangeError,
+    );
+    // Und die Meldung muss den Ueberlauf BENENNEN (Korrekturbefund K7). Vorher stand
+    // dort "Jahr NaN ist nicht darstellbar (kein Jahr null, keine negativen
+    // Jahre)" — ein "Jahr", das der Aufrufer nie uebergeben hat; wer das im Log
+    // liest, sucht am falschen Ende.
+    expect(() => shiftPlanningWeek({ isoYear: 2026, isoWeek: 1 }, 1_000_000_000)).toThrow(
+      /Ueberlauf/,
+    );
+  });
+
+  it("haelt die obere Jahresgrenze ein, statt 10000-W01 zu erzeugen", () => {
+    // Korrekturbefund K1: `assertRealIsoWeek` prueft `isoYear >= 1`, der Vertrag endet
+    // bei MAX_ISO_JAHR = 9999 (packages/contracts/src/planning/iso-week.ts) —
+    // der Schluessel ist vierstellig. Gemessen: 9999 hat 52 ISO-Wochen, und
+    // "9999-W52 + 1" lieferte vorher "10000-W01", einen Schluessel, den
+    // `isValidIsoWeekKey` ablehnt. Die Kopplung an die Vertragsfunktion selbst
+    // misst apps/api/test/iso-week-parity.test.ts — `packages/domain` darf
+    // `@easytree/contracts` nicht importieren.
+    expect(planningWeekKey(shiftPlanningWeek({ isoYear: 9999, isoWeek: 51 }, 1))).toBe("9999-W52");
+    expect(() => shiftPlanningWeek({ isoYear: 9999, isoWeek: 52 }, 1)).toThrow(RangeError);
+    expect(() => shiftPlanningWeek({ isoYear: 10000, isoWeek: 1 }, -1)).toThrow(RangeError);
+    expect(() => planningWeekDateRange({ isoYear: 10000, isoWeek: 1 })).toThrow(RangeError);
+  });
+});
+
+describe("planningWeekDateRange — Kalendertage, keine Instants (E4)", () => {
+  it("liefert Montag und Sonntag der Woche als Kalendertage", () => {
+    expect(planningWeekDateRange({ isoYear: 2026, isoWeek: 32 })).toEqual({
+      monday: { year: 2026, month: 8, day: 3 },
+      sunday: { year: 2026, month: 8, day: 9 },
+    });
+    // Die 53. Woche 2026 laeuft ueber den Jahreswechsel hinaus.
+    expect(planningWeekDateRange({ isoYear: 2026, isoWeek: 53 })).toEqual({
+      monday: { year: 2026, month: 12, day: 28 },
+      sunday: { year: 2027, month: 1, day: 3 },
+    });
+    // Woche 1 eines Jahres kann im Vorjahr beginnen.
+    expect(planningWeekDateRange({ isoYear: 2020, isoWeek: 1 }).monday).toEqual({
+      year: 2019,
+      month: 12,
+      day: 30,
+    });
+  });
+
+  it("grenzt die Woche exakt ab — der Vortag und der Folgetag liegen in anderen Wochen", () => {
+    // Der unterscheidende Gegenfall: waere der Zeitraum um einen Tag verschoben
+    // oder um einen Tag zu breit, traegt einer dieser vier Vergleiche es zutage.
+    // Orakel ist ausschliesslich die vorbestehende `isoWeekOfLocalDate` samt
+    // `dayBefore`/`dayAfter` — keine der beiden neuen Funktionen.
+    for (const woche of [
+      { isoYear: 2026, isoWeek: 32 },
+      { isoYear: 2026, isoWeek: 53 },
+      { isoYear: 2020, isoWeek: 1 },
+    ] as const) {
+      const { monday, sunday } = planningWeekDateRange(woche);
+      expect(isoWeekOfLocalDate(monday), planningWeekKey(woche)).toEqual(woche);
+      expect(isoWeekOfLocalDate(sunday), planningWeekKey(woche)).toEqual(woche);
+      expect(isSameWeek(isoWeekOfLocalDate(dayBefore(monday)), woche)).toBe(false);
+      expect(isSameWeek(isoWeekOfLocalDate(dayAfter(sunday)), woche)).toBe(false);
+    }
+  });
+
+  it("lehnt eine im ISO-Jahr nicht existierende Woche ab, statt einen Zeitraum zu erfinden", () => {
+    expect(() => planningWeekDateRange({ isoYear: 2025, isoWeek: 53 })).toThrow(RangeError);
+    expect(() => planningWeekDateRange({ isoYear: 2026, isoWeek: 54 })).toThrow(RangeError);
+    expect(() => planningWeekDateRange({ isoYear: 2026, isoWeek: 0 })).toThrow(RangeError);
+    expect(() => planningWeekDateRange({ isoYear: 0, isoWeek: 1 })).toThrow(RangeError);
+  });
+});
+
+describe("Sweep — 520 Verschiebungen ab 2020-W01", () => {
+  it("erzeugt 520 reale Wochen, jede genau sieben Kalendertage nach der vorigen", () => {
+    // NUR die Form, ausdruecklich nicht die Realitaet der Woche (Korrekturbefund K3).
+    // Genau dieses Muster nennt der Kopf von
+    // `packages/contracts/src/planning/iso-week.ts` unzureichend: es laesst
+    // `W53` in JEDEM Jahr durch, auch in den 52-Wochen-Jahren. Die ECHTE
+    // Vertragspruefung (`isValidIsoWeekKey`) laeuft in
+    // `apps/api/test/iso-week-parity.test.ts` ueber denselben Sweep —
+    // `packages/domain` darf `@easytree/contracts` nicht importieren, deshalb
+    // ist sie hier nicht schreibbar. Was die Woche hier real macht, ist die
+    // Rueckrechnung in `assertRealIsoWeek` plus die Zusicherungen unten.
+    const WOHLGEFORMT = /^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$/;
+    const start = { isoYear: 2020, isoWeek: 1 } as const;
+    let vorigerMontag: { year: number; month: number; day: number } | null = null;
+    let geprueft = 0;
+
+    for (let delta = 0; delta < 520; delta += 1) {
+      const woche = shiftPlanningWeek(start, delta);
+      const schluessel = planningWeekKey(woche);
+      expect(WOHLGEFORMT.test(schluessel), schluessel).toBe(true);
+
+      const { monday } = planningWeekDateRange(woche);
+      // Unabhaengiges Orakel: `isoWeekOfLocalDate` ist vorbestehend und wird in
+      // apps/api/test/iso-week-parity.test.ts gegen packages/contracts gemessen.
+      expect(isoWeekOfLocalDate(monday), schluessel).toEqual(woche);
+      // Korrekturbefund K4: Zugehoerigkeit allein sagt NICHT "es ist der Montag" — sie
+      // gilt fuer jeden der sieben Tage. Und "sieben `dayAfter`-Schritte" gilt
+      // fuer jede gleichfoermig verschobene Folge. Gemessen: der Montagsanker um
+      // genau einen Tag verschoben liess 28 von 30 Tests gruen, alle 520
+      // Sweep-Schritte eingeschlossen. Erst diese Zeile pinnt den ERSTEN Tag:
+      // gehoerte der Vortag noch zur selben Woche, waere `monday` nicht der
+      // Wochenanfang.
+      expect(isSameWeek(isoWeekOfLocalDate(dayBefore(monday)), woche), schluessel).toBe(false);
+
+      if (vorigerMontag !== null) {
+        // Sieben Schritte reiner Kalenderarithmetik aus local-business-date.ts —
+        // ohne jede Wochenrechnung.
+        let tag = vorigerMontag;
+        for (let i = 0; i < 7; i += 1) tag = dayAfter(tag);
+        expect(tag, schluessel).toEqual(monday);
+      }
+      vorigerMontag = monday;
+      geprueft += 1;
+    }
+
+    // Nicht-Leerlauf-Bremse: eine leere Schleife waere sonst still gruen.
+    expect(geprueft).toBe(520);
+    // Der Sweep laeuft von 2020-W01 bis 2029-W50 und ueberquert damit BEIDE
+    // 53-Wochen-Jahre des Fensters (2020 und 2026) — er misst also nicht nur
+    // Jahresmitten. Der Endwert ist unabhaengig nachgerechnet, nicht geraten:
+    // Montag von 2020-W01 ist der 30.12.2019, plus 519 * 7 Tage = 10.12.2029.
+    expect(planningWeekKey(shiftPlanningWeek(start, 519))).toBe("2029-W50");
   });
 });

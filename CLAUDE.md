@@ -33,6 +33,17 @@ one canonical product repository; "Arborga" is its **former name**, not a second
 namespace). Work is tracked as Jira `EYT-*` tickets; commits and code comments reference
 those IDs.
 
+**Für den MVP-Scope gilt zusätzlich Confluence PRD v1.4 (Seite 7766017, Stand 28.07.2026).**
+Diese Seite ist die **fachliche Produktbaseline** und ersetzt v1.3 in §10 hinsichtlich MVP-Scope
+und Phasen: „Die gesamte Planungsökonomie ist nicht mehr pauschal Post-MVP." Konkret führt v1.4
+§7 **interne Kostensätze, Plan-/Ist-Kosten und den Excel-Export unter „Im MVP"**. Weiterhin
+**Post-MVP** bleiben Maschinenverleiherlöse, Rechnung/Steuer/Zahlung/Buchung und Payroll — die
+Grenze wird also enger gezogen, nicht aufgehoben. Grundlage: PO-Beschluss vom 30.07.2026
+(`CONTRA-S5-001` = `FALSE_POSITIVE_SOURCE_SCOPE_ERROR` / `RESOLVED_NO_SCOPE_CHANGE`) und die enge
+Sprint-6-Freigabe vom 18.08.2026 für den bereits implementierten EYT-109-Personalkosten-Snapshot.
+v1.3 bleibt für alles Übrige die kanonische Repository-Autorität; v1.4 liegt in Confluence und
+nicht in diesem Repository, weshalb diese Notiz existiert.
+
 [`docs/handoff/AGENT_HANDOFF_v1.3.md`](docs/handoff/AGENT_HANDOFF_v1.3.md) holds the agent
 guardrails: required working method, prohibited actions, evidence rules, stop conditions and the
 human review checkpoints. **Read it before changing code** — the rules below are a summary of the

@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "feature": "easytree-sprint-6-core-journey",
+  "scope": {
+    "product": [
+      "apps/web/app/planung/**",
+      "apps/web/app/globals.css",
+      "apps/web/components/**",
+      "apps/web/lib/**",
+      "apps/web/test/**",
+      "apps/web/e2e/**",
+      "packages/domain/src/**",
+      "packages/domain/test/**",
+      "apps/api/test/domain-invariants/**",
+      "apps/api/test/iso-week-parity.test.ts",
+      "packages/ui/src/**",
+      "packages/ui/test/**"
+    ],
+    "governance": [
+      "docs/canvas/**",
+      "docs/vision/**",
+      "docs/prd/**",
+      "docs/plans/**",
+      "docs/context/**",
+      "docs/scope/**",
+      "docs/reality/**",
+      "docs/traceability.md",
+      "CLAUDE.md",
+      "docs/handoff/AGENT_HANDOFF_v1.3.md"
+    ]
+  },
+  "artifacts": {
+    "canvas": "docs/canvas/easytree-sprint-6-core-journey.canvas.md",
+    "plan": "docs/plans/2026-08-18-eyt-140-planungswerkbank.md"
+  },
+  "provenance": [
+    {
+      "revision": 1,
+      "origin": "Plumbline-Intake easytree-sprint-6; PO-Bestaetigung + GO 18.08.2026; Dateiliste aus dem plumbline-touches-Block des EYT-140-Plans",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-18T18:05:23+0200",
+      "rationale": "Slice 1 EYT-140: Planungswerkbank und Wochennavigation. Wochenarithmetik in packages/domain, weil apps/web bereits an @easytree/domain haengt; ein neuer Wert-Export zieht apps/api/test/domain-invariants/registry.ts nach. Infrastruktur-, API- und supabase-Pfade fuer Slice 0/3 bewusst NICHT enthalten.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "packages/ui/src/**",
+          "packages/ui/test/**"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/traceability.md"
+        ]
+      },
+      "scope_digest": "sha256:8f034755fbf1b91473ee93e8c0109da86f64d5796d7cefd8ad34b337515fb970"
+    },
+    {
+      "revision": 2,
+      "origin": "PO-Entscheidung 18.08.2026 zu Spec-Audit-BLOCKER-5: \"Ja, im Sprint-6-Branch angleichen\"",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-18T22:03:15+0200",
+      "rationale": "Revision 2 ergaenzt CLAUDE.md und docs/handoff/AGENT_HANDOFF_v1.3.md als Governance-Pfade. Grund: die Doku-Drift ist CI-verankert (handoff-guardrails.test.ts:54/118 fixiert PRD v1.3 als Produktautoritaet im Pflichtjob unit-tests); der PO hat die Angleichung im Sprint-6-Branch ausdruecklich freigegeben. Beide Dateien wurden in 1cecf0c rein additiv geaendert (-0/+10 bzw. -0/+17), die vom Test geprueften Ueberschriften und ID-Listen sind unangetastet.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "packages/ui/src/**",
+          "packages/ui/test/**"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md"
+        ]
+      },
+      "scope_digest": "sha256:404102276869affcdc71928e924bd128541aa6451fb508f2299ff2f9f6e5d60b"
+    },
+    {
+      "revision": 3,
+      "origin": "PO-Entscheidung 18.08.2026: Scope erweitern, Paritaetstest ergaenzen",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-18T23:18:06+0200",
+      "rationale": "Revision 3 nimmt apps/api/test/iso-week-parity.test.ts auf. Grund: die Test-Vorgabe des freigegebenen M2-Abschnitts verlangt die Kopplung an isValidIsoWeekKey; packages/domain darf @easytree/contracts nicht importieren, apps/api ist die einzige Stelle, die beide Pakete sieht. Damit werden Reviewbefund N1 (die zweite Kopie von montagDerIsoWoche ist ungewaechtert) und N4 (Sweep prueft mit genau der Regex, die EYT-88 verworfen hat) gemeinsam geschlossen.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md"
+        ]
+      },
+      "scope_digest": "sha256:50a023ece02a51b9c035f7271ad8fc2b901b60bb461874e9126d937585362468"
+    },
+    {
+      "revision": 4,
+      "origin": "PO-Entscheidung 19.08.2026: Reality-Ledger fuer Sprint 6 einfuehren",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-19T00:06:31+0200",
+      "rationale": "Revision 4 nimmt docs/reality/** auf. Der Watcher meldete plumbline-reality-check mit Exit 2: die Evidenzledger-Datei fehlte, docs/reality/ existierte im Repository ueberhaupt nicht \u2014 auch nicht fuer Sprint 4 und Sprint 5. Der PO hat entschieden, den Ledger fuer Sprint 6 einzufuehren; das Gate ist damit erstmals passierbar und meldet jetzt den tatsaechlichen Stand (unit-fake) statt Abwesenheit.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/reality/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md"
+        ]
+      },
+      "scope_digest": "sha256:e1b3563f1b529b82e510e97724f538b718e9ef164e02235e08d1c2f3c8579c5c"
+    }
+  ]
+}

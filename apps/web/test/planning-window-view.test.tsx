@@ -319,4 +319,134 @@ describe("PlanningWindowView", () => {
     expect(leseversuch).toBe(2);
     expect(screen.queryByTestId("planungsfenster-laedt")).toBeNull();
   });
+
+  /**
+   * EYT-140 M7 — `AC-007` (`REQ-004`).
+   *
+   * Der Rundlauf allein bewiese nichts: ein optimistisch eingefuegter
+   * Clientzustand saehe genauso aus. Deshalb tragen die drei Quellen hier
+   * DREI verschiedene Ids —
+   *
+   * - `GESENDETE_ID` schickt der Client nie mit (er sendet nur Person,
+   *   Baustelle und Intervall), steht aber als Kontrollwert im Baum,
+   * - `SCHREIBANTWORT_ID` liefert `createAssignment` zurueck,
+   * - `SERVERSTAND_ID` liefert erst der ZWEITE `getPlanningWindow`.
+   *
+   * Im Markup darf nur `SERVERSTAND_ID` stehen. Stuende dort
+   * `SCHREIBANTWORT_ID`, zeigte die Ansicht die Schreibantwort statt des neu
+   * gelesenen Serverstands — und ein Schreibvorgang, dessen Antwort unterwegs
+   * verloren ging, saehe aus wie ein gelungener.
+   */
+  it("zeigt nach dem Speichern den neu gelesenen Serverstand, nicht die Schreibantwort", async () => {
+    const SCHREIBANTWORT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const SERVERSTAND_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const mitarbeiterId = PLANBARE_WOCHE.resources.employees[0]?.id ?? "";
+    const baustellenId = PLANBARE_WOCHE.resources.worksites[0]?.id ?? "";
+    const intervall = {
+      startUtc: "2026-08-03T06:00:00.000Z",
+      endUtc: "2026-08-03T14:00:00.000Z",
+    };
+
+    let leseversuch = 0;
+    const gateway: PlanningGateway = {
+      getPlanningWindow: () => {
+        leseversuch += 1;
+        return Promise.resolve(
+          leseversuch === 1
+            ? { ok: true, value: PLANBARE_WOCHE }
+            : {
+                ok: true,
+                value: {
+                  ...PLANBARE_WOCHE,
+                  assignments: [
+                    {
+                      id: SERVERSTAND_ID,
+                      employeeId: mitarbeiterId,
+                      worksiteId: baustellenId,
+                      interval: intervall,
+                    },
+                  ],
+                },
+              },
+        );
+      },
+      validateDraft: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+      createAssignment: () =>
+        Promise.resolve({
+          ok: true,
+          value: {
+            id: SCHREIBANTWORT_ID,
+            employeeId: mitarbeiterId,
+            worksiteId: baustellenId,
+            interval: intervall,
+          },
+        }),
+      publishPlan: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+    };
+
+    render(
+      <PlanningGatewayProvider gateway={gateway}>
+        <PlanningWindowView weekKey="2026-W32" />
+      </PlanningGatewayProvider>,
+    );
+    await screen.findByTestId("einsatzformular");
+
+    // Vor dem Speichern: genau EIN Lesevorgang, und noch keine Zuweisung.
+    expect(leseversuch).toBe(1);
+    expect(screen.getByTestId("planungsfenster-leer")).toBeTruthy();
+
+    await userEvent.selectOptions(screen.getByTestId("feld-employee"), mitarbeiterId);
+    await userEvent.selectOptions(screen.getByTestId("feld-worksite"), baustellenId);
+    await userEvent.type(screen.getByTestId("feld-datum"), "2026-08-03");
+    await userEvent.type(screen.getByTestId("feld-beginn"), "08:00");
+    await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
+    await userEvent.click(screen.getByTestId("einsatz-speichern"));
+
+    const liste = await screen.findByTestId("planungsfenster-liste");
+
+    // Nach dem Speichern: genau ZWEI Lesevorgaenge.
+    expect(leseversuch).toBe(2);
+
+    const zeilen = liste.querySelectorAll("li[data-assignment-id]");
+    expect(zeilen).toHaveLength(1);
+    expect(zeilen[0]?.getAttribute("data-assignment-id")).toBe(SERVERSTAND_ID);
+
+    // Und die Schreibantwort taucht nirgends im ausgelieferten Markup auf.
+    expect(document.body.innerHTML).not.toContain(SCHREIBANTWORT_ID);
+  });
+
+  /**
+   * EYT-140 M7 — `AC-018`: der Unterschied Entwurf/veroeffentlicht traegt
+   * zusaetzlich ueber Form und Zeichen, nicht nur ueber Farbe.
+   *
+   * Geprueft wird deshalb die Glyphe im Markup, nicht eine CSS-Farbe: eine
+   * Klasse allein waere genau die reine Farbcodierung, die das Kriterium
+   * ausschliesst.
+   */
+  it("unterscheidet Entwurf und veroeffentlicht auch ohne Farbe", async () => {
+    const zeichen = async (fenster: PlanningWindow): Promise<string> => {
+      cleanup();
+      renderWith({ ok: true, value: fenster });
+      const abzeichen = await screen.findByTestId("planungsfenster-stand-abzeichen");
+      const marke = abzeichen.querySelector('[aria-hidden="true"]');
+      expect(marke?.textContent ?? "").not.toBe("");
+      return `${marke?.textContent ?? ""}|${abzeichen.textContent ?? ""}`;
+    };
+
+    const entwurf = await zeichen({
+      ...LEERE_WOCHE,
+      sourceVersion: { id: "55555555-5555-4555-8555-555555555555", state: "draft" },
+    });
+    const veroeffentlicht = await zeichen({
+      ...LEERE_WOCHE,
+      sourceVersion: { id: "44444444-4444-4444-8444-444444444444", state: "published" },
+      publishedVersionId: "44444444-4444-4444-8444-444444444444",
+    });
+
+    expect(entwurf).not.toBe(veroeffentlicht);
+  });
 });
