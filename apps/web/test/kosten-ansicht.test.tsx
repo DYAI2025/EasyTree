@@ -641,4 +641,74 @@ describe("Kostenansicht — Baustellenauswahl (EYT-146)", () => {
     await screen.findByTestId("kosten-snapshot");
     expect(aufrufe.erzeugt).toEqual([{ publishedPlanVersionId: VERSION_A, worksiteId: null }]);
   });
+
+  /**
+   * EYT-137: „Fehlender oder mehrdeutiger Stundensatz wird handlungsorientiert
+   * und fail-closed gezeigt; NIEMALS als `0,00 €` oder scheinbar erfolgreicher
+   * Kostenstand."
+   *
+   * ## Warum diese beiden Faelle hier fehlten
+   *
+   * Gemessen am 20.08.2026: `RATE_MISSING` und `RATE_AMBIGUOUS` sind in SECHS
+   * API-Testdateien belegt — und im Web in keiner einzigen. Die API weist also
+   * nachweislich ab; dass die OBERFLAECHE daraus keinen plausiblen Nullbetrag
+   * macht, war die ungepruefte Haelfte. Genau sie benennt das Kriterium.
+   *
+   * ## Was hier wirklich zugesichert wird
+   *
+   * Nicht "es erscheint eine Fehlermeldung" — das waere schwach. Zugesichert
+   * ist die AUSGEBLIEBENE Anzeige: kein Snapshot, keine Gesamtsumme, keine
+   * Position, und der String `0,00` kommt im ausgelieferten Markup nirgends
+   * vor. Der Betrag ist der gefaehrliche Teil: eine Kostenansicht, die bei
+   * fehlendem Satz `0,00 €` zeigt, sieht aus wie ein Ergebnis und wird als
+   * eines gelesen.
+   *
+   * Zusaetzlich muss der SERVERtext ankommen. Der Client kann die drei
+   * 409-Faelle nicht auseinanderhalten (fehlender Satz, mehrdeutiger Satz,
+   * unveroeffentlichter Plan); haette er eine eigene Texttabelle, waere sie
+   * eine zweite Wahrheit und bei der naechsten Serveraenderung falsch.
+   */
+  const SATZ_FAELLE = [
+    {
+      name: "A25 zeigt einen FEHLENDEN Stundensatz handlungsorientiert statt als 0,00 €",
+      urn: "urn:easytree:problem:rate-missing",
+      detail:
+        "Für mindestens eine Person fehlt in dieser Woche ein gültiger Stundensatz. Bitte den Satz hinterlegen und den Snapshot erneut erzeugen.",
+    },
+    {
+      name: "A26 zeigt einen MEHRDEUTIGEN Stundensatz handlungsorientiert statt als 0,00 €",
+      urn: "urn:easytree:problem:rate-ambiguous",
+      detail:
+        "Für mindestens eine Person gelten in dieser Woche mehrere Stundensätze gleichzeitig. Bitte die Gültigkeiten entzerren.",
+    },
+  ] as const;
+
+  for (const fall of SATZ_FAELLE) {
+    it(fall.name, async () => {
+      zeige({
+        erzeugen: {
+          ok: false,
+          failure: "REJECTED" as GatewayFailure,
+          problem: problem(fall.urn, fall.detail),
+        },
+      });
+      await ladeVersionen();
+      await waehleVersion(VERSION_A);
+      await userEvent.click(screen.getByRole("button", { name: "Snapshot erzeugen" }));
+
+      // 1 — der Text des SERVERS kommt an, nicht ein clientseitiger Ersatz.
+      const fehler = await screen.findByTestId("kosten-snapshot-fehler");
+      expect(fehler.textContent).toContain(fall.detail);
+
+      // 2 — und es entsteht KEIN Kostenstand. Das ist die eigentliche Zusage.
+      expect(screen.queryByTestId("kosten-snapshot")).toBeNull();
+      expect(screen.queryByTestId("kosten-gesamtsumme")).toBeNull();
+      expect(screen.queryByTestId("kosten-position")).toBeNull();
+
+      // 3 — kein Nullbetrag irgendwo im ausgelieferten Markup. Geprueft wird
+      // das MARKUP, nicht die Sichtbarkeit: ein per CSS verborgener Betrag
+      // waere ausgeliefert und damit trotzdem eine Aussage.
+      expect(document.body.innerHTML).not.toContain("0,00");
+    });
+  }
 });
