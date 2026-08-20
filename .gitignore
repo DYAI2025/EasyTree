@@ -33,3 +33,10 @@ _sprint2-transfer/
 
 # PRIL-Laufzustand (Plumbline). Kein Repoinhalt.
 .plumbline/
+
+# Cloudflare-Buildartefakte (EYT-142). Ohne diese Eintraege nimmt ein
+# `git add -A` den kompletten OpenNext-Output mit — dasselbe Muster wie bei
+# penpot/ weiter oben, nur groesser.
+.open-next/
+.wrangler/
+.wrangler-dry/

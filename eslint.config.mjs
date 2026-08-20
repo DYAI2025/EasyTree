@@ -14,8 +14,31 @@ export default tseslint.config(
       "**/.next/**",
       "**/.turbo/**",
       "**/coverage/**",
+      // Cloudflare-Buildartefakte (EYT-142). `.open-next/` enthaelt den
+      // gebuendelten Next-Server; ihn zu linten meldete 21145 Fehler aus
+      // fremdem, generiertem Code und machte `pnpm lint` unbrauchbar.
+      "**/.open-next/**",
+      "**/.wrangler/**",
+      "**/.wrangler-dry/**",
     ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // Cloudflare-Worker-Entrypoints (EYT-142). Sie laufen in der
+    // Workers-Laufzeit, nicht in Node: `Response`, `Request` und `fetch` sind
+    // dort globale Standardobjekte. Ohne diese Deklaration meldet `no-undef`
+    // sie als undefiniert — ein Fehler ueber die falsche Laufzeit, nicht ueber
+    // den Code.
+    files: ["**/cloudflare/*.mjs"],
+    languageOptions: {
+      globals: {
+        Response: "readonly",
+        Request: "readonly",
+        fetch: "readonly",
+        URL: "readonly",
+        console: "readonly",
+      },
+    },
+  },
 );
