@@ -35,6 +35,13 @@ import { psqlMitMarker } from "./global-setup";
  * unter den WCAG-Tags: `landmark-no-duplicate-main` haette den verschachtelten
  * `<main>` sonst auch im Browser durchgelassen.
  *
+ * ## Drei Breiten, nicht eine
+ *
+ * EYT-141 und EYT-137 nennen 1440 px, 1920 px und 200-%-Zoom ausdruecklich.
+ * Ein Lauf in der Playwright-Standardbreite haette keine davon abgedeckt und
+ * die Zusicherung waere eine Behauptung geblieben. Siehe `ABNAHME_BREITEN`
+ * unten dazu, warum 200-%-Zoom als halbierte CSS-Breite nachgestellt wird.
+ *
  * ## Gegenmutation
  *
  * In `apps/web/components/planungs-werkbank.tsx` das `<section aria-label=…>`
@@ -42,7 +49,59 @@ import { psqlMitMarker } from "./global-setup";
  * und der Job wird rot. Im jsdom-Lauf ist genau diese Mutation ausgefuehrt und
  * zurueckgenommen worden (`apps/web/test/planung-a11y.test.tsx`).
  */
+/**
+ * Die Abnahmebreiten aus EYT-141/EYT-137 — und was „200-%-Zoom" hier heisst.
+ *
+ * Ein Browser mit 200-%-Zoom auf einem 1440-px-Schirm hat eine CSS-Breite von
+ * 720 px: die Pixel werden doppelt so gross, also passen halb so viele hinein.
+ * Genau so wird er hier nachgestellt. `deviceScaleFactor` waere das FALSCHE
+ * Werkzeug — der beschreibt die Pixeldichte des Geraets und laesst die
+ * CSS-Breite unveraendert, womit kein Umbruch entstuende und die Pruefung
+ * nichts messen wuerde.
+ *
+ * WCAG 2.1 §1.4.10 (Reflow) verlangt an dieser Stelle, dass kein Inhalt
+ * horizontales Scrollen erzwingt. Das wird unten eigens geprueft, weil axe es
+ * nicht kann: ob eine Seite seitlich ueberlaeuft, ergibt sich erst aus dem
+ * Layout, nicht aus dem Markup.
+ */
+const ABNAHME_BREITEN = [
+  { name: "1440 px", width: 1440, height: 900 },
+  { name: "1920 px", width: 1920, height: 1080 },
+  { name: "1440 px bei 200-%-Zoom (720 px CSS)", width: 720, height: 450 },
+] as const;
+
 async function pruefeBarrierefreiheit(seite: Page, flaeche: string): Promise<void> {
+  const urspruenglich = seite.viewportSize();
+
+  for (const breite of ABNAHME_BREITEN) {
+    await seite.setViewportSize({ width: breite.width, height: breite.height });
+
+    const proBreite = await new AxeBuilder({ page: seite })
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])
+      .analyze();
+    expect(
+      proBreite.violations.map((verstoss) => `${verstoss.id} (${verstoss.nodes.length})`),
+      `axe-Verstoesse auf ${flaeche} bei ${breite.name}`,
+    ).toEqual([]);
+
+    // Reflow: kein horizontales Scrollen. Ein Pixel Toleranz gegen
+    // Subpixel-Rundung — mehr nicht, sonst verschwindet ein echter Ueberlauf
+    // in der Toleranz.
+    const ueberlauf = await seite.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(
+      ueberlauf,
+      `horizontaler Ueberlauf auf ${flaeche} bei ${breite.name}`,
+    ).toBeLessThanOrEqual(1);
+  }
+
+  // Zurueck auf die Ausgangsbreite: die nachfolgenden Reiseschritte sollen
+  // nicht in einer Breite weiterlaufen, die dieser Nachweis gesetzt hat.
+  if (urspruenglich !== null) {
+    await seite.setViewportSize(urspruenglich);
+  }
+
   const ergebnis = await new AxeBuilder({ page: seite })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])
     .analyze();
