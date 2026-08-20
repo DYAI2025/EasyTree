@@ -130,7 +130,14 @@ async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<voi
         // Die gemessenen Werte reisen mit. Ohne sie sagt ein Fehlschlag nur
         // "kein Indikator" und die Diagnose beginnt bei null — genau das ist
         // beim ersten roten Lauf dieser Sonde passiert.
-        befund: `outline-style=${s.outlineStyle} outline-width=${s.outlineWidth} box-shadow=${s.boxShadow}`,
+        // `:focus` und `:focus-visible` reisen mit, weil sie die beiden
+        // moeglichen Ursachen TRENNEN: matcht `:focus` nicht, ist das Element
+        // gar nicht wirklich fokussiert (z. B. weil das Dokument den
+        // Fensterfokus verloren hat) und die Messung sagt nichts ueber das
+        // CSS. Matcht es, greift die Regel wirklich nicht.
+        befund:
+          `outline-style=${s.outlineStyle} outline-width=${s.outlineWidth} box-shadow=${s.boxShadow}` +
+          ` :focus=${el.matches(":focus")} :focus-visible=${el.matches(":focus-visible")}`,
       };
     });
     if (halt !== null && !halt.sichtbarerFokus) {
