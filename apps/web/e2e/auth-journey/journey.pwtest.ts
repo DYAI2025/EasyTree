@@ -70,6 +70,75 @@ const ABNAHME_BREITEN = [
   { name: "1440 px bei 200-%-Zoom (720 px CSS)", width: 720, height: 450 },
 ] as const;
 
+/**
+ * Tastaturbedienbarkeit und SICHTBARER Fokus auf einer angemeldeten Flaeche
+ * (EYT-141/EYT-137: „Tastatur, sichtbarer Fokus").
+ *
+ * ## Warum das hier fehlte
+ *
+ * Gemessen 20.08.2026: `shell-smoke.spec.ts` prueft den Tab-Zyklus — aber
+ * ausschliesslich auf `/`. In dieser Datei kam `keyboard` bis eben **null Mal**
+ * vor. `/planung` und `/kosten`, die beiden Flaechen der Kernreise, hatten also
+ * keinen einzigen Tastaturnachweis; nur die Startseite hatte einen.
+ *
+ * ## Warum dieselbe Technik wie in `shell-smoke`
+ *
+ * Die Sichtbarkeitspruefung (`outline` mit Breite > 0 ODER `box-shadow`) ist
+ * woertlich uebernommen und nicht neu erfunden. Zwei Definitionen von
+ * „sichtbarer Fokus" waeren zwei Wahrheiten, die auseinanderlaufen koennen —
+ * und die schwaechere gaebe dann den Ausschlag.
+ *
+ * ## Was NICHT geprueft wird
+ *
+ * Die DOM-Reihenfolge. `shell-smoke` vergleicht die Tab-Reihenfolge gegen die
+ * DOM-Reihenfolge; das ist auf einer statischen Seite sinnvoll. Hier stehen
+ * Formulare mit Zustaenden, die waehrend des Durchtabbens nachladen koennen —
+ * eine Reihenfolgezusicherung waere dort flaky und wuerde als „Fokusfehler"
+ * gelesen, obwohl sie ein Timingartefakt ist. Zugesichert wird deshalb das,
+ * was hier wirklich traegt: **jedes** erreichte Element zeigt einen sichtbaren
+ * Fokus, und es gibt keine Tastaturfalle.
+ */
+async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<void> {
+  const fokussierbare = await seite.evaluate(
+    () =>
+      document.querySelectorAll(
+        "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])",
+      ).length,
+  );
+  // Nicht-vakuoes: eine Flaeche ohne fokussierbare Elemente wuerde die
+  // Schleife unten null Mal durchlaufen und truege gruen nichts bei.
+  expect(fokussierbare, `fokussierbare Elemente auf ${flaeche}`).toBeGreaterThan(0);
+
+  const ohneIndikator: string[] = [];
+  for (let i = 0; i < fokussierbare; i++) {
+    await seite.keyboard.press("Tab");
+    const halt = await seite.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (el === null || el === document.body) return null;
+      const s = getComputedStyle(el);
+      const sichtbarerFokus =
+        (s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0) || s.boxShadow !== "none";
+      return {
+        id: `${el.tagName}:${el.getAttribute("data-testid") ?? el.textContent?.trim()?.slice(0, 40)}`,
+        sichtbarerFokus,
+      };
+    });
+    if (halt !== null && !halt.sichtbarerFokus) ohneIndikator.push(halt.id);
+  }
+
+  // Die Elemente werden BENANNT, nicht gezaehlt: „2 Elemente ohne Indikator"
+  // zwingt zur Suche, die Liste zeigt sofort, welches Bedienelement gemeint ist.
+  expect(ohneIndikator, `Elemente ohne sichtbaren Fokusindikator auf ${flaeche}`).toEqual([]);
+
+  // Keine Tastaturfalle: ein weiterer Tab verlaesst das zuletzt fokussierte
+  // Element. Ein Bedienelement, das den Fokus festhaelt, sperrt die ganze
+  // Flaeche fuer alle, die nicht mit der Maus arbeiten.
+  const vorher = await seite.evaluate(() => document.activeElement?.outerHTML?.slice(0, 80) ?? "");
+  await seite.keyboard.press("Tab");
+  const nachher = await seite.evaluate(() => document.activeElement?.outerHTML?.slice(0, 80) ?? "");
+  expect(nachher, `Tastaturfalle auf ${flaeche}`).not.toBe(vorher);
+}
+
 async function pruefeBarrierefreiheit(seite: Page, flaeche: string): Promise<void> {
   const urspruenglich = seite.viewportSize();
 
@@ -101,6 +170,8 @@ async function pruefeBarrierefreiheit(seite: Page, flaeche: string): Promise<voi
   if (urspruenglich !== null) {
     await seite.setViewportSize(urspruenglich);
   }
+
+  await pruefeTastaturUndFokus(seite, flaeche);
 
   const ergebnis = await new AxeBuilder({ page: seite })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])
