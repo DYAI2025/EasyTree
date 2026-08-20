@@ -116,14 +116,26 @@ async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<voi
       const el = document.activeElement as HTMLElement | null;
       if (el === null || el === document.body) return null;
       const s = getComputedStyle(el);
-      const sichtbarerFokus =
-        (s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0) || s.boxShadow !== "none";
+      // `outline-width: auto` ist der Browser-Fokusring und ein ECHTER
+      // Indikator — aber `parseFloat("auto")` ist `NaN`, und `NaN > 0` ist
+      // `false`. Eine Sonde, die nur auf eine Zahl prueft, meldet ihn als
+      // fehlend und erfindet damit einen Barrierefreiheitsfehler, den es nicht
+      // gibt. `auto` zaehlt deshalb ausdruecklich mit.
+      const breite = parseFloat(s.outlineWidth);
+      const hatOutline = s.outlineStyle !== "none" && (s.outlineWidth === "auto" || breite > 0);
+      const sichtbarerFokus = hatOutline || s.boxShadow !== "none";
       return {
         id: `${el.tagName}:${el.getAttribute("data-testid") ?? el.textContent?.trim()?.slice(0, 40)}`,
         sichtbarerFokus,
+        // Die gemessenen Werte reisen mit. Ohne sie sagt ein Fehlschlag nur
+        // "kein Indikator" und die Diagnose beginnt bei null — genau das ist
+        // beim ersten roten Lauf dieser Sonde passiert.
+        befund: `outline-style=${s.outlineStyle} outline-width=${s.outlineWidth} box-shadow=${s.boxShadow}`,
       };
     });
-    if (halt !== null && !halt.sichtbarerFokus) ohneIndikator.push(halt.id);
+    if (halt !== null && !halt.sichtbarerFokus) {
+      ohneIndikator.push(`${halt.id} (${halt.befund})`);
+    }
   }
 
   // Die Elemente werden BENANNT, nicht gezaehlt: „2 Elemente ohne Indikator"
