@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "easytree-api",
+  "main": "cloudflare/entry.mjs",
+  // >= 2025-09-01 aktiviert enable_nodejs_http_server_modules (httpServerHandler),
+  // >= 2025-04-01 befuellt process.env aus vars und Secrets.
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat", "enable_nodejs_http_server_modules"],
+  "build": {
+    "command": "pnpm --filter @easytree/api... build",
+  },
+  // Nicht-geheime Konfiguration. DATABASE_URL, SUPABASE_ANON_KEY und
+  // DATABASE_SSL_ROOT_CERT sind Secrets und werden NICHT hier gefuehrt.
+  "vars": {
+    "NODE_ENV": "production",
+    "API_PORT": "8080",
+    "LOG_LEVEL": "info",
+  },
+  // Nest laedt diese Pakete nur bei Microservices/Websockets/Validation. Der
+  // Bundler sieht die require() statisch; die App nutzt keines davon.
+  "alias": {
+    "@nestjs/microservices": "./cloudflare/nest-optional-stub.mjs",
+    "@nestjs/microservices/microservices-module": "./cloudflare/nest-optional-stub.mjs",
+    "@nestjs/websockets/socket-module": "./cloudflare/nest-optional-stub.mjs",
+    "class-transformer": "./cloudflare/nest-optional-stub.mjs",
+    "class-validator": "./cloudflare/nest-optional-stub.mjs",
+  },
+}

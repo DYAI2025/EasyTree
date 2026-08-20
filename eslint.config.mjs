@@ -24,4 +24,21 @@ export default tseslint.config(
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // Cloudflare-Worker-Entrypoints (EYT-142). Sie laufen in der
+    // Workers-Laufzeit, nicht in Node: `Response`, `Request` und `fetch` sind
+    // dort globale Standardobjekte. Ohne diese Deklaration meldet `no-undef`
+    // sie als undefiniert — ein Fehler ueber die falsche Laufzeit, nicht ueber
+    // den Code.
+    files: ["**/cloudflare/*.mjs"],
+    languageOptions: {
+      globals: {
+        Response: "readonly",
+        Request: "readonly",
+        fetch: "readonly",
+        URL: "readonly",
+        console: "readonly",
+      },
+    },
+  },
 );
