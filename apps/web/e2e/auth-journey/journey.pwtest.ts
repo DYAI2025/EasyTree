@@ -110,11 +110,23 @@ async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<voi
   expect(fokussierbare, `fokussierbare Elemente auf ${flaeche}`).toBeGreaterThan(0);
 
   const ohneIndikator: string[] = [];
+  let beurteilt = 0;
   for (let i = 0; i < fokussierbare; i++) {
     await seite.keyboard.press("Tab");
     const halt = await seite.evaluate(() => {
       const el = document.activeElement as HTMLElement | null;
       if (el === null || el === document.body) return null;
+      // `document.activeElement` ist KEIN verlaesslicher Beleg dafuer, dass der
+      // Browser das Element als fokussiert ansieht. Gemessen am 20.08.2026 im
+      // echten Chromium: `input[type="date"]` auf `/planung` ist
+      // `activeElement`, matcht aber `:focus` NICHT — vermutlich, weil der
+      // Fokus in der UA-Shadow-Root auf einem Segment sitzt.
+      //
+      // Ueber ein solches Element laesst sich ueber den Fokusrahmen nichts
+      // aussagen: keine `:focus`-Regel kann greifen, und ein Befund waere ein
+      // erfundener Fehler. Es wird deshalb uebersprungen — nicht stillschweigend,
+      // sondern gezaehlt (siehe `beurteilt` unten).
+      if (!el.matches(":focus")) return { uebersprungen: true } as const;
       const s = getComputedStyle(el);
       // `outline-width: auto` ist der Browser-Fokusring und ein ECHTER
       // Indikator — aber `parseFloat("auto")` ist `NaN`, und `NaN > 0` ist
@@ -125,6 +137,7 @@ async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<voi
       const hatOutline = s.outlineStyle !== "none" && (s.outlineWidth === "auto" || breite > 0);
       const sichtbarerFokus = hatOutline || s.boxShadow !== "none";
       return {
+        uebersprungen: false as const,
         id: `${el.tagName}:${el.getAttribute("data-testid") ?? el.textContent?.trim()?.slice(0, 40)}`,
         sichtbarerFokus,
         // Die gemessenen Werte reisen mit. Ohne sie sagt ein Fehlschlag nur
@@ -140,10 +153,17 @@ async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<voi
           ` :focus=${el.matches(":focus")} :focus-visible=${el.matches(":focus-visible")}`,
       };
     });
-    if (halt !== null && !halt.sichtbarerFokus) {
+    if (halt === null || halt.uebersprungen) continue;
+    beurteilt += 1;
+    if (!halt.sichtbarerFokus) {
       ohneIndikator.push(`${halt.id} (${halt.befund})`);
     }
   }
+
+  // Der Schutz gegen einen vakuoesen Nachweis: haette der `:focus`-Filter oben
+  // ALLE Elemente aussortiert, waere die Liste unten leer und der Test gruen,
+  // ohne ein einziges Bedienelement geprueft zu haben.
+  expect(beurteilt, `tatsaechlich beurteilte Bedienelemente auf ${flaeche}`).toBeGreaterThan(0);
 
   // Die Elemente werden BENANNT, nicht gezaehlt: „2 Elemente ohne Indikator"
   // zwingt zur Suche, die Liste zeigt sofort, welches Bedienelement gemeint ist.
