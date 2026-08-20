@@ -93,6 +93,33 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * Formularfelder zusätzlich über `:focus` (EYT-141).
+ *
+ * Gemessen am 20.08.2026 im echten Chromium der `auth-journey`: ein
+ * `input[type="date"]`, in das die Planerin hineintabbt, ist zwar
+ * `document.activeElement`, matcht aber `:focus-visible` NICHT. Die Regel
+ * oben greift dort also nicht, und der berechnete Stil war
+ * `outline-style: none` bei `outline-width: 3px` — die 3px sind bloss der
+ * Initialwert `medium`, kein Ring. Chromium zeichnet bei Datumsfeldern nur die
+ * innere Segmentauswahl, nicht den Rahmen um das Bedienelement.
+ *
+ * Folge ohne diese Regel: `feld-datum` im Einsatzformular hatte für
+ * Tastaturnutzung keinen erkennbaren Fokusrahmen. Aufgefallen ist das erst,
+ * als der Tastaturnachweis überhaupt zum ersten Mal auf `/planung` lief.
+ *
+ * `:focus` statt `:focus-visible` ist hier bewusst: bei Texteingaben ist ein
+ * Fokusrahmen auch bei Mausbedienung erwünscht und üblich — er zeigt, wohin
+ * die Eingabe geht. Der Nachteil, den `:focus-visible` für Buttons vermeidet
+ * (Ring nach jedem Klick), gilt für Eingabefelder nicht.
+ */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 /* Skip-Link: erstes fokussierbares Element, sichtbar bei Fokus. */
 .skip-link {
   position: absolute;
