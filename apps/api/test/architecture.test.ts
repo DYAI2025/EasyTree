@@ -40,6 +40,24 @@ const tsconfigFiles = [
   ...collectFilesNamed(repoRoot, "packages", /^tsconfig(\..+)?\.json$/),
   "tsconfig.base.json",
 ];
+/**
+ * Der Cloudflare-Entry importiert ABSICHTLICH das tsc-Ergebnis (EYT-142).
+ *
+ * Nest braucht `emitDecoratorMetadata`, das esbuild nicht erzeugen kann; der
+ * Nest-Code muss deshalb aus `apps/api/dist/` kommen. `dist` steht in
+ * `SKIP_DIRS` und wird nie gescannt — dieser Import kann also gar nicht
+ * aufloesen, und zwar by design, nicht durch Versehen.
+ *
+ * Bewusst eng gefasst: nur `.mjs`-Dateien direkt unter einem
+ * `cloudflare/`-Verzeichnis, und nur Spezifizierer nach `../dist/`. Alles
+ * andere faellt weiter unter die Regel. Der Test darunter haelt die Liste der
+ * tatsaechlich ausgenommenen Importe fest, damit die Ausnahme nicht wachsen
+ * kann, ohne dass es jemand sieht.
+ */
+function istGewolltUnaufloesbar(von: string, spezifizierer: string): boolean {
+  return /^apps\/[^/]+\/cloudflare\/[^/]+\.mjs$/.test(von) && spezifizierer.startsWith("../dist/");
+}
+
 const refs = extractImports(repoRoot, files);
 const { violations, scopeCounts } = evaluate(refs);
 const starReExports = findStarReExports(repoRoot, files);
@@ -59,8 +77,26 @@ describe("Architekturgrenzen", () => {
     // Scanners, weil er wie ein sauberer Lauf aussieht.
     const unresolved = refs
       .filter((ref) => ref.specifier.startsWith(".") && ref.resolved === null)
+      .filter((ref) => !istGewolltUnaufloesbar(ref.from, ref.specifier))
       .map((ref) => `${ref.from}:${ref.line} -> ${ref.specifier}`);
     expect(unresolved).toEqual([]);
+  });
+
+  it("die Ausnahme fuer Buildartefakte deckt GENAU die bekannten Importe", () => {
+    // Ohne diese Zusicherung koennte die Ausnahme oben beliebig wachsen. Hier
+    // steht die vollstaendige Liste; ein neuer `../dist/`-Import im
+    // Cloudflare-Entry macht diesen Test rot und ist damit eine bewusste
+    // Entscheidung im Diff statt einer stillen Erweiterung.
+    const ausgenommen = refs
+      .filter((ref) => istGewolltUnaufloesbar(ref.from, ref.specifier))
+      .map((ref) => `${ref.from} -> ${ref.specifier}`)
+      .sort();
+    expect(ausgenommen).toEqual([
+      "apps/api/cloudflare/entry.mjs -> ../dist/config/config.module.js",
+      "apps/api/cloudflare/entry.mjs -> ../dist/main.js",
+      "apps/api/cloudflare/entry.mjs -> ../dist/platform/database/role-privileges.js",
+      "apps/api/cloudflare/entry.mjs -> ../dist/platform/runtime/role-gate-latch.js",
+    ]);
   });
 
   it.each(RULES.map((rule) => rule.id))("Regel %s ueberwacht mindestens eine Datei", (ruleId) => {
