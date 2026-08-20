@@ -25,3 +25,4 @@ export {
 export { PrimaryAction, type PrimaryActionProps } from "./primary-action.js";
 export { EmptyState, type EmptyStateProps } from "./empty-state.js";
 export { ErrorState, type ErrorStateProps } from "./error-state.js";
+export { LoadingState, type LoadingStateProps } from "./loading-state.js";

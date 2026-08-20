@@ -11,7 +11,15 @@ import {
   type SelectablePlanVersion,
   type SelectableWorksite,
 } from "@easytree/contracts";
-import { Button, Card, EmptyState, ErrorState, PrimaryAction, StateBanner } from "@easytree/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PrimaryAction,
+  StateBanner,
+} from "@easytree/ui";
 
 import { useCostsGateway } from "../lib/costs-gateway-provider";
 import { minorUnitsToEuro } from "../lib/euro-minor-units";
@@ -326,9 +334,10 @@ export function KostenAnsicht({ snapshotId }: { snapshotId: string | null }) {
         </form>
 
         {liste.art === "laedt" ? (
-          <p role="status" data-testid="kosten-versionen-laedt">
-            Veröffentlichte Planversionen werden geladen …
-          </p>
+          <LoadingState
+            data-testid="kosten-versionen-laedt"
+            label="Veröffentlichte Planversionen werden geladen …"
+          />
         ) : null}
 
         {liste.art === "fehler" ? (
@@ -365,9 +374,10 @@ export function KostenAnsicht({ snapshotId }: { snapshotId: string | null }) {
             </select>
 
             {baustellen.art === "laedt" ? (
-              <p role="status" data-testid="kosten-baustellen-laedt">
-                Baustellen dieser Planversion werden geladen …
-              </p>
+              <LoadingState
+                data-testid="kosten-baustellen-laedt"
+                label="Baustellen dieser Planversion werden geladen …"
+              />
             ) : null}
 
             {baustellen.art === "fehler" ? (
@@ -426,15 +436,14 @@ export function KostenAnsicht({ snapshotId }: { snapshotId: string | null }) {
         ) : null}
 
         {snapshot.art === "laedt" ? (
-          <p role="status" data-testid="kosten-snapshot-laedt">
-            Gespeicherter Snapshot wird geladen …
-          </p>
+          <LoadingState
+            data-testid="kosten-snapshot-laedt"
+            label="Gespeicherter Snapshot wird geladen …"
+          />
         ) : null}
 
         {snapshot.art === "erzeugt" ? (
-          <p role="status" data-testid="kosten-snapshot-erzeugt">
-            Snapshot wird erstellt …
-          </p>
+          <LoadingState data-testid="kosten-snapshot-erzeugt" label="Snapshot wird erstellt …" />
         ) : null}
 
         {snapshot.art === "fehler" ? (

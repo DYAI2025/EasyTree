@@ -254,9 +254,20 @@ describe("PlanningWindowView", () => {
     await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
 
     await userEvent.click(screen.getByTestId("einsatz-speichern"));
-    await screen.findByRole("alert");
+    // Genau die Meldung DES FORMULARS, nicht "irgendein Statusbereich":
+    // seit EYT-141 traegt auch der Leerzustand `role="status"`, und ein
+    // Rollenzugriff faende beide.
+    await waitFor(() =>
+      expect(screen.getByTestId("einsatzformular-meldung").getAttribute("data-state")).toBe(
+        "fehler",
+      ),
+    );
     await userEvent.click(screen.getByTestId("einsatz-speichern"));
-    await screen.findByRole("status");
+    await waitFor(() =>
+      expect(screen.getByTestId("einsatzformular-meldung").getAttribute("data-state")).toBe(
+        "erfolg",
+      ),
+    );
 
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
@@ -313,9 +324,9 @@ describe("PlanningWindowView", () => {
     await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
     await userEvent.click(screen.getByTestId("einsatz-speichern"));
 
-    expect((await screen.findByRole("status")).textContent).toContain(
-      "Der Entwurf wurde gespeichert.",
-    );
+    const meldung = await screen.findByTestId("einsatzformular-meldung");
+    await waitFor(() => expect(meldung.getAttribute("data-state")).toBe("erfolg"));
+    expect(meldung.textContent).toContain("Der Entwurf wurde gespeichert.");
     expect(leseversuch).toBe(2);
     expect(screen.queryByTestId("planungsfenster-laedt")).toBeNull();
   });

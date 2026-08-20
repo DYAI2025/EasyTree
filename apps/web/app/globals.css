@@ -416,6 +416,28 @@ body {
   padding: var(--space);
 }
 
+/*
+ * Ladezustand (EYT-141). Bewusst ohne Animation: die Aussage steht im Text,
+ * und eine Bewegung, die sie zusaetzlich traegt, hilft niemandem, der sie
+ * nicht sehen kann — `prefers-reduced-motion` waere dann noch eine Ausnahme
+ * mehr zu pflegen. Dieselbe Kastenform wie Empty/Error, damit die drei
+ * Zustaende an derselben Stelle dieselbe Flaeche einnehmen und der Inhalt
+ * beim Wechsel nicht springt.
+ */
+.eyt-loading-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px dashed var(--eyt-border-default);
+  border-radius: var(--radius);
+  padding: var(--space);
+  color: var(--eyt-text-secondary);
+}
+
+.eyt-loading-state__mark {
+  color: var(--eyt-text-secondary);
+}
+
 .eyt-empty-state__title,
 .eyt-error-state__title {
   margin: 0 0 0.25rem;

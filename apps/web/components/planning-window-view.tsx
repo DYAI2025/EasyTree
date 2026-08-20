@@ -34,7 +34,15 @@ import {
   type PlanningResource,
   type PlanningWindow,
 } from "@easytree/contracts";
-import { Card, StatusBadge, type StatusTone } from "@easytree/ui";
+import {
+  Card,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  StateBanner,
+  StatusBadge,
+  type StatusTone,
+} from "@easytree/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { usePlanningGateway } from "../lib/planning-gateway-provider";
@@ -54,6 +62,33 @@ const FAILURE_TEXT: Record<GatewayFailure, string> = {
   FORBIDDEN: "Keine Berechtigung fuer diese Organisation.",
   STALE_VERSION: "Der Stand ist veraltet.",
   REJECTED: "Die Anfrage wurde abgelehnt.",
+};
+
+/**
+ * Welcher Zustandsbaustein einen Portfehler traegt (EYT-141).
+ *
+ * Nicht jeder Fehlschlag ist ein Fehler im Sinne der Bedienung:
+ *
+ * - `kein-zugriff` ist ein RECHTEzustand. Ein „Erneut versuchen" waere dort
+ *   eine Luege — dieselbe Anfrage scheitert wieder, und die Nutzerin wuerde
+ *   klicken statt sich anzumelden bzw. die Organisation zu wechseln.
+ * - `veraltet` ist ein Nebenlaeufigkeitszustand: der Server hat recht, der
+ *   Bildschirm ist alt. Warnend, nicht alarmierend.
+ * - alles Uebrige ist ein echter Ausfall — assertiv, mit Weg zurueck.
+ *
+ * Vollstaendiges `Record`, kein Standardzweig: kommt ein `GatewayFailure`
+ * hinzu, geht der Typecheck rot, statt den neuen Fall still als Ausfall zu
+ * zeigen.
+ */
+type Zustandsklasse = "ausfall" | "kein-zugriff" | "veraltet";
+
+const ZUSTANDSKLASSE: Record<GatewayFailure, Zustandsklasse> = {
+  UNAVAILABLE: "ausfall",
+  CONTRACT_VIOLATION: "ausfall",
+  UNAUTHENTICATED: "kein-zugriff",
+  FORBIDDEN: "kein-zugriff",
+  STALE_VERSION: "veraltet",
+  REJECTED: "ausfall",
 };
 
 /**
@@ -238,17 +273,47 @@ export function PlanningWindowView({
   if (state.kind === "laedt") {
     return (
       <Card>
-        <p data-testid="planungsfenster-laedt">Wochenplan wird geladen …</p>
+        <LoadingState data-testid="planungsfenster-laedt" label="Wochenplan wird geladen …" />
       </Card>
     );
   }
 
   if (state.kind === "fehler") {
+    // Ein Zustand, drei Lesarten — und deshalb drei Bausteine. Bis EYT-141
+    // trug jeder Portfehler dieselbe graue Zeile: „keine Berechtigung" sah aus
+    // wie „Server weg", obwohl das eine ein Rechtezustand ist, den kein
+    // Wiederholen loest, und das andere ein Ausfall, den genau das loest.
+    //
+    // `data-testid` und `data-failure` bleiben auf ALLEN drei Zweigen
+    // unveraendert: daran haengen Reisen (`werkbank-serverwahrheit.test.tsx`,
+    // `read-through.spec.ts`), und ein Baustein-Wechsel darf keinen Anker
+    // still entfernen. `data-zustand` kommt hinzu, es verschwindet keiner.
+    const klasse = ZUSTANDSKLASSE[state.failure];
+    const gemeinsam = {
+      "data-testid": "planungsfenster-fehler",
+      "data-failure": state.failure,
+      "data-zustand": klasse,
+    } as const;
+
     return (
       <Card>
-        <p data-testid="planungsfenster-fehler" data-failure={state.failure} role="alert">
-          {FAILURE_TEXT[state.failure]}
-        </p>
+        {klasse === "kein-zugriff" ? (
+          <StateBanner {...gemeinsam} tone="info" title="Kein Zugriff">
+            {FAILURE_TEXT[state.failure]}
+          </StateBanner>
+        ) : klasse === "veraltet" ? (
+          <StateBanner {...gemeinsam} tone="warning" title="Stand veraltet">
+            {FAILURE_TEXT[state.failure]}
+          </StateBanner>
+        ) : (
+          <ErrorState
+            {...gemeinsam}
+            title="Wochenplan nicht ladbar"
+            description={FAILURE_TEXT[state.failure]}
+            onRetry={() => setNachladen((n) => n + 1)}
+            retryLabel="Erneut laden"
+          />
+        )}
       </Card>
     );
   }
@@ -292,7 +357,11 @@ export function PlanningWindowView({
       />
 
       {fenster.assignments.length === 0 ? (
-        <p data-testid="planungsfenster-leer">Für diese Woche ist nichts geplant.</p>
+        <EmptyState
+          data-testid="planungsfenster-leer"
+          title="Für diese Woche ist nichts geplant."
+          description="Lege unten den ersten Einsatz an — Person, Baustelle und Zeitraum genügen."
+        />
       ) : (
         <ul data-testid="planungsfenster-liste">
           {fenster.assignments.map((assignment) => (
