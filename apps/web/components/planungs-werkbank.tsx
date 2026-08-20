@@ -79,7 +79,7 @@ export function PlanungsWerkbank({
   children: ReactNode;
 }) {
   return (
-    <section aria-label={titel(modell)} data-testid="werkbank-planungsflaeche" className="werkbank">
+    <main data-testid="werkbank-planungsflaeche" className="werkbank">
       <PageHeader
         data-testid="werkbank-kopf"
         className="werkbank__kopf"
@@ -91,7 +91,7 @@ export function PlanungsWerkbank({
       />
       <WochenNavigation modell={modell} />
       <div className="werkbank__flaeche">{children}</div>
-    </section>
+    </main>
   );
 }
 
