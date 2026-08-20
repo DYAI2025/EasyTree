@@ -24,6 +24,15 @@ const SKIP_DIRS = new Set([
   ".turbo",
   "coverage",
   ".git",
+  // Cloudflare-Buildartefakte (EYT-142) — dieselbe Kategorie wie `dist` und
+  // `.next`: generierter Fremdcode, kein Quelltext. `.open-next/` enthaelt den
+  // gebuendelten Next-Server; ohne diesen Ausschluss meldet die
+  // Geheimnisgrenze dessen `process.env.__NEXT_APP_NAV_FAIL_HANDLING` als
+  // Verletzung des Laufzeitpfads, und der Importaufloeser scheitert an
+  // Modulen, die nur im Worker-Bundle existieren.
+  ".open-next",
+  ".wrangler",
+  ".wrangler-dry",
   // Untracked Fremdverzeichnisse im Repo-Root (siehe CLAUDE.md, Konventionen).
   "penpot",
   "_sprint2-transfer",

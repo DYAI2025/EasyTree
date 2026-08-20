@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "easytree-web",
+  "main": ".open-next/worker.js",
+  // >= 2025-09-01 aktiviert enable_nodejs_http_server_modules; nodejs_compat
+  // ist fuer den von OpenNext erzeugten Server erforderlich.
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+  },
+}

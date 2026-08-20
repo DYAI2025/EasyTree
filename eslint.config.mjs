@@ -14,6 +14,12 @@ export default tseslint.config(
       "**/.next/**",
       "**/.turbo/**",
       "**/coverage/**",
+      // Cloudflare-Buildartefakte (EYT-142). `.open-next/` enthaelt den
+      // gebuendelten Next-Server; ihn zu linten meldete 21145 Fehler aus
+      // fremdem, generiertem Code und machte `pnpm lint` unbrauchbar.
+      "**/.open-next/**",
+      "**/.wrangler/**",
+      "**/.wrangler-dry/**",
     ],
   },
   eslint.configs.recommended,
