@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EmptyState,
   ErrorState,
+  LoadingState,
   PageHeader,
   PrimaryAction,
   StateBanner,
@@ -75,5 +76,35 @@ describe("PageHeader / PrimaryAction", () => {
     render(<PrimaryAction>Neue Satzversion anlegen</PrimaryAction>);
     const button = screen.getByRole("button", { name: "Neue Satzversion anlegen" });
     expect(button.getAttribute("type")).toBe("button");
+  });
+});
+
+/**
+ * `LoadingState` (EYT-141) — der fuenfte wiederverwendbare Zustand.
+ *
+ * Vor EYT-141 stand er vier Mal einzeln ausgeschrieben in Planung und Kosten.
+ * Was hier geprueft wird, ist genau das, was an einer dieser vier Stellen
+ * haette fehlen koennen, ohne dass etwas rot geworden waere.
+ */
+describe("LoadingState", () => {
+  it("meldet hoeflich (role=status) und markiert den Bereich als arbeitend", () => {
+    render(<LoadingState label="Wochenplan wird geladen …" />);
+    const bereich = screen.getByRole("status");
+    expect(bereich.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("traegt die Aussage im TEXT, nicht nur in der Glyphe", () => {
+    render(<LoadingState label="Wochenplan wird geladen …" />);
+    const bereich = screen.getByRole("status");
+    // Die Glyphe ist Dekoration und fuer Screenreader unsichtbar …
+    const marke = bereich.querySelector('[aria-hidden="true"]');
+    expect(marke?.textContent ?? "").not.toBe("");
+    // … der Text steht daneben und traegt die Aussage allein.
+    expect(bereich.textContent).toContain("Wochenplan wird geladen");
+  });
+
+  it("reicht data-Attribute durch, damit Reisen daran ankern koennen", () => {
+    render(<LoadingState data-testid="irgendwas-laedt" label="Lädt …" />);
+    expect(screen.getByTestId("irgendwas-laedt").getAttribute("role")).toBe("status");
   });
 });

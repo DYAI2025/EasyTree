@@ -19,6 +19,20 @@
  * Navigation unter die Clientgrenze zoege: dort brauchte sie Code im Browser,
  * ohne dass irgendetwas an ihr interaktiv waere.
  *
+ * ## Warum `<section>` und nicht `<main>` (EYT-141)
+ *
+ * Bis EYT-141 stand hier ein `<main>` — INNERHALB des `<main id="hauptinhalt">`
+ * der `AppShell`. Zwei verschachtelte `main`-Landmarks sind ein
+ * Barrierefreiheitsfehler (nur eine je Dokument), und der Skip-Link zielt auf
+ * die aeussere: wer ihm folgte, landete in einem Bereich, der eine zweite
+ * gleichrangige Landmark enthielt. Kein Waechter hat das gesehen, weil axe im
+ * Browser bis EYT-141 ausschliesslich `/` geprueft hat, nie `/planung`.
+ *
+ * `<section aria-label=…>` ist die richtige Ebene: ein benannter Bereich
+ * INNERHALB des Hauptinhalts. Der Name ist derselbe Titel, den der Kopf zeigt
+ * — keine zweite Formulierung, die auseinanderlaufen koennte. Ein `<section>`
+ * ohne Namen waere gar keine Landmark und im Screenreader unauffindbar.
+ *
  * Der Client bleibt deshalb genau dort, wo er gemessen hingehoert: in
  * `PlanungAnsicht`. `PlanungZugang` reicht die Rechte als KINDFUNKTION weiter,
  * und eine Funktion kann die Server-/Client-Grenze nicht ueberqueren — der
@@ -65,7 +79,7 @@ export function PlanungsWerkbank({
   children: ReactNode;
 }) {
   return (
-    <main data-testid="werkbank-planungsflaeche" className="werkbank">
+    <section aria-label={titel(modell)} data-testid="werkbank-planungsflaeche" className="werkbank">
       <PageHeader
         data-testid="werkbank-kopf"
         className="werkbank__kopf"
@@ -77,7 +91,7 @@ export function PlanungsWerkbank({
       />
       <WochenNavigation modell={modell} />
       <div className="werkbank__flaeche">{children}</div>
-    </main>
+    </section>
   );
 }
 

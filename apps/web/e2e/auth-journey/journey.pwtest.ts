@@ -1,15 +1,70 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import AxeBuilder from "@axe-core/playwright";
 import {
   expect,
   test,
+  type Page,
   type APIRequestContext,
   type APIResponse,
   type Cookie,
 } from "@playwright/test";
 
 import { psqlMitMarker } from "./global-setup";
+
+/**
+ * Barrierefreiheits-Abnahme einer ANGEMELDETEN Sprint-6-Flaeche (EYT-141).
+ *
+ * ## Warum das hier steht und nicht in `shell-smoke.spec.ts`
+ *
+ * `shell-smoke` laeuft ohne Sitzung und kommt deshalb nur bis `/`. Genau das
+ * war die Luecke: bis EYT-141 hat kein Browser-axe-Lauf je `/planung` oder
+ * `/kosten` betreten — die beiden Flaechen, auf denen die Kernreise
+ * stattfindet. Hier liegt eine echte GoTrue-Sitzung an, also sind sie
+ * erreichbar, und die Daten darauf sind die echten aus PostgreSQL.
+ *
+ * ## Was gegenueber dem jsdom-Lauf hinzukommt
+ *
+ * `color-contrast`. Der braucht echtes Rendering und ist in jsdom
+ * abgeschaltet; im Browser wird er ausdruecklich NICHT abgeschaltet — sonst
+ * bliebe der Kontrast in beiden Laeufen ungeprueft und die Zusicherung waere
+ * an keiner Stelle eingeloest.
+ *
+ * `best-practice` ist dabei, weil die Landmark-Regeln dort leben und nicht
+ * unter den WCAG-Tags: `landmark-no-duplicate-main` haette den verschachtelten
+ * `<main>` sonst auch im Browser durchgelassen.
+ *
+ * ## Gegenmutation
+ *
+ * In `apps/web/components/planungs-werkbank.tsx` das `<section aria-label=…>`
+ * auf `<main>` zuruecksetzen → dieser Schritt meldet `landmark-no-duplicate-main`
+ * und der Job wird rot. Im jsdom-Lauf ist genau diese Mutation ausgefuehrt und
+ * zurueckgenommen worden (`apps/web/test/planung-a11y.test.tsx`).
+ */
+async function pruefeBarrierefreiheit(seite: Page, flaeche: string): Promise<void> {
+  const ergebnis = await new AxeBuilder({ page: seite })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])
+    .analyze();
+
+  // Die Verstoesse werden BENANNT, nicht gezaehlt: eine Laengenzusicherung
+  // meldet im Fehlerfall "expected 3 to be 0" und verschweigt, welche Regel
+  // gefallen ist — dann beginnt die Diagnose bei null.
+  expect(
+    ergebnis.violations.map((verstoss) => `${verstoss.id} (${verstoss.nodes.length})`),
+    `axe-Verstoesse auf ${flaeche}`,
+  ).toEqual([]);
+
+  // Genau EINE main-Landmark. Steht neben axe, weil sie unabhaengig von
+  // dessen Regelkatalog gilt.
+  await expect(seite.locator("main"), `main-Landmarks auf ${flaeche}`).toHaveCount(1);
+
+  // Basisdesign v2.0 §2.3: hoechstens EIN primaerer CTA je Bildschirm. Die
+  // Regel ist im Code durch die eigene Komponente sichtbar; hier wird sie
+  // gemessen.
+  const primaere = await seite.locator(".eyt-primary-action").count();
+  expect(primaere, `primaere CTAs auf ${flaeche}`).toBeLessThanOrEqual(1);
+}
 
 /**
  * Die reale Auth-Kostenreise (EYT-106 AK8, EYT-134).
@@ -890,6 +945,13 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       fullPage: true,
     });
     schritte["9c_entwurf"] = { versionId: entwurfsVersionId };
+  });
+
+  // ---------------------------------------------------------------------
+  // 9c1 — Barrierefreiheit der PLANUNGSflaeche, angemeldet (EYT-141)
+  // ---------------------------------------------------------------------
+  await test.step("9c1 — /planung besteht axe inklusive Kontrast", async () => {
+    await pruefeBarrierefreiheit(page, "/planung");
   });
 
   // ---------------------------------------------------------------------
@@ -1820,6 +1882,13 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     console.log(`  ${gepruefte}`);
 
     await page.screenshot({ path: join(ARTEFAKTE, "07-kosten-snapshot.png"), fullPage: true });
+
+    // Barrierefreiheit der KOSTENflaeche, angemeldet und mit einem echten
+    // gespeicherten Snapshot auf dem Schirm (EYT-141). Der Zeitpunkt ist
+    // bewusst gewaehlt: eine leere Kostenseite haette weder Tabelle noch
+    // Betraege, und genau die sind der interessante Teil.
+    await pruefeBarrierefreiheit(page, "/kosten mit gespeichertem Snapshot");
+
     schritte["9e_kosten_snapshot"] = {
       snapshotId: kostenSnapshotId,
       planVersionId: veroeffentlichteVersionId,

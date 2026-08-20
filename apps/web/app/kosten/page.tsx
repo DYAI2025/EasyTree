@@ -35,8 +35,21 @@ export default async function KostenPage({
     roh === undefined ? null : IdSchema.safeParse(typeof roh === "string" ? roh : "");
 
   return (
-    <>
+    /*
+     * Derselbe Werkbankrahmen wie `/planung` (EYT-141).
+     *
+     * Bis EYT-141 stand hier ein blosses Fragment: Kopf und Inhalt lagen ohne
+     * Bereichsgrenze direkt im `<main>` der Shell, waehrend die Planung ihre
+     * Flaeche als benannten Bereich fuehrte. Beide Seiten sahen dadurch
+     * unterschiedlich aufgebaut aus, obwohl sie dieselbe Rolle spielen.
+     *
+     * `<section aria-label>` und nicht `<main>`: die eine `main`-Landmark
+     * stellt die `AppShell`, und eine zweite darin waere derselbe Fehler, den
+     * `planungs-werkbank.tsx` gerade abgelegt hat.
+     */
+    <section aria-label="Kosten" data-testid="werkbank-kostenflaeche" className="werkbank">
       <PageHeader
+        className="werkbank__kopf"
         title="Kosten"
         description="Geplante Personalkosten je Baustelle und Tag — aus veröffentlichten Planversionen, bis zur Einzelposition."
       />
@@ -59,6 +72,6 @@ export default async function KostenPage({
           </p>
         </Card>
       </KostenZugang>
-    </>
+    </section>
   );
 }
