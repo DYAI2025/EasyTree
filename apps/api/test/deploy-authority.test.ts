@@ -62,6 +62,67 @@ describe("keine zweite Migrationsautoritaet (EYT-142)", () => {
     }
   });
 
+  describe("JSONC-Eigenheiten — der Waechter darf nicht an der Syntax scheitern", () => {
+    /** Schreibt ein Wegwerf-Fixture und prueft es. */
+    function mitFixture<T>(inhalt: string, fn: (datei: string) => T): T {
+      const verzeichnis = mkdtempSync(join(tmpdir(), "eyt142-jsonc-"));
+      const datei = join(verzeichnis, "wrangler.jsonc");
+      try {
+        writeFileSync(datei, inhalt);
+        return fn(datei);
+      } finally {
+        rmSync(verzeichnis, { recursive: true, force: true });
+      }
+    }
+
+    it("liest Zeilen- und Blockkommentare sowie nachlaufende Kommata", () => {
+      const inhalt = `{
+  // Zeilenkommentar
+  "name": "brav",
+  /* mehrzeiliger
+     Blockkommentar */
+  "build": {
+    "command": "pnpm build",
+  },
+}
+`;
+      expect(mitFixture(inhalt, (d) => pruefeDeployAutoritaet([d]))).toEqual([]);
+    });
+
+    it("haelt `//` INNERHALB einer Zeichenkette fuer Inhalt, nicht fuer einen Kommentar", () => {
+      const inhalt = `{
+  "name": "brav",
+  "build": { "command": "curl https://example.invalid/psql-doku" }
+}
+`;
+      // Der Wert enthaelt "psql" — wuerde `//` als Kommentarbeginn gelesen,
+      // waere der Rest der Zeile verschwunden und der Fund ausgeblieben.
+      const funde = mitFixture(inhalt, (d) => pruefeDeployAutoritaet([d]));
+      expect(funde).toHaveLength(1);
+      expect(funde[0]?.werkzeug).toBe("psql");
+      expect(funde[0]?.wert).toBe("curl https://example.invalid/psql-doku");
+    });
+
+    it("laesst ein Komma vor `]` INNERHALB einer Zeichenkette unangetastet", () => {
+      const inhalt = `{
+  "name": "brav",
+  "build": { "command": ["echo a, ]", "psql -c select1"] }
+}
+`;
+      const funde = mitFixture(inhalt, (d) => pruefeDeployAutoritaet([d]));
+      expect(funde).toHaveLength(1);
+      expect(funde[0]?.feld).toBe("build.command[1]");
+    });
+
+    it("ist fail-closed bei unlesbarer Konfiguration", () => {
+      // Ein Waechter, der eine kaputte Datei als "keine Funde" durchwinkt,
+      // ist keiner.
+      expect(() => mitFixture(`{ "build": { `, (d) => pruefeDeployAutoritaet([d]))).toThrow(
+        /kein gueltiges JSONC/,
+      );
+    });
+  });
+
   it("laesst harmlose Buildbefehle durch", () => {
     const verzeichnis = mkdtempSync(join(tmpdir(), "eyt142-deploy-ok-"));
     const datei = join(verzeichnis, "wrangler.jsonc");

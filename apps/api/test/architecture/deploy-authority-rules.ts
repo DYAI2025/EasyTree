@@ -9,11 +9,25 @@
  * Stand. `CLAUDE.md` nennt SQL-Migrationen die EINZIGE Schemaquelle; das hier
  * ist der Waechter dazu.
  *
- * Fail-closed: findet die Regel keine `wrangler.jsonc`, ist sie ROT. Sonst
- * wuerde ein Umbenennen der Dateien den Waechter still abschalten — genau das
- * Muster, das `CLAUDE.md` als vakuoses Gate verbietet.
+ * Fail-closed an zwei Stellen: findet die Regel keine `wrangler.jsonc`, ist sie
+ * ROT. Und laesst sich eine gefundene Datei nicht parsen, ist sie ebenfalls ROT
+ * — ein Waechter, der eine unlesbare Konfiguration als "keine Funde"
+ * durchwinkt, ist keiner.
+ *
+ * ## Warum `jsonc-parser` und keine eigene Vorverarbeitung
+ *
+ * `wrangler.jsonc` ist JSONC: Kommentare und nachlaufende Kommata sind erlaubt,
+ * `JSON.parse` verweigert beides — und Prettier SETZT die Kommata. Die erste
+ * Fassung dieses Waechters brachte dafuer zwei handgeschriebene,
+ * zeichenkettenbewusste Vorverarbeitungsschritte mit. Die waren korrekt, aber
+ * sie sind eine eigene Parserimplementierung mit eigener Fehlerflaeche
+ * (Escapes, verschachtelte Blockkommentare, `//` innerhalb von Werten), die
+ * niemand pflegen will. `jsonc-parser` ist der Parser, den VS Code selbst fuer
+ * genau dieses Format benutzt.
  */
 import { readFileSync } from "node:fs";
+
+import { parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser";
 
 /** Werkzeuge, die Schema veraendern. Keines gehoert in einen Cloudflare-Build. */
 export const SCHEMA_WERKZEUGE: readonly string[] = [
@@ -32,89 +46,26 @@ export interface DeployAuthorityFund {
 }
 
 /**
- * Entfernt Zeilen- und Blockkommentare aus JSONC.
+ * Liest eine JSONC-Datei streng.
  *
- * Bewusst konservativ: Zeichenketten bleiben unangetastet, sonst wuerde ein
- * `https://…` in einem Wert als Kommentarbeginn gelesen.
+ * `jsonc-parser` ist von Haus aus tolerant und liefert auch bei Syntaxfehlern
+ * ein Teilergebnis. Fuer einen Sicherheitswaechter ist das die falsche
+ * Voreinstellung: eine halb gelesene Konfiguration sieht aus wie eine saubere
+ * ohne Befunde. Deshalb werden die Fehler eingesammelt und fuehren zum Wurf.
  */
-export function entferneJsoncKommentare(text: string): string {
-  let ergebnis = "";
-  let inString = false;
-  let escaped = false;
-  let i = 0;
-  while (i < text.length) {
-    const zeichen = text[i] ?? "";
-    if (inString) {
-      ergebnis += zeichen;
-      if (escaped) {
-        escaped = false;
-      } else if (zeichen === "\\") {
-        escaped = true;
-      } else if (zeichen === '"') {
-        inString = false;
-      }
-      i += 1;
-      continue;
-    }
-    if (zeichen === '"') {
-      inString = true;
-      ergebnis += zeichen;
-      i += 1;
-      continue;
-    }
-    if (zeichen === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i += 1;
-      continue;
-    }
-    if (zeichen === "/" && text[i + 1] === "*") {
-      i += 2;
-      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i += 1;
-      i += 2;
-      continue;
-    }
-    ergebnis += zeichen;
-    i += 1;
+export function liesJsonc(datei: string): unknown {
+  const fehler: ParseError[] = [];
+  const wert: unknown = parseJsonc(readFileSync(datei, "utf8"), fehler, {
+    allowTrailingComma: true,
+    disallowComments: false,
+  });
+  if (fehler.length > 0) {
+    const beschreibung = fehler
+      .map((f) => `${printParseErrorCode(f.error)} bei Offset ${f.offset}`)
+      .join(", ");
+    throw new Error(`${datei} ist kein gueltiges JSONC (${beschreibung}). Fail-closed.`);
   }
-  return ergebnis;
-}
-
-/**
- * Entfernt abschliessende Kommata vor `}` oder `]`.
- *
- * JSONC erlaubt sie, `JSON.parse` nicht — und Prettier SETZT sie in
- * `wrangler.jsonc`. Ohne diesen Schritt scheitert der Waechter an der
- * Formatierung statt an seinem Gegenstand.
- */
-export function entferneNachlaufendeKommata(text: string): string {
-  // Zeichenkettenbewusst: ein naives `text.replace(/,(\s*[}\]])/g, "$1")`
-  // wuerde auch in einem Wert wie "a, }" zuschlagen und den Inhalt der
-  // Konfiguration veraendern, die der Waechter gerade beurteilen soll.
-  const zeichen: string[] = [];
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text[i] ?? "";
-    if (inString) {
-      zeichen.push(c);
-      if (escaped) escaped = false;
-      else if (c === "\\") escaped = true;
-      else if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      zeichen.push(c);
-      continue;
-    }
-    if (c === ",") {
-      let j = i + 1;
-      while (j < text.length && /\s/.test(text[j] ?? "")) j += 1;
-      const naechstes = text[j] ?? "";
-      if (naechstes === "}" || naechstes === "]") continue; // Komma verwerfen
-    }
-    zeichen.push(c);
-  }
-  return zeichen.join("");
+  return wert;
 }
 
 /** Sammelt jede Zeichenkette unterhalb von `build`/`deploy`. */
@@ -141,7 +92,8 @@ function sammleBefehle(
 /**
  * Prueft die genannten Wrangler-Konfigurationen.
  *
- * @throws wenn eine Datei fehlt — fail-closed, siehe Kopfkommentar.
+ * @throws wenn die Liste leer ist oder eine Datei nicht parsebar ist —
+ *         fail-closed, siehe Kopfkommentar.
  */
 export function pruefeDeployAutoritaet(dateien: readonly string[]): DeployAuthorityFund[] {
   if (dateien.length === 0) {
@@ -151,10 +103,7 @@ export function pruefeDeployAutoritaet(dateien: readonly string[]): DeployAuthor
   }
   const funde: DeployAuthorityFund[] = [];
   for (const datei of dateien) {
-    const roh = readFileSync(datei, "utf8");
-    const konfiguration = JSON.parse(
-      entferneNachlaufendeKommata(entferneJsoncKommentare(roh)),
-    ) as Record<string, unknown>;
+    const konfiguration = liesJsonc(datei) as Record<string, unknown>;
     for (const abschnitt of ["build", "deploy"]) {
       if (!(abschnitt in konfiguration)) continue;
       sammleBefehle(konfiguration[abschnitt], abschnitt, (feld, wert) => {

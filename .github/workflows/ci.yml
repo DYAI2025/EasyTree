@@ -74,16 +74,41 @@ jobs:
           set -euo pipefail
           pnpm --filter @easytree/web run build:cf
           pnpm --filter @easytree/web run cf:dry-run | tee /tmp/cf-web-dry.log
-          groesse="$(grep -oE 'Total Upload: [0-9.]+ KiB / gzip: [0-9.]+ KiB' /tmp/cf-web-dry.log | tail -1)"
+
+          # Drei Stufen, absichtlich in dieser Reihenfolge. Wrangler ist ein
+          # Fremdwerkzeug; sein Ausgabeformat ist keine Zusage an uns. Eine
+          # Formataenderung soll die Zusammenfassung verschlechtern, nicht den
+          # Build faellen — aber ein voelliges Fehlen der Messung MUSS laut sein.
+          erwartet='Total Upload: [0-9.]+ KiB / gzip: [0-9.]+ KiB'
+          groesse="$(grep -oE "$erwartet" /tmp/cf-web-dry.log | tail -1 || true)"
+          hinweis=""
           if [ -z "$groesse" ]; then
-            echo "Keine Groessenzeile im Wrangler-Output gefunden — der Schritt misst nichts." >&2
+            # Stufe 2: Zeile existiert, aber anders formatiert — verbatim melden.
+            groesse="$(grep -aF 'Total Upload' /tmp/cf-web-dry.log | tail -1 | sed 's/^[[:space:]]*//' || true)"
+            if [ -n "$groesse" ]; then
+              hinweis="> Hinweis: Wrangler hat das Format geaendert; erwartet war \`$erwartet\`. Die Zeile steht unveraendert oben — die Schwellenpruefung unten ist damit NICHT automatisiert."
+            fi
+          fi
+          if [ -z "$groesse" ]; then
+            # Stufe 3: gar keine Groessenangabe — der Schritt haette nichts gemessen.
+            echo "Keine 'Total Upload'-Zeile im Wrangler-Output. Der Schritt misst nichts und ist deshalb rot." >&2
             exit 1
           fi
-          echo "### Cloudflare Web-Worker (EYT-142)" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`$groesse\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Free-Tier-Grenze: 3072 KiB gzip." >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "### Cloudflare Web-Worker (EYT-142)"
+            echo ""
+            echo "\`$groesse\`"
+            echo ""
+            echo "Free-Tier-Grenze: 3072 KiB gzip."
+            # Bewusst ein `if` und keine `&&`-Kette: unter `set -e` liefert
+            # `[ -n "" ] && …` den Status 1 und faellt den ganzen Schritt — im
+            # NORMALFALL, in dem gar kein Hinweis noetig ist. Lokal gemessen.
+            if [ -n "$hinweis" ]; then
+              echo ""
+              echo "$hinweis"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Real-Browser-Smoke der Web-Shell (EYT-58b): Tastatur, Fokus,
   # Viewports und axe inkl. color-contrast in echtem Chromium.
