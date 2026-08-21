@@ -162,3 +162,52 @@ also zu Recht armiert.
 **Nicht gemergt und nicht versioniert:** `.plumbline/` steht in `.gitignore`. Die neue Bindung
 existiert damit nur lokal. Wer den Gate auf einer anderen Maschine fährt, bringt seine eigene
 Bindung mit und muss sie einmalig gegen den Manifest-Hash `d5b483614d8e81c7…` setzen.
+
+## Nachtrag — Revision 6 am 22.08.2026
+
+Der Reparatur-Slice zu PR #89 (Laufzeit-Proxyziel, Plan
+`docs/plans/2026-08-21-eyt-126-laufzeit-proxyziel.md`) brauchte sechs Pfade, die
+Revision 5 nicht deckte. Der PO hat sie am 22.08.2026 bestätigt („Revision 6
+bestätigt"), ausdrücklich ohne weitere Erweiterung.
+
+```
+apps/web/app/api/**
+apps/web/app/health/**
+apps/web/app/ready/**
+apps/web/instrumentation.ts
+apps/api/test/architecture/secret-surface-rules.ts
+apps/api/test/container-bindung.test.ts
+```
+
+Der Grund liegt in einer Messung, nicht in einer Vorliebe: der Same-Origin-Proxy
+muss aus `next.config.ts`-`rewrites()` heraus, weil Next das Ergebnis beim Bauen
+nach `routes-manifest.json` schreibt und ein fertiges Image damit an sein Ziel
+gebunden wäre. Der naheliegende Ersatz — eine Next-16-`proxy.ts` — ist zweifach
+gemessen ausgeschieden: `NextResponse.rewrite()` auf ein externes Ziel sendet
+`x-middleware-rewrite` mit der internen Adresse an den Browser und lässt sich
+nicht entfernen, ohne die Weiterleitung abzuschalten; und
+`@opennextjs/cloudflare` bricht mit „Node.js middleware is not currently
+supported" ab, was den Pflichtjob `build-web` rot machen würde. Übrig bleiben
+Route Handler — und die liegen unter `apps/web/app/`, wo Revision 5 nur
+`planung/**` und `globals.css` führte.
+
+**Nichts weiter war nötig.** `apps/web/lib/**` und `apps/web/test/**` stehen seit
+Revision 1 als Platzhalter in der Scope, die Container- und CI-Pfade kamen mit
+Revision 5.
+
+Bindung neu gezogen: `d5b483614d8e81c7…` → `2741c0ec0935d01d…`, geprüft gegen
+`shasum -a 256` des Manifests. Die Digest-Konvention wurde vorher erneut gegen
+**alle fünf** bestehenden Revisionen verifiziert (5/5), nicht aus diesem
+Dokument übernommen. Revisionen 1–5 sind unverändert, kein Pfad ging verloren.
+Der Gate meldet mit Base `origin/master`: `PRIL scope check passed … (33 changed
+files)`, Exit 0.
+
+**Zwei Grenzen, in diesem Lauf gemessen und vorher nirgends notiert:**
+
+1. `.plumbline/` ist per `.gitignore:35` ausgeschlossen, der Feature-Marker
+   `docs/context/.active-feature` dagegen versioniert.
+2. Fehlt die Bindung — etwa in einem frischen Worktree — meldet der Gate
+   trotzdem `passed` und **nicht** `SCOPE_AUTHORITY_CHANGED`. Gemessen durch
+   Wegbewegen von `.plumbline/` und erneuten Lauf. Die Manipulationsbindung ist
+   dort also nicht scharf; wer in einem neuen Worktree arbeitet, kopiert
+   `.plumbline/` mit.

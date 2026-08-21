@@ -22,7 +22,13 @@
       "apps/web/Dockerfile",
       "apps/web/next.config.ts",
       "apps/api/test/architecture/deploy-authority-rules.ts",
-      "apps/api/test/deploy-authority.test.ts"
+      "apps/api/test/deploy-authority.test.ts",
+      "apps/web/app/api/**",
+      "apps/web/app/health/**",
+      "apps/web/app/ready/**",
+      "apps/web/instrumentation.ts",
+      "apps/api/test/architecture/secret-surface-rules.ts",
+      "apps/api/test/container-bindung.test.ts"
     ],
     "governance": [
       "docs/canvas/**",
@@ -235,6 +241,61 @@
         ]
       },
       "scope_digest": "sha256:fbd66901a4dcac99ff50878669120f9635d623fd7def11738a69d5a910f5a792"
+    },
+    {
+      "revision": 6,
+      "origin": "PO-Bestaetigung 22.08.2026: „Revision 6 bestätigt“ — Erweiterung des bestehenden EYT-126/Sprint-6-Scopes um genau sechs Pfade, ausgeloest durch den Reparatur-Slice zu PR #89.",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-22T00:06:57+02:00",
+      "rationale": "Revision 6 nimmt sechs Pfade auf, die unmittelbar noetig sind, um den bereits freigegebenen EYT-126-Containervertrag zu erfuellen: ein identisches Web-OCI-Image muss sein API-Ziel zur LAUFZEIT erhalten koennen, ohne interne Dienstadressen an den Browser zu exponieren. Warum genau diese Pfade, gemessen am 21.08.2026 auf Next 16.2.11: der Same-Origin-Proxy kann nicht in next.config.ts-rewrites() bleiben, weil Next das Ergebnis beim Bauen nach routes-manifest.json schreibt und ein fertiges Image damit an sein Ziel gebunden waere. Der naheliegende Ersatz, eine Next-16-proxy.ts (Node-Middleware), ist zweifach gemessen ausgeschieden: NextResponse.rewrite() auf ein externes Ziel sendet den Kopf x-middleware-rewrite mit der internen Adresse an den Browser und laesst sich nicht entfernen, ohne die Weiterleitung selbst abzuschalten; und @opennextjs/cloudflare bricht mit ‚Node.js middleware is not currently supported‘ ab, was den Pflichtjob build-web rot machen wuerde. Uebrig bleiben Route Handler — daher apps/web/app/api/**, apps/web/app/health/** und apps/web/app/ready/**, die Revision 5 nicht deckte (dort standen unter apps/web/app/ nur planung/** und globals.css). apps/web/instrumentation.ts ist die Startsperre; sie liegt im Wurzelverzeichnis von apps/web und faellt weder unter lib/** noch unter test/**. apps/api/test/architecture/secret-surface-rules.ts muss die eine neue Laufzeit-Umgebungsstelle in ERLAUBTE_UMGEBUNGSLESER aufnehmen, sonst verweigert der Geheimnis-Waechter den Slice — gemessen als roter Lauf mit ‚runtime-reads-no-environment‘. apps/api/test/container-bindung.test.ts ist der neue Regressionswaechter gegen fail-open GIT_SHA und fail-open Proxyziel. AUSDRUECKLICH KEINE weitere Erweiterung: alle uebrigen Dateien des Slice liegen bereits in der Scope — apps/web/lib/** und apps/web/test/** sind seit Revision 1 Platzhalter, next.config.ts, turbo.json, beide Dockerfiles, docker-compose.yml, scripts/** und .github/workflows/** kamen mit Revision 5. Supabase, Staging-Deploy, Produktionsdaten, der Cloudflare-Abbau (EYT-149) und der Merge bleiben ausserhalb dieses Reparatur-Slice; supabase/** bleibt wie in Revision 5 ausgeschlossen.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**",
+          ".dockerignore",
+          "docker-compose.yml",
+          "turbo.json",
+          "apps/api/Dockerfile",
+          "apps/web/Dockerfile",
+          "apps/web/next.config.ts",
+          "apps/api/test/architecture/deploy-authority-rules.ts",
+          "apps/api/test/deploy-authority.test.ts",
+          "apps/web/app/api/**",
+          "apps/web/app/health/**",
+          "apps/web/app/ready/**",
+          "apps/web/instrumentation.ts",
+          "apps/api/test/architecture/secret-surface-rules.ts",
+          "apps/api/test/container-bindung.test.ts"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/reality/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md",
+          ".github/workflows/**",
+          "scripts/**",
+          "docs/runbooks/**",
+          "docs/architecture/**"
+        ]
+      },
+      "scope_digest": "sha256:bd4224b230fc968b4d3df7fca50b0a5940c24e143b735274757bdf1c8fbdc4bf"
     }
   ]
 }
