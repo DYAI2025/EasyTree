@@ -4,7 +4,7 @@
 # CI dient sie demselben Zweck. Sie beschreibt AUSSCHLIESSLICH Topologie und
 # Konfigurationsnaehte — keine Fachlogik, keine Secrets, keine Migrationen.
 #
-# Zwei Grenzen, die hier sichtbar sein muessen:
+# Drei Grenzen, die hier sichtbar sein muessen:
 #
 #  1. Nur `web` veroeffentlicht einen Port. Die API haengt am internen Netz und
 #     ist unter dem Dienstnamen `api` erreichbar. Der Browser sieht deshalb
@@ -13,6 +13,10 @@
 #     Migrationspfads bleibt die Supabase-GitHub-Integration; Coolify und
 #     Railway werden keine zweite Migration Authority (EYT-126, EYT-142).
 #     `apps/api/test/deploy-authority.test.ts` erzwingt das.
+#  3. Weder `GIT_SHA` noch `EASYTREE_API_PROXY_TARGET` haben einen Vorgabewert.
+#     Beide hatten es frueher (`:-unknown`, `:-http://api:3001`) — ein Deploy
+#     ohne Herkunft und ein geratenes Proxyziel waren damit ueber genau diesen
+#     Pfad erzeugbar (EYT-126).
 
 services:
   api:
@@ -20,7 +24,10 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
       args:
-        GIT_SHA: ${GIT_SHA:-unknown}
+        # `:?` statt `:-`: ein Image ohne Herkunft ist kein Kandidat fuer ein
+        # Deploy. Frueher trug diese Zeile den Vorgabewert `unknown` — damit war
+        # `revision=unknown` ueber genau diesen Pfad erzeugbar (EYT-126).
+        GIT_SHA: ${GIT_SHA:?GIT_SHA fehlt - baue mit GIT_SHA=$(git rev-parse HEAD)}
     image: ${EASYTREE_API_IMAGE:-easytree-api:local}
     restart: unless-stopped
     # Kein `ports:`. Bewusst. Ein veroeffentlichter API-Port waere zusaetzliche
@@ -58,11 +65,10 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        GIT_SHA: ${GIT_SHA:-unknown}
-        # BAUZEIT, nicht Laufzeit — gemessen am 21.08.2026, siehe den Kopf von
-        # apps/web/Dockerfile. `next start` liest die Weiterleitungen aus dem
-        # gebauten routes-manifest.json und ignoriert die Umgebung.
-        EASYTREE_API_PROXY_TARGET: ${EASYTREE_API_PROXY_TARGET:-http://api:3001}
+        # Das Web-Image bekommt KEIN Proxyziel mehr mit auf den Weg. Es ist seit
+        # EYT-126 an kein Ziel und an keinen Anbieter gebunden; das Ziel steht
+        # unten bei `environment` und gilt zur Laufzeit.
+        GIT_SHA: ${GIT_SHA:?GIT_SHA fehlt - baue mit GIT_SHA=$(git rev-parse HEAD)}
     image: ${EASYTREE_WEB_IMAGE:-easytree-web:local}
     restart: unless-stopped
     depends_on:
@@ -74,6 +80,10 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
+      # LAUFZEIT, nicht Bauzeit — gemessen 21.08.2026, siehe den Kopf von
+      # apps/web/Dockerfile. Kein Default: ein geratenes Ziel sieht im Browser
+      # aus wie eine leere Woche, nicht wie ein Fehler.
+      EASYTREE_API_PROXY_TARGET: ${EASYTREE_API_PROXY_TARGET:?EASYTREE_API_PROXY_TARGET fehlt - interner Dienstname der API, z. B. http://api:3001}
     healthcheck:
       test:
         [
