@@ -1,0 +1,88 @@
+# easyTree — Container-Topologie fuer Staging (EYT-126).
+#
+# Coolify konsumiert diese Datei als "Docker Compose"-Ressource; lokal und in
+# CI dient sie demselben Zweck. Sie beschreibt AUSSCHLIESSLICH Topologie und
+# Konfigurationsnaehte — keine Fachlogik, keine Secrets, keine Migrationen.
+#
+# Zwei Grenzen, die hier sichtbar sein muessen:
+#
+#  1. Nur `web` veroeffentlicht einen Port. Die API haengt am internen Netz und
+#     ist unter dem Dienstnamen `api` erreichbar. Der Browser sieht deshalb
+#     genau eine Origin und niemals eine interne Adresse.
+#  2. Weder `api` noch `web` fuehren Schemawerkzeuge aus. Eigentuemerin des
+#     Migrationspfads bleibt die Supabase-GitHub-Integration; Coolify und
+#     Railway werden keine zweite Migration Authority (EYT-126, EYT-142).
+#     `apps/api/test/deploy-authority.test.ts` erzwingt das.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    image: ${EASYTREE_API_IMAGE:-easytree-api:local}
+    restart: unless-stopped
+    # Kein `ports:`. Bewusst. Ein veroeffentlichter API-Port waere zusaetzliche
+    # oeffentliche Oberflaeche fuer ein Problem, das der Same-Origin-Proxy loest.
+    expose:
+      - "3001"
+    environment:
+      # Der kanonische Variablensatz aus packages/config/src/schema.ts.
+      # `:?` statt Default: eine fehlende Pflichtvariable soll den Start
+      # verweigern, nicht stillschweigend auf etwas Plausibles zeigen.
+      NODE_ENV: ${NODE_ENV:-production}
+      API_PORT: "3001"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL fehlt — verbindet als easytree_app, niemals als postgres}
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL fehlt}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY fehlt}
+      DATABASE_SSL_ROOT_CERT: ${DATABASE_SSL_ROOT_CERT:?DATABASE_SSL_ROOT_CERT ist in production Pflicht}
+    healthcheck:
+      # `node -e` statt curl: das Laufzeit-Image ist bewusst schlank und
+      # enthaelt weder curl noch wget. Node 22 bringt `fetch` global mit.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        # BAUZEIT, nicht Laufzeit — gemessen am 21.08.2026, siehe den Kopf von
+        # apps/web/Dockerfile. `next start` liest die Weiterleitungen aus dem
+        # gebauten routes-manifest.json und ignoriert die Umgebung.
+        EASYTREE_API_PROXY_TARGET: ${EASYTREE_API_PROXY_TARGET:-http://api:3001}
+    image: ${EASYTREE_WEB_IMAGE:-easytree-web:local}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${EASYTREE_WEB_PUBLIC_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s

@@ -1,6 +1,9 @@
+import path from "node:path";
+
 import type { NextConfig } from "next";
 
 import { resolveBuildProxyTarget } from "./lib/api-proxy-target";
+import { resolveNextOutput } from "./lib/next-output";
 
 /**
  * easyTree Web-/PWA-Shell (EYT-41, Same-Origin seit EYT-50).
@@ -22,6 +25,15 @@ import { resolveBuildProxyTarget } from "./lib/api-proxy-target";
  * ins Leere laufen.
  */
 const nextConfig: NextConfig = {
+  /**
+   * Die Ablaufverfolgung fuer `output: "standalone"` braucht die
+   * Workspace-Wurzel, nicht `apps/web`. Ohne diese Angabe raet Next sie aus
+   * den gefundenen Lockfiles ("Detected additional lockfiles") — und ein
+   * Raten entscheidet darueber, ob die Workspace-Pakete im Standalone-Bundle
+   * landen.
+   */
+  outputFileTracingRoot: path.join(__dirname, "..", ".."),
+  ...resolveNextOutput(process.env),
   async rewrites() {
     const target = resolveBuildProxyTarget(process.env);
     return [

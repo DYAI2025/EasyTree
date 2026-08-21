@@ -10,10 +10,20 @@
  *
  * ## Build-Konfiguration, nicht Laufzeitschalter
  *
- * `rewrites()` laeuft beim Bauen und beim Start des Servers. Fuer diesen Slice
- * ist die Variable damit BUILD- und DEPLOYMENTkonfiguration. Ob ein bereits
- * gebautes Image sie zur Laufzeit noch umschalten kann, ist ungeprueft und
- * wird hier nicht behauptet.
+ * `rewrites()` laeuft beim BAUEN. Next schreibt das Ergebnis nach
+ * `.next/routes-manifest.json`, und `next start` liest die Weiterleitungen von
+ * dort — NICHT erneut aus der Umgebung.
+ *
+ * Das ist gemessen und nicht mehr offen (21.08.2026, Next 16.2.11, EYT-126):
+ * gebaut mit `http://buildtime-marker.invalid:9999`, gestartet mit
+ * `EASYTREE_API_PROXY_TARGET=http://127.0.0.1:3999` — der Server antwortete auf
+ * `/health` mit HTTP 500 und protokollierte
+ * `Failed to proxy http://buildtime-marker.invalid:9999/health … ENOTFOUND`.
+ * Eine fruehere Fassung dieses Kommentars liess die Frage ausdruecklich offen.
+ *
+ * Fuer den Containerbetrieb heisst das: der Wert wird als `--build-arg` in das
+ * Web-Image gebacken. Ein bereits gebautes Image laesst sich zur Laufzeit NICHT
+ * auf ein anderes Ziel umschalten.
  *
  * Deshalb ist diese Variable bewusst NICHT `NEXT_PUBLIC_*`. Alles mit diesem
  * Praefix wird in das Browserbuendel eingebacken und beim Build festgeschrieben
