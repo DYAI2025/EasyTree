@@ -2,35 +2,38 @@
 #
 # easyTree Web-Shell (Next.js App Router) als OCI-Workload — EYT-126.
 #
-# ## Das Proxyziel ist BAUZEIT-Konfiguration. Gemessen, nicht vermutet.
+# ## Das Proxyziel ist LAUFZEIT-Konfiguration. Gemessen, nicht vermutet.
 #
-# `next.config.ts` loest `EASYTREE_API_PROXY_TARGET` in `rewrites()` auf. Next
-# schreibt das Ergebnis beim Bauen nach `.next/routes-manifest.json`; `next
-# start` liest die Weiterleitungen aus diesem Manifest und NICHT erneut aus der
-# Umgebung.
+# Der Same-Origin-Proxy liegt in Route Handlern (`app/api/[[...pfad]]`,
+# `app/health`, `app/ready`), nicht mehr in `next.config.ts`-`rewrites()`. Route
+# Handler sind dynamischer Servercode: sie lesen `EASYTREE_API_PROXY_TARGET` bei
+# JEDER Anfrage neu.
 #
-# Nachgemessen am 21.08.2026 auf Next 16.2.11: gebaut mit
-# `http://buildtime-marker.invalid:9999`, gestartet mit
-# `EASYTREE_API_PROXY_TARGET=http://127.0.0.1:3999` — der Server antwortete auf
-# `/health` mit HTTP 500 und protokollierte
-# `Failed to proxy http://buildtime-marker.invalid:9999/health … ENOTFOUND`.
-# Der Laufzeitwert wurde also ignoriert.
+# Nachgemessen am 21.08.2026 auf Next 16.2.11: EIN Standalone-Build, danach
+# derselbe Server dreimal mit unterschiedlichem Ziel gestartet — die Antworten
+# kamen von den drei verschiedenen Stubs, ohne Neubau dazwischen. Der
+# Container-Smoke wiederholt den Nachweis gegen denselben IMAGE-DIGEST.
 #
-# Konsequenz, die hier ehrlich stehen muss: das Web-IMAGE ist an sein Ziel
-# gebunden, nicht an einen Anbieter. Dieselbe Datei, derselbe Startpfad und
-# dieselben Argumente bauen es fuer Coolify/VPS wie fuer Railway — nur der
-# Wert unterscheidet sich. "Ein Image fuer beide Plattformen gleichzeitig"
-# waere dagegen eine Behauptung, die die Messung nicht deckt.
+# Deshalb steht hier KEIN `ARG EASYTREE_API_PROXY_TARGET` mehr. Dieses Image ist
+# an keinen Anbieter und an kein Ziel gebunden; dieselbe Datei und derselbe
+# Startpfad liefern es fuer Coolify/VPS wie fuer Railway.
 #
-# Fail-closed ist es trotzdem: `next build` setzt NODE_ENV=production, und
-# `normalizeProxyTarget` wirft dort ohne expliziten Wert. Ein vergessenes
-# `--build-arg` faellt den Build, statt still auf localhost zu zeigen.
+# ## Fail-closed
+#
+# `instrumentation.ts` prueft das Ziel beim Serverstart. Fehlt es oder ist es
+# ungueltig, meldet Next "Failed to prepare server" und beantwortet JEDE Route
+# mit 500 — auch `/`. Der Prozess haelt dabei den Port; er bedient aber keinen
+# normalen Anwendungsverkehr, und der Compose-Healthcheck auf `/` schlaegt fehl.
+#
+# `GIT_SHA` hat bewusst KEINEN Vorgabewert und wird unten erzwungen: ein Image
+# mit `revision=unknown` waere ein Deploy ohne Herkunft.
 #
 # ## Der Browser sieht diese Adresse nie
 #
 # Das Ziel ist ausdruecklich KEIN `NEXT_PUBLIC_*`. Es wird serverseitig
-# aufgeloest; im Browserbuendel steht es nicht. Die Weiterleitung passiert im
-# Next-Server im Container.
+# aufgeloest; weder im Browserbuendel noch in einem Antwortkopf steht es — auch
+# nicht in einem `location`-Kopf, den die Durchreiche in einen relativen Pfad
+# uebersetzt.
 
 ARG NODE_IMAGE=node:22.23.1-bookworm-slim
 
@@ -54,8 +57,6 @@ RUN pnpm install --frozen-lockfile --filter @easytree/web...
 
 # ---------------------------------------------------------------------------
 FROM deps AS build
-ARG EASYTREE_API_PROXY_TARGET
-ENV EASYTREE_API_PROXY_TARGET=${EASYTREE_API_PROXY_TARGET}
 # `standalone` legt unter `.next/standalone/` einen selbsttragenden Server samt
 # der wirklich benutzten node_modules ab (~23 MB statt des ganzen Workspace).
 # Der Schalter ist bewusst nicht fest verdrahtet — siehe lib/next-output.ts.
@@ -67,7 +68,14 @@ RUN pnpm --filter @easytree/web... build
 
 # ---------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runner
-ARG GIT_SHA=unknown
+# Kein Vorgabewert, und der Wert wird geprueft: ein leeres ARG faellt sonst
+# still auf ein Label ohne Inhalt zurueck, und "das Image ist gruen" waere eine
+# Aussage ueber irgendein Image (EYT-126).
+ARG GIT_SHA
+RUN test -n "${GIT_SHA}" || { \
+      echo "GIT_SHA fehlt. Baue mit --build-arg GIT_SHA=\$(git rev-parse HEAD)." >&2; \
+      exit 1; \
+    }
 LABEL org.opencontainers.image.title="easytree-web" \
       org.opencontainers.image.description="easyTree Web-Shell (Next.js) — EYT-126" \
       org.opencontainers.image.source="https://github.com/DYAI2025/EasyTree" \

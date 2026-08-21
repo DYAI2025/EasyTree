@@ -69,7 +69,14 @@ RUN pnpm --filter @easytree/api --prod --legacy deploy /prod/api
 
 # ---------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runner
-ARG GIT_SHA=unknown
+# Kein Vorgabewert, und der Wert wird geprueft: ein leeres ARG faellt sonst
+# still auf ein Label ohne Inhalt zurueck, und "das Image ist gruen" waere eine
+# Aussage ueber irgendein Image (EYT-126).
+ARG GIT_SHA
+RUN test -n "${GIT_SHA}" || { \
+      echo "GIT_SHA fehlt. Baue mit --build-arg GIT_SHA=\$(git rev-parse HEAD)." >&2; \
+      exit 1; \
+    }
 LABEL org.opencontainers.image.title="easytree-api" \
       org.opencontainers.image.description="easyTree API (NestJS) — EYT-126" \
       org.opencontainers.image.source="https://github.com/DYAI2025/EasyTree" \
