@@ -577,7 +577,13 @@ Produktionsprofil ohne `DATABASE_SSL_ROOT_CERT` und geordnetes Herunterfahren. R
 
 **Ein Deploy ist trotzdem gesperrt.** `BLOCKER_ENVIRONMENT_SEPARATION`: es existiert keine
 EasyTree-Datengrenze, deren `project_ref` von `inypnrvpawvhgiyagxbd` verschieden ist
-(nachgemessen 21.08.2026 über `list_projects` und `list_branches`). Siehe
+(nachgemessen 21.08.2026 über `list_projects` und `list_branches`). Der **kostenlose** Weg dorthin
+ist zusätzlich versperrt: ein `create_project`-Versuch für `easytree-staging` (Kosten gemessen
+0 $/Monat) wurde mit einem Quota-Fehler abgelehnt — die Free-Projekt-Quota zählt **pro Nutzer**
+über alle Organisationen hinweg, in denen er Owner oder Admin ist, und `DYAI2025` hat sie mit zwei
+aktiven Free-Projekten ausgeschöpft; das zweite ist über diesen Zugang nicht sichtbar. Ein
+pausiertes Projekt zählt laut Supabase-Doku nicht mit, das pausierte „Bazodiac" zu löschen hilft
+also nicht. Siehe
 [`docs/plans/2026-08-20-sprint-6-staging-blocker.md`](docs/plans/2026-08-20-sprint-6-staging-blocker.md).
 
 ## Deployment (Railway) — measured 01.08.2026

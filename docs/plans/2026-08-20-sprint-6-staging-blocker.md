@@ -17,6 +17,58 @@
 >
 > Wer aus „Cloudflare ist weg" schliesst, der Blocker sei weg, hat die falsche Hälfte gelesen.
 
+> **Nachtrag 2, 21.08.2026 — die Ursache ist jetzt eine Stufe genauer, und eine frühere Annahme
+> war falsch.** Nach PO-Freigabe wurde versucht, ein zweites Projekt `easytree-staging`
+> (eu-west-2, Org `iudjsdyrammpwhtryrir` „EASTree", `get_cost` → **0 $/Monat**) anzulegen. Der
+> Aufruf wurde abgelehnt:
+>
+> ```
+> BadRequestException: The following organization members have reached their maximum limits
+> for the number of active free projects within organizations where they are an administrator
+> or owner: DYAI2025 (2 project limit).
+> ```
+>
+> **Korrektur:** In der ersten Lesart galt das pausierte Projekt `ykoijifgweoapitabgxx`
+> („Bazodiac", `status: INACTIVE`) als einer der beiden belegten Slots. Das ist falsch. Die
+> Supabase-Doku sagt an zwei Stellen wörtlich das Gegenteil — Billing FAQ: „You are entitled to
+> two active free projects. **Paused projects do not count towards your quota.**"; About billing:
+> „Paused projects do not count towards your free project limit." Bazodiac zu löschen oder zu
+> pausieren ist damit **gegenstandslos**.
+>
+> **Die tatsächliche fehlende Voraussetzung ist damit zweistufig:**
+>
+> 1. Es existiert keine EasyTree-Datengrenze, deren `project_ref` von `inypnrvpawvhgiyagxbd`
+>    verschieden ist. (unverändert)
+> 2. Der **kostenlose** Weg dorthin ist versperrt, weil die Free-Projekt-Quota **pro Nutzer**
+>    zählt, nicht pro Organisation, und `DYAI2025` — Owner/Admin von EASTree — sie mit zwei
+>    aktiven Free-Projekten ausgeschöpft hat. Eines davon ist `inypnrvpawvhgiyagxbd`
+>    (`ACTIVE_HEALTHY`); **das zweite ist über die Management-API dieses Zugangs nicht sichtbar.**
+>
+> Punkt 2 ist belegbar und nicht bloss vermutet: `list_projects` liefert reproduzierbar **genau
+> ein** Projekt (Bazodiac) und **enthält `inypnrvpawvhgiyagxbd` nicht**, obwohl `get_project`
+> darauf antwortet. `list_organizations` liefert nur `rcginbmldqfibmrbtsvr` und **nicht** EASTree,
+> obwohl `get_organization` darauf antwortet. Die Aufzählung ist also nachweislich unvollständig —
+> jede daraus abgeleitete Projektzählung wäre falsch, und deshalb steht hier keine.
+>
+> **Was der abgelehnte Aufruf nebenbei belegt:** die Antwort war ein _Quota_-Fehler, kein
+> 403/Forbidden. Die Autorisierung ist also durchgelaufen; es fehlt Kontingent, nicht Recht.
+> Vorbehalt, weil ungemessen: falls Supabase Quota vor Mitgliedschaft prüft, trägt diese
+> Ableitung nicht.
+>
+> **Nicht-destruktiver nächster Schritt, in dieser Reihenfolge:**
+>
+> 1. Im Dashboard als `DYAI2025` nachsehen, **welches zweite aktive Free-Projekt** die Quota
+>    belegt. Nur dort sichtbar — die API-Aufzählung dieses Zugangs ist unvollständig (s. o.).
+> 2. Ist es entbehrlich: **pausieren**, nicht löschen. Pausierte Projekte zählen nicht.
+> 3. Sonst: eine weitere Free-Plan-Organisation, in der `DYAI2025` **nicht** Owner/Admin ist —
+>    die FAQ nennt genau diesen Weg („You can create another Free Plan organization or change the
+>    role of the affected member").
+> 4. Erst wenn beides ausscheidet, die kostenpflichtige Variante: Pro für EASTree, danach zweites
+>    Projekt oder Preview-Branch (`get_cost` → 0,01344 $/h ≈ 9,81 $/Monat).
+>
+> **Kein Schreibzugriff hat stattgefunden.** Der abgelehnte `create_project`-Aufruf hat nichts
+> angelegt; alles Übrige war read-only. Produktionsdaten wurden zu keinem Zeitpunkt berührt.
+
 ## Worum es geht
 
 EYT-137 verlangt die Kernreise „auf dem für Sprint 6 freigegebenen Staging-Ziel", EYT-142 verlangt

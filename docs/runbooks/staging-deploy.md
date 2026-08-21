@@ -40,6 +40,15 @@ Ein Deploy ist erst zulässig, wenn **alle drei** Bedingungen erfüllt sind:
    `project_ref == parent_project_ref == inypnrvpawvhgiyagxbd`. Die einzige Branch **ist** die
    Produktion. Die Bedingung gilt unverändert.
 
+   **Und der kostenlose Weg dorthin ist versperrt.** Ein Versuch, ein zweites Projekt
+   `easytree-staging` anzulegen (`get_cost` → 0 $/Monat), wurde mit einem **Quota**-Fehler
+   abgelehnt: die Free-Projekt-Quota zählt **pro Nutzer** über alle Organisationen hinweg, in
+   denen er Owner oder Admin ist, und `DYAI2025` hat sie mit zwei aktiven Free-Projekten
+   ausgeschöpft — eines davon ist die Produktion, das zweite ist über diesen Zugang nicht
+   sichtbar. Ein pausiertes Projekt zählt laut Supabase-Doku **nicht** mit; das Pausieren oder
+   Löschen von „Bazodiac" hilft deshalb nicht. Die nicht-destruktiven Auswege stehen im
+   Blockerbericht, Nachtrag 2.
+
 3. **Owner-Freigabe für den Deploy liegt vor.** Ohne (2) gegenstandslos.
 
 **Fail-closed:** Wer (2) nicht positiv belegen kann, hat sie nicht. „Vermutlich Staging" ist kein
