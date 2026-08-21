@@ -102,31 +102,45 @@ es deshalb auskommentiert — ein Platzhalterwert dort wäre schlimmer als keine
 funktionierend aussähe. Der Container-Smoke belegt das negativ: mit `NODE_ENV=production` und
 ohne Wurzelzertifikat **verweigert der API-Container den Start und nennt die Variable**.
 
-### Die achte Größe: `EASYTREE_API_PROXY_TARGET` ist BAUZEIT, nicht Laufzeit
+### Die achte Größe: `EASYTREE_API_PROXY_TARGET` ist LAUFZEIT, nicht Bauzeit
 
 `EASYTREE_API_PROXY_TARGET` ist keine Anwendungsvariable — sie steht bewusst nicht in
-`ENV_VAR_META` — sondern die Naht zwischen Web und API. **Sie wird beim Bauen des Web-Images
-festgeschrieben.**
+`ENV_VAR_META` — sondern die Naht zwischen Web und API. **Sie wird beim START des
+Web-Containers gesetzt und bei jeder Anfrage neu gelesen.**
 
-Das ist gemessen, nicht vermutet (21.08.2026, Next 16.2.11): ein Web-Build mit
-`http://buildtime-marker.invalid:9999`, gestartet mit
-`EASYTREE_API_PROXY_TARGET=http://127.0.0.1:3999`, antwortete auf `/health` mit HTTP 500 und
-protokollierte `Failed to proxy http://buildtime-marker.invalid:9999/health … ENOTFOUND`. `next
-start` liest die Weiterleitungen aus dem gebauten `.next/routes-manifest.json` und **nicht**
-erneut aus der Umgebung.
+Das ist gemessen, nicht vermutet (22.08.2026, Next 16.2.11, EYT-126): der Same-Origin-Proxy
+liegt in Route Handlern (`apps/web/app/api/[[...pfad]]`, `app/health`, `app/ready`), nicht mehr
+in `next.config.ts`-`rewrites()`. Der Container-Smoke baut **ein** Web-Image, hält seinen Digest
+fest und startet **denselben Digest** zweimal gegen verschiedene APIs:
+
+```
+ziel=http://easytree-stub-a:3001 -> {"stub":"easytree-stub-a","pfad":"/health"}
+ziel=http://easytree-stub-b:3001 -> {"stub":"easytree-stub-b","pfad":"/health"}
+vorher=sha256:191a1af9…  nachher=sha256:191a1af9…
+```
+
+**Eine frühere Fassung dieses Abschnitts sagte das Gegenteil, und sie war für ihren Stand
+korrekt:** ein Web-Build mit `http://buildtime-marker.invalid:9999`, mit einem anderen Wert
+gestartet, antwortete auf `/health` mit HTTP 500 und `… ENOTFOUND`. Das galt dem
+`rewrites()`-Weg, den es nicht mehr gibt.
 
 Drei Konsequenzen, die vor dem ersten Deploy bekannt sein müssen:
 
-- Das Web-**Image** ist an sein Ziel gebunden, nicht an einen Anbieter. Für Coolify und für
-  Railway wird dieselbe Datei mit demselben Startpfad gebaut — nur das Argument unterscheidet
-  sich (`--build-arg EASYTREE_API_PROXY_TARGET=…`). „Ein Image für beide Plattformen
-  gleichzeitig" wäre eine Behauptung, die die Messung nicht deckt.
-- Ein vergessenes Build-Argument **fällt den Build**: `next build` setzt `NODE_ENV=production`,
-  und `normalizeProxyTarget` wirft dort ohne expliziten Wert. Kein stilles Zurückfallen auf
-  localhost.
-- Der Browser sieht die Adresse trotzdem nie. Sie ist ausdrücklich kein `NEXT_PUBLIC_*`; die
-  Weiterleitung passiert serverseitig im Web-Container. Der Container-Smoke prüft das ausgeliefert
-  HTML dagegen.
+- Das Web-**Image** ist weder an ein Ziel noch an einen Anbieter gebunden. Für Coolify und für
+  Railway wird dieselbe Datei mit demselben Startpfad gebaut, und es gibt **kein**
+  `--build-arg`, das sich unterscheiden könnte. Der Wert gehört in die Laufzeitumgebung des
+  Web-Dienstes.
+- Eine vergessene Laufzeitvariable **fällt den Serverstart**: `apps/web/instrumentation.ts`
+  prüft sie einmal beim Hochfahren, und danach beantwortet Next **jede** Route mit 500 — auch
+  `/` und `/anmelden`. Kein stilles Zurückfallen auf localhost. Ehrliche Grenze: der Prozess
+  bleibt am Leben und hält den Port, der Compose-Healthcheck auf `/` schlägt fehl und der
+  Container gilt als `unhealthy`. **Sag nicht, der Container starte nicht.**
+- Der Browser sieht die Adresse nie. Sie ist ausdrücklich kein `NEXT_PUBLIC_*`; die
+  Weiterleitung passiert serverseitig im Web-Container. Der Container-Smoke prüft das
+  ausgelieferte HTML, **jeden referenzierten Client-Chunk**, die Antwortköpfe und den
+  `location`-Kopf dagegen — eine absolute Weiterleitung der API auf sich selbst wird in einen
+  relativen Pfad übersetzt (Pfad und Query bleiben erhalten), ein externes Weiterleitungsziel
+  bleibt unangetastet.
 
 Drei Regeln zur Datenbankverbindung, die aus gemessenen Fehlern stammen und nicht verhandelbar
 sind:
@@ -160,8 +174,19 @@ Build- oder Startbefehl ein Schemawerkzeug auf, gehen sie rot.
    ```bash
    SHA="$(git rev-parse HEAD)"
    docker build -f apps/api/Dockerfile --build-arg "GIT_SHA=${SHA}" -t "easytree-api:${SHA}" .
-   docker build -f apps/web/Dockerfile --build-arg "GIT_SHA=${SHA}" \
-     --build-arg "EASYTREE_API_PROXY_TARGET=http://api:3001" -t "easytree-web:${SHA}" .
+   docker build -f apps/web/Dockerfile --build-arg "GIT_SHA=${SHA}" -t "easytree-web:${SHA}" .
+   ```
+
+   `GIT_SHA` hat in **beiden** Dockerfiles keinen Vorgabewert mehr und wird geprüft: ohne
+   `--build-arg` bricht der Bau mit `GIT_SHA fehlt. Baue mit --build-arg GIT_SHA=$(git rev-parse
+HEAD).` ab (gemessen 22.08.2026 für beide Images). Ein Image mit `revision=unknown` ist über
+   diesen Pfad nicht mehr erzeugbar.
+
+   Das Proxyziel wird hier **nicht** übergeben — es ist Laufzeitkonfiguration und steht beim
+   Start:
+
+   ```bash
+   docker run -d --name web -e EASYTREE_API_PROXY_TARGET=http://api:3001 "easytree-web:${SHA}"
    ```
 
    Beide Images tragen den Commit danach als OCI-Label
@@ -191,15 +216,15 @@ Niemals: Produktionsdaten kopieren, echte Personendaten einspielen, echte Stunde
 
 Reihenfolge ist nicht beliebig; sie geht vom Billigsten zum Teuersten.
 
-| Symptom                         | Erste Frage                                           | Werkzeug                                                                    |
-| ------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------- |
-| Container startet nicht         | Fehlt ein Secret?                                     | Containerlogs; `ConfigValidationError` **nennt die Variable, nie den Wert** |
-| `/ready` = 503                  | Ist die DB erreichbar?                                | `GET /ready` liefert den Indikator, der unten ist                           |
-| Boot bricht mit Rollenfehler ab | Verbindet `DATABASE_URL` als `easytree_app`?          | EYT-45-Startgate; das ist korrektes Verhalten, kein Defekt                  |
-| `self-signed certificate`       | Ist `DATABASE_SSL_ROOT_CERT` gesetzt und vollständig? | §3; **nicht** mit No-Verify „lösen"                                         |
-| Leere Woche statt Fehler        | Antwortet die API oder der Proxy?                     | `EASYTREE_API_PROXY_TARGET` — Bauzeitwert des Web-Images, §3                |
-| Web erreicht die API nicht      | Liegen beide Workloads im selben internen Netz?       | Dienstname muss aus dem Web-Container auflösbar sein                        |
-| Publish schlägt fehl            | Läuft die Verbindung über den Transaction-Pooler?     | Erwartet: der Laufzeitkanal-Riegel greift — siehe unten                     |
+| Symptom                         | Erste Frage                                           | Werkzeug                                                                                                                                   |
+| ------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Container startet nicht         | Fehlt ein Secret?                                     | Containerlogs; `ConfigValidationError` **nennt die Variable, nie den Wert**                                                                |
+| `/ready` = 503                  | Ist die DB erreichbar?                                | `GET /ready` liefert den Indikator, der unten ist                                                                                          |
+| Boot bricht mit Rollenfehler ab | Verbindet `DATABASE_URL` als `easytree_app`?          | EYT-45-Startgate; das ist korrektes Verhalten, kein Defekt                                                                                 |
+| `self-signed certificate`       | Ist `DATABASE_SSL_ROOT_CERT` gesetzt und vollständig? | §3; **nicht** mit No-Verify „lösen"                                                                                                        |
+| Leere Woche statt Fehler        | Antwortet die API oder der Proxy?                     | `EASYTREE_API_PROXY_TARGET` — Laufzeitvariable des Web-Dienstes, §3. Fehlt sie, antwortet auch `/` mit 500 — dann ist es keine leere Woche |
+| Web erreicht die API nicht      | Liegen beide Workloads im selben internen Netz?       | Dienstname muss aus dem Web-Container auflösbar sein                                                                                       |
+| Publish schlägt fehl            | Läuft die Verbindung über den Transaction-Pooler?     | Erwartet: der Laufzeitkanal-Riegel greift — siehe unten                                                                                    |
 
 **Der Pooler-Fall ist wichtig und vorhergesagt, nicht überraschend.** Über den Supavisor-
 Transaction-Pooler wird `session_user` zu `postgres.<tenant>`, und `app.is_runtime_channel()`
@@ -300,8 +325,12 @@ Ohne diese fünf Angaben ist ein Rollback nicht ausführbar und eine Abnahme nic
   dem Wurzelverzeichnis. Coolify baut damit beide Images selbst aus dem gepinnten Lockfile.
 - **Branch/Commit:** ausdrücklich der geprüfte Head, nicht „latest". Coolify zeigt den
   deployten Commit an; er muss mit §8 (1) übereinstimmen.
-- **Build-Argument:** `EASYTREE_API_PROXY_TARGET` auf den internen Dienstnamen der API
+- **Laufzeitvariable:** `EASYTREE_API_PROXY_TARGET` auf den internen Dienstnamen der API
   (`http://api:3001` in der Compose-Topologie). Kein öffentlicher Name, kein `https` nach außen.
+  Ausdrücklich als **Environment-Variable des Web-Dienstes**, nicht als Build-Argument: das
+  Image ist seit EYT-126 zielneutral, und ein Build-Argument würde es wieder binden.
+- **Build-Argument:** ausschließlich `GIT_SHA` (der geprüfte Head). `docker-compose.yml`
+  erzwingt es mit `${GIT_SHA:?…}` — ohne den Wert scheitert schon `docker compose config`.
 - **Secrets:** die vier geheimen Variablen aus §3 als Coolify-Secrets, nicht als Build-Argumente
   — ein Build-Argument landet in der Imagehistorie.
 - **Öffentliche Domain:** ausschließlich auf `web` (Port 3000). Die API bekommt **keine**
@@ -316,8 +345,10 @@ Ohne diese fünf Angaben ist ein Rollback nicht ausführbar und eine Abnahme nic
 Railway ist über Dashboard-Variablen gegen den generischen Startpfad konfiguriert; es gibt
 **keine** Railway-Datei im Repository, und dieser Slice legt auch keine an. Kompatibel bleibt der
 Weg, weil die Images nichts Providerspezifisches enthalten: derselbe `node dist/main.js`,
-dasselbe Variablenset, derselbe Health-/Readiness-Vertrag. Der einzige Unterschied ist der Wert
-von `EASYTREE_API_PROXY_TARGET` beim Bauen des Web-Images (§3).
+dasselbe Variablenset, derselbe Health-/Readiness-Vertrag. Seit EYT-126 unterscheidet sich nicht
+einmal mehr das Web-Image: der Wert von `EASYTREE_API_PROXY_TARGET` ist eine Laufzeitvariable des
+Dienstes (§3), also **dasselbe Image für Coolify und Railway** — belegt über denselben
+Image-Digest gegen zwei Ziele im Container-Smoke.
 
 **Nicht gemessen:** ein Railway-Deploy aus diesen Dockerfiles ist nicht ausgeführt worden. Belegt
 ist die Kompatibilität auf der Ebene „reproduzierbarer Container- und Startpfad", nicht auf der
@@ -327,11 +358,12 @@ Ebene „läuft dort".
 
 ## 11. Stand dieses Dokuments
 
-Überarbeitet am 21.08.2026 auf den Containerpfad (Confluence 30998530), ausgehend von der Fassung
-vom 20.08.2026 gegen `master` `b2d8dbf`. Abgeleitet aus: den beiden Dockerfiles,
+Überarbeitet am 22.08.2026 (EYT-126) auf das Laufzeit-Proxyziel, ausgehend von der Fassung vom
+21.08.2026 auf den Containerpfad (Confluence 30998530). Abgeleitet aus: den beiden Dockerfiles,
 `docker-compose.yml`, `scripts/smoke-container.sh`, `packages/config/src/schema.ts`,
-`pg-connection.ts`, den bestehenden Smoke-Skripten und der Messung zum Bauzeitverhalten von
-`EASYTREE_API_PROXY_TARGET`.
+`pg-connection.ts`, den bestehenden Smoke-Skripten und dem lokal ausgeführten Container-Smoke
+(`[container-smoke] mode=local executed=24 passed=24 skipped=0`, 22.08.2026), der ein Image
+gegen zwei Ziele und beide Fail-closed-Fälle belegt.
 
 **Noch nie ausgeführt.** Kein Abschnitt unterhalb von §1 ist gegen eine reale Staging-Grenze
 gelaufen, weil es keine gibt. Beim ersten echten Deploy gehört dieses Runbook gegen die
