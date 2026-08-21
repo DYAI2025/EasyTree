@@ -539,6 +539,47 @@ gh run view <run> --log --job <db-gates-job-id> \
   | grep -oE '\[[a-z-]+\] mode=[a-z]+ executed=[0-9]+ passed=[0-9]+ skipped=[0-9]+' | sort -u
 ```
 
+## Deployment — Container first (Entscheidung 21.08.2026)
+
+Kanonisch ist Confluence **"EasyTree – Deployment-Entscheidung 21.08.2026: VPS + Coolify +
+Docker"** (Seite 30998530): **primär eigener VPS mit Coolify und Docker/OCI, sekundär Railway,
+Cloudflare Workers ist kein Zielruntime mehr.** Coolify ist Orchestrator, nicht Teil der
+Facharchitektur. Die Cloudflare-Artefakte (`apps/*/wrangler.jsonc`, `apps/web/open-next.config.ts`,
+die Schritte in `build-web`/`build-api`) bleiben vorerst stehen und werden erst nach belegter
+Container-Parität entfernt — das ist EYT-149, nicht dieser Slice.
+
+Beide Workloads werden aus dem Wurzelverzeichnis gebaut (`apps/api/Dockerfile`,
+`apps/web/Dockerfile`, Topologie in `docker-compose.yml`), mit `pnpm install --frozen-lockfile`
+und `corepack`. Der Outbox-Worker benutzt **dasselbe** API-Image und überschreibt nur das
+Kommando mit `node dist/worker.js`. Nur `web` veröffentlicht einen Port; die API hängt am
+internen Netz. Beide Images laufen als `node`, nicht als root, und tragen den Commit als
+OCI-Label `org.opencontainers.image.revision`.
+
+**`EASYTREE_API_PROXY_TARGET` ist BAUZEIT-Konfiguration, nicht Laufzeitschalter — gemessen
+21.08.2026 auf Next 16.2.11.** Ein Web-Build mit `http://buildtime-marker.invalid:9999`,
+gestartet mit `EASYTREE_API_PROXY_TARGET=http://127.0.0.1:3999`, antwortete auf `/health` mit
+HTTP 500 und protokollierte `Failed to proxy http://buildtime-marker.invalid:9999/health …
+ENOTFOUND`. `next start` liest die Weiterleitungen aus dem gebauten `.next/routes-manifest.json`.
+Der Kommentar in `lib/api-proxy-target.ts` nannte das früher "ungeprüft"; jetzt ist es geprüft.
+Konsequenz: das Web-**Image** ist an sein Ziel gebunden, nicht an einen Anbieter — dieselbe Datei
+und derselbe Startpfad bauen es für Coolify wie für Railway, nur das `--build-arg` unterscheidet
+sich. Fail-closed bleibt es, weil `next build` NODE_ENV=production setzt und
+`normalizeProxyTarget` dort ohne expliziten Wert wirft.
+
+`scripts/smoke-container.sh` ist der Container-Smoke; er läuft am Ende von `db-gates` (kein
+eigener Job — der wäre kein Pflichtcheck, bis jemand das Ruleset neu anwendet) und meldet
+`[container-smoke] mode=required executed=… passed=… skipped=0`. Er prüft OCI-Label gegen den
+Head, Nicht-root, `/health`, `/ready` mit echter Datenbank, den Weg Web→API über den
+Dienstnamen, dass der Dienstname von aussen NICHT auflösbar ist, dass das ausgelieferte HTML die
+interne Adresse nicht nennt, geheimnisfreie Protokolle, das Verweigern des Starts im
+Produktionsprofil ohne `DATABASE_SSL_ROOT_CERT` und geordnetes Herunterfahren. Runbook:
+[`docs/runbooks/staging-deploy.md`](docs/runbooks/staging-deploy.md).
+
+**Ein Deploy ist trotzdem gesperrt.** `BLOCKER_ENVIRONMENT_SEPARATION`: es existiert keine
+EasyTree-Datengrenze, deren `project_ref` von `inypnrvpawvhgiyagxbd` verschieden ist
+(nachgemessen 21.08.2026 über `list_projects` und `list_branches`). Siehe
+[`docs/plans/2026-08-20-sprint-6-staging-blocker.md`](docs/plans/2026-08-20-sprint-6-staging-blocker.md).
+
 ## Deployment (Railway) — measured 01.08.2026
 
 - The API runs as Railway service `EasyTree` (project `EasyTree`, environment `production`),
