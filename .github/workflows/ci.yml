@@ -55,12 +55,10 @@ jobs:
 
   build-web:
     runs-on: ubuntu-latest
-    # Das Proxyziel wird AUSDRUECKLICH gesetzt, nicht dem Default ueberlassen.
-    # Zuvor behauptete der Code "Produktion und CI setzen den Wert explizit" —
-    # und beide taten es nicht. Ein Default, auf den sich niemand berufen darf,
-    # aber alle sich verlassen, ist die schlechteste Sorte Vorgabe.
-    env:
-      EASYTREE_API_PROXY_TARGET: http://127.0.0.1:3001
+    # Kein EASYTREE_API_PROXY_TARGET mehr: seit EYT-126 loest der Same-Origin-
+    # Proxy das Ziel zur LAUFZEIT auf (Route Handler statt `rewrites()`). Dass
+    # die Variable hier fehlt, ist die dauerhafte Gegenprobe — brauchte der
+    # Build sie noch, waere dieser Pflichtjob rot.
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
@@ -117,6 +115,10 @@ jobs:
     # Hier laeuft KEINE API: der Smoke prueft den gehandelten Ausfall und die
     # Shell, nicht den Proxy. Er ist ausdruecklich KEIN Proxy-Nachweis — der
     # kommt aus dem integrierten Harness.
+    #
+    # Auf Job-Ebene, damit `next start` sie ERBT: seit EYT-126 ist sie eine
+    # LAUFZEIT-Variable. Beim Bauen wird sie nicht mehr gelesen; der Bauschritt
+    # unten liefe auch ohne sie durch.
     env:
       EASYTREE_API_PROXY_TARGET: http://127.0.0.1:3001
     steps:
@@ -742,10 +744,14 @@ jobs:
             echo "EASYTREE_JOURNEY_ADMIN_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           } >> "$GITHUB_ENV"
           echo "Supabase-API unter ${API_URL} uebernommen (Anon-Key maskiert)."
-      - name: Bauen — ECHTE API und Web mit Rewrite auf ihren Port
+      # Das Proxyziel steht NICHT mehr hier: seit EYT-126 setzt es
+      # apps/web/e2e/auth-journey/config.ts in der webServer-Umgebung, also zur
+      # Laufzeit. Genau dieser Job beweist damit zugleich, dass Login, POST-
+      # Koerper und HttpOnly-Cookies durch die neue Durchreiche gehen.
+      - name: Bauen — ECHTE API und Web (das Proxyziel kommt erst beim Start)
         run: |
           pnpm --filter @easytree/api... build
-          EASYTREE_API_PROXY_TARGET="http://127.0.0.1:3101" pnpm --filter @easytree/web... build
+          pnpm --filter @easytree/web... build
       - name: Chromium installieren
         run: pnpm --filter @easytree/web exec playwright install --with-deps chromium
       - name: Reise fahren

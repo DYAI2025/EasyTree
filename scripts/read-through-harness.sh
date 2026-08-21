@@ -84,7 +84,9 @@ echo "::endgroup::"
 echo "::group::6-9 Bauen"
 pnpm --filter @easytree/api^... build
 pnpm --filter @easytree/api run build:harness
-EASYTREE_API_PROXY_TARGET="$API_ORIGIN" pnpm --filter @easytree/web... build
+# Der Bau braucht das Ziel seit EYT-126 nicht mehr — es wird beim `next start`
+# unten gesetzt und dort bei jeder Anfrage neu gelesen.
+pnpm --filter @easytree/web... build
 pnpm --filter @easytree/web exec playwright install --with-deps chromium
 echo "::endgroup::"
 
