@@ -3,6 +3,20 @@
 > **Status:** `BLOCKED`. Dieses Dokument ersetzt keine Entscheidung — es macht die eine fehlende
 > Voraussetzung so genau benennbar, dass sie in einem Schritt erfüllbar ist.
 
+> **Nachtrag 21.08.2026 — die Plattform hat gewechselt, der Blocker nicht.** Confluence 30998530
+> stellt das Staging auf **VPS + Coolify + Docker** um; Cloudflare Workers ist kein Zielruntime
+> mehr. Wo unten „primäres Cloudflare-Staging" steht, ist das die Formulierung von EYT-142 zum
+> Zeitpunkt der Messung, nicht das heutige Ziel.
+>
+> **Das ändert an diesem Dokument genau nichts Inhaltliches.** Die fehlende Voraussetzung ist
+> keine Eigenschaft der Hostingplattform, sondern der Datengrenze — und die ist dieselbe
+> geblieben. Nachgemessen am 21.08.2026, wieder read-only: `list_projects` zeigt weiterhin nur
+> `ykoijifgweoapitabgxx` („Bazodiac") und kein EasyTree-Projekt; `list_branches` auf
+> `inypnrvpawvhgiyagxbd` zeigt weiterhin genau eine Branch `main` mit
+> `project_ref == parent_project_ref == inypnrvpawvhgiyagxbd`.
+>
+> Wer aus „Cloudflare ist weg" schliesst, der Blocker sei weg, hat die falsche Hälfte gelesen.
+
 ## Worum es geht
 
 EYT-137 verlangt die Kernreise „auf dem für Sprint 6 freigegebenen Staging-Ziel", EYT-142 verlangt
