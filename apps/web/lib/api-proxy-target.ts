@@ -8,45 +8,24 @@
  * sichtbare Origin, und die API braucht kein CORS: keine Freigabe, keine
  * Wildcard, keine zusaetzliche oeffentliche Oberflaeche.
  *
- * ## Build-Konfiguration, nicht Laufzeitschalter
+ * ## Laufzeitkonfiguration, seit EYT-126
  *
- * `rewrites()` laeuft beim BAUEN. Next schreibt das Ergebnis nach
- * `.next/routes-manifest.json`, und `next start` liest die Weiterleitungen von
- * dort — NICHT erneut aus der Umgebung.
+ * Frueher stand hier, der Wert sei Bauzeitkonfiguration und ein fertiges Image
+ * lasse sich nicht mehr umschalten. Das galt fuer den Weg ueber
+ * `next.config.ts`-`rewrites()` und ist mit dem Wechsel auf Route Handler
+ * ueberholt: `lib/proxy-durchreichen.ts` liest die Variable bei JEDER Anfrage
+ * neu, `instrumentation.ts` prueft sie einmal beim Serverstart. Ein Image,
+ * zwei Ziele, kein Neubau — gemessen am 21.08.2026, Next 16.2.11.
  *
- * Das ist gemessen und nicht mehr offen (21.08.2026, Next 16.2.11, EYT-126):
- * gebaut mit `http://buildtime-marker.invalid:9999`, gestartet mit
- * `EASYTREE_API_PROXY_TARGET=http://127.0.0.1:3999` — der Server antwortete auf
- * `/health` mit HTTP 500 und protokollierte
- * `Failed to proxy http://buildtime-marker.invalid:9999/health … ENOTFOUND`.
- * Eine fruehere Fassung dieses Kommentars liess die Frage ausdruecklich offen.
- *
- * Fuer den Containerbetrieb heisst das: der Wert wird als `--build-arg` in das
- * Web-Image gebacken. Ein bereits gebautes Image laesst sich zur Laufzeit NICHT
- * auf ein anderes Ziel umschalten.
- *
- * Deshalb ist diese Variable bewusst NICHT `NEXT_PUBLIC_*`. Alles mit diesem
- * Praefix wird in das Browserbuendel eingebacken und beim Build festgeschrieben
- * — eine interne Adresse gehoert dort nicht hin, und ein Wert, der zur Bauzeit
- * feststeht, laesst sich in einer anderen Umgebung nicht mehr aendern.
+ * Die Variable traegt weiterhin bewusst KEIN `NEXT_PUBLIC_`-Praefix: alles mit
+ * diesem Praefix landet im Browserbuendel, und eine interne Adresse gehoert
+ * dort nicht hin.
  */
 
 /**
  * Standard fuer development und test — und NUR dort.
  */
 export const DEFAULT_API_PROXY_TARGET = "http://127.0.0.1:3001";
-
-/**
- * Sprint-6-Fallback fuer Cloudflare Builds.
- *
- * Cloudflare ist die primaere Web-Staging-Grenze. Solange der API-Worker die
- * separaten Runtime-/TLS-/RLS-Gates aus EYT-142 noch nicht bestanden hat,
- * bleibt der bereits existierende Railway-API-Service der ausdruecklich
- * dokumentierte Fallback. Ein explizit gesetztes EASYTREE_API_PROXY_TARGET hat
- * immer Vorrang und kann spaeter ohne Codeaenderung auf einen Cloudflare-API-
- * Endpunkt zeigen.
- */
-export const CLOUDFLARE_API_FALLBACK_TARGET = "https://easytree-production.up.railway.app";
 
 export class InvalidProxyTargetError extends Error {}
 
@@ -100,34 +79,4 @@ export function normalizeProxyTarget(
   }
 
   return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
-}
-
-export type ProxyBuildEnvironment = {
-  EASYTREE_API_PROXY_TARGET?: string;
-  NODE_ENV?: string;
-  WORKERS_CI?: string;
-  CF_PAGES?: string;
-};
-
-/**
- * Loest das Build-Ziel auf, ohne die allgemeine Production-Fail-Closed-Regel
- * aufzuweichen.
- *
- * Cloudflare Workers Builds setzt WORKERS_CI=1, Cloudflare Pages setzt
- * CF_PAGES=1. Nur in diesen beiden expliziten Build-Kontexten darf bei
- * fehlendem EASYTREE_API_PROXY_TARGET der dokumentierte Railway-Fallback
- * verwendet werden. Ein expliziter Wert gewinnt immer.
- */
-export function resolveBuildProxyTarget(env: ProxyBuildEnvironment): string {
-  const explicit = env.EASYTREE_API_PROXY_TARGET?.trim();
-  if (explicit) {
-    return normalizeProxyTarget(explicit, env.NODE_ENV);
-  }
-
-  const isCloudflareBuild = env.WORKERS_CI === "1" || env.CF_PAGES === "1";
-  if (isCloudflareBuild) {
-    return normalizeProxyTarget(CLOUDFLARE_API_FALLBACK_TARGET, env.NODE_ENV);
-  }
-
-  return normalizeProxyTarget(undefined, env.NODE_ENV);
 }

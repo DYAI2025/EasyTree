@@ -14,9 +14,12 @@
  * aber sein Abbau ist ein eigener Slice (EYT-149) — bis dahin darf dieser
  * Slice ihn nicht nebenbei rot machen.
  *
- * Der Schalter ist deshalb Bauzeitkonfiguration, genau wie
- * `EASYTREE_API_PROXY_TARGET`, und traegt aus demselben Grund KEIN
- * `NEXT_PUBLIC_`-Praefix.
+ * Der Schalter ist Bauzeitkonfiguration und traegt schon deshalb KEIN
+ * `NEXT_PUBLIC_`-Praefix. Er ist damit seit EYT-126 das Gegenstueck zu
+ * `EASYTREE_API_PROXY_TARGET`, das frueher hier als gleichartig genannt wurde
+ * und inzwischen zur LAUFZEIT gelesen wird (siehe lib/proxy-durchreichen.ts):
+ * die Ausgabeform entscheidet, WAS gebaut wird, das Proxyziel nur, WOHIN ein
+ * fertiges Image zeigt.
  *
  * ## Fail-closed
  *

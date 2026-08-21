@@ -1,14 +1,17 @@
 /**
  * Das Proxyziel wird geprueft, nicht geglaubt (EYT-50/EYT-142).
+ *
+ * `resolveBuildProxyTarget` und sein Cloudflare-Fallback stehen hier seit
+ * EYT-126 nicht mehr: der einzige Aufrufer war `next.config.ts`-`rewrites()`,
+ * und den gibt es nicht mehr. Ein Test auf toten Code haette weiter eine
+ * Zusage behauptet, die niemand mehr einloest.
  */
 import { describe, expect, it } from "vitest";
 
 import {
-  CLOUDFLARE_API_FALLBACK_TARGET,
   DEFAULT_API_PROXY_TARGET,
   InvalidProxyTargetError,
   normalizeProxyTarget,
-  resolveBuildProxyTarget,
 } from "../lib/api-proxy-target";
 
 describe("normalizeProxyTarget", () => {
@@ -56,35 +59,5 @@ describe("normalizeProxyTarget", () => {
     ["mit Fragment", "http://127.0.0.1:3001#frag"],
   ])("lehnt ein %s Ziel ab", (_name, wert) => {
     expect(() => normalizeProxyTarget(wert)).toThrow(InvalidProxyTargetError);
-  });
-});
-
-describe("resolveBuildProxyTarget", () => {
-  it("nimmt in Cloudflare Workers Builds den dokumentierten Railway-Fallback", () => {
-    expect(resolveBuildProxyTarget({ NODE_ENV: "production", WORKERS_CI: "1" })).toBe(
-      CLOUDFLARE_API_FALLBACK_TARGET,
-    );
-  });
-
-  it("nimmt in Cloudflare Pages den dokumentierten Railway-Fallback", () => {
-    expect(resolveBuildProxyTarget({ NODE_ENV: "production", CF_PAGES: "1" })).toBe(
-      CLOUDFLARE_API_FALLBACK_TARGET,
-    );
-  });
-
-  it("bevorzugt ein explizites API-Ziel auch in Cloudflare", () => {
-    expect(
-      resolveBuildProxyTarget({
-        NODE_ENV: "production",
-        WORKERS_CI: "1",
-        EASYTREE_API_PROXY_TARGET: "https://api.example.org/",
-      }),
-    ).toBe("https://api.example.org");
-  });
-
-  it("bleibt ausserhalb Cloudflare in production fail-closed", () => {
-    expect(() => resolveBuildProxyTarget({ NODE_ENV: "production" })).toThrow(
-      InvalidProxyTargetError,
-    );
   });
 });
