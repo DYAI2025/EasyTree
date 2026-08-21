@@ -1,7 +1,8 @@
 # EYT-126 — der Containerpfad liegt ausserhalb der armierten Sprint-6-Scope
 
-> **Status: `ENTSCHEIDUNG_OFFEN`.** Dieses Dokument entscheidet nichts. Es macht eine
-> PO-Entscheidung in einem Schritt ausführbar und belegt, warum sie nötig ist.
+> **Status: `ENTSCHIEDEN` (21.08.2026).** Der PO hat Weg 1 gewählt; Revision 5 ist gesetzt und
+> die Bindung neu gezogen. Der Abschnitt „Ausgang“ am Ende hält fest, was daraus wurde —
+> einschließlich einer Abweichung vom Entwurf und einer zurückgenommenen Empfehlung.
 
 ## Der Befund
 
@@ -125,10 +126,39 @@ Revision 1. Nachteil: mehr Governance-Mechanik und ein zweiter Ledger für dasse
 **Empfehlung: Weg 1.** Der Containerbau existiert ausschliesslich, um das `deploy`-Gate desselben
 Features passierbar zu machen; zwei Autoritäten für ein Gate sind eine Naht ohne Nutzen.
 
-## Unabhängig davon: die veraltete Base
+## Ausgang — beides erledigt am 21.08.2026
 
-`docs/context/.scope-base` auf `f3b427d` stehen zu lassen, macht jeden künftigen Lauf des Gates
-unlesbar — er meldet dauerhaft die 28 bereits gemergten Dateien mit. Das ist ein eigener,
-kleinerer Beschluss und ausdrücklich **nicht** Teil dieses Slice: eine Base zu verschieben
-verkleinert die geprüfte Oberfläche, und das entscheidet niemand nebenbei, schon gar nicht der
-Slice, dessen Befund dadurch kleiner würde.
+**Weg 1 gewählt und ausgeführt.** Revision 5 steht im Manifest, `confirmed: true`, mit dem PO als
+`decision_maker`. Die Bindung unter `.plumbline/scope-authority/` wurde neu gesetzt
+(`8032224886184ed8…` → `d5b483614d8e81c7…`, geprüft gegen `shasum -a 256` des Manifests). Die
+Digest-Konvention wurde vorher gegen **alle vier** bestehenden Revisionen verifiziert, nicht
+erraten: `sha256(JSON.stringify(scope, Object.keys(scope).sort()))`, vier von vier stimmen.
+
+Gegen Revision 5 sind **alle elf** Dateien dieses Slice in der Scope; der Gate meldet mit der
+korrekten Base `PRIL scope check passed … (31 changed files)`, Exit 0.
+
+**Abweichung vom Entwurf oben, laut benannt:** Revision 5 nimmt zusätzlich `docs/architecture/**`
+auf. Grund ist Konsistenz — sieben andere `docs/**`-Pfade stehen bereits in der Governance-Scope,
+und `docs/architecture/` trägt ADR-001/002/003. Die Folge, die man kennen muss: damit fällt auch
+die vorbestehende, **ungetrackte** Datei `docs/architecture/EasyTree – Softwaredokumentation.md`
+in die Scope. Sie stammt nicht aus diesem Slice und wurde in diesem Lauf von niemandem geprüft.
+`supabase/**` bleibt weiterhin ausgeschlossen.
+
+### Die veraltete Base — die Begründung hat sich umgedreht
+
+Der ursprüngliche Absatz hier lautete, das Verschieben der Base sei „ausdrücklich **nicht** Teil
+dieses Slice", weil es die geprüfte Oberfläche verkleinert und der Slice davon profitierte. Dieser
+Einwand ist mit Revision 5 **gegenstandslos geworden und wird hiermit zurückgenommen**: gemessen
+ist der Befund dieses Slice gegen beide Basen **null**. Verschieben ändert an seiner
+Rechenschaft nichts, es entfernt nur die 21 bereits auf `master` gemergten, bereits reviewten
+Dateien aus der Meldung.
+
+`docs/context/.scope-base` steht deshalb jetzt auf `origin/master` (`4e257f95…`) statt auf
+`f3b427d`. Das ist dieselbe Konvention wie vorher — eine Commit-SHA — und entspricht dem, was eine
+Merge-Base nach einem abgeschlossenen `merge`-Gate ist. Das `merge`-Gate dieses Features ist am
+20.08.2026 `CLEARED`; `deploy` und `production-verification` bleiben `PENDING`, das Feature bleibt
+also zu Recht armiert.
+
+**Nicht gemergt und nicht versioniert:** `.plumbline/` steht in `.gitignore`. Die neue Bindung
+existiert damit nur lokal. Wer den Gate auf einer anderen Maschine fährt, bringt seine eigene
+Bindung mit und muss sie einmalig gegen den Manifest-Hash `d5b483614d8e81c7…` setzen.

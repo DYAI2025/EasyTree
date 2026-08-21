@@ -14,7 +14,15 @@
       "apps/api/test/domain-invariants/**",
       "apps/api/test/iso-week-parity.test.ts",
       "packages/ui/src/**",
-      "packages/ui/test/**"
+      "packages/ui/test/**",
+      ".dockerignore",
+      "docker-compose.yml",
+      "turbo.json",
+      "apps/api/Dockerfile",
+      "apps/web/Dockerfile",
+      "apps/web/next.config.ts",
+      "apps/api/test/architecture/deploy-authority-rules.ts",
+      "apps/api/test/deploy-authority.test.ts"
     ],
     "governance": [
       "docs/canvas/**",
@@ -26,7 +34,11 @@
       "docs/reality/**",
       "docs/traceability.md",
       "CLAUDE.md",
-      "docs/handoff/AGENT_HANDOFF_v1.3.md"
+      "docs/handoff/AGENT_HANDOFF_v1.3.md",
+      ".github/workflows/**",
+      "scripts/**",
+      "docs/runbooks/**",
+      "docs/architecture/**"
     ]
   },
   "artifacts": {
@@ -143,7 +155,7 @@
       "origin": "PO-Entscheidung 19.08.2026: Reality-Ledger fuer Sprint 6 einfuehren",
       "decision_maker": "Product Owner Benjamin Poersch",
       "decided_at": "2026-08-19T00:06:31+0200",
-      "rationale": "Revision 4 nimmt docs/reality/** auf. Der Watcher meldete plumbline-reality-check mit Exit 2: die Evidenzledger-Datei fehlte, docs/reality/ existierte im Repository ueberhaupt nicht \u2014 auch nicht fuer Sprint 4 und Sprint 5. Der PO hat entschieden, den Ledger fuer Sprint 6 einzufuehren; das Gate ist damit erstmals passierbar und meldet jetzt den tatsaechlichen Stand (unit-fake) statt Abwesenheit.",
+      "rationale": "Revision 4 nimmt docs/reality/** auf. Der Watcher meldete plumbline-reality-check mit Exit 2: die Evidenzledger-Datei fehlte, docs/reality/ existierte im Repository ueberhaupt nicht — auch nicht fuer Sprint 4 und Sprint 5. Der PO hat entschieden, den Ledger fuer Sprint 6 einzufuehren; das Gate ist damit erstmals passierbar und meldet jetzt den tatsaechlichen Stand (unit-fake) statt Abwesenheit.",
       "confirmed": true,
       "scope": {
         "product": [
@@ -174,6 +186,55 @@
         ]
       },
       "scope_digest": "sha256:e1b3563f1b529b82e510e97724f538b718e9ef164e02235e08d1c2f3c8579c5c"
+    },
+    {
+      "revision": 5,
+      "origin": "PO-Entscheidung 21.08.2026: Scope um den Containerpfad erweitern (EYT-126, Confluence 30998530 — VPS + Coolify + Docker); Auslöser ist PR #89 und der rote PRIL-Scope-Gate.",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-21T18:05:00+0200",
+      "rationale": "Revision 5 nimmt die Deploymentpfade auf, die Revision 1 ausdruecklich ausgeschlossen hatte („Infrastruktur-, API- und supabase-Pfade fuer Slice 0/3 bewusst NICHT enthalten“). Grund: die Deployment-Entscheidung vom 21.08.2026 macht den Containerbau zur Voraussetzung des PENDING-Gates „deploy“ DESSELBEN Features; ein Dockerfile kann die alte Regel nicht einhalten, ohne aufzuhoeren ein Dockerfile zu sein. Der PO hat Weg 1 aus docs/plans/2026-08-21-eyt-126-scope-autoritaet.md gewaehlt. ABWEICHUNG VOM ENTWURF, ausdruecklich benannt: zusaetzlich zu dem dort vorgeschlagenen Block ist docs/architecture/** aufgenommen. Grund ist Konsistenz — sieben andere docs/**-Pfade stehen bereits in der Governance-Scope, docs/architecture/ traegt ADR-001/002/003. Folge, die man kennen muss: damit faellt auch die vorbestehende, UNGETRACKTE Datei ‚docs/architecture/EasyTree – Softwaredokumentation.md‘ in die Scope, die nicht aus diesem Slice stammt und von niemandem in diesem Lauf geprueft wurde. supabase/** bleibt weiterhin ausgeschlossen: der Schemapfad gehoert der Supabase-GitHub-Integration, nicht diesem Feature.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**",
+          ".dockerignore",
+          "docker-compose.yml",
+          "turbo.json",
+          "apps/api/Dockerfile",
+          "apps/web/Dockerfile",
+          "apps/web/next.config.ts",
+          "apps/api/test/architecture/deploy-authority-rules.ts",
+          "apps/api/test/deploy-authority.test.ts"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/reality/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md",
+          ".github/workflows/**",
+          "scripts/**",
+          "docs/runbooks/**",
+          "docs/architecture/**"
+        ]
+      },
+      "scope_digest": "sha256:fbd66901a4dcac99ff50878669120f9635d623fd7def11738a69d5a910f5a792"
     }
   ]
 }
