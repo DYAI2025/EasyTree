@@ -726,9 +726,12 @@ export const ERLAUBTE_UMGEBUNGSLESER: ReadonlyArray<{ datei: string; grund: stri
   {
     datei: "apps/web/next.config.ts",
     grund:
-      "Buildzeit- und Serverkonfiguration des Same-Origin-Rewrites " +
-      "(EASYTREE_API_PROXY_TARGET). Laeuft nie im Browser; der Wert wird von " +
-      "lib/api-proxy-target.ts streng geprueft.",
+      "Bauzeitkonfiguration der Ausgabeform (EASYTREE_NEXT_OUTPUT). Laeuft nie " +
+      "im Browser; der Wert wird von lib/next-output.ts streng geprueft und " +
+      "faellt bei einem Tippfehler, statt still auf die Standardausgabe " +
+      "zurueckzufallen. Bis EYT-126 stand hier zusaetzlich das Proxyziel — das " +
+      "liest diese Datei nicht mehr, seit der Same-Origin-Proxy in Route " +
+      "Handlern liegt.",
   },
   {
     datei: "apps/web/lib/proxy-durchreichen.ts",

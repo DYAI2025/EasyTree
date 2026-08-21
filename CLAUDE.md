@@ -409,7 +409,8 @@ proven in CI against a real Supavisor (`[tenant-pooling] …`). This layer sets 
 defense-in-depth. Repositories see only the `TenantQuery` interface, never a driver type.
 
 **The read path is proven end to end, not assembled from unit tests** (EYT-50). Browser →
-same-origin Next rewrite → NestJS → `TenantQueryRunner` → RLS → PostgreSQL, exercised by
+same-origin Next Route Handler (`lib/proxy-durchreichen.ts`; it was a `rewrites()` entry until
+EYT-126) → NestJS → `TenantQueryRunner` → RLS → PostgreSQL, exercised by
 `scripts/read-through-harness.sh` (CI job `read-through`) with `apps/web/e2e/read-through.spec.ts`.
 Only the subject resolver and the access policy are substituted (`apps/api/test/harness/server.ts`,
 built via `pnpm --filter @easytree/api run build:harness`); repository, runner, pool and controller
