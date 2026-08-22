@@ -355,7 +355,10 @@ server start instead of silently proxying to localhost, which would look like an
 the browser rather than an error. The single pass-through is `lib/proxy-durchreichen.ts`; it is
 also the one place that keeps the internal address off the wire — no `x-middleware-rewrite`
 exists, an absolute `location` header pointing at the configured target is rewritten to a
-relative path (an external redirect is left alone), and a connection failure becomes a 502 that
+relative path (an external redirect is left alone), **every other response header naming the
+configured target is dropped** rather than rewritten (`X-Upstream-Url`, `Link: <…>; rel="self"`,
+`Content-Location`, a `Set-Cookie` carrying an internal `Domain` — external addresses stay,
+multiple `set-cookie` stay multiple), and a connection failure becomes a 502 that
 names no host. Each gateway's URL is assembled in exactly one place — its own
 factory — because the test that checks it must call the same function production does; an
 earlier version built its own gateway and would have stayed green whatever `providers.tsx` did.
@@ -602,7 +605,14 @@ HTML noch ein Client-Chunk noch ein Antwortkopf noch ein `location`-Kopf die int
 nennt, geheimnisfreie Protokolle, das Verweigern des Starts im Produktionsprofil ohne
 `DATABASE_SSL_ROOT_CERT`, **ein Image gegen zwei Ziele bei unverändertem Digest**, das
 Fail-closed-Verhalten bei fehlendem und bei ungültigem Proxyziel, und geordnetes Herunterfahren.
-Lokal gemessen 22.08.2026: `[container-smoke] mode=local executed=24 passed=24 skipped=0`.
+Der Antwortkopf-Teil ist dabei nicht auf `location` beschränkt: **jeder** übrige Kopf, der die
+interne Adresse nennt, fällt in `lib/proxy-durchreichen.ts` ersatzlos weg — `X-Upstream-Url`,
+`Link: <…>; rel="self"`, `Content-Location`, ein `Set-Cookie` mit interner `Domain`. Weggelassen
+und nicht umgeschrieben, weil ein Kopf ohne festgelegte Bedeutung keine Struktur trägt, aus der
+sich eine Übersetzung ableiten ließe; fremde Adressen bleiben stehen, mehrere `Set-Cookie`
+bleiben mehrere. Die beiden Stub-Container des Smokes senden diesen Kopf nachweislich, sonst
+wäre seine Abwesenheit hinter dem Proxy kein Nachweis.
+Lokal gemessen 22.08.2026: `[container-smoke] mode=local executed=26 passed=26 skipped=0`.
 Runbook:
 [`docs/runbooks/staging-deploy.md`](docs/runbooks/staging-deploy.md).
 

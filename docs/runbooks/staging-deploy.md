@@ -140,7 +140,13 @@ Drei Konsequenzen, die vor dem ersten Deploy bekannt sein müssen:
   ausgelieferte HTML, **jeden referenzierten Client-Chunk**, die Antwortköpfe und den
   `location`-Kopf dagegen — eine absolute Weiterleitung der API auf sich selbst wird in einen
   relativen Pfad übersetzt (Pfad und Query bleiben erhalten), ein externes Weiterleitungsziel
-  bleibt unangetastet.
+  bleibt unangetastet. **Jeder übrige Antwortkopf, der die interne Adresse nennt, fällt
+  ersatzlos weg** — `X-Upstream-Url`, `Link: <…>; rel="self"`, `Content-Location`, ein
+  `Set-Cookie` mit interner `Domain`. Nicht umgeschrieben, sondern weggelassen: ein Kopf ohne
+  festgelegte Bedeutung trägt keine Struktur, aus der sich eine Übersetzung ableiten ließe.
+  Fremde Adressen bleiben stehen, und mehrere `Set-Cookie` bleiben mehrere. Der Smoke belegt
+  das mit einem Stub, der den leckenden Kopf nachweislich sendet — sonst wäre seine
+  Abwesenheit hinter dem Proxy kein Nachweis.
 
 Drei Regeln zur Datenbankverbindung, die aus gemessenen Fehlern stammen und nicht verhandelbar
 sind:
@@ -362,8 +368,9 @@ Ebene „läuft dort".
 21.08.2026 auf den Containerpfad (Confluence 30998530). Abgeleitet aus: den beiden Dockerfiles,
 `docker-compose.yml`, `scripts/smoke-container.sh`, `packages/config/src/schema.ts`,
 `pg-connection.ts`, den bestehenden Smoke-Skripten und dem lokal ausgeführten Container-Smoke
-(`[container-smoke] mode=local executed=24 passed=24 skipped=0`, 22.08.2026), der ein Image
-gegen zwei Ziele und beide Fail-closed-Fälle belegt.
+(`[container-smoke] mode=local executed=26 passed=26 skipped=0`, 22.08.2026), der ein Image
+gegen zwei Ziele, das Nicht-Lecken der internen Adresse in gewöhnlichen Antwortköpfen und
+beide Fail-closed-Fälle belegt.
 
 **Noch nie ausgeführt.** Kein Abschnitt unterhalb von §1 ist gegen eine reale Staging-Grenze
 gelaufen, weil es keine gibt. Beim ersten echten Deploy gehört dieses Runbook gegen die

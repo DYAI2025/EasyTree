@@ -25,7 +25,7 @@
  * ## Der Browser sieht die Adresse nie
  *
  * Die Variable traegt bewusst KEIN `NEXT_PUBLIC_`-Praefix. Sie wird nur hier
- * gelesen, im Serverprozess. Drei Lecks werden aktiv geschlossen, nicht nur
+ * gelesen, im Serverprozess. Vier Lecks werden aktiv geschlossen, nicht nur
  * eines:
  *
  *   * kein `x-middleware-rewrite` — es entsteht gar nicht erst;
@@ -33,6 +33,13 @@
  *     (Pfad, Query und Fragment bleiben erhalten). Ohne diesen Schritt truege
  *     der Browser die interne Adresse in die Adresszeile und riefe sie als
  *     naechstes selbst auf. Ein FREMDES Weiterleitungsziel bleibt unangetastet;
+ *   * JEDER uebrige Antwortkopf, der die interne Adresse nennt, faellt weg —
+ *     `X-Upstream-Url`, `Link: <…>; rel="self"`, `Content-Location`, ein
+ *     `Set-Cookie` mit interner `Domain`. Das gilt fuer den Kopfnamen wie fuer
+ *     den Wert. Weglassen und nicht umschreiben: ein Kopf ohne festgelegte
+ *     Bedeutung hat keine Struktur, aus der sich eine Uebersetzung ableiten
+ *     liesse, und eine erfundene waere schlimmer als der Verlust. Fremde
+ *     Adressen bleiben unangetastet, mehrere `set-cookie` bleiben mehrere;
  *   * ein Verbindungsfehler wird zu einem eigenen 502, statt die Fehlermeldung
  *     von undici (sie nennt den Host) durch Nexts Fehlerseite laufen zu lassen.
  */
@@ -98,6 +105,41 @@ export function uebersetzeWeiterleitung(roh: string, ziel: string): string {
   return `${pfad}${ort.search}${ort.hash}`;
 }
 
+/**
+ * Alles, woran der Browser das interne Ziel wiedererkennen koennte — klein
+ * geschrieben, weil Hostnamen ohnehin schreibungsunabhaengig sind und ein Kopf
+ * in beliebiger Schreibweise ankommen darf.
+ *
+ * Drei Formen, weil ein Leck in jeder von ihnen auftritt: die volle Adresse
+ * (`http://api:3001/basis`), die Autoritaet (`api:3001`) und der nackte
+ * Dienstname (`api`). Im Containernetz ist schon der Dienstname die interne
+ * Adresse — genau ihn sucht auch `scripts/smoke-container.sh`.
+ */
+function leckmuster(ziel: string): string[] {
+  const url = new URL(ziel);
+  const muster = new Set([
+    ziel.toLowerCase(),
+    url.origin.toLowerCase(),
+    url.host.toLowerCase(),
+    url.hostname.toLowerCase(),
+  ]);
+  muster.delete("");
+  return [...muster];
+}
+
+/**
+ * Nennt dieser Text das interne Ziel?
+ *
+ * Bewusst ein Teilstringvergleich und keine URL-Analyse: ein Kopf ohne
+ * festgelegte Bedeutung hat keine Struktur, auf die man sich verlassen
+ * koennte. Die Richtung des Irrtums ist damit die sichere — ein zu breiter
+ * Treffer kostet einen Kopf, ein zu enger kostet die Zusage.
+ */
+export function nenntInternesZiel(text: string, ziel: string): boolean {
+  const klein = text.toLowerCase();
+  return leckmuster(ziel).some((m) => klein.includes(m));
+}
+
 export async function durchreichen(request: Request): Promise<Response> {
   const ziel = aktuellesProxyziel();
   const eingang = new URL(request.url);
@@ -146,12 +188,24 @@ export async function durchreichen(request: Request): Promise<Response> {
     // zusammengefaltet, und ein zusammengefaltetes Cookie-Paar ist kaputt.
     if (name === "set-cookie") continue;
     if (name === "location") {
+      // `location` hat eine Bedeutung und deshalb eine Uebersetzung; der
+      // Riegel darunter fasst ihn bewusst NICHT an, sonst fiele die
+      // Weiterleitung weg, statt relativ zu werden.
       antwortKopf.set("location", uebersetzeWeiterleitung(wert, ziel));
       continue;
     }
+    // Jeder uebrige Kopf ist bedeutungslos fuer uns und wird deshalb nicht
+    // umgeschrieben, sondern weggelassen, sobald er die interne Adresse
+    // nennt. Auch der NAME zaehlt mit: `x-api-intern: 1` leckt genauso.
+    if (nenntInternesZiel(`${name}: ${wert}`, ziel)) continue;
     antwortKopf.set(name, wert);
   }
-  for (const keks of oben.headers.getSetCookie()) antwortKopf.append("set-cookie", keks);
+  for (const keks of oben.headers.getSetCookie()) {
+    // Dieselbe Zusage, ohne die Mehrfachheit aufzugeben: das leckende Cookie
+    // faellt weg, die uebrigen bleiben eigene Koepfe.
+    if (nenntInternesZiel(keks, ziel)) continue;
+    antwortKopf.append("set-cookie", keks);
+  }
 
   return new Response(oben.body, {
     status: oben.status,

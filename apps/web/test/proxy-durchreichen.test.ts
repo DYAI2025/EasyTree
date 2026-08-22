@@ -189,6 +189,165 @@ describe("durchreichen", () => {
 });
 
 /**
+ * `location` ist nicht der einzige Kopf, der eine Adresse traegt.
+ *
+ * Gemessen an einem echten Gegenbeispiel: antwortet die API mit
+ * `X-Upstream-Url: http://<interner-host>:3001/private` oder mit einem
+ * `Link`-Kopf, der auf sie selbst zeigt, dann steht die interne Adresse im
+ * Browser — same-origin-JavaScript liest sie ueber `response.headers`, und
+ * `Link` wertet der Browser sogar selbst aus.
+ *
+ * Ein Kopf ohne festgelegte Bedeutung laesst sich nicht sinnvoll uebersetzen;
+ * eine erfundene Umschreibung waere schlimmer als der Verlust. Deshalb faellt
+ * er weg. `location` bleibt davon unberuehrt — der hat eine Bedeutung und
+ * seine eigene Uebersetzung, eine Zeile weiter oben.
+ */
+describe("durchreichen — gewoehnliche Antwortkoepfe lecken die interne Adresse nicht", () => {
+  it("entfernt einen gewoehnlichen Kopf, der das interne Ziel nennt", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        antwort(
+          { ok: true },
+          {
+            "x-upstream-url": "http://api-a.invalid:3001/private",
+            link: '<http://api-a.invalid:3001/foo>; rel="self"',
+            "x-request-id": "r-42",
+          },
+        ),
+      ),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    const alles = [...ergebnis.headers.entries()].map(([n, w]) => `${n}: ${w}`).join("\n");
+    expect(alles).not.toContain("api-a.invalid");
+    expect(ergebnis.headers.get("x-upstream-url")).toBeNull();
+    expect(ergebnis.headers.get("link")).toBeNull();
+    // Eingangsbremse: fiele einfach ALLES weg, pruefte dieser Test nichts.
+    expect(ergebnis.headers.get("x-request-id")).toBe("r-42");
+  });
+
+  it("entfernt auch einen Kopf, der nur den internen Hostnamen nennt", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        antwort(
+          { ok: true },
+          { "x-upstream-host": "api-a.invalid", "content-location": "http://api-a.invalid:3001/f" },
+        ),
+      ),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-upstream-host")).toBeNull();
+    expect(ergebnis.headers.get("content-location")).toBeNull();
+    const alles = [...ergebnis.headers.entries()].map(([n, w]) => `${n}: ${w}`).join("\n");
+    expect(alles).not.toContain("api-a.invalid");
+    // Eingangsbremse: die Antwort traegt weiterhin ihren content-type.
+    expect(ergebnis.headers.get("content-type")).toBe("application/json");
+  });
+
+  it("erkennt die interne Adresse unabhaengig von der Schreibweise", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        antwort({ ok: true }, { "x-upstream-url": "HTTP://API-A.INVALID:3001/private" }),
+      ),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-upstream-url")).toBeNull();
+  });
+
+  it("laesst gewoehnliche Koepfe unveraendert", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        antwort(
+          { ok: true },
+          { "cache-control": "no-store", etag: '"abc123"', "x-correlation-id": "korr-7" },
+        ),
+      ),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("cache-control")).toBe("no-store");
+    expect(ergebnis.headers.get("etag")).toBe('"abc123"');
+    expect(ergebnis.headers.get("x-correlation-id")).toBe("korr-7");
+    expect(ergebnis.headers.get("content-type")).toBe("application/json");
+  });
+
+  it("laesst einen Kopf mit einer EXTERNEN URL unveraendert", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        antwort(
+          { ok: true },
+          {
+            link: '<https://login.example.org/foo>; rel="next"',
+            "content-location": "https://cdn.example.org/a.json",
+          },
+        ),
+      ),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("link")).toBe('<https://login.example.org/foo>; rel="next"');
+    expect(ergebnis.headers.get("content-location")).toBe("https://cdn.example.org/a.json");
+  });
+
+  it("entfernt nur das leckende Cookie und erhaelt die uebrigen einzeln", async () => {
+    const oben = new Response("{}", { status: 200 });
+    oben.headers.append("set-cookie", "sb-access=abc; HttpOnly; Path=/");
+    oben.headers.append("set-cookie", "leck=1; Domain=api-a.invalid; Path=/");
+    oben.headers.append("set-cookie", "sb-refresh=def; HttpOnly; Path=/");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => oben),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/auth/login"));
+
+    // Zwei bleiben zwei — der Riegel darf nicht zusammenfalten, was er nicht faltet.
+    expect(ergebnis.headers.getSetCookie()).toEqual([
+      "sb-access=abc; HttpOnly; Path=/",
+      "sb-refresh=def; HttpOnly; Path=/",
+    ]);
+    const alles = [...ergebnis.headers.entries()].map(([n, w]) => `${n}: ${w}`).join("\n");
+    expect(alles).not.toContain("api-a.invalid");
+  });
+
+  it("misst gegen das AKTUELLE Ziel und nicht gegen ein eingefrorenes", async () => {
+    // Dasselbe Modul, dieselbe Antwort — nur die Umgebung wechselt. Waere das
+    // Ziel beim Modulladen eingefroren, bliebe genau die falsche Adresse stehen.
+    process.env.EASYTREE_API_PROXY_TARGET = "http://api-b.invalid:3001";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        antwort(
+          { ok: true },
+          {
+            "x-upstream-url": "http://api-b.invalid:3001/private",
+            "x-frueheres-ziel": "http://api-a.invalid:3001/egal",
+          },
+        ),
+      ),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-upstream-url")).toBeNull();
+    // Das ALTE Ziel ist jetzt eine fremde Adresse und bleibt deshalb stehen.
+    expect(ergebnis.headers.get("x-frueheres-ziel")).toBe("http://api-a.invalid:3001/egal");
+  });
+});
+
+/**
  * Der Kopf `location` ist der zweite Weg nach draussen.
  *
  * `x-middleware-rewrite` zu vermeiden genuegt NICHT: antwortet die API mit

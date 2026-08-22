@@ -11,8 +11,10 @@
 #      Geprueft wird von aussen, durch den Web-Container hindurch.
 #   4. Die interne Adresse erreicht den Browser auf KEINEM Weg: weder im
 #      ausgelieferten HTML noch in einem Client-Chunk noch in einem
-#      Antwortkopf — und auch nicht in einem `location`-Kopf, den die API
-#      absolut auf sich selbst setzt.
+#      Antwortkopf — weder in einem `location`-Kopf, den die API absolut auf
+#      sich selbst setzt, noch in einem gewoehnlichen Kopf wie
+#      `x-upstream-url` oder `link: <…>; rel="self"`. Beide Faelle werden mit
+#      einem Stub belegt, der den leckenden Kopf nachweislich sendet.
 #   5. Die Protokolle enthalten weder Datenbankpasswort noch Anon-Key.
 #   6. Beide Container laufen als nicht-privilegierter Benutzer.
 #   7. Gegenprobe: mit NODE_ENV=production und ohne Wurzelzertifikat MUSS der
@@ -396,7 +398,14 @@ echo "== 8/10 Ein Image, zwei Ziele, kein Neubau =="
 #
 # Derselbe Stub beantwortet ausserdem zwei Weiterleitungsfaelle, weil `location`
 # der zweite Weg ist, auf dem die interne Adresse den Browser erreichen koennte.
-STUB_PROGRAMM='const http=require("http");const name=process.env.STUB_NAME;const eigen=process.env.STUB_ORIGIN;http.createServer((q,s)=>{if(q.url.indexOf("weiterleitung-intern")!==-1){s.writeHead(302,{location:eigen+"/foo?x=1"});return s.end();}if(q.url.indexOf("weiterleitung-extern")!==-1){s.writeHead(302,{location:"https://login.example.org/oauth?state=xyz"});return s.end();}s.writeHead(200,{"content-type":"application/json"});s.end(JSON.stringify({stub:name,pfad:q.url}));}).listen(3001,"0.0.0.0")'
+#
+# Auf JEDER 200er-Antwort sendet der Stub zusaetzlich zwei Koepfe, die seine
+# EIGENE interne Adresse nennen — `x-upstream-url` und ein `link: <…>;
+# rel="self"`. Beides sind reale Formen (Weiterleitungsketten, Hypermedia), und
+# beide sind fuer same-origin-JavaScript ueber `response.headers` lesbar. Der
+# dritte Kopf `x-stub-marke` ist harmlos und dient als Eingangsbremse: ohne ihn
+# waere "der leckende Kopf fehlt" auch dann gruen, wenn gar nichts durchkommt.
+STUB_PROGRAMM='const http=require("http");const name=process.env.STUB_NAME;const eigen=process.env.STUB_ORIGIN;http.createServer((q,s)=>{if(q.url.indexOf("weiterleitung-intern")!==-1){s.writeHead(302,{location:eigen+"/foo?x=1"});return s.end();}if(q.url.indexOf("weiterleitung-extern")!==-1){s.writeHead(302,{location:"https://login.example.org/oauth?state=xyz"});return s.end();}s.writeHead(200,{"content-type":"application/json","x-upstream-url":eigen+"/private",link:"<"+eigen+"/foo>; rel=\"self\"","x-stub-marke":"harmlos"});s.end(JSON.stringify({stub:name,pfad:q.url}));}).listen(3001,"0.0.0.0")'
 
 stub_starten() {
   local name="$1"
@@ -487,6 +496,77 @@ externe_weiterleitung_bleibt() {
 }
 pruefung "ein externes Weiterleitungsziel bleibt semantisch unveraendert" \
   externe_weiterleitung_bleibt
+
+echo "== 8c/10 Auch gewoehnliche Antwortkoepfe lecken die interne Adresse nicht =="
+# `location` ist nicht der einzige Kopf, der eine Adresse traegt. Der Stub B —
+# weiterhin das Ziel des Web-Containers — nennt seine eigene interne Adresse in
+# `x-upstream-url` und in `link`. Beide muessen hinter dem Proxy verschwunden
+# sein, ohne dass dabei der harmlose Kopf mit verschwindet.
+stub_leckt_direkt() {
+  # Ohne diesen Schritt waere die Pruefung darunter vakuos: sendet der Stub den
+  # leckenden Kopf gar nicht, beweist seine Abwesenheit hinter dem Proxy
+  # nichts. Gelesen wird AUS dem Containernetz heraus, denn von aussen ist der
+  # Stub nicht erreichbar — genau das ist ja der Punkt.
+  local ausgabe
+  ausgabe="$(docker run --rm --network "${NETZ}" \
+    -e "STUB_URL=http://${ZWEI_ZIEL_B}:3001" "${STUB_IMAGE}" \
+    node -e 'fetch(process.env.STUB_URL+"/health").then(r=>{console.log("x-upstream-url="+r.headers.get("x-upstream-url"));console.log("link="+r.headers.get("link"));console.log("x-stub-marke="+r.headers.get("x-stub-marke"));}).catch(e=>{console.log("fehler="+e.message);process.exitCode=1})')" || return 1
+  printf '  direkt vom Stub: %s\n' "$(printf '%s' "${ausgabe}" | tr '\n' ' ')"
+  case "${ausgabe}" in
+  *"${ZWEI_ZIEL_B}"*) ;;
+  *)
+    echo "  der Stub nennt seine interne Adresse in KEINEM Kopf — die Pruefung darunter waere vakuos" >&2
+    return 1
+    ;;
+  esac
+  # Und die Eingangsbremse muss es beim Stub auch wirklich geben.
+  case "${ausgabe}" in
+  *x-stub-marke=harmlos*) ;;
+  *)
+    echo "  der Stub sendet den harmlosen Kopf nicht — die Eingangsbremse waere blind" >&2
+    return 1
+    ;;
+  esac
+}
+pruefung "der Stub nennt seine interne Adresse tatsaechlich in einem Nicht-location-Kopf" \
+  stub_leckt_direkt
+
+gewoehnliche_koepfe_ohne_leck() {
+  local koepfe klein
+  koepfe="$(curl -fsS -D - -o /dev/null "http://127.0.0.1:${ZWEI_PORT}/health")"
+  [ -n "${koepfe}" ] || return 1
+  # `tr` liest die Eingabe vollstaendig und kann deshalb — anders als
+  # `grep -q` — kein EPIPE ausloesen, das unter `pipefail` einen Treffer in
+  # einen Fehlschlag verkehren wuerde.
+  klein="$(printf '%s' "${koepfe}" | tr 'A-Z' 'a-z')"
+  case "${klein}" in
+  *"${ZWEI_ZIEL_B}"*)
+    echo "  die interne Adresse steht in den Antwortkoepfen" >&2
+    printf '%s\n' "${koepfe}" >&2
+    return 1
+    ;;
+  esac
+  case "${klein}" in
+  *x-upstream-url*)
+    echo "  der leckende Kopf x-upstream-url erreicht den Browser" >&2
+    printf '%s\n' "${koepfe}" >&2
+    return 1
+    ;;
+  esac
+  # Eingangsbremse: der harmlose Kopf des Stubs MUSS durchkommen. Sonst bewiese
+  # die Abwesenheit oben nur, dass ueberhaupt nichts durchgereicht wird.
+  case "${klein}" in
+  *x-stub-marke*) ;;
+  *)
+    echo "  auch der harmlose Kopf x-stub-marke fehlt — es wird gar nichts durchgereicht" >&2
+    printf '%s\n' "${koepfe}" >&2
+    return 1
+    ;;
+  esac
+  echo "  x-upstream-url und link entfernt, x-stub-marke durchgereicht"
+}
+pruefung "kein gewoehnlicher Antwortkopf traegt die interne Adresse zum Browser" \
+  gewoehnliche_koepfe_ohne_leck
 
 echo "== 9/10 Fail-closed zur Laufzeit =="
 start_verweigert() {
