@@ -158,15 +158,17 @@ happened. Two further traps in the same family: the cache is shared across git w
 "cache hit" can be a replay from a worktree where the task never ran at all; and a `vitest` path
 filter that matches nothing exits 0 without having checked anything.
 
-`pnpm build` at the repository root **fails today, and that is pre-existing, not a defect of
-your branch**: `turbo.json` declares no `env` for the `build` task, so Turbo's strict env mode
-strips `EASYTREE_API_PROXY_TARGET`, and `apps/web` refuses to build in production without it
-(deliberately — see `lib/api-proxy-target.ts`). Setting the variable does **not** help through
-Turbo. CI never hits this because it builds through pnpm, not Turbo — measured 14.08.2026, both
-of these are green locally:
+`pnpm build` at the repository root **used to fail and no longer does** (EYT-126). The old
+reason was real: `apps/web` resolved `EASYTREE_API_PROXY_TARGET` inside `next.config.ts`
+`rewrites()` at build time, Turbo's strict env mode stripped the variable, and the build
+refused. Since the proxy moved into Route Handlers the build does not read that variable at
+all. Measured 22.08.2026 with the variable explicitly unset:
+`env -u EASYTREE_API_PROXY_TARGET pnpm build` → exit 0, `Tasks: 6 successful, 6 total`,
+`Cached: 0 cached, 6 total` (so it really ran, it was not a replay). These two are green as
+well, and neither needs the variable any more:
 
 ```bash
-EASYTREE_API_PROXY_TARGET=http://127.0.0.1:3001 pnpm --filter @easytree/web... build
+pnpm --filter @easytree/web... build
 pnpm --filter @easytree/api... build
 ```
 
@@ -341,14 +343,28 @@ guard that fails if the Supabase JS SDK name appears anywhere under `apps/web` �
 string is assembled from parts on purpose, so don't "fix" it by inlining the literal.
 
 **There is no `NEXT_PUBLIC_API_URL` any more** (removed in EYT-50) — do not reintroduce it.
-The browser calls **relative** paths and `providers.tsx` passes the empty origin; `next.config.ts`
-rewrites `/api/:path*`, `/health` and `/ready` server-side to `EASYTREE_API_PROXY_TARGET`. Two
-reasons, both deliberate: one visible origin means the API needs no CORS and no extra public
-surface, and a `NEXT_PUBLIC_*` value would be baked into the browser bundle at build time.
-`lib/api-proxy-target.ts` validates that target strictly (absolute http/https, no credentials,
-no query/fragment, no trailing slash) and has **no default in production** — the build fails
-there instead of silently proxying to localhost, which would look like an empty week in the
-browser rather than an error. Each gateway's URL is assembled in exactly one place — its own
+The browser calls **relative** paths and `providers.tsx` passes the empty origin; the Route
+Handlers under `apps/web/app/api/[[...pfad]]`, `app/health` and `app/ready` forward them
+server-side to `EASYTREE_API_PROXY_TARGET`, read fresh on **every request** (EYT-126 —
+`next.config.ts` no longer carries a `rewrites()` block). Two reasons, both deliberate: one
+visible origin means the API needs no CORS and no extra public surface, and a `NEXT_PUBLIC_*`
+value would be baked into the browser bundle at build time. `lib/api-proxy-target.ts` validates
+that target strictly (absolute http/https, no credentials, no query/fragment, no trailing slash)
+and has **no default in production** — `apps/web/instrumentation.ts` therefore refuses the
+server start instead of silently proxying to localhost, which would look like an empty week in
+the browser rather than an error. The single pass-through is `lib/proxy-durchreichen.ts`; it is
+also the one place that keeps the internal address off the wire — no `x-middleware-rewrite`
+exists, an absolute `location` header pointing at the configured target is rewritten to a
+relative path (an external redirect is left alone), **every other response header whose VALUE
+names the configured target is dropped** rather than rewritten (`X-Upstream-Url`,
+`Link: <…>; rel="self"`, `Content-Location`, a `Set-Cookie` carrying an internal `Domain` —
+external addresses stay, multiple `set-cookie` stay multiple), and a connection failure becomes
+a 502 that names no host. That match targets the **address, not the word**: header names are not
+inspected at all, URLs in the value are parsed with `new URL()` and compared by origin, the
+`host:port` authority matches only at a character boundary and only when the target declares a
+port, and the bare hostname matches only as the **whole** value. A bare-substring match would
+swallow `X-Api-Version: 1` for a target named `api` — the guard would then be a silent outage
+rather than a protection. Each gateway's URL is assembled in exactly one place — its own
 factory — because the test that checks it must call the same function production does; an
 earlier version built its own gateway and would have stayed green whatever `providers.tsx` did.
 There are **three** such factories (`lib/planning-gateway-factory.ts`,
@@ -401,7 +417,8 @@ proven in CI against a real Supavisor (`[tenant-pooling] …`). This layer sets 
 defense-in-depth. Repositories see only the `TenantQuery` interface, never a driver type.
 
 **The read path is proven end to end, not assembled from unit tests** (EYT-50). Browser →
-same-origin Next rewrite → NestJS → `TenantQueryRunner` → RLS → PostgreSQL, exercised by
+same-origin Next Route Handler (`lib/proxy-durchreichen.ts`; it was a `rewrites()` entry until
+EYT-126) → NestJS → `TenantQueryRunner` → RLS → PostgreSQL, exercised by
 `scripts/read-through-harness.sh` (CI job `read-through`) with `apps/web/e2e/read-through.spec.ts`.
 Only the subject resolver and the access policy are substituted (`apps/api/test/harness/server.ts`,
 built via `pnpm --filter @easytree/api run build:harness`); repository, runner, pool and controller
@@ -538,6 +555,89 @@ the lines with:
 gh run view <run> --log --job <db-gates-job-id> \
   | grep -oE '\[[a-z-]+\] mode=[a-z]+ executed=[0-9]+ passed=[0-9]+ skipped=[0-9]+' | sort -u
 ```
+
+## Deployment — Container first (Entscheidung 21.08.2026)
+
+Kanonisch ist Confluence **"EasyTree – Deployment-Entscheidung 21.08.2026: VPS + Coolify +
+Docker"** (Seite 30998530): **primär eigener VPS mit Coolify und Docker/OCI, sekundär Railway,
+Cloudflare Workers ist kein Zielruntime mehr.** Coolify ist Orchestrator, nicht Teil der
+Facharchitektur. Die Cloudflare-Artefakte (`apps/*/wrangler.jsonc`, `apps/web/open-next.config.ts`,
+die Schritte in `build-web`/`build-api`) bleiben vorerst stehen und werden erst nach belegter
+Container-Parität entfernt — das ist EYT-149, nicht dieser Slice.
+
+Beide Workloads werden aus dem Wurzelverzeichnis gebaut (`apps/api/Dockerfile`,
+`apps/web/Dockerfile`, Topologie in `docker-compose.yml`), mit `pnpm install --frozen-lockfile`
+und `corepack`. Der Outbox-Worker benutzt **dasselbe** API-Image und überschreibt nur das
+Kommando mit `node dist/worker.js`. Nur `web` veröffentlicht einen Port; die API hängt am
+internen Netz. Beide Images laufen als `node`, nicht als root, und tragen den Commit als
+OCI-Label `org.opencontainers.image.revision`.
+
+**`EASYTREE_API_PROXY_TARGET` ist LAUFZEIT-Konfiguration — gemessen 22.08.2026 auf Next 16.2.11
+(EYT-126).** Der Same-Origin-Proxy liegt seit EYT-126 in Route Handlern
+(`apps/web/app/api/[[...pfad]]`, `app/health`, `app/ready`), nicht mehr in
+`next.config.ts`-`rewrites()`. Gemessen im Container-Smoke: **ein** Web-Image wurde einmal
+gebaut, sein Digest festgehalten, und derselbe Digest zweimal gegen verschiedene APIs gestartet —
+`ziel=http://easytree-stub-a:3001 -> {"stub":"easytree-stub-a"}`,
+`ziel=http://easytree-stub-b:3001 -> {"stub":"easytree-stub-b"}`, und
+`vorher=<digest> nachher=<digest>` identisch. **Das Web-Image ist damit weder an ein Ziel noch
+an einen Anbieter gebunden** — dieselbe Datei und derselbe Startpfad bauen es für Coolify wie
+für Railway, und es gibt kein `--build-arg` mehr, das sich unterscheiden könnte.
+
+Eine früher hier stehende Messung (Build mit `http://buildtime-marker.invalid:9999`, Start mit
+einem anderen Wert, HTTP 500 mit `ENOTFOUND`) **war korrekt** — sie galt dem `rewrites()`-Weg,
+den es nicht mehr gibt.
+
+Fail-closed bleibt es an zwei Stellen: `apps/web/instrumentation.ts` prüft das Ziel beim
+Serverstart, und danach beantwortet Next **jede** Route mit 500 — auch `/` und `/anmelden`
+(gemessen 22.08.2026, Container und `next start`). Der Prozess hält dabei den Port; er bedient
+aber keinen normalen Anwendungsverkehr, und der Compose-Healthcheck auf `/` schlägt fehl, der
+Container gilt als `unhealthy`. **Behaupte nicht, der Container starte nicht.**
+`lib/proxy-durchreichen.ts` prüft zusätzlich bei jeder Anfrage.
+
+**Zwei nicht wiederholenswerte Sackgassen, beide gemessen 21.08.2026:** eine Next-16-`proxy.ts`
+(Node-Middleware) funktioniert zwar zur Laufzeit, sendet aber
+`x-middleware-rewrite: <interne Adresse>` an den Browser — der Kopf lässt sich nicht entfernen,
+ohne die Weiterleitung abzuschalten —, und `@opennextjs/cloudflare` bricht mit `Node.js
+middleware is not currently supported` ab, was den Pflichtjob `build-web` rot machen würde.
+Edge-Middleware scheidet aus, weil dort `process.env` beim Bauen eingebacken wird.
+
+`scripts/smoke-container.sh` ist der Container-Smoke; er läuft am Ende von `db-gates` (kein
+eigener Job — der wäre kein Pflichtcheck, bis jemand das Ruleset neu anwendet) und meldet
+`[container-smoke] mode=required executed=… passed=… skipped=0`. Er prüft OCI-Label gegen den
+Head, Nicht-root, `/health`, `/ready` mit echter Datenbank, den Weg Web→API über den
+Dienstnamen, dass der Dienstname von aussen NICHT auflösbar ist, dass weder das ausgelieferte
+HTML noch ein Client-Chunk noch ein Antwortkopf noch ein `location`-Kopf die interne Adresse
+nennt, geheimnisfreie Protokolle, das Verweigern des Starts im Produktionsprofil ohne
+`DATABASE_SSL_ROOT_CERT`, **ein Image gegen zwei Ziele bei unverändertem Digest**, das
+Fail-closed-Verhalten bei fehlendem und bei ungültigem Proxyziel, und geordnetes Herunterfahren.
+Der Antwortkopf-Teil ist dabei nicht auf `location` beschränkt: **jeder** übrige Kopf, dessen
+**Wert** die interne Adresse nennt, fällt in `lib/proxy-durchreichen.ts` ersatzlos weg —
+`X-Upstream-Url`, `Link: <…>; rel="self"`, `Content-Location`, ein `Set-Cookie` mit interner
+`Domain`. Weggelassen und nicht umgeschrieben, weil ein Kopf ohne festgelegte Bedeutung keine
+Struktur trägt, aus der sich eine Übersetzung ableiten ließe; fremde Adressen bleiben stehen,
+mehrere `Set-Cookie` bleiben mehrere. **Gesucht wird die Adresse, nicht das Wort** — der
+Kopfname wird gar nicht geprüft, eine URL im Wert wird mit `new URL()` gefunden und über ihre
+Origin verglichen, die Autorität `host:port` nur an einer Zeichengrenze und nur bei
+ausgewiesenem Port, der nackte Hostname nur als **ganzer** Wert. Ein Teilstringvergleich gegen
+den nackten Dienstnamen wäre bei der vorgesehenen Topologie `http://api:3001` fatal: er
+verschluckte `X-Api-Version: 1`, eine Doku-URL auf `api.example.org` und ein Cookie
+`api_session` — kein Schutz, sondern ein stiller Ausfall. Die Stub-Container des Smokes senden
+sowohl den leckenden als auch diese harmlosen Köpfe nachweislich; sonst wäre weder die
+Abwesenheit der einen noch die Anwesenheit der anderen ein Nachweis.
+Lokal gemessen 22.08.2026: `[container-smoke] mode=local executed=27 passed=27 skipped=0`.
+Runbook:
+[`docs/runbooks/staging-deploy.md`](docs/runbooks/staging-deploy.md).
+
+**Ein Deploy ist trotzdem gesperrt.** `BLOCKER_ENVIRONMENT_SEPARATION`: es existiert keine
+EasyTree-Datengrenze, deren `project_ref` von `inypnrvpawvhgiyagxbd` verschieden ist
+(nachgemessen 21.08.2026 über `list_projects` und `list_branches`). Der **kostenlose** Weg dorthin
+ist zusätzlich versperrt: ein `create_project`-Versuch für `easytree-staging` (Kosten gemessen
+0 $/Monat) wurde mit einem Quota-Fehler abgelehnt — die Free-Projekt-Quota zählt **pro Nutzer**
+über alle Organisationen hinweg, in denen er Owner oder Admin ist, und `DYAI2025` hat sie mit zwei
+aktiven Free-Projekten ausgeschöpft; das zweite ist über diesen Zugang nicht sichtbar. Ein
+pausiertes Projekt zählt laut Supabase-Doku nicht mit, das pausierte „Bazodiac" zu löschen hilft
+also nicht. Siehe
+[`docs/plans/2026-08-20-sprint-6-staging-blocker.md`](docs/plans/2026-08-20-sprint-6-staging-blocker.md).
 
 ## Deployment (Railway) — measured 01.08.2026
 

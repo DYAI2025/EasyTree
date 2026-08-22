@@ -1,0 +1,47 @@
+# Buildkontext fuer die OCI-Images (EYT-126).
+#
+# Der Kontext ist bewusst das REPOSITORY-WURZELVERZEICHNIS, nicht `apps/api`
+# bzw. `apps/web`: ein pnpm-Workspace laesst sich nicht aus einem Unterordner
+# heraus mit gepinntem Lockfile installieren. Alles, was hier nicht
+# ausgeschlossen wird, landet im Build — deshalb ist die Liste eng.
+
+# Abhaengigkeiten und Buildausgaben werden IM Image erzeugt. Wuerden sie aus
+# dem Arbeitsbaum mitkommen, waere der Build nicht mehr reproduzierbar: eine
+# lokal gebaute `dist/` haette Vorrang vor der im Image gebauten.
+node_modules
+**/node_modules
+**/dist
+**/dist-harness
+**/.next
+**/.turbo
+**/coverage
+**/test-results
+**/playwright-report
+
+# Cloudflare-Buildartefakte (EYT-142). Generierter Fremdcode, kein Quelltext.
+**/.open-next
+**/.wrangler
+**/.wrangler-dry
+
+# Historie und CI gehoeren nicht ins Image. Der Commit wird als Build-Argument
+# `GIT_SHA` hineingereicht und als OCI-Label gesetzt — sichtbar, ohne `.git`
+# mitzuschleppen.
+.git
+.github
+
+# Grosse Nicht-Quellen.
+docs
+penpot
+_sprint2-transfer
+supabase
+*.log
+*.pdf
+
+# Geheimnisse erreichen den Buildkontext gar nicht erst. `.env.example` traegt
+# ausschliesslich Platzhalter und darf bleiben, damit ein Diagnoselauf im
+# Container die erwarteten Variablennamen nachschlagen kann.
+.env
+.env.*
+!.env.example
+*.pem
+*.key

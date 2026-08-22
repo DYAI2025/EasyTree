@@ -55,12 +55,10 @@ jobs:
 
   build-web:
     runs-on: ubuntu-latest
-    # Das Proxyziel wird AUSDRUECKLICH gesetzt, nicht dem Default ueberlassen.
-    # Zuvor behauptete der Code "Produktion und CI setzen den Wert explizit" —
-    # und beide taten es nicht. Ein Default, auf den sich niemand berufen darf,
-    # aber alle sich verlassen, ist die schlechteste Sorte Vorgabe.
-    env:
-      EASYTREE_API_PROXY_TARGET: http://127.0.0.1:3001
+    # Kein EASYTREE_API_PROXY_TARGET mehr: seit EYT-126 loest der Same-Origin-
+    # Proxy das Ziel zur LAUFZEIT auf (Route Handler statt `rewrites()`). Dass
+    # die Variable hier fehlt, ist die dauerhafte Gegenprobe — brauchte der
+    # Build sie noch, waere dieser Pflichtjob rot.
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pnpm
@@ -117,6 +115,10 @@ jobs:
     # Hier laeuft KEINE API: der Smoke prueft den gehandelten Ausfall und die
     # Shell, nicht den Proxy. Er ist ausdruecklich KEIN Proxy-Nachweis — der
     # kommt aus dem integrierten Harness.
+    #
+    # Auf Job-Ebene, damit `next start` sie ERBT: seit EYT-126 ist sie eine
+    # LAUFZEIT-Variable. Beim Bauen wird sie nicht mehr gelesen; der Bauschritt
+    # unten liefe auch ohne sie durch.
     env:
       EASYTREE_API_PROXY_TARGET: http://127.0.0.1:3001
     steps:
@@ -629,6 +631,49 @@ jobs:
           SUPABASE_URL: "http://127.0.0.1:54321"
           SUPABASE_ANON_KEY: "ci-local-anon-key"
         run: bash scripts/smoke-worker.sh
+      # EYT-126 — Container-Smoke: dieselbe Codebasis als OCI-Workloads.
+      #
+      # Er steht am ENDE von db-gates und bekommt bewusst KEINEN eigenen Job.
+      # Ein neuer Job waere so lange kein Pflichtcheck, bis jemand mit
+      # Repository-Adminrechten das Ruleset neu anwendet, und beide Kopien der
+      # Pflichtcheck-Liste (setup-/verify-branch-protection.sh) muessten
+      # mitgezogen werden. Dieselbe Begruendung steht schon bei den
+      # Cloudflare-Schritten in build-web und build-api.
+      #
+      # Und nur HIER gibt es, was der Smoke sonst nirgends bekommt: eine echte
+      # PostgreSQL-Instanz mit der Rolle easytree_app. Ohne sie waere `/ready`
+      # kein Nachweis, sondern eine Zusicherung ueber sich selbst.
+      - name: Head und CI-SHA muessen uebereinstimmen (EYT-126)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ist="$(git rev-parse HEAD)"
+          echo "checkout=${ist} github.sha=${{ github.sha }}"
+          test "${ist}" = "${{ github.sha }}"
+      - name: Container-Smoke — Web und API als OCI-Workloads (EYT-126)
+        shell: bash
+        env:
+          EASYTREE_CONTAINER_SMOKE: required
+          GIT_SHA: ${{ github.sha }}
+          # Aus Sicht des CONTAINERS, nicht des Runners: host.docker.internal
+          # zeigt ueber --add-host=...:host-gateway auf den Hostrechner, auf
+          # dem der Supabase-Stack seine Ports veroeffentlicht.
+          EASYTREE_SMOKE_DATABASE_URL: "postgresql://easytree_app:ci-local-app-password@host.docker.internal:54322/postgres"
+          EASYTREE_SMOKE_SUPABASE_URL: "http://host.docker.internal:54321"
+          EASYTREE_SMOKE_ANON_KEY: "ci-local-anon-key"
+        run: |
+          set -Eeuo pipefail
+          bash scripts/smoke-container.sh 2>&1 | tee /tmp/container-smoke.log
+      - name: Container-Gate-Zeile pruefen und berichten (EYT-126)
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          # Die Zeile, nicht der gruene Haken: `skipped=0` ist die eigentliche
+          # Aussage. Ein Smoke, der sich mangels Docker weggeduckt hat, waere
+          # sonst nicht von einem bestandenen zu unterscheiden.
+          grep -E '\[container-smoke\] mode=required executed=[0-9]+ passed=[0-9]+ skipped=0' /tmp/container-smoke.log
+          grep -F '[container-smoke]' /tmp/container-smoke.log >> "$GITHUB_STEP_SUMMARY"
 
   # Integrierter Read-Through-Nachweis (EYT-50): Browser -> Same-Origin-Rewrite
   # -> NestJS -> TenantQueryRunner -> RLS -> PostgreSQL.
@@ -699,10 +744,14 @@ jobs:
             echo "EASYTREE_JOURNEY_ADMIN_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           } >> "$GITHUB_ENV"
           echo "Supabase-API unter ${API_URL} uebernommen (Anon-Key maskiert)."
-      - name: Bauen — ECHTE API und Web mit Rewrite auf ihren Port
+      # Das Proxyziel steht NICHT mehr hier: seit EYT-126 setzt es
+      # apps/web/e2e/auth-journey/config.ts in der webServer-Umgebung, also zur
+      # Laufzeit. Genau dieser Job beweist damit zugleich, dass Login, POST-
+      # Koerper und HttpOnly-Cookies durch die neue Durchreiche gehen.
+      - name: Bauen — ECHTE API und Web (das Proxyziel kommt erst beim Start)
         run: |
           pnpm --filter @easytree/api... build
-          EASYTREE_API_PROXY_TARGET="http://127.0.0.1:3101" pnpm --filter @easytree/web... build
+          pnpm --filter @easytree/web... build
       - name: Chromium installieren
         run: pnpm --filter @easytree/web exec playwright install --with-deps chromium
       - name: Reise fahren

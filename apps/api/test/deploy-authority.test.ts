@@ -4,7 +4,11 @@ import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { pruefeDeployAutoritaet, SCHEMA_WERKZEUGE } from "./architecture/deploy-authority-rules";
+import {
+  pruefeContainerDeployAutoritaet,
+  pruefeDeployAutoritaet,
+  SCHEMA_WERKZEUGE,
+} from "./architecture/deploy-authority-rules";
 
 /**
  * EYT-142 — Cloudflare deployt Web und API, NIEMALS das Schema.
@@ -20,6 +24,15 @@ const REPO = resolve(__dirname, "../../..");
 const WRANGLER_DATEIEN = [
   join(REPO, "apps/api/wrangler.jsonc"),
   join(REPO, "apps/web/wrangler.jsonc"),
+];
+/**
+ * EYT-126 — dieselbe Grenze fuer den Containerpfad. Coolify ist Orchestrator,
+ * nicht Schemaeigentuemer; Railway genauso wenig.
+ */
+const CONTAINER_DATEIEN = [
+  join(REPO, "apps/api/Dockerfile"),
+  join(REPO, "apps/web/Dockerfile"),
+  join(REPO, "docker-compose.yml"),
 ];
 
 describe("keine zweite Migrationsautoritaet (EYT-142)", () => {
@@ -139,5 +152,55 @@ describe("keine zweite Migrationsautoritaet (EYT-142)", () => {
     } finally {
       rmSync(verzeichnis, { recursive: true, force: true });
     }
+  });
+});
+
+describe("keine zweite Migrationsautoritaet im Containerpfad (EYT-126)", () => {
+  it("liest ueberhaupt Konfigurationen — sonst prueft dieser Test nichts", () => {
+    expect(CONTAINER_DATEIEN.length).toBe(3);
+    expect(() => pruefeContainerDeployAutoritaet(CONTAINER_DATEIEN)).not.toThrow();
+  });
+
+  it("kein Dockerfile und kein Compose-Dienst ruft ein Schemawerkzeug auf", () => {
+    expect(pruefeContainerDeployAutoritaet(CONTAINER_DATEIEN)).toEqual([]);
+  });
+
+  it("ist fail-closed: ohne Konfiguration wird die Regel rot", () => {
+    expect(() => pruefeContainerDeployAutoritaet([])).toThrow(/fail-closed/);
+  });
+
+  it("ist fail-closed: eine unlesbare Datei wird rot", () => {
+    expect(() => pruefeContainerDeployAutoritaet([join(REPO, "gibt-es-nicht/Dockerfile")])).toThrow(
+      /Fail-closed/,
+    );
+  });
+
+  describe("Rot-Fall — die Regel feuert wirklich", () => {
+    for (const werkzeug of SCHEMA_WERKZEUGE) {
+      it(`meldet "${werkzeug}" in einem RUN-Befehl`, () => {
+        const verzeichnis = mkdtempSync(join(tmpdir(), "eyt126-container-"));
+        const datei = join(verzeichnis, "Dockerfile");
+        try {
+          writeFileSync(datei, `FROM node:22-slim\nRUN ${werkzeug} --db-url $DATABASE_URL\n`);
+          const funde = pruefeContainerDeployAutoritaet([datei]);
+          expect(funde).toHaveLength(1);
+          expect(funde[0]?.werkzeug).toBe(werkzeug);
+          expect(funde[0]?.feld).toBe("Zeile 2");
+        } finally {
+          rmSync(verzeichnis, { recursive: true, force: true });
+        }
+      });
+    }
+
+    it("uebersieht ein Werkzeug in einer Kommentarzeile — sonst erzieht der Waechter zum Verschweigen", () => {
+      const verzeichnis = mkdtempSync(join(tmpdir(), "eyt126-kommentar-"));
+      const datei = join(verzeichnis, "Dockerfile");
+      try {
+        writeFileSync(datei, "FROM node:22-slim\n# hier steht bewusst KEIN psql\n");
+        expect(pruefeContainerDeployAutoritaet([datei])).toEqual([]);
+      } finally {
+        rmSync(verzeichnis, { recursive: true, force: true });
+      }
+    });
   });
 });

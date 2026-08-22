@@ -3,7 +3,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "env": ["EASYTREE_API_PROXY_TARGET", "WORKERS_CI", "CF_PAGES"],
+      "env": ["EASYTREE_NEXT_OUTPUT"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**", ".open-next/**"]
     },
     "lint": {},

@@ -29,7 +29,7 @@ import { readFileSync } from "node:fs";
 
 import { parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser";
 
-/** Werkzeuge, die Schema veraendern. Keines gehoert in einen Cloudflare-Build. */
+/** Werkzeuge, die Schema veraendern. Keines gehoert in einen Deploybefehl. */
 export const SCHEMA_WERKZEUGE: readonly string[] = [
   "supabase db push",
   "supabase migration",
@@ -114,6 +114,51 @@ export function pruefeDeployAutoritaet(dateien: readonly string[]): DeployAuthor
         }
       });
     }
+  }
+  return funde;
+}
+
+/**
+ * Dieselbe Regel fuer die Containerwelt (EYT-126).
+ *
+ * Coolify und Railway starten Images; sie duerfen dabei so wenig eine zweite
+ * Migrationsautoritaet werden wie ein Cloudflare-Build. Der Unterschied ist
+ * nur das Format: `Dockerfile` und `docker-compose.yml` sind kein JSONC,
+ * ihre Befehle stehen als Klartext in `RUN`, `CMD`, `ENTRYPOINT` oder
+ * `command:`. Deshalb wird hier zeilenweise gelesen statt geparst.
+ *
+ * Kommentarzeilen werden uebersprungen. Sonst meldete der Waechter die
+ * Begruendung, warum ein Werkzeug NICHT vorkommen darf, als Verstoss — und
+ * ein Waechter, den man nur durch Verschweigen zufriedenstellt, erzieht zum
+ * Verschweigen.
+ *
+ * Fail-closed genauso: leere Dateiliste oder eine unlesbare Datei sind rot.
+ */
+export function pruefeContainerDeployAutoritaet(dateien: readonly string[]): DeployAuthorityFund[] {
+  if (dateien.length === 0) {
+    throw new Error(
+      "Keine Containerkonfiguration gefunden. Der Waechter gegen eine zweite Migrationsautoritaet kann nichts pruefen und ist deshalb fail-closed rot.",
+    );
+  }
+  const funde: DeployAuthorityFund[] = [];
+  for (const datei of dateien) {
+    let inhalt: string;
+    try {
+      inhalt = readFileSync(datei, "utf8");
+    } catch (fehler) {
+      throw new Error(`${datei} ist nicht lesbar (${String(fehler)}). Fail-closed.`, {
+        cause: fehler,
+      });
+    }
+    const zeilen = inhalt.split("\n");
+    zeilen.forEach((zeile, index) => {
+      if (zeile.trimStart().startsWith("#")) return;
+      for (const werkzeug of SCHEMA_WERKZEUGE) {
+        if (zeile.includes(werkzeug)) {
+          funde.push({ datei, feld: `Zeile ${index + 1}`, werkzeug, wert: zeile.trim() });
+        }
+      }
+    });
   }
   return funde;
 }

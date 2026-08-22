@@ -1,0 +1,98 @@
+# easyTree — Container-Topologie fuer Staging (EYT-126).
+#
+# Coolify konsumiert diese Datei als "Docker Compose"-Ressource; lokal und in
+# CI dient sie demselben Zweck. Sie beschreibt AUSSCHLIESSLICH Topologie und
+# Konfigurationsnaehte — keine Fachlogik, keine Secrets, keine Migrationen.
+#
+# Drei Grenzen, die hier sichtbar sein muessen:
+#
+#  1. Nur `web` veroeffentlicht einen Port. Die API haengt am internen Netz und
+#     ist unter dem Dienstnamen `api` erreichbar. Der Browser sieht deshalb
+#     genau eine Origin und niemals eine interne Adresse.
+#  2. Weder `api` noch `web` fuehren Schemawerkzeuge aus. Eigentuemerin des
+#     Migrationspfads bleibt die Supabase-GitHub-Integration; Coolify und
+#     Railway werden keine zweite Migration Authority (EYT-126, EYT-142).
+#     `apps/api/test/deploy-authority.test.ts` erzwingt das.
+#  3. Weder `GIT_SHA` noch `EASYTREE_API_PROXY_TARGET` haben einen Vorgabewert.
+#     Beide hatten es frueher (`:-unknown`, `:-http://api:3001`) — ein Deploy
+#     ohne Herkunft und ein geratenes Proxyziel waren damit ueber genau diesen
+#     Pfad erzeugbar (EYT-126).
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        # `:?` statt `:-`: ein Image ohne Herkunft ist kein Kandidat fuer ein
+        # Deploy. Frueher trug diese Zeile den Vorgabewert `unknown` — damit war
+        # `revision=unknown` ueber genau diesen Pfad erzeugbar (EYT-126).
+        GIT_SHA: ${GIT_SHA:?GIT_SHA fehlt - baue mit GIT_SHA=$(git rev-parse HEAD)}
+    image: ${EASYTREE_API_IMAGE:-easytree-api:local}
+    restart: unless-stopped
+    # Kein `ports:`. Bewusst. Ein veroeffentlichter API-Port waere zusaetzliche
+    # oeffentliche Oberflaeche fuer ein Problem, das der Same-Origin-Proxy loest.
+    expose:
+      - "3001"
+    environment:
+      # Der kanonische Variablensatz aus packages/config/src/schema.ts.
+      # `:?` statt Default: eine fehlende Pflichtvariable soll den Start
+      # verweigern, nicht stillschweigend auf etwas Plausibles zeigen.
+      NODE_ENV: ${NODE_ENV:-production}
+      API_PORT: "3001"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL fehlt — verbindet als easytree_app, niemals als postgres}
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL fehlt}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY fehlt}
+      DATABASE_SSL_ROOT_CERT: ${DATABASE_SSL_ROOT_CERT:?DATABASE_SSL_ROOT_CERT ist in production Pflicht}
+    healthcheck:
+      # `node -e` statt curl: das Laufzeit-Image ist bewusst schlank und
+      # enthaelt weder curl noch wget. Node 22 bringt `fetch` global mit.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Das Web-Image bekommt KEIN Proxyziel mehr mit auf den Weg. Es ist seit
+        # EYT-126 an kein Ziel und an keinen Anbieter gebunden; das Ziel steht
+        # unten bei `environment` und gilt zur Laufzeit.
+        GIT_SHA: ${GIT_SHA:?GIT_SHA fehlt - baue mit GIT_SHA=$(git rev-parse HEAD)}
+    image: ${EASYTREE_WEB_IMAGE:-easytree-web:local}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${EASYTREE_WEB_PUBLIC_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      # LAUFZEIT, nicht Bauzeit — gemessen 21.08.2026, siehe den Kopf von
+      # apps/web/Dockerfile. Kein Default: ein geratenes Ziel sieht im Browser
+      # aus wie eine leere Woche, nicht wie ein Fehler.
+      EASYTREE_API_PROXY_TARGET: ${EASYTREE_API_PROXY_TARGET:?EASYTREE_API_PROXY_TARGET fehlt - interner Dienstname der API, z. B. http://api:3001}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s

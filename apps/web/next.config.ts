@@ -1,6 +1,8 @@
+import path from "node:path";
+
 import type { NextConfig } from "next";
 
-import { resolveBuildProxyTarget } from "./lib/api-proxy-target";
+import { resolveNextOutput } from "./lib/next-output";
 
 /**
  * easyTree Web-/PWA-Shell (EYT-41, Same-Origin seit EYT-50).
@@ -11,25 +13,28 @@ import { resolveBuildProxyTarget } from "./lib/api-proxy-target";
  *
  * ## Same-Origin statt CORS
  *
- * Der Browser bleibt auf der Origin der Web-App und ruft relative Pfade. Next
- * leitet sie serverseitig an die API weiter. Die Alternative waere gewesen,
- * die API fuer eine fremde Origin zu oeffnen — also zusaetzliche oeffentliche
- * Oberflaeche fuer ein Problem, das ein Proxy loest.
+ * Der Browser bleibt auf der Origin der Web-App und ruft relative Pfade. Die
+ * Weiterleitung an die API passiert NICHT hier: `rewrites()` wird beim Bauen
+ * aufgeloest und in `.next/routes-manifest.json` geschrieben, womit ein
+ * fertiges Image an sein Ziel gebunden waere. Zustaendig sind stattdessen die
+ * Route Handler unter `app/api/[[...pfad]]`, `app/health` und `app/ready`; sie
+ * lesen das Ziel bei jeder Anfrage neu (EYT-126).
  *
  * `/health` und `/ready` sind mit dabei und nicht vergessen: der bestehende
- * ApiClient ruft `/health` relativ zu seiner Basis-URL, und die ist ab jetzt
- * die Web-Origin. Ein Rewrite nur fuer `/api/:path*` liesse den Health-Check
- * ins Leere laufen.
+ * ApiClient ruft `/health` relativ zu seiner Basis-URL, und die ist die
+ * Web-Origin. Eine Durchreiche nur fuer `/api/*` liesse den Health-Check ins
+ * Leere laufen.
  */
 const nextConfig: NextConfig = {
-  async rewrites() {
-    const target = resolveBuildProxyTarget(process.env);
-    return [
-      { source: "/api/:path*", destination: `${target}/api/:path*` },
-      { source: "/health", destination: `${target}/health` },
-      { source: "/ready", destination: `${target}/ready` },
-    ];
-  },
+  /**
+   * Die Ablaufverfolgung fuer `output: "standalone"` braucht die
+   * Workspace-Wurzel, nicht `apps/web`. Ohne diese Angabe raet Next sie aus
+   * den gefundenen Lockfiles ("Detected additional lockfiles") — und ein
+   * Raten entscheidet darueber, ob die Workspace-Pakete im Standalone-Bundle
+   * landen.
+   */
+  outputFileTracingRoot: path.join(__dirname, "..", ".."),
+  ...resolveNextOutput(process.env),
 };
 
 export default nextConfig;
