@@ -355,11 +355,16 @@ server start instead of silently proxying to localhost, which would look like an
 the browser rather than an error. The single pass-through is `lib/proxy-durchreichen.ts`; it is
 also the one place that keeps the internal address off the wire — no `x-middleware-rewrite`
 exists, an absolute `location` header pointing at the configured target is rewritten to a
-relative path (an external redirect is left alone), **every other response header naming the
-configured target is dropped** rather than rewritten (`X-Upstream-Url`, `Link: <…>; rel="self"`,
-`Content-Location`, a `Set-Cookie` carrying an internal `Domain` — external addresses stay,
-multiple `set-cookie` stay multiple), and a connection failure becomes a 502 that
-names no host. Each gateway's URL is assembled in exactly one place — its own
+relative path (an external redirect is left alone), **every other response header whose VALUE
+names the configured target is dropped** rather than rewritten (`X-Upstream-Url`,
+`Link: <…>; rel="self"`, `Content-Location`, a `Set-Cookie` carrying an internal `Domain` —
+external addresses stay, multiple `set-cookie` stay multiple), and a connection failure becomes
+a 502 that names no host. That match targets the **address, not the word**: header names are not
+inspected at all, URLs in the value are parsed with `new URL()` and compared by origin, the
+`host:port` authority matches only at a character boundary and only when the target declares a
+port, and the bare hostname matches only as the **whole** value. A bare-substring match would
+swallow `X-Api-Version: 1` for a target named `api` — the guard would then be a silent outage
+rather than a protection. Each gateway's URL is assembled in exactly one place — its own
 factory — because the test that checks it must call the same function production does; an
 earlier version built its own gateway and would have stayed green whatever `providers.tsx` did.
 There are **three** such factories (`lib/planning-gateway-factory.ts`,
@@ -605,14 +610,21 @@ HTML noch ein Client-Chunk noch ein Antwortkopf noch ein `location`-Kopf die int
 nennt, geheimnisfreie Protokolle, das Verweigern des Starts im Produktionsprofil ohne
 `DATABASE_SSL_ROOT_CERT`, **ein Image gegen zwei Ziele bei unverändertem Digest**, das
 Fail-closed-Verhalten bei fehlendem und bei ungültigem Proxyziel, und geordnetes Herunterfahren.
-Der Antwortkopf-Teil ist dabei nicht auf `location` beschränkt: **jeder** übrige Kopf, der die
-interne Adresse nennt, fällt in `lib/proxy-durchreichen.ts` ersatzlos weg — `X-Upstream-Url`,
-`Link: <…>; rel="self"`, `Content-Location`, ein `Set-Cookie` mit interner `Domain`. Weggelassen
-und nicht umgeschrieben, weil ein Kopf ohne festgelegte Bedeutung keine Struktur trägt, aus der
-sich eine Übersetzung ableiten ließe; fremde Adressen bleiben stehen, mehrere `Set-Cookie`
-bleiben mehrere. Die beiden Stub-Container des Smokes senden diesen Kopf nachweislich, sonst
-wäre seine Abwesenheit hinter dem Proxy kein Nachweis.
-Lokal gemessen 22.08.2026: `[container-smoke] mode=local executed=26 passed=26 skipped=0`.
+Der Antwortkopf-Teil ist dabei nicht auf `location` beschränkt: **jeder** übrige Kopf, dessen
+**Wert** die interne Adresse nennt, fällt in `lib/proxy-durchreichen.ts` ersatzlos weg —
+`X-Upstream-Url`, `Link: <…>; rel="self"`, `Content-Location`, ein `Set-Cookie` mit interner
+`Domain`. Weggelassen und nicht umgeschrieben, weil ein Kopf ohne festgelegte Bedeutung keine
+Struktur trägt, aus der sich eine Übersetzung ableiten ließe; fremde Adressen bleiben stehen,
+mehrere `Set-Cookie` bleiben mehrere. **Gesucht wird die Adresse, nicht das Wort** — der
+Kopfname wird gar nicht geprüft, eine URL im Wert wird mit `new URL()` gefunden und über ihre
+Origin verglichen, die Autorität `host:port` nur an einer Zeichengrenze und nur bei
+ausgewiesenem Port, der nackte Hostname nur als **ganzer** Wert. Ein Teilstringvergleich gegen
+den nackten Dienstnamen wäre bei der vorgesehenen Topologie `http://api:3001` fatal: er
+verschluckte `X-Api-Version: 1`, eine Doku-URL auf `api.example.org` und ein Cookie
+`api_session` — kein Schutz, sondern ein stiller Ausfall. Die Stub-Container des Smokes senden
+sowohl den leckenden als auch diese harmlosen Köpfe nachweislich; sonst wäre weder die
+Abwesenheit der einen noch die Anwesenheit der anderen ein Nachweis.
+Lokal gemessen 22.08.2026: `[container-smoke] mode=local executed=27 passed=27 skipped=0`.
 Runbook:
 [`docs/runbooks/staging-deploy.md`](docs/runbooks/staging-deploy.md).
 

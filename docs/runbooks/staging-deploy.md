@@ -140,13 +140,18 @@ Drei Konsequenzen, die vor dem ersten Deploy bekannt sein müssen:
   ausgelieferte HTML, **jeden referenzierten Client-Chunk**, die Antwortköpfe und den
   `location`-Kopf dagegen — eine absolute Weiterleitung der API auf sich selbst wird in einen
   relativen Pfad übersetzt (Pfad und Query bleiben erhalten), ein externes Weiterleitungsziel
-  bleibt unangetastet. **Jeder übrige Antwortkopf, der die interne Adresse nennt, fällt
+  bleibt unangetastet. **Jeder übrige Antwortkopf, dessen Wert die interne Adresse nennt, fällt
   ersatzlos weg** — `X-Upstream-Url`, `Link: <…>; rel="self"`, `Content-Location`, ein
   `Set-Cookie` mit interner `Domain`. Nicht umgeschrieben, sondern weggelassen: ein Kopf ohne
   festgelegte Bedeutung trägt keine Struktur, aus der sich eine Übersetzung ableiten ließe.
-  Fremde Adressen bleiben stehen, und mehrere `Set-Cookie` bleiben mehrere. Der Smoke belegt
-  das mit einem Stub, der den leckenden Kopf nachweislich sendet — sonst wäre seine
-  Abwesenheit hinter dem Proxy kein Nachweis.
+  Fremde Adressen bleiben stehen, und mehrere `Set-Cookie` bleiben mehrere. **Getroffen wird
+  die Adresse, nicht das Wort:** Kopfnamen werden nicht geprüft, URLs im Wert über ihre Origin
+  verglichen, `host:port` nur an einer Zeichengrenze und nur bei ausgewiesenem Port, der nackte
+  Hostname nur als ganzer Wert. Sonst verschluckte der Riegel bei der Topologie
+  `http://api:3001` jedes `X-Api-Version`, jede Doku-URL auf `api.example.org` und jedes Cookie
+  `api_session`. Der Smoke belegt **beide** Richtungen mit einem Stub, der sowohl den leckenden
+  als auch die harmlosen Köpfe nachweislich sendet — sonst wäre weder die Abwesenheit der einen
+  noch die Anwesenheit der anderen ein Nachweis.
 
 Drei Regeln zur Datenbankverbindung, die aus gemessenen Fehlern stammen und nicht verhandelbar
 sind:
@@ -368,9 +373,10 @@ Ebene „läuft dort".
 21.08.2026 auf den Containerpfad (Confluence 30998530). Abgeleitet aus: den beiden Dockerfiles,
 `docker-compose.yml`, `scripts/smoke-container.sh`, `packages/config/src/schema.ts`,
 `pg-connection.ts`, den bestehenden Smoke-Skripten und dem lokal ausgeführten Container-Smoke
-(`[container-smoke] mode=local executed=26 passed=26 skipped=0`, 22.08.2026), der ein Image
-gegen zwei Ziele, das Nicht-Lecken der internen Adresse in gewöhnlichen Antwortköpfen und
-beide Fail-closed-Fälle belegt.
+(`[container-smoke] mode=local executed=27 passed=27 skipped=0`, 22.08.2026), der ein Image
+gegen zwei Ziele, das Nicht-Lecken der internen Adresse in gewöhnlichen Antwortköpfen, das
+unveränderte Durchreichen harmloser Köpfe mit demselben Wort und beide Fail-closed-Fälle
+belegt.
 
 **Noch nie ausgeführt.** Kein Abschnitt unterhalb von §1 ist gegen eine reale Staging-Grenze
 gelaufen, weil es keine gibt. Beim ersten echten Deploy gehört dieses Runbook gegen die

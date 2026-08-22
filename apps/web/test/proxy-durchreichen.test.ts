@@ -348,6 +348,141 @@ describe("durchreichen — gewoehnliche Antwortkoepfe lecken die interne Adresse
 });
 
 /**
+ * Der Riegel muss die ADRESSE treffen, nicht das Wort.
+ *
+ * Die erste Fassung verglich Teilstrings — volle Adresse, Autoritaet UND
+ * nackter Dienstname — und zwar ueber Kopfnamen und Wert zusammen. Fuer die
+ * vorgesehene Containertopologie `http://api:3001` ist der Dienstname das
+ * Wort "api", und damit fiel jeder harmlose Kopf, in dem diese drei Buchstaben
+ * irgendwo vorkommen: `X-Api-Version`, eine Doku-URL auf `api.example.org`,
+ * ein Cookie namens `api_session`. Das ist kein Leck, das ist ein Ausfall.
+ *
+ * Deshalb steht das Ziel hier auf genau dem echten Wert `http://api:3001` —
+ * mit `api-a.invalid` waere der Fehler unsichtbar geblieben, weil dieser Name
+ * in keinem harmlosen Kopf vorkommt.
+ */
+describe("durchreichen — der Riegel trifft die Adresse, nicht das Wort", () => {
+  beforeEach(() => {
+    // Die vorgesehene interne Topologie, woertlich. Der Dienstname ist "api".
+    process.env.EASYTREE_API_PROXY_TARGET = "http://api:3001";
+  });
+
+  it("laesst einen Kopf stehen, dessen NAME den Dienstnamen enthaelt", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => antwort({ ok: true }, { "x-api-version": "1" })),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-api-version")).toBe("1");
+  });
+
+  it("laesst einen Kopf mit einer FREMDEN Adresse unter demselben Wort stehen", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        antwort({ ok: true }, { "x-documentation": "https://api.example.org/public" }),
+      ),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-documentation")).toBe("https://api.example.org/public");
+  });
+
+  it("laesst ein Cookie stehen, dessen Name den Dienstnamen enthaelt", async () => {
+    const oben = new Response("{}", { status: 200 });
+    oben.headers.append("set-cookie", "api_session=abc123; Path=/; HttpOnly");
+    oben.headers.append("set-cookie", "sb-refresh=def; HttpOnly; Path=/");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => oben),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/auth/login"));
+
+    expect(ergebnis.headers.getSetCookie()).toEqual([
+      "api_session=abc123; Path=/; HttpOnly",
+      "sb-refresh=def; HttpOnly; Path=/",
+    ]);
+  });
+
+  it("laesst einen Wert stehen, in dem der Dienstname nur ein Wortteil ist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => antwort({ ok: true }, { "x-label": "capitalized-api-response" })),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-label")).toBe("capitalized-api-response");
+  });
+
+  it("entfernt trotzdem die echte interne Adresse", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        antwort(
+          { ok: true },
+          {
+            "x-upstream-url": "http://api:3001/private",
+            link: '<http://api:3001/foo>; rel="self"',
+            "x-api-version": "1",
+          },
+        ),
+      ),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-upstream-url")).toBeNull();
+    expect(ergebnis.headers.get("link")).toBeNull();
+    // Im selben Lauf: der harmlose Kopf ueberlebt. Sonst waere die Zeile
+    // darueber auch mit einem Riegel gruen, der alles wegwirft.
+    expect(ergebnis.headers.get("x-api-version")).toBe("1");
+  });
+
+  it("entfernt trotzdem die nackte Autoritaet ohne Schema", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => antwort({ ok: true }, { "x-upstream": "api:3001" })),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-upstream")).toBeNull();
+  });
+
+  it("verwechselt eine laengere Portnummer nicht mit der internen", async () => {
+    // `api:30011` ist ein anderer Endpunkt. Ein Vergleich ohne Grenze haette
+    // ihn als Treffer gelesen.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => antwort({ ok: true }, { "x-upstream": "api:30011" })),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/planung"));
+
+    expect(ergebnis.headers.get("x-upstream")).toBe("api:30011");
+  });
+
+  it("entfernt ein Cookie, dessen Domain-Attribut den internen Host nennt", async () => {
+    const oben = new Response("{}", { status: 200 });
+    oben.headers.append("set-cookie", "api_session=abc123; Path=/; HttpOnly");
+    oben.headers.append("set-cookie", "leck=1; Domain=api; Path=/");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => oben),
+    );
+
+    const ergebnis = await durchreichen(new Request("http://web.invalid/api/v1/auth/login"));
+
+    expect(ergebnis.headers.getSetCookie()).toEqual(["api_session=abc123; Path=/; HttpOnly"]);
+  });
+});
+
+/**
  * Der Kopf `location` ist der zweite Weg nach draussen.
  *
  * `x-middleware-rewrite` zu vermeiden genuegt NICHT: antwortet die API mit

@@ -33,13 +33,16 @@
  *     (Pfad, Query und Fragment bleiben erhalten). Ohne diesen Schritt truege
  *     der Browser die interne Adresse in die Adresszeile und riefe sie als
  *     naechstes selbst auf. Ein FREMDES Weiterleitungsziel bleibt unangetastet;
- *   * JEDER uebrige Antwortkopf, der die interne Adresse nennt, faellt weg —
- *     `X-Upstream-Url`, `Link: <…>; rel="self"`, `Content-Location`, ein
- *     `Set-Cookie` mit interner `Domain`. Das gilt fuer den Kopfnamen wie fuer
- *     den Wert. Weglassen und nicht umschreiben: ein Kopf ohne festgelegte
- *     Bedeutung hat keine Struktur, aus der sich eine Uebersetzung ableiten
- *     liesse, und eine erfundene waere schlimmer als der Verlust. Fremde
- *     Adressen bleiben unangetastet, mehrere `set-cookie` bleiben mehrere;
+ *   * JEDER uebrige Antwortkopf, dessen WERT die interne Adresse nennt, faellt
+ *     weg — `X-Upstream-Url`, `Link: <…>; rel="self"`, `Content-Location`, ein
+ *     `Set-Cookie` mit interner `Domain`. Weglassen und nicht umschreiben: ein
+ *     Kopf ohne festgelegte Bedeutung hat keine Struktur, aus der sich eine
+ *     Uebersetzung ableiten liesse, und eine erfundene waere schlimmer als der
+ *     Verlust. Gesucht wird die ADRESSE, nicht das Wort (siehe
+ *     `nenntInternesZiel`): der Kopfname wird gar nicht geprueft, und der
+ *     nackte Dienstname ist kein Teilstringtreffer mehr — sonst faellt bei
+ *     einem Ziel namens `api` jedes `X-Api-Version`. Fremde Adressen bleiben
+ *     unangetastet, mehrere `set-cookie` bleiben mehrere;
  *   * ein Verbindungsfehler wird zu einem eigenen 502, statt die Fehlermeldung
  *     von undici (sie nennt den Host) durch Nexts Fehlerseite laufen zu lassen.
  */
@@ -106,38 +109,99 @@ export function uebersetzeWeiterleitung(roh: string, ziel: string): string {
 }
 
 /**
- * Alles, woran der Browser das interne Ziel wiedererkennen koennte — klein
- * geschrieben, weil Hostnamen ohnehin schreibungsunabhaengig sind und ein Kopf
- * in beliebiger Schreibweise ankommen darf.
- *
- * Drei Formen, weil ein Leck in jeder von ihnen auftritt: die volle Adresse
- * (`http://api:3001/basis`), die Autoritaet (`api:3001`) und der nackte
- * Dienstname (`api`). Im Containernetz ist schon der Dienstname die interne
- * Adresse — genau ihn sucht auch `scripts/smoke-container.sh`.
+ * Eine URL im Fliesstext eines Kopfes. Die ausgeschlossenen Zeichen sind die
+ * Trenner, mit denen Koepfe ihre Werte umgeben — `Link` klammert in `<…>`,
+ * Listen trennen mit Komma, Parameter mit Semikolon.
  */
-function leckmuster(ziel: string): string[] {
-  const url = new URL(ziel);
-  const muster = new Set([
-    ziel.toLowerCase(),
-    url.origin.toLowerCase(),
-    url.host.toLowerCase(),
-    url.hostname.toLowerCase(),
-  ]);
-  muster.delete("");
-  return [...muster];
+const URL_IM_TEXT = /https?:\/\/[^\s,;"'<>()[\]\\]+/gi;
+
+function fuerRegex(roh: string): string {
+  return roh.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
 }
 
 /**
- * Nennt dieser Text das interne Ziel?
+ * Nennt dieser WERT das interne Ziel?
  *
- * Bewusst ein Teilstringvergleich und keine URL-Analyse: ein Kopf ohne
- * festgelegte Bedeutung hat keine Struktur, auf die man sich verlassen
- * koennte. Die Richtung des Irrtums ist damit die sichere — ein zu breiter
- * Treffer kostet einen Kopf, ein zu enger kostet die Zusage.
+ * Die erste Fassung verglich Teilstrings gegen drei Formen, darunter den
+ * nackten Dienstnamen. Fuer die vorgesehene Topologie `http://api:3001` ist
+ * dieser Dienstname das Wort "api" — und damit fielen `X-Api-Version: 1`, eine
+ * Doku-URL auf `api.example.org` und ein Cookie namens `api_session`. Ein
+ * Riegel, der harmlose Koepfe verschluckt, ist kein Schutz, sondern ein
+ * Ausfall; die Zusage lautet ausdruecklich, dass legitime Koepfe unveraendert
+ * bleiben.
+ *
+ * Deshalb wird jetzt die ADRESSE gesucht und nicht das Wort. Drei Formen, jede
+ * mit einer Grenze:
+ *
+ *   1. **Eine echte URL im Wert**, deren Origin die des Ziels IST. Gefunden
+ *      wird sie mit `new URL()`, nicht mit einem Textvergleich — deshalb ist
+ *      `https://api.example.org/public` kein Treffer, obwohl das Wort darin
+ *      steht. Gross-/Kleinschreibung normalisiert `URL` selbst.
+ *   2. **Die Autoritaet ohne Schema** (`api:3001`), aber nur wenn das Ziel
+ *      einen Port ausweist, und nur an einer Zeichengrenze: `capitalized-api`
+ *      davor und `api:30011` danach sind keine Treffer.
+ *   3. **Der Wert BESTEHT aus dem Host** (`api` oder `api:3001`), Leerraum
+ *      abgezogen. Das ist der Fall `X-Upstream-Host: api` — eine Adresse, die
+ *      allein steht, ist eine Adresse. Als Teilstring wird der nackte
+ *      Hostname bewusst NICHT mehr gesucht.
+ *
+ * Der Kopf-NAME wird gar nicht mehr geprueft: ein Name traegt keine Adresse,
+ * er traegt hoechstens dasselbe Wort.
  */
-export function nenntInternesZiel(text: string, ziel: string): boolean {
-  const klein = text.toLowerCase();
-  return leckmuster(ziel).some((m) => klein.includes(m));
+export function nenntInternesZiel(wert: string, ziel: string): boolean {
+  const url = new URL(ziel);
+  const origin = url.origin.toLowerCase();
+
+  for (const roh of wert.match(URL_IM_TEXT) ?? []) {
+    let gefunden: URL;
+    try {
+      gefunden = new URL(roh);
+    } catch {
+      continue;
+    }
+    if (gefunden.origin.toLowerCase() === origin) return true;
+  }
+
+  // Ohne Port waere die "Autoritaet" nichts anderes als der nackte Hostname,
+  // und genau dieser Teilstringvergleich ist der Fehler, den diese Fassung
+  // behebt. Der Fall bleibt trotzdem gedeckt: eine URL faengt Regel 1, ein
+  // allein stehender Host faengt Regel 3.
+  if (url.port !== "") {
+    const grenze = new RegExp(`(?<![A-Za-z0-9._-])${fuerRegex(url.host.toLowerCase())}(?![0-9])`);
+    if (grenze.test(wert.toLowerCase())) return true;
+  }
+
+  const nurWert = wert.trim().toLowerCase();
+  return nurWert === url.host.toLowerCase() || nurWert === url.hostname.toLowerCase();
+}
+
+/**
+ * Dasselbe fuer ein einzelnes `set-cookie`.
+ *
+ * Der Wert wird zuerst wie jeder andere geprueft — eine interne URL im
+ * Cookiewert ist ein Leck wie ueberall sonst. Zusaetzlich, und NUR strukturell,
+ * das `Domain`-Attribut: es nennt einen Host per Definition, also wird es
+ * ausgelesen und VERGLICHEN statt im Text gesucht. Das erste Segment ist das
+ * Name/Wert-Paar und deshalb kein Attribut — sonst waere ein Cookie namens
+ * `domain` ein falscher Treffer.
+ */
+export function keksNenntInternesZiel(keks: string, ziel: string): boolean {
+  if (nenntInternesZiel(keks, ziel)) return true;
+
+  const hostname = new URL(ziel).hostname.toLowerCase();
+  for (const attribut of keks.split(";").slice(1)) {
+    const trenner = attribut.indexOf("=");
+    if (trenner === -1) continue;
+    if (attribut.slice(0, trenner).trim().toLowerCase() !== "domain") continue;
+    // Ein fuehrender Punkt ist die alte Schreibweise fuer dieselbe Domain.
+    const wert = attribut
+      .slice(trenner + 1)
+      .trim()
+      .toLowerCase()
+      .replace(/^\./, "");
+    if (wert === hostname) return true;
+  }
+  return false;
 }
 
 export async function durchreichen(request: Request): Promise<Response> {
@@ -195,15 +259,17 @@ export async function durchreichen(request: Request): Promise<Response> {
       continue;
     }
     // Jeder uebrige Kopf ist bedeutungslos fuer uns und wird deshalb nicht
-    // umgeschrieben, sondern weggelassen, sobald er die interne Adresse
-    // nennt. Auch der NAME zaehlt mit: `x-api-intern: 1` leckt genauso.
-    if (nenntInternesZiel(`${name}: ${wert}`, ziel)) continue;
+    // umgeschrieben, sondern weggelassen, sobald sein WERT die interne
+    // Adresse nennt. Nur der Wert: ein Kopfname traegt keine Adresse, und
+    // `X-Api-Version` wegzuwerfen, weil das Ziel `api` heisst, waere kein
+    // Schutz, sondern ein Ausfall.
+    if (nenntInternesZiel(wert, ziel)) continue;
     antwortKopf.set(name, wert);
   }
   for (const keks of oben.headers.getSetCookie()) {
     // Dieselbe Zusage, ohne die Mehrfachheit aufzugeben: das leckende Cookie
     // faellt weg, die uebrigen bleiben eigene Koepfe.
-    if (nenntInternesZiel(keks, ziel)) continue;
+    if (keksNenntInternesZiel(keks, ziel)) continue;
     antwortKopf.append("set-cookie", keks);
   }
 

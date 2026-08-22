@@ -15,6 +15,11 @@
 #      sich selbst setzt, noch in einem gewoehnlichen Kopf wie
 #      `x-upstream-url` oder `link: <…>; rel="self"`. Beide Faelle werden mit
 #      einem Stub belegt, der den leckenden Kopf nachweislich sendet.
+#      Und die Gegenrichtung im selben Zug: harmlose Koepfe, die das WORT der
+#      internen Adresse tragen, aber nicht die Adresse (`X-Api-Version`, eine
+#      Doku-URL auf einem fremden Host, ein Cookie `api_session`), muessen
+#      unveraendert ankommen — sonst ist der Riegel kein Schutz, sondern ein
+#      stiller Ausfall.
 #   5. Die Protokolle enthalten weder Datenbankpasswort noch Anon-Key.
 #   6. Beide Container laufen als nicht-privilegierter Benutzer.
 #   7. Gegenprobe: mit NODE_ENV=production und ohne Wurzelzertifikat MUSS der
@@ -402,10 +407,22 @@ echo "== 8/10 Ein Image, zwei Ziele, kein Neubau =="
 # Auf JEDER 200er-Antwort sendet der Stub zusaetzlich zwei Koepfe, die seine
 # EIGENE interne Adresse nennen — `x-upstream-url` und ein `link: <…>;
 # rel="self"`. Beides sind reale Formen (Weiterleitungsketten, Hypermedia), und
-# beide sind fuer same-origin-JavaScript ueber `response.headers` lesbar. Der
-# dritte Kopf `x-stub-marke` ist harmlos und dient als Eingangsbremse: ohne ihn
-# waere "der leckende Kopf fehlt" auch dann gruen, wenn gar nichts durchkommt.
-STUB_PROGRAMM='const http=require("http");const name=process.env.STUB_NAME;const eigen=process.env.STUB_ORIGIN;http.createServer((q,s)=>{if(q.url.indexOf("weiterleitung-intern")!==-1){s.writeHead(302,{location:eigen+"/foo?x=1"});return s.end();}if(q.url.indexOf("weiterleitung-extern")!==-1){s.writeHead(302,{location:"https://login.example.org/oauth?state=xyz"});return s.end();}s.writeHead(200,{"content-type":"application/json","x-upstream-url":eigen+"/private",link:"<"+eigen+"/foo>; rel=\"self\"","x-stub-marke":"harmlos"});s.end(JSON.stringify({stub:name,pfad:q.url}));}).listen(3001,"0.0.0.0")'
+# beide sind fuer same-origin-JavaScript ueber `response.headers` lesbar.
+#
+# Daneben stehen VIER harmlose Koepfe, und sie sind nicht bloss Beiwerk. Der
+# Riegel hat zwei Fehlerrichtungen, und ein Smoke, der nur die eine misst, ist
+# halb blind:
+#
+#   * `x-stub-marke` beantwortet "kommt ueberhaupt etwas durch";
+#   * `x-api-version`, `x-documentation` (eine FREMDE Adresse) und das Cookie
+#     `api_session` tragen das Wort "api" und **nicht** die interne Autoritaet.
+#     Sie muessen ankommen. Eine frueherere Fassung des Riegels verglich den
+#     nackten Dienstnamen als Teilstring und ueber den Kopfnamen mit — bei der
+#     vorgesehenen Topologie `http://api:3001` haette das genau diese drei
+#     verschluckt. Gemessen wird diese Fehlerrichtung scharf in der
+#     Unit-Suite (dort heisst das Ziel woertlich `api`); hier belegt sie, dass
+#     der Weg durch den echten Container dieselbe Antwort gibt.
+STUB_PROGRAMM='const http=require("http");const name=process.env.STUB_NAME;const eigen=process.env.STUB_ORIGIN;http.createServer((q,s)=>{if(q.url.indexOf("weiterleitung-intern")!==-1){s.writeHead(302,{location:eigen+"/foo?x=1"});return s.end();}if(q.url.indexOf("weiterleitung-extern")!==-1){s.writeHead(302,{location:"https://login.example.org/oauth?state=xyz"});return s.end();}s.writeHead(200,{"content-type":"application/json","x-upstream-url":eigen+"/private",link:"<"+eigen+"/foo>; rel=\"self\"","x-stub-marke":"harmlos","x-api-version":"1","x-documentation":"https://api.example.org/public","set-cookie":["api_session=abc123; Path=/; HttpOnly","stub_sitzung=def456; Path=/"]});s.end(JSON.stringify({stub:name,pfad:q.url}));}).listen(3001,"0.0.0.0")'
 
 stub_starten() {
   local name="$1"
@@ -510,7 +527,7 @@ stub_leckt_direkt() {
   local ausgabe
   ausgabe="$(docker run --rm --network "${NETZ}" \
     -e "STUB_URL=http://${ZWEI_ZIEL_B}:3001" "${STUB_IMAGE}" \
-    node -e 'fetch(process.env.STUB_URL+"/health").then(r=>{console.log("x-upstream-url="+r.headers.get("x-upstream-url"));console.log("link="+r.headers.get("link"));console.log("x-stub-marke="+r.headers.get("x-stub-marke"));}).catch(e=>{console.log("fehler="+e.message);process.exitCode=1})')" || return 1
+    node -e 'fetch(process.env.STUB_URL+"/health").then(r=>{for(const k of ["x-upstream-url","link","x-stub-marke","x-api-version","x-documentation"])console.log(k+"="+r.headers.get(k));console.log("set-cookie="+r.headers.getSetCookie().join(" || "));}).catch(e=>{console.log("fehler="+e.message);process.exitCode=1})')" || return 1
   printf '  direkt vom Stub: %s\n' "$(printf '%s' "${ausgabe}" | tr '\n' ' ')"
   case "${ausgabe}" in
   *"${ZWEI_ZIEL_B}"*) ;;
@@ -519,14 +536,20 @@ stub_leckt_direkt() {
     return 1
     ;;
   esac
-  # Und die Eingangsbremse muss es beim Stub auch wirklich geben.
-  case "${ausgabe}" in
-  *x-stub-marke=harmlos*) ;;
-  *)
-    echo "  der Stub sendet den harmlosen Kopf nicht — die Eingangsbremse waere blind" >&2
-    return 1
-    ;;
-  esac
+  # Und die Eingangsbremsen muss es beim Stub auch wirklich geben — alle vier,
+  # sonst prueft die Erhaltungsseite darunter weniger, als sie behauptet.
+  local bremse
+  for bremse in "x-stub-marke=harmlos" "x-api-version=1" \
+    "x-documentation=https://api.example.org/public" "api_session=abc123"; do
+    case "${ausgabe}" in
+    *"${bremse}"*) ;;
+    *)
+      echo "  der Stub sendet '${bremse}' nicht — die Erhaltungspruefung waere blind" >&2
+      printf '%s\n' "${ausgabe}" >&2
+      return 1
+      ;;
+    esac
+  done
 }
 pruefung "der Stub nennt seine interne Adresse tatsaechlich in einem Nicht-location-Kopf" \
   stub_leckt_direkt
@@ -567,6 +590,42 @@ gewoehnliche_koepfe_ohne_leck() {
 }
 pruefung "kein gewoehnlicher Antwortkopf traegt die interne Adresse zum Browser" \
   gewoehnliche_koepfe_ohne_leck
+
+harmlose_koepfe_ueberleben() {
+  # Die andere Fehlerrichtung. Der Riegel darf nur die ADRESSE treffen, nicht
+  # das Wort: alle drei Koepfe hier tragen "api", keiner die interne
+  # Autoritaet. Verschluckt der Proxy sie, ist er kaputt — nur eben still.
+  local koepfe klein fehlt=0
+  koepfe="$(curl -fsS -D - -o /dev/null "http://127.0.0.1:${ZWEI_PORT}/health")"
+  [ -n "${koepfe}" ] || return 1
+  klein="$(printf '%s' "${koepfe}" | tr 'A-Z' 'a-z')"
+  local erwartet
+  for erwartet in "x-api-version: 1" "x-documentation: https://api.example.org/public" \
+    "api_session=abc123" "stub_sitzung=def456"; do
+    case "${klein}" in
+    *"${erwartet}"*) ;;
+    *)
+      echo "  der harmlose Kopf '${erwartet}' wurde unterwegs verschluckt" >&2
+      fehlt=1
+      ;;
+    esac
+  done
+  if [ "${fehlt}" -ne 0 ]; then
+    printf '%s\n' "${koepfe}" >&2
+    return 1
+  fi
+  # Zwei Cookies bleiben zwei — der Riegel darf nicht zusammenfalten.
+  local kekse
+  kekse="$(printf '%s' "${koepfe}" | tr -d '\r' | grep -ci '^set-cookie:' || true)"
+  echo "  set-cookie-Koepfe: ${kekse}"
+  [ "${kekse}" = "2" ] || {
+    echo "  erwartet waren zwei getrennte set-cookie-Koepfe" >&2
+    return 1
+  }
+  echo "  x-api-version, x-documentation und beide Cookies unveraendert durchgereicht"
+}
+pruefung "harmlose Koepfe mit dem Wort 'api' ueberleben den Riegel unveraendert" \
+  harmlose_koepfe_ueberleben
 
 echo "== 9/10 Fail-closed zur Laufzeit =="
 start_verweigert() {
