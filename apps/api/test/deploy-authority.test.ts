@@ -33,6 +33,10 @@ const CONTAINER_DATEIEN = [
   join(REPO, "apps/api/Dockerfile"),
   join(REPO, "apps/web/Dockerfile"),
   join(REPO, "docker-compose.yml"),
+  // EYT-142 — die Staging-Topologie ist eine zweite Deploy-Datei und braucht
+  // dieselbe Grenze. Ohne diese Zeile bliebe ein `supabase db push` darin
+  // unbemerkt, und Coolify waere still Schemaeigentuemer.
+  join(REPO, "docker-compose.staging.yml"),
 ];
 
 describe("keine zweite Migrationsautoritaet (EYT-142)", () => {
@@ -157,7 +161,7 @@ describe("keine zweite Migrationsautoritaet (EYT-142)", () => {
 
 describe("keine zweite Migrationsautoritaet im Containerpfad (EYT-126)", () => {
   it("liest ueberhaupt Konfigurationen — sonst prueft dieser Test nichts", () => {
-    expect(CONTAINER_DATEIEN.length).toBe(3);
+    expect(CONTAINER_DATEIEN.length).toBe(4);
     expect(() => pruefeContainerDeployAutoritaet(CONTAINER_DATEIEN)).not.toThrow();
   });
 
