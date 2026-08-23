@@ -464,10 +464,16 @@ export function KostenAnsicht({ snapshotId }: { snapshotId: string | null }) {
 /**
  * Der gespeicherte Stand — Gesamtsumme, Tagessummen, Positionen, Herkunft.
  *
- * Jede Zahl kommt aus dem Snapshot. Die Herkunftsangaben (Regelversion, Zone,
- * Korrelations-Id, Erzeuger) stehen dabei nicht aus Vollstaendigkeitsdrang
- * dort: ohne sie ist spaeter nicht mehr entscheidbar, nach welcher Regel und
- * in welcher Zone die Tagesgrenzen gezogen wurden.
+ * Jede Zahl kommt aus dem Snapshot. Gerendert werden neun Herkunftsangaben:
+ * Snapshot-ID, Planversion, Woche, Erzeugt am, Erzeugt von, Regelversion,
+ * Zeitzone, Waehrung, Baustellenfilter. Sie stehen nicht aus
+ * Vollstaendigkeitsdrang dort: ohne sie ist spaeter nicht mehr entscheidbar,
+ * nach welcher Regel und in welcher Zone die Tagesgrenzen gezogen wurden.
+ *
+ * `CostSnapshot` traegt ein zehntes Feld, `correlationId`, und das bleibt
+ * bewusst ungerendert: es adressiert einen Serverlauf im Protokoll und hilft
+ * beim Nachschlagen eines Vorfalls, nicht beim Beurteilen eines Kostenstandes.
+ * Es hier zu zeigen verlaengerte die Liste, die EYT-141 gerade verkuerzt.
  *
  * Sie stehen aber ZULETZT (EYT-141). Wer `/kosten` oeffnet, sucht die Summe und
  * die Positionen; standen die neun Metadatenfelder davor, war das Erste, was

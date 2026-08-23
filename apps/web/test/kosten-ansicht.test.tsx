@@ -288,17 +288,27 @@ describe("Kostenansicht — Auswahl, Erzeugung, gespeicherter Stand (EYT-144)", 
     zeige({}, SNAPSHOT_ID);
 
     const summe = await screen.findByTestId("kosten-gesamtsumme");
+    const tage = screen.getByTestId("kosten-tage");
     const positionen = screen.getByTestId("kosten-positionen");
     const herkunft = screen.getByTestId("kosten-herkunft");
 
     // Dokumentreihenfolge, nicht CSS: `compareDocumentPosition` misst, was ein
     // Screenreader und ein Tastaturlauf tatsaechlich nacheinander erreichen.
+    //
+    // Alle DREI Bereiche einzeln, weil das Kriterium alle drei nennt
+    // ("Tages-/Gesamtsumme und Positionen"). Mit nur Summe und Positionen
+    // ueberlebte die Mutation, die allein die Tagestabelle hinter die Herkunft
+    // schiebt: beide Zusicherungen blieben wahr, das Kriterium waere trotzdem
+    // verletzt.
     const summeVorHerkunft =
       summe.compareDocumentPosition(herkunft) & Node.DOCUMENT_POSITION_FOLLOWING;
+    const tageVorHerkunft =
+      tage.compareDocumentPosition(herkunft) & Node.DOCUMENT_POSITION_FOLLOWING;
     const positionenVorHerkunft =
       positionen.compareDocumentPosition(herkunft) & Node.DOCUMENT_POSITION_FOLLOWING;
 
     expect(summeVorHerkunft, "Gesamtsumme steht nach der Herkunft").toBeTruthy();
+    expect(tageVorHerkunft, "Tagessummen stehen nach der Herkunft").toBeTruthy();
     expect(positionenVorHerkunft, "Positionen stehen nach der Herkunft").toBeTruthy();
   });
 

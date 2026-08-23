@@ -649,17 +649,21 @@ body {
 /* EYT-141 — die Herkunft ist nachgeordnet, aber nicht versteckt: kleinere
    Schrift und Sekundaerfarbe, oberhalb eine Haarlinie als Zaesur. Kein
    `<details>`: die Akzeptanz verlangt "sichtbar", und zugeklappt ist es das
-   nicht. */
-.eyt-kosten-herkunft {
-  margin-block-start: calc(var(--space) * 1.5);
-  padding-block-start: var(--space);
-  border-block-start: 1px solid var(--eyt-border-default);
-  color: var(--eyt-text-secondary);
-  font-size: 0.875rem;
-}
+   nicht.
 
+   Die Linie sitzt auf der UEBERSCHRIFT und nicht auf der Liste. Lag sie auf
+   dem `<dl>`, trennte sie die Ueberschrift von ihrer eigenen Liste statt den
+   Abschnitt vom Inhalt darueber — der Block zerfiel optisch in zwei Teile. */
 .eyt-kosten-herkunft__titel {
   margin-block: calc(var(--space) * 1.5) 0;
+  padding-block-start: var(--space);
+  border-block-start: 1px solid var(--eyt-border-default);
   font-size: 0.9375rem;
   color: var(--eyt-text-secondary);
+}
+
+.eyt-kosten-herkunft {
+  margin-block-start: var(--space);
+  color: var(--eyt-text-secondary);
+  font-size: 0.875rem;
 }
