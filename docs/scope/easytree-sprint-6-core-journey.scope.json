@@ -28,7 +28,8 @@
       "apps/web/app/ready/**",
       "apps/web/instrumentation.ts",
       "apps/api/test/architecture/secret-surface-rules.ts",
-      "apps/api/test/container-bindung.test.ts"
+      "apps/api/test/container-bindung.test.ts",
+      "docker-compose.staging.yml"
     ],
     "governance": [
       "docs/canvas/**",
@@ -296,6 +297,62 @@
         ]
       },
       "scope_digest": "sha256:bd4224b230fc968b4d3df7fca50b0a5940c24e143b735274757bdf1c8fbdc4bf"
+    },
+    {
+      "revision": 7,
+      "origin": "PO-Entscheidung 23.08.2026: Scope um die Staging-Compose-Topologie erweitern (EYT-142). Ausloeser ist der rote PRIL-Scope-Gate auf dem Branch feat/eyt-126-ghcr-images (PRIL_POLICY_VIOLATION, exit_code=3, einzige beanstandete Datei docker-compose.staging.yml).",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-23T20:36:51+02:00",
+      "rationale": "Revision 8 nimmt GENAU EINEN Pfad auf, ohne Platzhalter: docker-compose.staging.yml. Einordnung als product und nicht als governance, dem Praezedenzfall aus Revision 5 folgend, wo docker-compose.yml unter product steht: die Datei beschreibt die laufende Software, nicht das Werkzeug darum herum. ANLASS: EYT-142 verlangt einen Deploy, der an einen exakten Image-Stand gebunden ist. Der VPS hat am 23.08.2026 gemessen 2,6 GB verfuegbaren RAM und 22 GB Platte neben sechs fremden Workloads; ein Serverbuild aus dem Git-Stand ist dort ein OOM-Risiko und bindet das Deploy ausserdem an einen Branch statt an einen Digest. Die Images entstehen deshalb in CI (.github/workflows/release-images.yml, seit Revision 5 ueber .github/workflows/** im Scope) und Coolify zieht sie. Dafuer braucht es eine Topologie, die ZIEHT statt zu bauen. WARUM NICHT die vorhandene docker-compose.yml aendern: scripts/smoke-container.sh baut ueber sie aus dem Arbeitsbaum und prueft daran zehn Eigenschaften des Containerpfads. Naehme man ihr das build:, verloere der Container-Smoke seinen Gegenstand — der Wachhund wuerde fuer eine Bequemlichkeit geopfert. AUSDRUECKLICH NICHT aufgenommen: docker-compose*.yml als Platzhalter. Nur die eine Datei, damit eine kuenftige dritte Topologie wieder eine bewusste Entscheidung braucht. NUMMERNKOLLISION, die benannt gehoert — und der gemessene Grund dafuer: der PO hat am 23.08.2026 entschieden, diese Erweiterung als Revision 8 auf den committeten Stand (Revision 6) zu setzen und die lokal uncommittete Revision 7 unangetastet zu lassen. Das ist technisch nicht moeglich. Der Scope-Guard erzwingt lueckenlose Nummern und lehnte die 8 ab: 'provenance revision must be contiguous; expected 7' (exit_code=4, gemessen 23.08.2026). Dieser Eintrag traegt deshalb die 7. FOLGE, die der naechste Leser kennen muss: es existieren voruebergehend ZWEI Revisionen 7. Diese hier (docker-compose.staging.yml, committet) und eine gleichnamige im Haupt-Worktree (.gitignore und .claude/settings.json, aus dem /health-Konfigurationsaudit vom 23.08.2026, zum Zeitpunkt dieser Entscheidung nicht committet). Wer die andere spaeter committet, nummeriert sie auf 8 um und haengt sie hinter diese — die Reihenfolge im Manifest ist die Entscheidungsreihenfolge, und diese Entscheidung liegt nachweislich auf dem committeten Stand. Die andere Revision 7 wird dabei NICHT inhaltlich veraendert, nur ihre Nummer.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**",
+          ".dockerignore",
+          "docker-compose.yml",
+          "turbo.json",
+          "apps/api/Dockerfile",
+          "apps/web/Dockerfile",
+          "apps/web/next.config.ts",
+          "apps/api/test/architecture/deploy-authority-rules.ts",
+          "apps/api/test/deploy-authority.test.ts",
+          "apps/web/app/api/**",
+          "apps/web/app/health/**",
+          "apps/web/app/ready/**",
+          "apps/web/instrumentation.ts",
+          "apps/api/test/architecture/secret-surface-rules.ts",
+          "apps/api/test/container-bindung.test.ts",
+          "docker-compose.staging.yml"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/reality/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md",
+          ".github/workflows/**",
+          "scripts/**",
+          "docs/runbooks/**",
+          "docs/architecture/**"
+        ]
+      },
+      "scope_digest": "sha256:d428ceaf06155e7aa5137516fc8cb57f0dd0ab1de511fec8b5f3210e52fade6e"
     }
   ]
 }
