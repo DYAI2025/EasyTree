@@ -645,3 +645,21 @@ body {
   align-items: center;
   min-height: 2.5rem;
 }
+
+/* EYT-141 — die Herkunft ist nachgeordnet, aber nicht versteckt: kleinere
+   Schrift und Sekundaerfarbe, oberhalb eine Haarlinie als Zaesur. Kein
+   `<details>`: die Akzeptanz verlangt "sichtbar", und zugeklappt ist es das
+   nicht. */
+.eyt-kosten-herkunft {
+  margin-block-start: calc(var(--space) * 1.5);
+  padding-block-start: var(--space);
+  border-block-start: 1px solid var(--eyt-border-default);
+  color: var(--eyt-text-secondary);
+  font-size: 0.875rem;
+}
+
+.eyt-kosten-herkunft__titel {
+  margin-block: calc(var(--space) * 1.5) 0;
+  font-size: 0.9375rem;
+  color: var(--eyt-text-secondary);
+}
