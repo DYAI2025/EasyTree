@@ -462,58 +462,28 @@ export function KostenAnsicht({ snapshotId }: { snapshotId: string | null }) {
 }
 
 /**
- * Der gespeicherte Stand — Kopf, Tagessummen, Positionen.
+ * Der gespeicherte Stand — Gesamtsumme, Tagessummen, Positionen, Herkunft.
  *
- * Jede Zahl kommt aus dem Snapshot. Die Herkunftsangaben (Regelversion, Zone,
- * Korrelations-Id, Erzeuger) stehen dabei nicht aus Vollstaendigkeitsdrang
- * dort: ohne sie ist spaeter nicht mehr entscheidbar, nach welcher Regel und
- * in welcher Zone die Tagesgrenzen gezogen wurden.
+ * Jede Zahl kommt aus dem Snapshot. Gerendert werden neun Herkunftsangaben:
+ * Snapshot-ID, Planversion, Woche, Erzeugt am, Erzeugt von, Regelversion,
+ * Zeitzone, Waehrung, Baustellenfilter. Sie stehen nicht aus
+ * Vollstaendigkeitsdrang dort: ohne sie ist spaeter nicht mehr entscheidbar,
+ * nach welcher Regel und in welcher Zone die Tagesgrenzen gezogen wurden.
+ *
+ * `CostSnapshot` traegt ein zehntes Feld, `correlationId`, und das bleibt
+ * bewusst ungerendert: es adressiert einen Serverlauf im Protokoll und hilft
+ * beim Nachschlagen eines Vorfalls, nicht beim Beurteilen eines Kostenstandes.
+ * Es hier zu zeigen verlaengerte die Liste, die EYT-141 gerade verkuerzt.
+ *
+ * Sie stehen aber ZULETZT (EYT-141). Wer `/kosten` oeffnet, sucht die Summe und
+ * die Positionen; standen die neun Metadatenfelder davor, war das Erste, was
+ * Auge wie Screenreader erreichten, eine Reihe von UUIDs. Nachgeordnet heisst
+ * hier hinten im Dokument und leiser gesetzt, nicht ausgeblendet oder
+ * zugeklappt — das Kriterium verlangt ausdruecklich "sichtbar".
  */
 function SnapshotAnzeige({ snapshot }: { snapshot: CostSnapshot }) {
   return (
     <div data-testid="kosten-snapshot" data-snapshot-id={snapshot.id}>
-      <dl className="eyt-kennzahlen">
-        <div>
-          <dt>Snapshot-ID</dt>
-          <dd data-testid="kosten-snapshot-id">{snapshot.id}</dd>
-        </div>
-        <div>
-          <dt>Planversion</dt>
-          <dd data-testid="kosten-planversion-id">{snapshot.planVersionId}</dd>
-        </div>
-        <div>
-          <dt>Woche</dt>
-          <dd>{snapshot.weekKey}</dd>
-        </div>
-        <div>
-          <dt>Erzeugt am</dt>
-          <dd>{alsZeitpunkt(snapshot.createdAt)}</dd>
-        </div>
-        <div>
-          <dt>Erzeugt von</dt>
-          {/* Die wahrheitsgemaesse Id. Es gibt keine Namensaufloesung fuer
-              Benutzer-Ids in diesem Vertrag — einen Namen zu erfinden waere
-              schlimmer als eine Id zu zeigen, die sich nachschlagen laesst. */}
-          <dd data-testid="kosten-erzeuger">{snapshot.createdBy}</dd>
-        </div>
-        <div>
-          <dt>Regelversion</dt>
-          <dd data-testid="kosten-regelversion">{snapshot.ruleVersion}</dd>
-        </div>
-        <div>
-          <dt>Zeitzone</dt>
-          <dd>{snapshot.timeZone}</dd>
-        </div>
-        <div>
-          <dt>Währung</dt>
-          <dd data-testid="kosten-waehrung">{snapshot.currency}</dd>
-        </div>
-        <div>
-          <dt>Baustellenfilter</dt>
-          <dd data-testid="kosten-baustellenfilter">{snapshot.worksiteId ?? "alle Baustellen"}</dd>
-        </div>
-      </dl>
-
       <p className="eyt-kosten-summe">
         <strong>Gesamtsumme: </strong>
         <span data-testid="kosten-gesamtsumme">
@@ -583,6 +553,49 @@ function SnapshotAnzeige({ snapshot }: { snapshot: CostSnapshot }) {
           </tbody>
         </table>
       </div>
+
+      <h3 className="eyt-kosten-herkunft__titel">Herkunft dieses Snapshots</h3>
+      <dl className="eyt-kennzahlen eyt-kosten-herkunft" data-testid="kosten-herkunft">
+        <div>
+          <dt>Snapshot-ID</dt>
+          <dd data-testid="kosten-snapshot-id">{snapshot.id}</dd>
+        </div>
+        <div>
+          <dt>Planversion</dt>
+          <dd data-testid="kosten-planversion-id">{snapshot.planVersionId}</dd>
+        </div>
+        <div>
+          <dt>Woche</dt>
+          <dd>{snapshot.weekKey}</dd>
+        </div>
+        <div>
+          <dt>Erzeugt am</dt>
+          <dd>{alsZeitpunkt(snapshot.createdAt)}</dd>
+        </div>
+        <div>
+          <dt>Erzeugt von</dt>
+          {/* Die wahrheitsgemaesse Id. Es gibt keine Namensaufloesung fuer
+              Benutzer-Ids in diesem Vertrag — einen Namen zu erfinden waere
+              schlimmer als eine Id zu zeigen, die sich nachschlagen laesst. */}
+          <dd data-testid="kosten-erzeuger">{snapshot.createdBy}</dd>
+        </div>
+        <div>
+          <dt>Regelversion</dt>
+          <dd data-testid="kosten-regelversion">{snapshot.ruleVersion}</dd>
+        </div>
+        <div>
+          <dt>Zeitzone</dt>
+          <dd>{snapshot.timeZone}</dd>
+        </div>
+        <div>
+          <dt>Währung</dt>
+          <dd data-testid="kosten-waehrung">{snapshot.currency}</dd>
+        </div>
+        <div>
+          <dt>Baustellenfilter</dt>
+          <dd data-testid="kosten-baustellenfilter">{snapshot.worksiteId ?? "alle Baustellen"}</dd>
+        </div>
+      </dl>
     </div>
   );
 }
