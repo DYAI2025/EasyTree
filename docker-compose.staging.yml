@@ -1,0 +1,76 @@
+# Staging-Topologie (EYT-142): identisch zu docker-compose.yml, aber sie ZIEHT
+# fertige Images statt zu bauen. Coolify konsumiert diese Datei.
+#
+# Die Grenzen aus docker-compose.yml gelten unveraendert weiter:
+#   1. Nur `web` veroeffentlicht einen Port; die API haengt am internen Netz.
+#      Der Browser sieht genau eine Origin und niemals eine interne Adresse.
+#   2. Weder `api` noch `web` fuehren Schemawerkzeuge aus — Coolify wird keine
+#      zweite Migration Authority (EYT-126, EYT-142). Eigentuemerin des
+#      Migrationspfads bleibt die Supabase-GitHub-Integration.
+#   3. Kein Vorgabewert fuer EASYTREE_API_PROXY_TARGET: ein geratenes Ziel
+#      sieht im Browser aus wie eine leere Woche, nicht wie ein Fehler.
+#
+# EASYTREE_API_IMAGE/EASYTREE_WEB_IMAGE werden mit @sha256-DIGEST gesetzt, nicht
+# mit einem Tag: ein Tag laesst sich zwischen zwei Starts umhaengen, ein Digest
+# nicht. Die Werte liefert der Workflow release-images.yml in seiner
+# Zusammenfassung.
+
+services:
+  api:
+    image: ${EASYTREE_API_IMAGE:?EASYTREE_API_IMAGE fehlt - z. B. ghcr.io/dyai2025/easytree-api@sha256:...}
+    restart: unless-stopped
+    # Kein `ports:`. Bewusst. Ein veroeffentlichter API-Port waere zusaetzliche
+    # oeffentliche Oberflaeche fuer ein Problem, das der Same-Origin-Proxy loest.
+    expose:
+      - "3001"
+    environment:
+      # Der kanonische Variablensatz aus packages/config/src/schema.ts.
+      NODE_ENV: ${NODE_ENV:-production}
+      API_PORT: "3001"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL fehlt — verbindet als easytree_app, niemals als postgres}
+      SUPABASE_URL: ${SUPABASE_URL:?SUPABASE_URL fehlt}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?SUPABASE_ANON_KEY fehlt}
+      DATABASE_SSL_ROOT_CERT: ${DATABASE_SSL_ROOT_CERT:?DATABASE_SSL_ROOT_CERT ist in production Pflicht}
+    healthcheck:
+      # `node -e` statt curl: das Laufzeit-Image ist bewusst schlank und
+      # enthaelt weder curl noch wget. Node 22 bringt `fetch` global mit.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    image: ${EASYTREE_WEB_IMAGE:?EASYTREE_WEB_IMAGE fehlt - z. B. ghcr.io/dyai2025/easytree-web@sha256:...}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${EASYTREE_WEB_PUBLIC_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      # LAUFZEIT, nicht Bauzeit (EYT-126): der Same-Origin-Proxy liegt in Route
+      # Handlern und liest das Ziel bei JEDER Anfrage neu.
+      EASYTREE_API_PROXY_TARGET: ${EASYTREE_API_PROXY_TARGET:?EASYTREE_API_PROXY_TARGET fehlt - interner Dienstname der API, z. B. http://api:3001}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s

@@ -1,0 +1,91 @@
+# Baut die beiden OCI-Images auf GitHubs Runnern und legt sie unter dem
+# Commit-SHA in der GitHub Container Registry ab (EYT-126, EYT-142).
+#
+# Warum nicht auf dem VPS: der Zielserver hat 2,6 GB verfuegbaren RAM neben
+# sechs fremden Workloads (gemessen 23.08.2026). Ein Next-16- plus ein
+# NestJS-Build dort ist ein OOM-Risiko ohne Gegenwert — und ein Serverbuild
+# bindet das Deploy an einen Branch statt an einen Digest.
+#
+# BEWUSST KEIN Pflichtcheck und bewusst NICHT in ci.yml: beide
+# Branch-Protection-Skripte lesen nur ci.yml und wuerden einen dortigen
+# Nicht-Pflicht-Job als Drift melden.
+name: release-images
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+          - name: web
+            dockerfile: apps/web/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Registry-Pfad in Kleinbuchstaben
+        id: ziel
+        run: |
+          set -euo pipefail
+          # GHCR verlangt kleingeschriebene Repository-Namen. Der Kontextwert
+          # `github.repository_owner` ist hier "DYAI2025" mit Grossbuchstaben
+          # (gemessen 23.08.2026 ueber `gh repo view --json owner`) — direkt als
+          # Tag benutzt ergaebe er "invalid reference format", und der Job fiele
+          # erst NACH dem vollstaendigen Bau beider Images.
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Image bauen und schieben
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          # Nur amd64: der Zielserver ist x86_64. Ein zweiter Bogen verdoppelt
+          # die Bauzeit fuer eine Plattform, auf der nichts laeuft.
+          platforms: linux/amd64
+          # GIT_SHA hat in beiden Dockerfiles KEINEN Vorgabewert und wird darin
+          # geprueft — ein Image ohne Herkunft schlaegt schon beim Bauen fehl.
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: |
+            ghcr.io/${{ steps.ziel.outputs.owner }}/easytree-${{ matrix.name }}:${{ github.sha }}
+            ghcr.io/${{ steps.ziel.outputs.owner }}/easytree-${{ matrix.name }}:master
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Digest und Herkunft in die Zusammenfassung
+        run: |
+          set -euo pipefail
+          # Der Digest ist die einzige Bindung, die ein umgehaengter Tag nicht
+          # faelschen kann. Er wandert in die Zusammenfassung, weil das Deploy
+          # ihn spaeter woertlich verlangt.
+          {
+            echo "### easytree-${{ matrix.name }}"
+            echo ""
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- Digest: \`${{ steps.push.outputs.digest }}\`"
+            echo "- Ziehen:  \`ghcr.io/${{ steps.ziel.outputs.owner }}/easytree-${{ matrix.name }}@${{ steps.push.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
