@@ -69,6 +69,16 @@
 > **Kein Schreibzugriff hat stattgefunden.** Der abgelehnte `create_project`-Aufruf hat nichts
 > angelegt; alles Übrige war read-only. Produktionsdaten wurden zu keinem Zeitpunkt berührt.
 
+> **Nachtrag 3, 24.08.2026 — nachgemessen, unverändert.** Wieder read-only über die
+> Control-Plane: `list_projects` liefert weiterhin genau **ein** Projekt (`ykoijifgweoapitabgxx`
+> „Bazodiac", `status: INACTIVE`) und kein EasyTree-Projekt; `list_organizations` weiterhin nur
+> `rcginbmldqfibmrbtsvr`; `list_branches` auf `inypnrvpawvhgiyagxbd` weiterhin genau eine Branch
+> `main` mit `project_ref == parent_project_ref == inypnrvpawvhgiyagxbd`. Beide Stufen der
+> fehlenden Voraussetzung aus Nachtrag 2 bestehen fort. Die Entscheidung aus
+> `docs/plans/2026-08-23-sprint-6-restarbeit.md` Phase 0 (Task 0.1: zweiten belegten Free-Slot im
+> Dashboard sichtbar machen; Task 0.2: Option A/B/C/D wählen) ist weiterhin nicht gefallen —
+> Phase 3 (realer Deploy) bleibt gesperrt.
+
 ## Worum es geht
 
 EYT-137 verlangt die Kernreise „auf dem für Sprint 6 freigegebenen Staging-Ziel", EYT-142 verlangt
