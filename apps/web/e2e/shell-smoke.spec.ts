@@ -148,12 +148,6 @@ test("Tab-Zyklus: alle interaktiven Elemente erreichbar, sichtbarer Fokus, keine
   expect(after).not.toBe(visited[visited.length - 1]);
 });
 
-test("axe im echten Browser: 0 Violations inkl. color-contrast", async ({ page }) => {
-  await page.goto("/");
-  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
-  expect(results.violations).toEqual([]);
-});
-
 /**
  * Jede Route rendert serverseitig ueberhaupt (EYT-107).
  *
@@ -205,5 +199,17 @@ for (const route of ROUTEN) {
 
     // Und die Shell steht: ohne diese Zeile waere eine leere Seite gruen.
     await expect(page.getByRole("banner")).toBeVisible();
+  });
+}
+
+for (const route of ROUTEN) {
+  test(`axe im echten Browser: 0 Violations auf ${route.pfad}`, async ({ page }) => {
+    await page.goto(route.pfad);
+    // Hier laeuft KEINE API. Geprueft wird deshalb der unangemeldete Lade-,
+    // Leer- oder Fehlerzustand dieser Flaeche — genau die Zustaende, die
+    // EYT-141 als wiederverwendbar verlangt. Die ANGEMELDETEN Zustaende
+    // derselben Flaechen prueft `auth-journey` bei 1440/1920/200 %.
+    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+    expect(results.violations, `${route.pfad}: ${JSON.stringify(results.violations)}`).toEqual([]);
   });
 }

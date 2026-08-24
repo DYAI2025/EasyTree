@@ -281,6 +281,37 @@ describe("Kostenansicht — Auswahl, Erzeugung, gespeicherter Stand (EYT-144)", 
     expect(screen.getByTestId("kosten-baustellenfilter").textContent).toBe("alle Baustellen");
   });
 
+  it("stellt Summe, Tage und Positionen VOR die Herkunftsangaben (EYT-141)", async () => {
+    // `zeige(antworten, snapshotId)` ist der vorhandene Helfer dieser Datei: er
+    // baut den Gateway-Doppelgaenger ueber `baue()` und rendert. Kein zweiter
+    // Aufbau, keine zweite Fixtur.
+    zeige({}, SNAPSHOT_ID);
+
+    const summe = await screen.findByTestId("kosten-gesamtsumme");
+    const tage = screen.getByTestId("kosten-tage");
+    const positionen = screen.getByTestId("kosten-positionen");
+    const herkunft = screen.getByTestId("kosten-herkunft");
+
+    // Dokumentreihenfolge, nicht CSS: `compareDocumentPosition` misst, was ein
+    // Screenreader und ein Tastaturlauf tatsaechlich nacheinander erreichen.
+    //
+    // Alle DREI Bereiche einzeln, weil das Kriterium alle drei nennt
+    // ("Tages-/Gesamtsumme und Positionen"). Mit nur Summe und Positionen
+    // ueberlebte die Mutation, die allein die Tagestabelle hinter die Herkunft
+    // schiebt: beide Zusicherungen blieben wahr, das Kriterium waere trotzdem
+    // verletzt.
+    const summeVorHerkunft =
+      summe.compareDocumentPosition(herkunft) & Node.DOCUMENT_POSITION_FOLLOWING;
+    const tageVorHerkunft =
+      tage.compareDocumentPosition(herkunft) & Node.DOCUMENT_POSITION_FOLLOWING;
+    const positionenVorHerkunft =
+      positionen.compareDocumentPosition(herkunft) & Node.DOCUMENT_POSITION_FOLLOWING;
+
+    expect(summeVorHerkunft, "Gesamtsumme steht nach der Herkunft").toBeTruthy();
+    expect(tageVorHerkunft, "Tagessummen stehen nach der Herkunft").toBeTruthy();
+    expect(positionenVorHerkunft, "Positionen stehen nach der Herkunft").toBeTruthy();
+  });
+
   it("A4 laedt beim Reload NUR den gespeicherten Snapshot", async () => {
     const { aufrufe } = zeige({}, SNAPSHOT_ID);
     await screen.findByTestId("kosten-snapshot");
