@@ -1,0 +1,37 @@
+{
+  "station1_userId_A": "4a4fc059-eeec-40b8-8f80-ae99b0b2b880",
+  "station2_woche": "2026-W35",
+  "station3_wochen": [
+    "2026-W34",
+    "2026-W36",
+    "2026-W35"
+  ],
+  "station4_assignmentId": "8b85fa26-f488-47a4-b7e7-d69b6ba05c2a",
+  "station5_reload_enthaelt_assignment": true,
+  "tastatur_erreichte_testids": [
+    "wochennavigation-vorherige",
+    "wochennavigation-heute",
+    "wochennavigation-naechste",
+    "planung-veroeffentlichen",
+    "feld-employee"
+  ],
+  "station6_publishedVersionId": "42e052be-f842-4d54-9ca0-f14479629150",
+  "station7_snapshotId": "8e05f8c3-4f7a-4a43-a466-4bf65388c9b1",
+  "station7_totalMinorUnits": "17000",
+  "station8_zweiter_kontext": {
+    "publishedVersionId": "42e052be-f842-4d54-9ca0-f14479629150",
+    "snapshotId": "8e05f8c3-4f7a-4a43-a466-4bf65388c9b1"
+  },
+  "negativ_b_userId": "b57c9e17-6630-42f1-9f61-166322515e49",
+  "negativ_b_direktzugriff_status": 403,
+  "negativ_c_userId": "a253e0f9-a85e-4568-819d-22505b3344c5",
+  "negativ_c_direktzugriff_status": 403,
+  "satz_fehlt_versionId": "00000000-0000-4000-8000-00000000e253",
+  "satz_fehlt_problem": {
+    "type": "urn:easytree:costs:rate-not-found",
+    "title": "Konflikt",
+    "status": 409,
+    "detail": "Fuer Person 00000000-0000-4000-8000-00000000e212, den 2026-09-14, Einsatz 00000000-0000-4000-8000-00000000e264 fehlt ein gueltiger Stundensatz. Bitte den Satz hinterlegen und den Snapshot erneut erzeugen. Es wurde kein Snapshot gespeichert.",
+    "correlationId": "aef93477-4821-4a3e-97e6-e03be626b36d"
+  }
+}
