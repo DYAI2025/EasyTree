@@ -27,7 +27,9 @@ Ein Deploy ist erst zulässig, wenn **alle drei** Bedingungen erfüllt sind:
 
 1. **Die Pflicht-CI ist am exakten Head grün**, einschließlich des Container-Smokes aus §6.
 2. **Eine eindeutig als NON-PRODUCTION identifizierte EasyTree-Datengrenze existiert und ist
-   nachgewiesen.** **Heute nicht erfüllt.** Prüfbar mit genau einer Frage:
+   nachgewiesen.** **Erfüllt seit dem 24.08.2026** durch die owner-freigegebene **VPS-lokale**
+   Datengrenze (Nachtrag unten); **für ein cloudseitiges Staging-Ziel weiterhin NICHT
+   erfüllt.** Für ein Cloud-Ziel prüfbar mit genau einer Frage:
 
    ```
    Ist der project_ref des Ziels von inypnrvpawvhgiyagxbd verschieden?
@@ -40,7 +42,8 @@ Ein Deploy ist erst zulässig, wenn **alle drei** Bedingungen erfüllt sind:
    `ykoijifgweoapitabgxx`) und **kein** EasyTree-Projekt; `list_branches` auf
    `inypnrvpawvhgiyagxbd` zeigt genau eine Branch `main` mit
    `project_ref == parent_project_ref == inypnrvpawvhgiyagxbd`. Die einzige Branch **ist** die
-   Produktion. Die Bedingung gilt unverändert.
+   Produktion. Für ein **Cloud**-Ziel gilt diese Messung unverändert; die heute erfüllte Grenze
+   ist die VPS-lokale aus dem Nachtrag unten.
 
    **Nachtrag 24./25.08.2026 — die Bedingung ist auf anderem Weg erfüllt.** Auf Owner-Auftrag
    vom 24.08.2026 ist die Datengrenze ein **VPS-lokaler Supabase-CLI-Stack** auf
@@ -418,3 +421,9 @@ Protokolle: `docs/plans/2026-08-24-vps-staging-deploy-protokoll.md` und
 stehen jetzt hier: die VPS-lokale Datengrenze in §1, die HTTPS-Pflicht in §3, der ausgeführte
 Rollback in §7. **Weiterhin nicht gemessen:** ein Railway-Deploy (§10) und Coolifys eigene
 Redeploy-Historie als Rollbackweg (§7.1, Einschränkung).
+
+**Korrigiert am 26.08.2026:** §1 (2) trug noch die Bewertung „Heute nicht erfüllt" aus dem
+Stand vor dem 24.08., während der Nachtrag im selben Abschnitt die erfüllte VPS-lokale Grenze
+beschrieb — zwei sich widersprechende Gegenwartsaussagen in einem Abschnitt. Jetzt steht dort
+eine: VPS-lokal erfüllt, cloudseitig weiterhin offen (Quota-Lage unverändert, Blockerbericht
+Nachtrag 2). Die historischen Messungen vom 21.08. bleiben als solche stehen.
