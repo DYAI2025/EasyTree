@@ -61,7 +61,7 @@ gehört zur Betriebswahrheit dieses Increments.
 
 ## Die Kernreise — Playwright gegen das reale Staging, 14/14 grün
 
-Lauf: 25.08.2026, `apps/web/e2e-staging/journey.spec.ts` (im Evidenzcommit enthalten),
+Lauf: 25.08.2026, `apps/web/e2e/staging/journey.pwtest.ts` (im Evidenzcommit enthalten),
 `14 passed (22.1s)`, Basis-URL `https://srv1308064.hstgr.cloud`. Die Schreibreise fährt
 **2026-W37** (veröffentlichte Wochen sind per DB-Trigger unlöschbar — jede Wiederholung braucht
 eine frische Woche; `EYT_JOURNEY_WOCHE`/`EYT_JOURNEY_DATUM` parametrisieren das).

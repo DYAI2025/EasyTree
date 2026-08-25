@@ -1,11 +1,7 @@
 {
   "station1_userId_A": "4a4fc059-eeec-40b8-8f80-ae99b0b2b880",
   "station2_woche": "2026-W35",
-  "station3_wochen": [
-    "2026-W34",
-    "2026-W36",
-    "2026-W35"
-  ],
+  "station3_wochen": ["2026-W34", "2026-W36", "2026-W35"],
   "station4_assignmentId": "8b85fa26-f488-47a4-b7e7-d69b6ba05c2a",
   "station5_reload_enthaelt_assignment": true,
   "tastatur_erreichte_testids": [

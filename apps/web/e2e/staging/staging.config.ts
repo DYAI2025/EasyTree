@@ -7,7 +7,9 @@ import { defineConfig } from "@playwright/test";
  */
 export default defineConfig({
   testDir: ".",
-  testMatch: /\.spec\.ts$/,
+  // .pwtest.ts wie bei auth-journey: faellt damit weder in den Default-Match
+  // der Haupt-Playwright-Config noch in vitest.
+  testMatch: /\.pwtest\.ts$/,
   timeout: 180_000,
   retries: 0,
   workers: 1,
