@@ -67,6 +67,30 @@ values ('00000000-0000-4000-8000-00000000e231',
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------------
+-- Der kanonische Mitarbeiter OHNE Stundensatz (EYT-142)
+-- ---------------------------------------------------------------------------
+-- Die Satz-fehlt-Negativreise der Staging-Kernreise braucht einen AKTIVEN
+-- Mitarbeiter mit exakt NULL Satzversionen: nur mit ihm ist die typisierte
+-- 409-Ablehnung (`urn:easytree:costs:rate-not-found`) reproduzierbar. Vor
+-- dieser Zeile war er reiner Umgebungszustand des Staging-Stacks — ein
+-- frischer Aufbau haette ihn erraten muessen. Jetzt ist er Fixture-Wahrheit:
+-- feste UUID in der `…e2xx`-Konvention, kanonischer Anzeigename, und die
+-- Staging-Harness (`apps/web/e2e/staging/harness-wachen.ts`) kennt genau
+-- diesen Namen als Vorgabewert.
+--
+-- `do update` statt `do nothing`, und zwar mit Absicht: auf einem Stack, auf
+-- dem die UUID schon existiert (der reale Staging-Stack vom 25.08.2026),
+-- konvergiert ein erneuter Fixture-Lauf Anzeigename und Aktiv-Status auf den
+-- kanonischen Stand, statt einen abweichenden Altnamen stehen zu lassen.
+-- Einen Satz bekommt er hier NIE — das prueft der Block unten nach.
+insert into public.employees (id, org_id, user_id, display_name, active)
+values ('00000000-0000-4000-8000-00000000e212',
+        '00000000-0000-4000-8000-00000000e201',
+        null, 'E2E-Mitarbeiter Ohne Satz', true)
+on conflict (id) do update
+  set display_name = excluded.display_name, active = excluded.active;
+
+-- ---------------------------------------------------------------------------
 -- Planungsdaten fuer die Publish-Reise (EYT-107)
 -- ---------------------------------------------------------------------------
 -- Ohne sie zeigte `/planung` eine leere Woche, und der Publish-Nachweis haette
@@ -166,6 +190,7 @@ declare
   n_mitglied int;
   n_mitarbeiter int;
   n_satz int;
+  n_satz_ohne int;
   n_projektion int;
   n_baustelle int;
   n_version int;
@@ -178,6 +203,11 @@ begin
     where org_id = '00000000-0000-4000-8000-00000000e201';
   select count(*) into n_satz from public.employee_rate_versions
     where org_id = '00000000-0000-4000-8000-00000000e201';
+  -- Die definierende Eigenschaft des Satz-fehlt-Mitarbeiters, ausdruecklich
+  -- und je Mitarbeiter gezaehlt: NULL Satzversionen. Der org-weite Zaehler
+  -- allein bewiese das nur, solange niemand eine weitere Version einspielt.
+  select count(*) into n_satz_ohne from public.employee_rate_versions
+    where employee_id = '00000000-0000-4000-8000-00000000e212';
   select count(*) into n_projektion from public.users u
     where exists (select 1 from auth.users a where a.id = u.id
                   and a.email like 'auth-journey-%@easytree.test');
@@ -196,17 +226,21 @@ begin
   --
   -- Seit EYT-146 zwei Baustellen, zwei Planversionen (beide Entwurf) und drei
   -- Zuweisungen: eine in W32 fuer die Reise, zwei in W33 fuer den
-  -- Baustellenfilter. Die Zahlen stehen ausgeschrieben und nicht als „>= 1",
+  -- Baustellenfilter. Seit EYT-142 ZWEI Mitarbeiter: e211 mit genau einer
+  -- Satzversion, e212 mit exakt NULL — `satz_ohne=0` ist die definierende
+  -- Eigenschaft der Satz-fehlt-Reise und wird hier fail-closed nachgerechnet.
+  -- Die Zahlen stehen ausgeschrieben und nicht als „>= 1",
   -- damit eine versehentlich doppelt eingespielte Fixtur auffaellt statt den
   -- Betrag eines Snapshots still zu verdoppeln.
-  if n_mitglied <> 1 or n_mitarbeiter <> 1 or n_satz <> 1 or n_projektion <> 2
+  if n_mitglied <> 1 or n_mitarbeiter <> 2 or n_satz <> 1 or n_satz_ohne <> 0
+     or n_projektion <> 2
      or n_baustelle <> 2 or n_version <> 2 or n_entwurf <> 2 or n_zuweisung <> 3 then
     raise exception
-      'E2E-Fixture unvollstaendig: membership=% mitarbeiter=% satz=% projektionen=% baustelle=% version=% entwurf=% zuweisung=% (erwartet 1/1/1/2/2/2/2/3)',
-      n_mitglied, n_mitarbeiter, n_satz, n_projektion,
+      'E2E-Fixture unvollstaendig: membership=% mitarbeiter=% satz=% satz_ohne=% projektionen=% baustelle=% version=% entwurf=% zuweisung=% (erwartet 1/2/1/0/2/2/2/2/3)',
+      n_mitglied, n_mitarbeiter, n_satz, n_satz_ohne, n_projektion,
       n_baustelle, n_version, n_entwurf, n_zuweisung;
   end if;
-  raise notice '[auth-journey-fixture] projektionen=% membership=% mitarbeiter=% satz=% baustelle=% entwurf=% zuweisung=%',
-    n_projektion, n_mitglied, n_mitarbeiter, n_satz, n_baustelle, n_entwurf, n_zuweisung;
+  raise notice '[auth-journey-fixture] projektionen=% membership=% mitarbeiter=% satz=% satz_ohne=% baustelle=% entwurf=% zuweisung=%',
+    n_projektion, n_mitglied, n_mitarbeiter, n_satz, n_satz_ohne, n_baustelle, n_entwurf, n_zuweisung;
 end
 $$;
