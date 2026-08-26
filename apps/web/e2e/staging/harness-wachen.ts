@@ -52,6 +52,16 @@ export const HISTORISCHES_EVIDENZ_VERZEICHNIS = "docs/evidence/2026-08-25-eyt-14
 export const SATZ_FEHLT_PROBLEM_TYPE = "urn:easytree:costs:rate-not-found";
 
 /**
+ * Kanonischer Anzeigename des Satz-fehlt-Mitarbeiters — die Identitaet kommt
+ * aus dem Repository, nicht aus dem Gedaechtnis eines Operators: Employee
+ * `…e212` in `apps/web/e2e/auth-journey/fixtures.sql` (EYT-142, Reparatur
+ * 26.08.2026). `EYT_SATZ_FEHLT_MITARBEITER` bleibt als bewusste Uebersteuerung
+ * fuer einen Stack, dessen Altbestand die UUID unter anderem Namen traegt —
+ * der reproduzierbare Vorgabepfad ist der kanonische Name.
+ */
+export const KANONISCHER_SATZ_FEHLT_MITARBEITER = "E2E-Mitarbeiter Ohne Satz";
+
+/**
  * Obergrenze fuer den Abstand einer Schreibwoche zur laufenden Woche. Die
  * Reise navigiert per Klick vorwaerts; eine Woche jenseits dieser Schranke
  * ist mit hoher Wahrscheinlichkeit ein Tippfehler, kein Plan.
@@ -201,6 +211,74 @@ export function satzFehltVerdikt(status: number, problemType: unknown): string |
   return null;
 }
 
+/** Ein Eintrag der Mitarbeiterliste, wie `GET /api/v1/kosten/mitarbeiter` ihn liefert. */
+export interface MitarbeiterEintrag {
+  readonly id: string;
+  readonly displayName: string;
+  readonly active: boolean;
+}
+
+/**
+ * Pre-flight, Haelfte 1: der Satz-fehlt-Mitarbeiter muss in der
+ * Mitarbeiterliste der Reiseorganisation stehen, aktiv sein und seinen
+ * Anzeigenamen exakt einmal tragen — die Reise waehlt ihn per
+ * `selectOption({ label })`, und ein doppelter Name waere dort mehrdeutig.
+ *
+ * Laeuft VOR jedem Publish: eine fehlende Fixture bricht die Reise ab, BEVOR
+ * irgendeine frische Woche veroeffentlicht und damit verbraucht ist. Vorher
+ * fiel das erst in der letzten Station auf — nach zwei verbrauchten Wochen.
+ */
+export function satzFehltMitarbeiterBefund(
+  mitarbeiter: readonly MitarbeiterEintrag[],
+  gesuchterName: string,
+): { readonly ok: true; readonly id: string } | { readonly ok: false; readonly grund: string } {
+  const treffer = mitarbeiter.filter((m) => m.displayName === gesuchterName);
+  if (treffer.length === 0) {
+    return {
+      ok: false,
+      grund:
+        `Kein Mitarbeiter "${gesuchterName}" in der Reiseorganisation. Die kanonische Fixture ` +
+        `legt ihn an: apps/web/e2e/auth-journey/fixtures.sql (Employee …e212, EYT-142). ` +
+        `Abbruch VOR dem ersten Publish — keine Woche wurde verbraucht.`,
+    };
+  }
+  if (treffer.length > 1) {
+    return {
+      ok: false,
+      grund:
+        `Anzeigename "${gesuchterName}" ist ${treffer.length}-fach vergeben — die Auswahl per ` +
+        `Label waere mehrdeutig, die Reise koennte den falschen Mitarbeiter treffen.`,
+    };
+  }
+  const einziger = treffer[0];
+  if (einziger === undefined || !einziger.active) {
+    return {
+      ok: false,
+      grund:
+        `Mitarbeiter "${gesuchterName}" existiert, ist aber inaktiv — das Einsatzformular ` +
+        `boete ihn nicht an.`,
+    };
+  }
+  return { ok: true, id: einziger.id };
+}
+
+/**
+ * Pre-flight, Haelfte 2: die definierende Eigenschaft. Der Mitarbeiter hat
+ * exakt NULL Satzversionen — nicht "keine aktive", sondern KEINE. `null` =
+ * eingehalten, sonst die Abweichung als Text. Hat er inzwischen einen Satz
+ * bekommen, wuerde der Snapshot angelegt statt abgelehnt; das faellt hier auf,
+ * bevor die Satz-fehlt-Woche veroeffentlicht und damit verbraucht wird.
+ */
+export function satzFehltFixtureVerdikt(anzahlSatzVersionen: number): string | null {
+  if (anzahlSatzVersionen === 0) return null;
+  return (
+    `${anzahlSatzVersionen} Satzversion(en) statt exakt 0 — der Satz-fehlt-Mitarbeiter hat ` +
+    `einen Satz erworben. Die Negativreise wuerde einen Snapshot ERZEUGEN statt die typisierte ` +
+    `Ablehnung zu messen. Abbruch vor dem Publish; Fixture bereinigen oder per ` +
+    `EYT_SATZ_FEHLT_MITARBEITER einen satzlosen Mitarbeiter benennen.`
+  );
+}
+
 /**
  * Prueft das Evidenz-Zielverzeichnis. Das historische, abgeschlossene Paket
  * vom 25.08.2026 ist als Ziel verboten — es bleibt byte-unveraendert.
@@ -302,15 +380,16 @@ export function leseReiseEingaben(
     );
   }
 
-  const satzFehltMitarbeiter = env["EYT_SATZ_FEHLT_MITARBEITER"];
-  if (satzFehltMitarbeiter === undefined || satzFehltMitarbeiter === "") {
-    throw new Error(
-      `[staging] EYT_SATZ_FEHLT_MITARBEITER fehlt. Erwartet wird der Anzeigename eines aktiven ` +
-        `Mitarbeiters der Reiseorganisation OHNE jede Stundensatzversion — nur mit ihm ist die ` +
-        `Satz-fehlt-Ablehnung reproduzierbar. Hat der benannte Mitarbeiter doch einen Satz, ` +
-        `faellt das sichtbar auf: der Snapshot wuerde angelegt statt abgelehnt.`,
-    );
-  }
+  // Vorgabewert statt Pflicht-Eingabe (Reparatur 26.08.2026): der Mitarbeiter
+  // ist seither kanonische Fixture-Wahrheit (`fixtures.sql`, Employee `…e212`),
+  // kein manuell erinnerter Umgebungszustand mehr. Ob er wirklich existiert
+  // und wirklich satzlos ist, prueft die Reise VOR jedem Publish ueber
+  // {@link satzFehltMitarbeiterBefund} und {@link satzFehltFixtureVerdikt}.
+  const rohMitarbeiter = env["EYT_SATZ_FEHLT_MITARBEITER"];
+  const satzFehltMitarbeiter =
+    rohMitarbeiter === undefined || rohMitarbeiter === ""
+      ? KANONISCHER_SATZ_FEHLT_MITARBEITER
+      : rohMitarbeiter;
 
   const klickWochen: string[] = [];
   let lauf = laufende;

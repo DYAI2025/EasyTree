@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   HISTORISCHES_EVIDENZ_VERZEICHNIS,
   KANONISCHE_STAGING_URL,
+  KANONISCHER_SATZ_FEHLT_MITARBEITER,
   MAX_WOCHEN_ABSTAND,
   SATZ_FEHLT_PROBLEM_TYPE,
   autorisierungsVerdikt,
@@ -13,6 +14,8 @@ import {
   leseReiseEingaben,
   pruefeEvidenzVerzeichnis,
   pruefeStagingUrl,
+  satzFehltFixtureVerdikt,
+  satzFehltMitarbeiterBefund,
   satzFehltVerdikt,
   schreibeEvidenz,
   wochenAbstandNachVorn,
@@ -97,12 +100,35 @@ describe("leseReiseEingaben — laufende Woche aus der Uhr, Schreibwochen als Pf
     expect(() => leseReiseEingaben({ EYT_JOURNEY_WOCHE: "2026-W46" }, MITTWOCH_W45)).toThrow(
       /EYT_SATZ_FEHLT_WOCHE fehlt/,
     );
-    expect(() =>
-      leseReiseEingaben(
-        { EYT_JOURNEY_WOCHE: "2026-W46", EYT_SATZ_FEHLT_WOCHE: "2026-W47" },
-        MITTWOCH_W45,
-      ),
-    ).toThrow(/EYT_SATZ_FEHLT_MITARBEITER fehlt/);
+  });
+
+  it("faellt ohne EYT_SATZ_FEHLT_MITARBEITER auf die kanonische Fixture-Identitaet zurueck", () => {
+    // Reparatur 26.08.2026: der Mitarbeiter ist Fixture-Wahrheit (fixtures.sql,
+    // Employee …e212), kein manuell erinnerter Umgebungszustand. Ob er wirklich
+    // existiert und satzlos ist, misst der Pre-flight der Reise — hier steht
+    // nur, dass die Identitaet aus dem Repository kommt.
+    const ohne = leseReiseEingaben(
+      { EYT_JOURNEY_WOCHE: "2026-W46", EYT_SATZ_FEHLT_WOCHE: "2026-W47" },
+      MITTWOCH_W45,
+    );
+    expect(ohne.satzFehltMitarbeiter).toBe(KANONISCHER_SATZ_FEHLT_MITARBEITER);
+    expect(KANONISCHER_SATZ_FEHLT_MITARBEITER).toBe("E2E-Mitarbeiter Ohne Satz");
+    // Leerstring zaehlt als "nicht gesetzt", nicht als Name.
+    const leer = leseReiseEingaben(
+      {
+        EYT_JOURNEY_WOCHE: "2026-W46",
+        EYT_SATZ_FEHLT_WOCHE: "2026-W47",
+        EYT_SATZ_FEHLT_MITARBEITER: "",
+      },
+      MITTWOCH_W45,
+    );
+    expect(leer.satzFehltMitarbeiter).toBe(KANONISCHER_SATZ_FEHLT_MITARBEITER);
+    // Die bewusste Uebersteuerung bleibt moeglich (Altbestand eines Stacks).
+    const uebersteuert = leseReiseEingaben(
+      { ...GUELTIGE_EINGABEN, EYT_SATZ_FEHLT_MITARBEITER: "Altbestand Ohne Satz" },
+      MITTWOCH_W45,
+    );
+    expect(uebersteuert.satzFehltMitarbeiter).toBe("Altbestand Ohne Satz");
   });
 
   it("lehnt eine unparsbare Wochenangabe ab", () => {
@@ -225,6 +251,67 @@ describe("satzFehltVerdikt — exakt 409 mit dem gemessenen Problem-URN", () => 
   });
 });
 
+describe("satzFehltMitarbeiterBefund — Fixture-Existenz VOR dem ersten Publish", () => {
+  const OHNE_SATZ = {
+    id: "00000000-0000-4000-8000-00000000e212",
+    displayName: KANONISCHER_SATZ_FEHLT_MITARBEITER,
+    active: true,
+  };
+  const MIT_SATZ = {
+    id: "00000000-0000-4000-8000-00000000e211",
+    displayName: "E2E-Mitarbeiter Reise",
+    active: true,
+  };
+
+  it("findet den kanonischen Mitarbeiter und liefert seine Server-Id", () => {
+    const befund = satzFehltMitarbeiterBefund(
+      [MIT_SATZ, OHNE_SATZ],
+      KANONISCHER_SATZ_FEHLT_MITARBEITER,
+    );
+    expect(befund).toEqual({ ok: true, id: OHNE_SATZ.id });
+  });
+
+  it("meldet eine FEHLENDE Fixture mit Verweis auf fixtures.sql — vor jeder verbrauchten Woche", () => {
+    const befund = satzFehltMitarbeiterBefund([MIT_SATZ], KANONISCHER_SATZ_FEHLT_MITARBEITER);
+    expect(befund.ok).toBe(false);
+    if (befund.ok) return;
+    expect(befund.grund).toMatch(/fixtures\.sql/);
+    expect(befund.grund).toMatch(/keine Woche wurde verbraucht/);
+  });
+
+  it("lehnt einen inaktiven Mitarbeiter ab — das Formular boete ihn nicht an", () => {
+    const befund = satzFehltMitarbeiterBefund(
+      [{ ...OHNE_SATZ, active: false }],
+      KANONISCHER_SATZ_FEHLT_MITARBEITER,
+    );
+    expect(befund.ok).toBe(false);
+    if (befund.ok) return;
+    expect(befund.grund).toMatch(/inaktiv/);
+  });
+
+  it("lehnt einen mehrfach vergebenen Anzeigenamen ab — die Label-Auswahl waere mehrdeutig", () => {
+    const befund = satzFehltMitarbeiterBefund(
+      [OHNE_SATZ, { ...OHNE_SATZ, id: "00000000-0000-4000-8000-00000000e219" }],
+      KANONISCHER_SATZ_FEHLT_MITARBEITER,
+    );
+    expect(befund.ok).toBe(false);
+    if (befund.ok) return;
+    expect(befund.grund).toMatch(/mehrdeutig/);
+  });
+});
+
+describe("satzFehltFixtureVerdikt — die definierende Eigenschaft: exakt NULL Satzversionen", () => {
+  it("haelt bei exakt null Versionen", () => {
+    expect(satzFehltFixtureVerdikt(0)).toBeNull();
+  });
+
+  it("lehnt jede vorhandene Satzversion ab — der Snapshot wuerde erzeugt statt abgelehnt", () => {
+    expect(satzFehltFixtureVerdikt(1)).toMatch(/statt exakt 0/);
+    expect(satzFehltFixtureVerdikt(1)).toMatch(/vor dem Publish/);
+    expect(satzFehltFixtureVerdikt(3)).toMatch(/^3 Satzversion/);
+  });
+});
+
 describe("schreibeEvidenz — ein halber Lauf ersetzt ids.json nicht", () => {
   it("laesst bei einem fehlgeschlagenen Lauf das kanonische ids.json byte-unveraendert", () => {
     const verzeichnis = mkdtempSync(join(tmpdir(), "eyt142-evidenz-"));
@@ -286,5 +373,20 @@ describe("Quelltext-Wache — keine verbrauchbaren Wochen, kein HTTP, keine >=-S
   it("die Konfiguration kennt kein plain-HTTP-Ziel mehr und prueft ueber die Wache", () => {
     expect(configQuelle).not.toContain("http://");
     expect(configQuelle).toContain("pruefeStagingUrl");
+  });
+
+  it("der Pre-flight steht VOR der ersten Schreibstation — in der seriellen Suite bricht er also vor jedem Publish", () => {
+    // Die Suite laeuft `describe.serial`: scheitert der Pre-flight, werden
+    // alle folgenden Tests uebersprungen. Damit das "vor jeder verbrauchten
+    // Woche" ist und bleibt, muss er im Quelltext vor Station 4 (erster
+    // Schreibversuch) und vor Station 6 (erster Publish) stehen.
+    const preflight = journeyQuelle.indexOf('test("Pre-flight');
+    const ersteSchreibstation = journeyQuelle.indexOf('test("Station 4');
+    expect(preflight).toBeGreaterThan(-1);
+    expect(ersteSchreibstation).toBeGreaterThan(-1);
+    expect(preflight).toBeLessThan(ersteSchreibstation);
+    expect(journeyQuelle).toContain("describe.serial");
+    expect(journeyQuelle).toContain("satzFehltMitarbeiterBefund");
+    expect(journeyQuelle).toContain("satzFehltFixtureVerdikt");
   });
 });

@@ -235,9 +235,51 @@ HEAD).` ab (gemessen 22.08.2026 für beide Images). Ein Image mit `revision=unkn
 für Nicht-Produktion gedacht. Auf Staging ist sie zulässig; sie war und bleibt auf Produktion
 nicht angewandt.
 
+### 5.1 Demo-Mandant
+
 Für einen bedienbaren Mandanten samt Anmeldung existiert
-`scripts/ops/bootstrap-demo-tenant.mjs`. **Erstmals ausgeführt am 24.08.2026** gegen die echte
-Staging-Grenze: Bootstrap plus `--verify` grün und idempotent (Protokoll vom 24.08., §Demo-Mandant).
+`scripts/ops/bootstrap-demo-tenant.mjs` — **seit dem 26.08.2026 eingecheckt**; die erste
+Ausführung am 24.08.2026 gegen die echte Staging-Grenze (Bootstrap plus `--verify` grün und
+idempotent, Protokoll vom 24.08., §Demo-Mandant) lief noch mit einer lokalen, nicht
+eingecheckten Fassung. Die eingecheckte Fassung rekonstruiert genau dieses Verhalten und
+ergänzt zweierlei: die Satzzählung ist auf den Demo-Mandanten eingegrenzt, und ein
+Produktionsziel (Produktions-`project_ref` oder Supabase-Cloud-Host) wird **fail-closed
+verweigert**. Aufruf: `DATABASE_URL=… node scripts/ops/bootstrap-demo-tenant.mjs
+--user-id <uuid> [--verify]` — keine Secrets im Repository, die Verbindung kommt
+ausschließlich aus der Umgebung.
+
+### 5.2 Journey-Fixture der Staging-Kernreise (EYT-142)
+
+Die Testdaten der Kernreise (Org `E2E Reiseorganisation` `…e201`, Mitarbeiter
+`E2E-Mitarbeiter Reise` `…e211` **mit** Satz und `E2E-Mitarbeiter Ohne Satz` `…e212` **ohne**
+jede Satzversion, Baustelle `…e241`) sind **kanonische Repository-Wahrheit**:
+`apps/web/e2e/auth-journey/fixtures.sql`. Ein frischer Staging-Aufbau erzeugt und verifiziert
+sie so:
+
+1. Beide Reisenden über den öffentlichen GoTrue-Signup anlegen (Anon-Key, kein
+   Service-Role-Schlüssel) — genau wie `apps/web/e2e/auth-journey/global-setup.ts`.
+2. Die Fixture mit den von GoTrue vergebenen UUIDs einspielen:
+
+   ```bash
+   psql "$ADMIN_DB_URL" -v ON_ERROR_STOP=1 \
+     -v benutzer_a=<uuid-a> -v benutzer_b=<uuid-b> \
+     -f apps/web/e2e/auth-journey/fixtures.sql
+   ```
+
+3. Die Markerzeile lesen — sie **ist** der Verify, nicht der Exit-Code:
+   `[auth-journey-fixture] … mitarbeiter=2 satz=1 satz_ohne=0 …`. `satz_ohne=0` ist die
+   definierende Eigenschaft der Satz-fehlt-Negativreise; jede Abweichung bricht das Skript
+   mit `E2E-Fixture unvollstaendig` ab.
+
+Das Skript ist idempotent (`on conflict do nothing` bzw. für `…e212` `do update`): ein
+zweiter Lauf erzeugt nichts Doppeltes, und auf einem Stack mit Altbestand konvergiert er
+Anzeigename und Aktiv-Status von `…e212` auf den kanonischen Stand. Die Staging-Harness
+benutzt den kanonischen Namen als **Vorgabewert** (`EYT_SATZ_FEHLT_MITARBEITER` ist seit dem
+26.08.2026 optional und nur noch die bewusste Übersteuerung für abweichenden Altbestand) und
+misst vor jedem Publish per Pre-flight über die echte API, dass der Mitarbeiter existiert,
+aktiv ist und **exakt null** Satzversionen hat — fehlt die Fixture oder hat sie einen Satz
+erworben, bricht die Reise ab, **bevor** eine frische Woche veröffentlicht und damit
+verbraucht ist.
 
 Niemals: Produktionsdaten kopieren, echte Personendaten einspielen, echte Stundensätze verwenden.
 

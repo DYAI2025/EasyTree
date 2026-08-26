@@ -6,8 +6,11 @@ import { join } from "node:path";
 import {
   autorisierungsVerdikt,
   leseReiseEingaben,
+  satzFehltFixtureVerdikt,
+  satzFehltMitarbeiterBefund,
   satzFehltVerdikt,
   schreibeEvidenz,
+  type MitarbeiterEintrag,
 } from "./harness-wachen";
 
 /**
@@ -30,8 +33,15 @@ import {
  *   EYT_JOURNEY_WOCHE          frische ISO-Woche der Schreibreise (Pflicht)
  *   EYT_JOURNEY_DATUM          optional; Tag IN dieser Woche (sonst ihr Montag)
  *   EYT_SATZ_FEHLT_WOCHE       frische ISO-Woche der Satz-fehlt-Reise (Pflicht)
- *   EYT_SATZ_FEHLT_MITARBEITER Anzeigename eines aktiven Mitarbeiters OHNE
- *                              Stundensatzversion (Pflicht)
+ *   EYT_SATZ_FEHLT_MITARBEITER optional; Vorgabe ist der KANONISCHE
+ *                              Satz-fehlt-Mitarbeiter aus fixtures.sql
+ *                              (Employee "…e212"). Uebersteuerung nur fuer
+ *                              einen Stack mit abweichendem Altbestand.
+ *
+ * Ob der Satz-fehlt-Mitarbeiter existiert, aktiv ist und wirklich NULL
+ * Satzversionen hat, misst der Pre-flight direkt nach Station 1 ueber die
+ * echte API — und bricht ab, BEVOR irgendeine frische Woche veroeffentlicht
+ * und damit verbraucht ist.
  *
  * Die Satz-fehlt-Reise erzeugt ihren Zustand selbst ueber die Oberflaeche
  * (Einsatz anlegen -> veroeffentlichen -> Snapshot-Versuch) statt auf
@@ -43,6 +53,12 @@ import {
 const EINGABEN = leseReiseEingaben(process.env, new Date());
 const EVIDENZ = EINGABEN.evidenzVerzeichnis;
 const REISEWOCHE = EINGABEN.reisewocheKey;
+
+/**
+ * Feste Organisation der Reise — die UUID aus `fixtures.sql`. Der Pre-flight
+ * und die Negativ-Direktzugriffe adressieren sie im Organisations-Header.
+ */
+const REISE_ORG_ID = "00000000-0000-4000-8000-00000000e201";
 
 const EMAIL_A = process.env["EYT_EMAIL_A"] ?? "auth-journey-a@easytree.test";
 const PW_A = process.env["EYT_PW_A"] ?? "";
@@ -175,6 +191,35 @@ test.describe.serial("EYT-142 Staging-Kernreise", () => {
     const { userId } = await anmelden(seite, EMAIL_A, PW_A);
     halte("station1_userId_A", userId);
     await schnappschuss(seite, "01-angemeldet-1440");
+  });
+
+  test("Pre-flight — Satz-fehlt-Fixture existiert, ist aktiv und hat NULL Satzversionen", async () => {
+    // VOR jedem Schreibversuch und jedem Publish: fehlt die Fixture oder hat
+    // der Mitarbeiter inzwischen einen Satz, bricht die Reise HIER ab —
+    // keine frische Woche wird verbraucht, kein halber Zustand entsteht.
+    // Gemessen wird ueber die echte API (dieselben autorisierten Lesepfade,
+    // die auch die Satzverwaltung benutzt), nicht ueber einen DB-Zugriff.
+    const orgHeader = { "X-EasyTree-Organization-Id": REISE_ORG_ID };
+    const listenAntwort = await seite.request.get("/api/v1/kosten/mitarbeiter", {
+      headers: orgHeader,
+    });
+    expect(listenAntwort.status(), "Mitarbeiterliste fuer den Pre-flight").toBe(200);
+    const liste = (await listenAntwort.json()) as { employees: MitarbeiterEintrag[] };
+    const befund = satzFehltMitarbeiterBefund(liste.employees, EINGABEN.satzFehltMitarbeiter);
+    expect(befund.ok ? null : befund.grund, "Satz-fehlt-Mitarbeiter vorhanden").toBeNull();
+    if (!befund.ok) return; // fuer den Typ-Narrowing-Pfad; der expect oben hat schon abgebrochen
+
+    const historienAntwort = await seite.request.get(`/api/v1/kosten/stundensaetze/${befund.id}`, {
+      headers: orgHeader,
+    });
+    expect(historienAntwort.status(), "Satzhistorie fuer den Pre-flight").toBe(200);
+    const historie = (await historienAntwort.json()) as { versions: unknown[] };
+    expect(
+      satzFehltFixtureVerdikt(historie.versions.length),
+      "definierende Eigenschaft: NULL Satzversionen",
+    ).toBeNull();
+    halte("preflight_satz_fehlt_mitarbeiterId", befund.id);
+    halte("preflight_satz_fehlt_versionen", historie.versions.length);
   });
 
   test("Station 2 — /planung ohne weekKey zeigt die aktuelle ISO-Woche", async () => {
@@ -396,7 +441,7 @@ test.describe.serial("EYT-142 Staging-Kernreise", () => {
       // Servers muss mit GENAU 403 ablehnen — ein 5xx waere ein Serverfehler
       // und kein Autorisierungsnachweis.
       const direkt = await seiteB.request.get(`/api/v1/kosten/snapshots/${snapshotId}`, {
-        headers: { "X-EasyTree-Organization-Id": "00000000-0000-4000-8000-00000000e201" },
+        headers: { "X-EasyTree-Organization-Id": REISE_ORG_ID },
       });
       expect(
         autorisierungsVerdikt(direkt.status()),
@@ -431,7 +476,7 @@ test.describe.serial("EYT-142 Staging-Kernreise", () => {
       // der direkte Snapshot-Abruf muss trotzdem mit GENAU 403 abgelehnt
       // werden; ein 5xx zaehlt nicht als Ablehnung.
       const direkt = await seiteC.request.get(`/api/v1/kosten/snapshots/${snapshotId}`, {
-        headers: { "X-EasyTree-Organization-Id": "00000000-0000-4000-8000-00000000e201" },
+        headers: { "X-EasyTree-Organization-Id": REISE_ORG_ID },
       });
       expect(autorisierungsVerdikt(direkt.status()), "Snapshot-Zugriff ohne costs.read").toBeNull();
       expect(await direkt.text()).not.toContain("totalMinorUnits");
