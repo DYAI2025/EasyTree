@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import {
   EUROPE_BERLIN,
@@ -279,18 +279,68 @@ export function satzFehltFixtureVerdikt(anzahlSatzVersionen: number): string | n
   );
 }
 
+/** Die Segmentfolge des historischen Pakets — Wegstueck, nicht Zeichenkette. */
+const HISTORISCHE_SEGMENTE = HISTORISCHES_EVIDENZ_VERZEICHNIS.split("/");
+
+/**
+ * Der Vorfahr von `zielAbsolut`, der das historische Evidenzpaket IST — oder
+ * `null`, wenn der Pfad es weder ist noch darunter liegt.
+ *
+ * Verglichen wird SEGMENTWEISE auf dem bereits durch `resolve()`
+ * normalisierten Pfad, nicht auf der rohen Zeichenkette. Beides ist
+ * notwendig:
+ *
+ * - `resolve()` erledigt `.`, `..`, doppelte und abschliessende Trenner sowie
+ *   den Bezug auf das Arbeitsverzeichnis. Genau diese Normalisierung nimmt
+ *   `join()` in {@link schreibeEvidenz} spaeter ohnehin vor — eine Wache, die
+ *   davor prueft, prueft einen anderen Pfad als den, der geschrieben wird.
+ * - Der Segmentvergleich unterscheidet Nachfahre von Namensvetter:
+ *   `…-staging/rerun` liegt im Paket, `…-staging-rerun` ist ein anderes
+ *   Verzeichnis. Ein `startsWith` verwechselt beide.
+ *
+ * Bewusst OHNE feste Projektwurzel und damit ohne einzelnes `relative()`: das
+ * abgeschlossene Paket ist in JEDEM Klon dasselbe Verzeichnis, und die Wache
+ * kennt die Wurzel des Klons nicht, in dem der Operator gerade steht. Der
+ * Segmentlauf ist die klon-unabhaengige Form derselben Aussage — er findet
+ * das Paket unter jeder Wurzel, statt unter genau einer.
+ *
+ * Symlinks bleiben aussen vor: die Wache fasst das Dateisystem nicht an und
+ * ist damit deterministisch und in Tests ohne Ablage pruefbar.
+ */
+function historischesPaketIn(zielAbsolut: string): string | null {
+  const segmente = zielAbsolut.split(sep);
+  for (let i = 0; i + HISTORISCHE_SEGMENTE.length <= segmente.length; i += 1) {
+    if (HISTORISCHE_SEGMENTE.every((teil, versatz) => segmente[i + versatz] === teil)) {
+      return segmente.slice(0, i + HISTORISCHE_SEGMENTE.length).join(sep);
+    }
+  }
+  return null;
+}
+
 /**
  * Prueft das Evidenz-Zielverzeichnis. Das historische, abgeschlossene Paket
  * vom 25.08.2026 ist als Ziel verboten — es bleibt byte-unveraendert.
+ *
+ * Die geltende Invariante ist eine ueber den AUFGELOESTEN Pfad, nicht ueber
+ * die eingegebene Zeichenkette: das Ziel darf das historische Verzeichnis
+ * weder SEIN noch UNTERHALB davon liegen. Ein `endsWith` auf dem Rohwert
+ * liess `…/2026-08-25-eyt-142-staging/rerun` und `…/2026-08-25-eyt-142-staging/.`
+ * durch — beide fuehrt `join()` in {@link schreibeEvidenz} anschliessend
+ * wieder in das Paket hinein.
+ *
+ * Zurueck kommt der EINGEGEBENE Pfad, nicht der aufgeloeste: die Aufloesung
+ * ist Mittel der Pruefung, nicht ihr Ergebnis — der Aufrufer soll mit dem
+ * Pfad weiterarbeiten, den der Operator gesetzt hat.
  */
 export function pruefeEvidenzVerzeichnis(rohwert: string | undefined): string {
   const verzeichnis = rohwert === undefined || rohwert === "" ? "/tmp/eyt-142-evidence" : rohwert;
-  const normalisiert = verzeichnis.replaceAll("\\", "/").replace(/\/+$/, "");
-  if (normalisiert.endsWith(HISTORISCHES_EVIDENZ_VERZEICHNIS)) {
+  const paket = historischesPaketIn(resolve(verzeichnis));
+  if (paket !== null) {
     throw new Error(
-      `[staging] EYT_EVIDENCE_DIR zeigt auf das abgeschlossene historische Evidenzpaket ` +
-        `${HISTORISCHES_EVIDENZ_VERZEICHNIS} — das bleibt byte-unveraendert. Ein neuer Lauf ` +
-        `braucht ein eigenes Verzeichnis.`,
+      `[staging] EYT_EVIDENCE_DIR "${verzeichnis}" loest sich in das abgeschlossene historische ` +
+        `Evidenzpaket ${HISTORISCHES_EVIDENZ_VERZEICHNIS} auf (${paket}) — das bleibt ` +
+        `byte-unveraendert, samt allem darunter. Ein neuer Lauf braucht ein eigenes ` +
+        `Verzeichnis ausserhalb dieses Pakets.`,
     );
   }
   return verzeichnis;

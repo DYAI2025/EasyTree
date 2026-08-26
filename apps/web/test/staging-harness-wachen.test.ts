@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
   HISTORISCHES_EVIDENZ_VERZEICHNIS,
@@ -339,18 +339,96 @@ describe("schreibeEvidenz — ein halber Lauf ersetzt ids.json nicht", () => {
 });
 
 describe("pruefeEvidenzVerzeichnis — das historische Paket ist kein Ziel", () => {
+  // Ein beliebiger Klon: das abgeschlossene Paket ist in JEDEM Arbeitsbaum
+  // dasselbe Verzeichnis, nicht nur in genau diesem hier.
+  const KLON = "/irgendein/klon";
+  const PAKET = resolve(KLON, HISTORISCHES_EVIDENZ_VERZEICHNIS);
+
+  /**
+   * Unabhaengiges Orakel — bewusst NICHT die Implementierung der Wache: liegt
+   * `pfad` im Paket `basis` oder IST er dieses Verzeichnis? Rein
+   * pfadsemantisch ueber `relative`, ohne Dateisystemzugriff.
+   */
+  function imPaket(basis: string, pfad: string): boolean {
+    const rel = relative(resolve(basis), resolve(pfad));
+    if (rel === "") return true;
+    if (isAbsolute(rel)) return false;
+    return rel !== ".." && !rel.startsWith(`..${sep}`);
+  }
+
+  /**
+   * Wohin schriebe {@link schreibeEvidenz} mit diesem Rueckgabewert? Genau
+   * dieses `join` ist der Weg, ueber den ein akzeptierter Pfad spaeter wieder
+   * im historischen Paket landet — deshalb pruefen die Faelle unten die
+   * WIRKUNG und nicht den Quelltext der Wache.
+   */
+  function schreibZiel(verzeichnis: string): string {
+    return resolve(join(verzeichnis, "ids.json"));
+  }
+
   it("liefert ohne Angabe das Wegwerf-Verzeichnis", () => {
     expect(pruefeEvidenzVerzeichnis(undefined)).toBe("/tmp/eyt-142-evidence");
+    expect(pruefeEvidenzVerzeichnis("")).toBe("/tmp/eyt-142-evidence");
   });
 
-  it("lehnt das abgeschlossene Evidenzverzeichnis vom 25.08.2026 ab", () => {
-    expect(() =>
-      pruefeEvidenzVerzeichnis(`/irgendein/klon/${HISTORISCHES_EVIDENZ_VERZEICHNIS}`),
-    ).toThrow(/byte-unveraendert/);
-    expect(() => pruefeEvidenzVerzeichnis(`/klon/${HISTORISCHES_EVIDENZ_VERZEICHNIS}/`)).toThrow(
+  /**
+   * Jede Schreibweise, die sich zum historischen Paket ODER unter das
+   * historische Paket aufloest. Ein `endsWith` auf der rohen Zeichenkette
+   * sieht davon nur die erste Handvoll: `join()` und die Normalisierung des
+   * Dateisystems fuehren die uebrigen spaeter wieder hinein.
+   */
+  const GESPERRT: ReadonlyArray<readonly [string, string]> = [
+    ["das Verzeichnis selbst", PAKET],
+    ["mit Schlussschraegstrich", `${PAKET}/`],
+    ["mit doppeltem Schlussschraegstrich", `${PAKET}//`],
+    ["mit abschliessendem /.", `${PAKET}/.`],
+    ["mit abschliessendem /./", `${PAKET}/./`],
+    ["mit eingebettetem /./", `${KLON}/docs/evidence/./2026-08-25-eyt-142-staging`],
+    ["ein Kindverzeichnis", `${PAKET}/rerun`],
+    ["ein Enkelverzeichnis", `${PAKET}/rerun/2026-08-26`],
+    ["ein Kind ueber doppelten Schraegstrich", `${PAKET}//rerun`],
+    ["ueber .. wieder hinein", `${PAKET}/../2026-08-25-eyt-142-staging`],
+    ["ueber .. wieder hinein und tiefer", `${PAKET}/rerun/../../2026-08-25-eyt-142-staging/tief`],
+  ];
+
+  for (const [name, kandidat] of GESPERRT) {
+    it(`sperrt ${name}`, () => {
+      // Nicht-vakuum: dieser Kandidat WUERDE wirklich ins Paket schreiben.
+      expect(imPaket(PAKET, schreibZiel(kandidat))).toBe(true);
+      expect(() => pruefeEvidenzVerzeichnis(kandidat)).toThrow(/byte-unveraendert/);
+    });
+  }
+
+  it("sperrt auch die relative Schreibweise ohne fuehrendes ./", () => {
+    const relativZumLauf = HISTORISCHES_EVIDENZ_VERZEICHNIS;
+    const basis = resolve(process.cwd(), HISTORISCHES_EVIDENZ_VERZEICHNIS);
+    expect(imPaket(basis, schreibZiel(relativZumLauf))).toBe(true);
+    expect(() => pruefeEvidenzVerzeichnis(relativZumLauf)).toThrow(/byte-unveraendert/);
+    expect(() => pruefeEvidenzVerzeichnis(`./${relativZumLauf}`)).toThrow(/byte-unveraendert/);
+    expect(() => pruefeEvidenzVerzeichnis(`./${relativZumLauf}/rerun`)).toThrow(
       /byte-unveraendert/,
     );
   });
+
+  /**
+   * Die Gegenrichtung: die Wache darf nicht zur Zeichenketten-Keule werden.
+   * Besonders `…-staging-rerun` — ein naives `startsWith` wuerde dieses
+   * voellig andere Verzeichnis mitsperren, obwohl es kein Nachfahre ist.
+   */
+  const ERLAUBT: ReadonlyArray<readonly [string, string]> = [
+    ["ein frisches Wegwerf-Verzeichnis", "/tmp/eyt-142-rerun-2026-08-26"],
+    ["ein Geschwisterpaket mit anderem Datum", `${KLON}/docs/evidence/2026-08-26-eyt-142-staging`],
+    ["ein Geschwisterpaket mit dem historischen Namen als Praefix", `${PAKET}-rerun`],
+    ["das Elternverzeichnis", `${KLON}/docs/evidence`],
+    ["ein relativer Pfad ohne Bezug zum Paket", "ergebnisse/lauf-2"],
+  ];
+
+  for (const [name, kandidat] of ERLAUBT) {
+    it(`laesst ${name} zu`, () => {
+      expect(imPaket(PAKET, schreibZiel(kandidat))).toBe(false);
+      expect(pruefeEvidenzVerzeichnis(kandidat)).toBe(kandidat);
+    });
+  }
 });
 
 describe("Quelltext-Wache — keine verbrauchbaren Wochen, kein HTTP, keine >=-Statusvertraege", () => {
