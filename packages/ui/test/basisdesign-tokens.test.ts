@@ -60,14 +60,27 @@ const GENEHMIGT: ReadonlyArray<readonly [string, string, string]> = [
 ];
 
 /**
- * Zwei Tokens stehen NICHT in der Confluence-Tabelle. Sie sind ABLEITUNGEN und
- * werden hier als solche geprueft — nicht als genehmigte Werte ausgegeben.
+ * Zwei Rollen stehen NICHT in der Confluence-Tabelle §2.1 — aus verschiedenen
+ * Gruenden, und deshalb in zwei Listen.
+ *
+ * `--eyt-state-published-text` ist eine echte ABLEITUNG: es traegt in beiden
+ * Modi die Farbe der Hauptaktion. Die Quelle steht in der Liste und wird
+ * benutzt.
+ *
+ * `--eyt-action-primary-contrast` ist KEINE Ableitung. Es ist repo-eigen
+ * gewaehlt und nur zufaellig in Hell gleich `bg.surface` und in Dunkel gleich
+ * `bg.canvas` — zwei verschiedene Rollen. Diese Gleichheit als Herkunft zu
+ * behaupten haette eine Kopplung erfunden, die es nicht gibt: eine Aenderung
+ * an `bg.surface` verlangte dann eine Aenderung hier, obwohl der Wert davon
+ * nicht abhaengt. Zugesagt ist nicht die Herkunft, sondern der KONTRAST auf
+ * der Hauptaktion — und der steht in `TEXTPAARE`.
  */
 const ABGELEITET: ReadonlyArray<readonly [string, string]> = [
-  // veroeffentlichter Text traegt dieselbe Farbe wie die Hauptaktion
   ["--eyt-state-published-text", "--eyt-action-primary"],
-  // Text AUF der Hauptaktion ist die jeweilige Gegenflaeche
-  ["--eyt-action-primary-contrast", ""],
+];
+
+const REPO_EIGEN: ReadonlyArray<readonly [string, string, string]> = [
+  ["--eyt-action-primary-contrast", "#ffffff", "#161513"],
 ];
 
 /**
@@ -97,11 +110,33 @@ const MODI = [
 ] as const;
 
 describe("Basisdesign v2.0 §2.1 — kanonische Tokenquelle (EYT-80)", () => {
-  it("liest ueberhaupt eine Stylesheet-Datei", () => {
-    // Faengt den leisen Fall: ein Pfad auf eine echte, aber leere oder halb
-    // geschriebene Datei. Ein FALSCHER Pfad wirft schon beim Einsammeln
-    // (ENOENT) und ist damit lauter, als eine Zusicherung es koennte.
-    expect(css.length).toBeGreaterThan(500);
+  it("deklariert in beiden Modi genau so viele Rollen wie bekannt", () => {
+    /*
+     * Faengt zwei Faelle auf einmal: eine abgeschnittene oder halb
+     * geschriebene Datei, und eine Rolle, die still dazukommt oder
+     * verschwindet. Eine Byte-Zahl (frueher `css.length > 500`) tat das
+     * nicht — die geplante Datei misst 1116 Zeichen, eine um 55 % gekuerzte
+     * waere durchgekommen.
+     */
+    const erwartet = GENEHMIGT.length + ABGELEITET.length + REPO_EIGEN.length;
+    expect(HELL.size, "hell").toBe(erwartet);
+    expect(DUNKEL.size, "dunkel").toBe(erwartet);
+  });
+
+  it("traegt genau einen Medienblock, und zwar den Dunkelmodus", () => {
+    /*
+     * `HELL` und `DUNKEL` teilen die Datei am ERSTEN `@media`. Ohne diese
+     * Zusicherung ist das eine Annahme statt einer Zusage. Der leise Fall ist
+     * NICHT ein fehlender Dunkelblock — der faellt oben beim Zaehlen auf —,
+     * sondern ein ZWEITER, spaeterer Medienblock, der eine `--eyt-`-Rolle neu
+     * setzt: `deklarationen` laesst den letzten gewinnen, und beide Gates
+     * messen dann einen Wert, der im Dunkelblock gar nicht steht.
+     * `apps/web/app/globals.css` traegt heute drei weitere Medienbloecke, die
+     * Form ist also nicht hypothetisch.
+     */
+    expect([...css.matchAll(/@media[^{]*/g)].map((m) => m[0].trim())).toEqual([
+      "@media (prefers-color-scheme: dark)",
+    ]);
   });
 
   it("deklariert alle dreizehn genehmigten Rollen in beiden Modi", () => {
@@ -118,17 +153,32 @@ describe("Basisdesign v2.0 §2.1 — kanonische Tokenquelle (EYT-80)", () => {
   });
 
   it("fuehrt keine Farbrolle, die die Baseline nicht kennt", () => {
-    const erlaubt = new Set([...GENEHMIGT.map(([t]) => t), ...ABGELEITET.map(([t]) => t)]);
-    expect([...HELL.keys()].filter((t) => !erlaubt.has(t))).toEqual([]);
+    const erlaubt = new Set([
+      ...GENEHMIGT.map(([t]) => t),
+      ...ABGELEITET.map(([t]) => t),
+      ...REPO_EIGEN.map(([t]) => t),
+    ]);
+    // Beide Modi einzeln: die Schluesselgleichheit oben ist eine ANDERE
+    // Zusicherung, und eine unbekannte Rolle nur im Dunkelblock waere sonst
+    // bloss transitiv gefangen.
+    expect(
+      [...HELL.keys()].filter((t) => !erlaubt.has(t)),
+      "hell",
+    ).toEqual([]);
+    expect(
+      [...DUNKEL.keys()].filter((t) => !erlaubt.has(t)),
+      "dunkel",
+    ).toEqual([]);
   });
 
-  it("haelt die beiden Ableitungen an ihre Herkunft", () => {
-    // published.text folgt action.primary — in BEIDEN Modi.
-    expect(HELL.get("--eyt-state-published-text")).toBe(HELL.get("--eyt-action-primary"));
-    expect(DUNKEL.get("--eyt-state-published-text")).toBe(DUNKEL.get("--eyt-action-primary"));
-    // Der Text AUF der Hauptaktion ist die jeweilige Gegenflaeche.
-    expect(HELL.get("--eyt-action-primary-contrast")).toBe("#ffffff");
-    expect(DUNKEL.get("--eyt-action-primary-contrast")).toBe(DUNKEL.get("--eyt-bg-canvas"));
+  it.each(ABGELEITET)("%s folgt seiner Herkunft %s", (token, quelle) => {
+    expect(HELL.get(token), `hell ${token}`).toBe(HELL.get(quelle));
+    expect(DUNKEL.get(token), `dunkel ${token}`).toBe(DUNKEL.get(quelle));
+  });
+
+  it.each(REPO_EIGEN)("%s traegt seine repo-eigenen Werte", (token, hell, dunkel) => {
+    expect(HELL.get(token), `hell ${token}`).toBe(hell);
+    expect(DUNKEL.get(token), `dunkel ${token}`).toBe(dunkel);
   });
 });
 
@@ -137,12 +187,13 @@ describe("Kontrastgate fuer normalen Kleintext (EYT-80, EYT-12)", () => {
     it.each(TEXTPAARE)(`${modus}: %s auf %s erreicht 4.5:1`, (vorne, hinten) => {
       const fg = tokens.get(vorne);
       const bg = tokens.get(hinten);
-      // Ohne diese zwei Zeilen wuerde ein GELOESCHTES Token zu
-      // `kontrast(undefined, …)` und damit zu einem Wurf statt zu einer
-      // Aussage — der Fall waere rot, aber aus dem falschen Grund.
-      expect(fg, `${modus}: ${vorne} nicht deklariert`).toBeTruthy();
-      expect(bg, `${modus}: ${hinten} nicht deklariert`).toBeTruthy();
-      const verhaeltnis = kontrast(fg as string, bg as string);
+      // Kein `as`-Cast: der ist zur Laufzeit nichts (CLAUDE.md, „ein `as` unter
+      // ‚validiert' ist zur Compilezeit geloescht"). Ein geloeschtes Token soll
+      // mit seinem NAMEN scheitern, nicht als TypeError aus `.trim()`.
+      if (fg === undefined || bg === undefined) {
+        throw new Error(`${modus}: ${vorne} oder ${hinten} nicht deklariert`);
+      }
+      const verhaeltnis = kontrast(fg, bg);
       expect(
         verhaeltnis,
         `${modus}: ${vorne} auf ${hinten} = ${verhaeltnis.toFixed(2)}:1`,
@@ -168,15 +219,5 @@ describe("Kontrastgate fuer normalen Kleintext (EYT-80, EYT-12)", () => {
      */
     expect(kontrast("#6D786F", "#F0F4EF")).toBeCloseTo(4.14, 2);
     expect(kontrast("#A86B2B", "#F6E9D8")).toBeCloseTo(3.66, 2);
-  });
-
-  it("weist die verworfenen Werte auch dann ab, wenn sie in den Tokens stuenden", () => {
-    /*
-     * Kein Blacklist-Test: geprueft wird, dass die GRENZE greift, nicht dass
-     * genau diese zwei Zeichenketten verboten sind. Ein Sekundaertext im
-     * Penpot-Ton auf der Penpot-Flaeche faellt durch dieselbe Schwelle, die
-     * oben alle echten Paare bestehen.
-     */
-    expect(kontrast("#6D786F", "#F0F4EF")).toBeLessThan(kontrast("#5b564e", "#f6f4ef"));
   });
 });

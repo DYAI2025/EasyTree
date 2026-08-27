@@ -14,20 +14,19 @@
  * eine Funktion, die immer 1 zurueckgibt, fuer die Ablehnungsfaelle gruen.
  */
 
-/** #rrggbb (auch verkuerzt #rgb) → [r, g, b] in 0..255. */
+/**
+ * #rrggbb → [r, g, b] in 0..255.
+ *
+ * Die Kurzform `#rgb` wird bewusst NICHT akzeptiert: die kanonische Datei
+ * schreibt sechsstellig, und der Zweig war von keiner Aufrufstelle erreichbar
+ * — er versprach eine Toleranz, die der Vertrag nicht hat.
+ */
 export function kanaele(hex: string): [number, number, number] {
   const roh = hex.trim().replace(/^#/, "");
-  const voll =
-    roh.length === 3
-      ? roh
-          .split("")
-          .map((z) => z + z)
-          .join("")
-      : roh;
-  if (!/^[0-9a-fA-F]{6}$/.test(voll)) {
+  if (!/^[0-9a-fA-F]{6}$/.test(roh)) {
     throw new Error(`kein 6-stelliger Hexwert: ${hex}`);
   }
-  const teil = (i: number): number => Number.parseInt(voll.slice(i, i + 2), 16);
+  const teil = (i: number): number => Number.parseInt(roh.slice(i, i + 2), 16);
   return [teil(0), teil(2), teil(4)];
 }
 
