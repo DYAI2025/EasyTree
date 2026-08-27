@@ -155,8 +155,16 @@ test("Tab-Zyklus: alle interaktiven Elemente erreichbar, sichtbarer Fokus, keine
  * 27.08.2026 gab es dafuer im ganzen Repository keine Zusicherung:
  * `apps/web/test/app-shell-styles.test.ts` vergleicht Zeichenketten IM
  * Stylesheet, und ein Klassenname im Stylesheet beweist weder Lage noch
- * Groesse; `grep -rn 'boundingBox|getComputedStyle|toHaveCSS' apps/web/test
- * apps/web/e2e` fand drei Fokussonden und null Layoutaussagen.
+ * Groesse; `grep -rnE 'boundingBox|getComputedStyle|toHaveCSS' apps/web/test
+ * apps/web/e2e` fand VIER Fokussonden und null Layoutaussagen
+ * (`shell-smoke.spec.ts:76` und `:121`, `read-through.spec.ts:745`,
+ * `auth-journey/journey.pwtest.ts:130`).
+ *
+ * Das `-E` gehoert zwingend dazu: ohne den Schalter ist `|` auf macOS ein
+ * gewoehnliches Zeichen und das Muster sucht die Zeichenkette
+ * „boundingBox|getComputedStyle|toHaveCSS" am Stueck. Am Stand vor diesem
+ * Umbau fand die BRE-Fassung 0 Zeilen; heute findet sie genau eine — diesen
+ * Kommentar hier.
  *
  * Ohne diese Faelle waeren gruen durchgegangen: ein dauerhaft sichtbarer
  * Sprunganker, eine untereinander gestapelte Kopfleiste, ein nicht mehr rechts
@@ -217,10 +225,38 @@ test("Kopfleiste ist EINE Zeile mit dem Sitzungsbereich rechts", async ({ page }
   await expect(anmelden).toBeVisible();
 
   const kopfBox = await rechteck(kopf);
+  const markeBox = await rechteck(page.locator(".eyt-app-shell__brand"));
   const anmeldenBox = await rechteck(anmelden);
   const abstandRechts = kopfBox.right - anmeldenBox.right;
   const abstandLinks = anmeldenBox.left - kopfBox.left;
 
+  // ERSTE Haelfte des Titels: EINE Zeile.
+  //
+  // Ohne diese Zusicherung versprach der Titel mehr, als der Fall pruefte. Das
+  // Verhaeltnis darunter ist ein LINKS/RECHTS-Vergleich und ueberlebt einen
+  // Umbruch: mit `.app-nav-list { min-width: 1200px }` bei 1280 px Breite wurde
+  // die Kopfleiste dreizeilig (Hoehe 159 px, Marke `top=16`, Anmelden
+  // `top=102`) und der Fall blieb GRUEN (gemessen 27.08.2026). `flex-wrap:
+  // wrap` steht absichtlich auf `.eyt-app-shell__header` — ein Umbruch ist hier
+  // konfiguriertes Verhalten, kein exotischer Zufall.
+  //
+  // Mit dieser Zusicherung wird dieselbe Mutation rot: gemessen `Marke=31,
+  // Anmelden=122, Kopfhoehe=159`, Abstand der Mitten 91 gegen erlaubte 2.
+  // Ungestoert liegen beide Mitten aufeinander.
+  //
+  // Verglichen werden die vertikalen MITTEN und nicht die Oberkanten: die
+  // Kopfleiste richtet ueber `align-items: center` aus, und Marke (Schriftgrad
+  // 1.25rem) und Anmelden-Zugang (`min-height: 40px`) sind verschieden hoch.
+  // In einer Zeile fallen ihre Mitten zusammen, in getrennten Flex-Zeilen
+  // nicht.
+  const markeMitte = markeBox.top + markeBox.height / 2;
+  const anmeldenMitte = anmeldenBox.top + anmeldenBox.height / 2;
+  expect(
+    Math.abs(markeMitte - anmeldenMitte),
+    `Kopfleiste umbricht: Marke=${markeMitte}, Anmelden=${anmeldenMitte}, Kopfhoehe=${kopfBox.height}`,
+  ).toBeLessThanOrEqual(2);
+
+  // ZWEITE Haelfte: der Sitzungsbereich steht rechts.
   // EINE Zusicherung, ZWEI Regeln — beide Gegenmutationen sind ausgefuehrt und
   // wurden rot (27.08.2026): ohne `margin-left: auto` auf
   // `.eyt-app-shell__session` steht der Zugang direkt hinter der Navigation
@@ -259,17 +295,28 @@ test("Hauptspalte ist begrenzt und mittig", async ({ page }) => {
   ).toBeLessThanOrEqual(2);
 });
 
-test("Sitzungs-Bedienelement erreicht das 40-px-Beruehrziel", async ({ page }) => {
+test("Anmelden-Zugang erreicht das 40-px-Beruehrziel", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/");
   const anmelden = page.getByRole("banner").getByRole("link", { name: "Anmelden" });
   await expect(anmelden).toBeVisible();
   const box = await rechteck(anmelden);
 
-  // Basisdesign v2.0 §2.3. Getragen wird das ALLEIN von `min-height: 40px` im
-  // Block `.app-logout, .app-login-link`: Polsterung, Zeilenhoehe und Rahmen
-  // ergeben von sich aus weniger. Gegenmutation (ausgefuehrt 27.08.2026): die
-  // Zeile entfernen und neu bauen — gemessen bleiben dann 38 px.
+  // Basisdesign v2.0 §2.3, und ausdruecklich nur fuer DIESES eine Bedienelement:
+  // den `Anmelden`-Link, also `.app-login-link`. Getragen wird seine Hoehe
+  // allein von `min-height: 40px`; Polsterung, Zeilenhoehe und Rahmen ergeben
+  // von sich aus weniger. Gegenmutation (ausgefuehrt 27.08.2026): die Zeile
+  // entfernen und neu bauen — gemessen bleiben dann 38 px.
+  //
+  // NICHT gemessen ist `.app-logout`. Die Deklaration steht heute im
+  // gemeinsamen Block `.app-logout, .app-login-link`, aber daraus folgt nichts:
+  // den Block so aufzuteilen, dass nur `.app-login-link` die `min-height`
+  // behaelt, liess diesen Fall gruen (gemessen 27.08.2026). Der Grund ist
+  // aelter als der Block — `web-smoke` laeuft ABGEMELDET, der Abmelden-Knopf
+  // wird in diesem Job ueberhaupt nicht gerendert. Der einzige Job, der ihn
+  // ueberhaupt zu sehen bekommt, ist `auth-journey`; auch dort wird er nur
+  // GEKLICKT, nie vermessen. Wer das schliessen will, braucht eine
+  // Groessenmessung im angemeldeten Zustand — und damit eine laufende API.
   expect(box.height, `Anmelden ist ${box.height} px hoch`).toBeGreaterThanOrEqual(40);
 });
 

@@ -17,9 +17,11 @@ import { useSession } from "../lib/session-provider";
  * aus der realen Session — und ersetzt trotzdem keine API-Autorisierung:
  * dieselbe Rechteliste steuert hier nur die Anzeige.
  *
- * Seit EYT-80 stellt der Rahmen selbst nichts mehr her: Sprunganker, Kopf,
- * Hauptbereich und Fusszeile kommen aus `@easytree/ui`. Was hier bleibt, ist
- * genau das, was dort nicht hingehoert — Sitzung, Rechtefilter,
+ * Seit EYT-80 kommt das GERUEST aus `@easytree/ui`: Sprunganker, Kopfleiste,
+ * Hauptbereich und Fusszeile stellt der Rahmen, nicht mehr diese Datei. Was
+ * die Slots FUELLT, wird weiterhin hier gerendert — `nav`, `ul`, `label`,
+ * `select`, `button`, `Link` und `p` stehen unveraendert unten. Was hier
+ * bleibt, ist genau das, was dort nicht hingehoert: Sitzung, Rechtefilter,
  * Organisationswahl, Abmelden und der Router.
  */
 export function AppShell({ children }: { children: ReactNode }) {
@@ -41,6 +43,48 @@ export function AppShell({ children }: { children: ReactNode }) {
     ...(hatRecht("planning.read") ? [{ href: "/planung", label: "Planung" }] : []),
     ...(hatRecht("costs.read") ? [{ href: "/kosten", label: "Kosten" }] : []),
   ];
+
+  // Der Sitzungsbereich steht als benannter Wert vor dem `return` und nicht
+  // als 38-zeiliger Ausdruck an der Prop: eine Fallunterscheidung mit einer
+  // zweiten darin, zwei `.map` und ein Klick-Handler lesen sich auf
+  // Prop-Einrueckung nicht mehr als Struktur.
+  const sitzungsbereich = angemeldet ? (
+    <>
+      {organisationen.length > 1 ? (
+        <label className="app-org-select">
+          <span className="app-org-select__label">Organisation</span>
+          <select
+            value={organisation?.id ?? ""}
+            onChange={(ereignis) => organisationWaehlen(ereignis.target.value)}
+          >
+            <option value="" disabled>
+              Bitte wählen
+            </option>
+            {organisationen.map((org) => (
+              <option key={org.id} value={org.id}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <span className="app-org-name">{organisation?.name ?? ""}</span>
+      )}
+      <button
+        type="button"
+        className="app-logout"
+        onClick={() => {
+          void abmelden().then(() => router.push("/anmelden"));
+        }}
+      >
+        Abmelden
+      </button>
+    </>
+  ) : (
+    <Link href="/anmelden" className="app-login-link">
+      Anmelden
+    </Link>
+  );
 
   return (
     <UiAppShell
@@ -66,45 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </ul>
         </nav>
       }
-      sessionArea={
-        angemeldet ? (
-          <>
-            {organisationen.length > 1 ? (
-              <label className="app-org-select">
-                <span className="app-org-select__label">Organisation</span>
-                <select
-                  value={organisation?.id ?? ""}
-                  onChange={(ereignis) => organisationWaehlen(ereignis.target.value)}
-                >
-                  <option value="" disabled>
-                    Bitte wählen
-                  </option>
-                  {organisationen.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <span className="app-org-name">{organisation?.name ?? ""}</span>
-            )}
-            <button
-              type="button"
-              className="app-logout"
-              onClick={() => {
-                void abmelden().then(() => router.push("/anmelden"));
-              }}
-            >
-              Abmelden
-            </button>
-          </>
-        ) : (
-          <Link href="/anmelden" className="app-login-link">
-            Anmelden
-          </Link>
-        )
-      }
+      sessionArea={sitzungsbereich}
       footer={<p>easyTree — Arboscus Teamplaner</p>}
     >
       {children}

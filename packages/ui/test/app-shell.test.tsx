@@ -99,6 +99,48 @@ describe("AppShell — Struktur", () => {
     expect(huelle).not.toBeNull();
     expect(huelle?.contains(screen.getByText("Sitzung"))).toBe(true);
   });
+
+  it("gibt alle sechs Klassennamen des Rahmens aus", () => {
+    /*
+     * Die EMITTER-Seite der Kopplung, und nur sie: dieses Paket VERGIBT die
+     * Namen, `apps/web/app/globals.css` haengt seine Regeln daran. Die
+     * STYLESHEET-Seite — dass es zu jedem Namen dort ueberhaupt eine Regel
+     * gibt — haelt `apps/web/test/app-shell-styles.test.ts`. Keine der beiden
+     * Haelften kann die andere sehen: eine Umbenennung HIER laesst jede Regel
+     * dort unberuehrt stehen, eine Umbenennung DORT laesst dieses Paket
+     * unberuehrt. Wer eine Klasse umbenennt, braucht beide Dateien.
+     *
+     * Ohne diesen Fall war `.eyt-app-shell__footer` von gar nichts gehalten
+     * (gemessen 27.08.2026). `__brand` und `__session` haben ihre eigenen
+     * Zusicherungen im Fall darueber; `__skip-link`, `__header` und `__main`
+     * faellt `apps/web/e2e/shell-smoke.spec.ts` als Nebenwirkung seiner
+     * Geometriemessungen auf. Die Fusszeile fiel durch beide Netze: sie
+     * umzubenennen liess `packages/ui` bei 3 Dateien / 31 Tests und
+     * `apps/web` bei 30 / 376 — beides unveraendert —, waehrend sie in der
+     * Anwendung Polsterung, Trennlinie und Schriftgrad verlor.
+     *
+     * Deshalb hier alle sechs und nicht nur die eine: die Luecke ist keine
+     * Eigenschaft der Fusszeile, sondern des Musters.
+     */
+    const { container } = rahmen({
+      navigation: <nav aria-label="Test">Punkte</nav>,
+      sessionArea: <span>Sitzung</span>,
+      footer: <p>Fusszeile</p>,
+    });
+    for (const klasse of [
+      "eyt-app-shell__skip-link",
+      "eyt-app-shell__header",
+      "eyt-app-shell__brand",
+      "eyt-app-shell__session",
+      "eyt-app-shell__main",
+      "eyt-app-shell__footer",
+    ]) {
+      expect(
+        container.querySelector(`.${klasse}`),
+        `.${klasse} wird nicht mehr ausgegeben`,
+      ).not.toBeNull();
+    }
+  });
 });
 
 describe("AppShell — abwesende Slots erzeugen gar kein Element", () => {
