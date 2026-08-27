@@ -125,10 +125,15 @@ const API_ALLOWED_PACKAGES: readonly RegExp[] = [
  * `react/jsx-runtime` steht ebenfalls nicht hier, und das ist kein Versehen:
  * `tsconfig.build.json` setzt `jsx: "react-jsx"`, der Laufzeitimport entsteht
  * also beim EMIT und nie im Quelltext. `ts.preProcessFile` liest Quelltext,
- * der Spezifizierer kann diese Regel damit gar nicht erreichen. Gemessen
- * 27.08.2026 ist `"react"` der einzige nicht-relative Spezifizierer in allen
- * 11 Dateien unter `packages/ui/src`. Ein Eintrag, der nie feuern kann,
- * verbraucht die Reviewsichtbarkeit dieser Liste fuer nichts.
+ * der Spezifizierer kann diese Regel damit gar nicht erreichen. Ein Eintrag,
+ * der nie feuern kann, verbraucht die Reviewsichtbarkeit dieser Liste fuer
+ * nichts.
+ *
+ * Dass `"react"` der einzige nicht-relative Spezifizierer unter
+ * `packages/ui/src` ist, steht hier bewusst OHNE Dateizahl: die Regel selbst
+ * prueft es bei jedem Lauf, denn jeder weitere Spezifizierer waere eine
+ * Verletzung. Eine mitgeschriebene Zahl waere dagegen sofort veraltet — genau
+ * das ist in diesem Slice passiert, als `4a6429e` eine zwoelfte Datei anlegte.
  */
 const UI_ALLOWED_PACKAGES: readonly RegExp[] = [/^react$/];
 
