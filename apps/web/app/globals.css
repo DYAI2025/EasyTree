@@ -1,31 +1,17 @@
+/* Die kanonische Tokenbasis gehoert @easytree/ui (EYT-80). */
+@import "@easytree/ui/basisdesign-v2.css";
+
 /*
  * easyTree Web-Shell — Basisdesign v2.0 „Werkbank & Feld — ruhig verdichtet"
  * (Confluence 8814623, verbindliche Tokenbasis). System-Font-Stack, bewusst
  * KEINE Google-Font-Imports: Build muss offline funktionieren.
  *
- * Die semantischen Tokens tragen die Palette aus §2.1; die aelteren
- * --color-*-Namen bleiben als Aliasse bestehen, damit Bestandsstile nicht
- * doppelt gepflegt werden.
+ * Die semantischen Farbrollen aus §2.1 kommen aus `@easytree/ui` (siehe
+ * Einbindung im Dateikopf); die aelteren --color-*-Namen bleiben als Aliasse,
+ * damit Bestandsstile nicht doppelt gepflegt werden.
  */
 
 :root {
-  /* Basisdesign v2.0 §2.1 — hell */
-  --eyt-bg-canvas: #f6f4ef;
-  --eyt-bg-surface: #ffffff;
-  --eyt-text-primary: #1d1b18;
-  --eyt-text-secondary: #5b564e;
-  --eyt-border-default: #d8d4cb;
-  --eyt-action-primary: #1e5231;
-  --eyt-action-primary-contrast: #ffffff;
-  --eyt-state-published-bg: #e1ebe2;
-  --eyt-state-published-text: #1e5231;
-  --eyt-state-draft-text: #7a5300;
-  --eyt-state-draft-bg: #f4e8ce;
-  --eyt-state-danger-text: #9b2c1f;
-  --eyt-state-danger-bg: #f7e3df;
-  --eyt-state-info-text: #155e75;
-  --eyt-state-info-bg: #deedf2;
-
   /* Aliasse fuer Bestandsstile */
   --color-bg: var(--eyt-bg-canvas);
   --color-text: var(--eyt-text-primary);
@@ -41,21 +27,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --eyt-bg-canvas: #161513;
-    --eyt-bg-surface: #211f1c;
-    --eyt-text-primary: #f1efe9;
-    --eyt-text-secondary: #b0aaa0;
-    --eyt-border-default: #3a3733;
-    --eyt-action-primary: #8fc7a2;
-    --eyt-action-primary-contrast: #161513;
-    --eyt-state-published-bg: #22352a;
-    --eyt-state-published-text: #8fc7a2;
-    --eyt-state-draft-text: #e3b95b;
-    --eyt-state-draft-bg: #3a2f17;
-    --eyt-state-danger-text: #f0a08f;
-    --eyt-state-danger-bg: #41211c;
-    --eyt-state-info-text: #7cc1db;
-    --eyt-state-info-bg: #1c3540;
+    /* Die Farbrollen kommen aus @easytree/ui; hier bleibt nur, was die
+       Anwendung selbst besitzt. */
     --color-focus: #7cc1db;
   }
 }
@@ -570,15 +543,15 @@ body {
   caption-side: top;
   text-align: left;
   padding-block-end: var(--eyt-space-2, 0.5rem);
-  color: var(--eyt-color-text-muted, #555);
+  color: var(--eyt-text-secondary);
   font-size: 0.875rem;
 }
 
 /*
  * Der Werkbankrahmen der Planung (EYT-140 M6).
  *
- * Nur Anordnung — Farben kommen ausschliesslich aus den bestehenden Tokens
- * oben in dieser Datei, es kommt kein einziges neues Farbliteral dazu. Die
+ * Nur Anordnung — Farben kommen ausschliesslich aus den Rollen von
+ * `@easytree/ui`, es kommt kein einziges neues Farbliteral dazu. Die
  * Bedienleiste bekommt hier erstmals ueberhaupt eine Darstellung: bis M6 trug
  * `.eyt-date-range` eine Klasse ohne jede Regel, die Bedienelemente standen
  * also als nackte Absaetze untereinander.
