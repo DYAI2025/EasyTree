@@ -139,7 +139,11 @@ describe("Basisdesign v2.0 §2.1 — kanonische Tokenquelle (EYT-80)", () => {
     ]);
   });
 
-  it("deklariert alle dreizehn genehmigten Rollen in beiden Modi", () => {
+  it("deklariert beide Modi deckungsgleich und alle genehmigten Rollen", () => {
+    // Zwei Aussagen, absichtlich zusammen: die Schluesselmengen sind
+    // deckungsgleich (das betrifft ALLE Rollen, auch die repo-eigenen), und
+    // jede der dreizehn genehmigten ist einzeln da — letzteres nur, damit ein
+    // Fehlschlag den NAMEN der fehlenden Rolle nennt statt einer Mengendifferenz.
     expect([...HELL.keys()].sort()).toEqual([...DUNKEL.keys()].sort());
     for (const [token] of GENEHMIGT) {
       expect(HELL.has(token), `hell: ${token} fehlt`).toBe(true);
