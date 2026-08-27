@@ -99,6 +99,38 @@ describe("Accessibility-Baseline der Shell (EYT-41)", () => {
 });
 
 /**
+ * EYT-80 — die Shell komponiert den geteilten Rahmen, ohne Politik abzugeben.
+ *
+ * Diese Zusicherungen sind der Gegenpol zur Extraktion: sie halten fest, dass
+ * NACH dem Umbau immer noch `apps/web` entscheidet, wer welche Punkte sieht,
+ * und dass der Sprunganker weiterhin auf die eine main-Landmark zeigt. Ohne
+ * sie waere „AppShell benutzt jetzt @easytree/ui" eine Behauptung ueber den
+ * Import und keine ueber das Verhalten.
+ *
+ * Sie sind bewusst VOR dem Umbau geschrieben und muessen schon auf dem alten
+ * Stand gruen sein — eine Charakterisierung, kein roter TDD-Schritt.
+ */
+describe("AppShell — Komposition ohne Politikverlust (EYT-80)", () => {
+  it("haelt Sprunganker und main-Landmark auf demselben Ziel", () => {
+    const { getByRole } = renderShell();
+    const anker = getByRole("link", { name: /zum hauptinhalt springen/i });
+    expect(anker.getAttribute("href")).toBe(`#${getByRole("main").id}`);
+  });
+
+  it("stellt Marke und Navigation weiterhin in die banner-Landmark", () => {
+    const { getByRole } = renderShell();
+    const kopf = getByRole("banner");
+    expect(kopf.textContent).toContain("easyTree");
+    expect(kopf.contains(getByRole("navigation", { name: "Hauptnavigation" }))).toBe(true);
+  });
+
+  it("traegt die Fusszeile als contentinfo", () => {
+    const { getByRole } = renderShell();
+    expect(getByRole("contentinfo").textContent).toContain("Arboscus Teamplaner");
+  });
+});
+
+/**
  * Die Kostenansicht ist die erste Ansicht mit ZWEI Datentabellen und einem
  * Formular auf einem Screen (EYT-144). Genau dort entstehen die Verstoesse, die
  * die Shell-Baseline nicht sehen kann: eine Tabelle ohne `caption`, ein
