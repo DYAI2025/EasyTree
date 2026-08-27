@@ -75,7 +75,8 @@ describe("AppShell — Struktur", () => {
     expect(kopf.contains(screen.getByRole("navigation", { name: "Test" }))).toBe(true);
 
     // Die Marke bekommt eine Huelle, und die traegt in der Werkbank eigene
-    // Regeln (heute `.app-brand`, `apps/web/app/globals.css:123`). Ein blosses
+    // Regeln (heute `.eyt-app-shell__brand`, `apps/web/app/globals.css:123`,
+    // nachgemessen 27.08.2026 nach der Umbenennung). Ein blosses
     // `kopf.contains(...)` waere auch ohne sie wahr — dieselbe Luecke wie beim
     // Sitzungsbereich, deshalb dieselbe Zusicherung.
     const markenhuelle = container.querySelector(".eyt-app-shell__brand");
@@ -89,9 +90,11 @@ describe("AppShell — Struktur", () => {
     expect(screen.getByRole("navigation", { name: "Test" }).parentElement).toBe(kopf);
 
     // Der Sitzungsbereich dagegen bekommt eine Huelle, und die traegt in der
-    // Werkbank `margin-left: auto` (heute `.app-session`,
-    // `apps/web/app/globals.css:262-267`). Ein blosses `kopf.contains(...)`
-    // waere auch ohne sie wahr — deshalb wird die Huelle selbst geprueft.
+    // Werkbank `margin-left: auto` (heute `.eyt-app-shell__session`,
+    // `apps/web/app/globals.css:262-267`, nachgemessen 27.08.2026 nach der
+    // Umbenennung). Ein blosses `kopf.contains(...)` waere auch ohne sie wahr —
+    // deshalb wird die Huelle selbst geprueft. Dass die Regel auch WIRKT, misst
+    // `apps/web/e2e/shell-smoke.spec.ts` im Browser; hier steht nur die Huelle.
     const huelle = container.querySelector(".eyt-app-shell__session");
     expect(huelle).not.toBeNull();
     expect(huelle?.contains(screen.getByText("Sitzung"))).toBe(true);

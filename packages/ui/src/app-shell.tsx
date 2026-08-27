@@ -80,17 +80,20 @@ function fehlt(knoten: ReactNode): boolean {
  * Erzwungen wird das von der Regel `ui-dependency-allowlist` im Pflichtjob
  * `unit-tests`, nicht von diesem Kommentar.
  *
- * Styling gehoert der Anwendung: das Paket vergibt nur `eyt-app-shell*`-Klassen,
- * die passenden Regeln entstehen mit dem Umbau der Werkbank-Shell in
- * `apps/web/app/globals.css`. Heute gibt es sie dort noch nicht
- * (`grep -cF "eyt-app-shell" apps/web/app/globals.css` = 0, gemessen
- * 27.08.2026).
+ * Styling gehoert der Anwendung: das Paket vergibt nur `eyt-app-shell*`-Klassen
+ * und liefert selbst kein Stylesheet. Die passenden Regeln STEHEN seit dem
+ * Umbau der Werkbank-Shell in `apps/web/app/globals.css` — `grep -cF
+ * "eyt-app-shell" apps/web/app/globals.css` = 9 Zeilen (gemessen 27.08.2026);
+ * ihre Wirkung, nicht nur ihre Existenz, misst
+ * `apps/web/e2e/shell-smoke.spec.ts` im Pflichtjob `web-smoke`. Ein anderer
+ * Client bringt seine eigenen Regeln mit.
  *
  * ## Zwei Vertraege, die man erst als naechster Aufrufer bemerkt
  *
  * (1) Dieser Rahmen ist das EINZIGE Primitive des Pakets ohne
  * `HTMLAttributes` — `grep -c HTMLAttributes packages/ui/src/*.tsx` liefert
- * hier 0 und bei allen zehn Geschwistern 2 (gemessen 27.08.2026). Er nimmt
+ * bei allen zehn Geschwistern 2 und hier 1, und diese eine Fundstelle ist
+ * dieser Satz selbst (gemessen 27.08.2026). Er nimmt
  * deshalb weder `className` noch `id` noch `aria-*` entgegen. Das ist so
  * gewollt: er rendert ein Fragment, es gibt gar kein Wurzelelement, auf das
  * sich solche Attribute legen liessen. Wer Stil braucht, schreibt Regeln zu
@@ -99,8 +102,10 @@ function fehlt(knoten: ReactNode): boolean {
  * (2) Eben weil es ein Fragment ist, muessen die vier Elemente DIREKTE Kinder
  * eines Spalten-Flexcontainers sein. In `apps/web` leistet das
  * `apps/web/app/globals.css:83-88` (`body { display: flex; flex-direction:
- * column }`), worauf sich `.app-main { flex: 1 }` (`:147-148`) stuetzt, um die
- * Resthoehe zu tragen und die Fusszeile unten zu halten. Ein Feld-Client, der
+ * column }`), worauf sich `.eyt-app-shell__main { flex: 1 }` (`:147-148`)
+ * stuetzt, um die Resthoehe zu tragen und die Fusszeile unten zu halten. Beide
+ * Zeilenangaben sind am 27.08.2026 nachgemessen: der Umbau hat die Klasse
+ * umbenannt, nicht verschoben. Ein Feld-Client, der
  * `<AppShell>` in ein Huellen-`<div>` haengt, verliert dieses Layout —
  * lautlos, kein Test dieses Pakets kann das sehen.
  */
