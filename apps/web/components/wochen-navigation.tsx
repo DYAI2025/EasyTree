@@ -23,6 +23,27 @@
  * drei Namen nicht schreiben, weil der Waechter seine eigene Beschreibung
  * mitgezaehlt haette. Diese Einschraenkung ist damit aufgehoben.
  *
+ * ## Was hier noch steht, ist die UEBERSETZUNG (EYT-80)
+ *
+ * Die Darstellung selbst liegt seit EYT-80 in `@easytree/ui` als
+ * `DateRangeControl` — ein domaenenfreier Bedienbereich fuer einen Zeitraum,
+ * der keinen Wochenbegriff kennt. Was in dieser Datei bleibt, ist genau die
+ * Uebersetzung des Wochenmodells in dieses Primitive: die Beschriftungen
+ * („Vorherige Woche", „Heute", „Nächste Woche", „Aktuelle Woche"), die sechs
+ * `data-testid`-Werte und der Link-Adapter. Es kommt keine Rechnung dazu und
+ * es faellt keine weg — die Adressen und Texte werden unveraendert
+ * durchgereicht.
+ *
+ * Die Zusicherung „rechnet nicht" wird dadurch ZWEIFACH getragen. Erstens
+ * weiterhin von den Sentinels in `test/wochen-navigation.test.tsx`: steht dort
+ * `SENTINEL-NACH` im DOM, wurde durchgereicht. Zweitens jetzt auch
+ * STRUKTURELL, denn die Regel `ui-dependency-allowlist` in
+ * `apps/api/test/architecture.test.ts` laesst unter `packages/ui/src/` nur
+ * `react` und paketinterne relative Pfade zu — das Primitive kann `@easytree/
+ * domain`, `@easytree/contracts` und `next/navigation` gar nicht importieren
+ * und hat damit keinen Zugang zu einer Kalenderrechnung. Die zweite Haelfte
+ * kostet nichts und faellt bei jeder Umgehung sofort auf.
+ *
  * ## Warum `Link` und nicht `router.push`
  *
  * Ein `<a href>` ist mit der Tastatur bedienbar, im Kontextmenue teilbar und
@@ -39,7 +60,8 @@
  * wird. Sichtbar hingestellt widerspraeche er dem Inkrement selbst: „die
  * Planerin blaettert OHNE technischen Parameter". `VisuallyHidden` loest beides
  * zugleich — der Schluessel bleibt im Accessibility-Tree und im `textContent`,
- * die Flaeche zeigt „KW 34 · 2026".
+ * die Flaeche zeigt „KW 34 · 2026". Das Verstecken macht das Primitive, sobald
+ * `rangeKey` gesetzt ist.
  *
  * ## Der Fehlerfall ist keine Sackgasse
  *
@@ -48,78 +70,85 @@
  * darstellbare Woche, und eine ersatzweise angezeigte waere die schlimmere
  * Variante (`E2`): die Planerin saehe eine plausible Woche, aber nicht die, die
  * sie angefordert hat. Welchen Text die Seite zum Grund schreibt, entscheidet
- * `app/planung/page.tsx`; diese Komponente kennt den Grund nicht.
+ * `app/planung/page.tsx`; diese Komponente kennt den Grund nicht. Im Primitive
+ * ist `reset` genau deshalb PFLICHT und alles andere optional.
  *
  * ## Die laufende Woche ist ueber TEXT kenntlich
  *
  * `AC-018` verlangt, dass ein Zustand nie nur ueber Farbe getragen wird.
  * „Aktuelle Woche" steht deshalb als Wort da; `aria-current="page"` auf dem
- * Rueckweg ist die maschinenlesbare Zugabe, nicht der Traeger.
+ * Rueckweg ist die maschinenlesbare Zugabe, nicht der Traeger. Im Primitive
+ * sind das ZWEI getrennte Eingaenge — `currentMarker` und `reset.current` —,
+ * hier speist beide dasselbe `modell.istAktuelleWoche`. Auseinanderlaufen
+ * koennen sie trotzdem, deshalb sichert der Abnahmevertrag beide Haelften in
+ * derselben Zusicherung.
  */
-import { VisuallyHidden } from "@easytree/ui";
+import { DateRangeControl, type DateRangeLinkProps } from "@easytree/ui";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import type { Wochenmodell } from "../lib/wochennavigation";
+
+/**
+ * Der Adapter auf `next/link`. `@easytree/ui` darf keinen Router importieren
+ * (Regel `ui-dependency-allowlist`), also reicht die Anwendung ihr Link-
+ * Element herein.
+ *
+ * Bewusst ein Adapter und nicht `linkComponent={Link}` direkt: `next/link`
+ * nimmt `href: Url` — also auch ein Objekt — und ist damit WEITER als der
+ * Vertrag `DateRangeLinkProps` mit `href: string`. Ob TypeScript die direkte
+ * Zuweisung akzeptiert, haengt an der Varianz der Prop-Typen und zeigte sich
+ * erst im `typecheck`. Fuenf Zeilen sind billiger als diese Wette.
+ */
+function WochenLink({ children, ...rest }: DateRangeLinkProps): ReactNode {
+  return <Link {...rest}>{children}</Link>;
+}
 
 export function WochenNavigation({ modell }: { modell: Wochenmodell }) {
   if (modell.art === "fehlerhaft") {
     return (
-      <nav
-        aria-label="Wochennavigation"
-        className="wochennavigation"
-        data-testid="wochennavigation"
-      >
-        <Link
-          href={modell.heuteUrl}
-          className="wochennavigation__ziel"
-          data-testid="wochennavigation-heute"
-        >
-          Heute
-        </Link>
-      </nav>
+      <DateRangeControl
+        label="Wochennavigation"
+        testId="wochennavigation"
+        linkComponent={WochenLink}
+        reset={{ label: "Heute", href: modell.heuteUrl, testId: "wochennavigation-heute" }}
+      />
     );
   }
 
+  // `exactOptionalPropertyTypes` ist an: ein ausdrueckliches `undefined` ist
+  // NICHT dasselbe wie eine fehlende Eigenschaft. `current` und `currentMarker`
+  // entstehen deshalb per Spread und werden nie als `undefined` uebergeben.
+  const laufend = modell.istAktuelleWoche;
+
   return (
-    <nav aria-label="Wochennavigation" className="wochennavigation" data-testid="wochennavigation">
-      <Link
-        href={modell.vorherigeUrl}
-        className="wochennavigation__ziel"
-        data-testid="wochennavigation-vorherige"
-      >
-        Vorherige Woche
-      </Link>
-
-      <p className="wochennavigation__woche" data-testid="werkbank-woche-iso">
-        <span className="wochennavigation__woche-text">{modell.isoWochenText}</span>{" "}
-        <VisuallyHidden className="wochennavigation__woche-schluessel">
-          {modell.schluessel}
-        </VisuallyHidden>
-      </p>
-      <p className="wochennavigation__zeitraum" data-testid="werkbank-woche-bereich">
-        {modell.zeitraumText}
-      </p>
-      {modell.istAktuelleWoche ? (
-        <p className="wochennavigation__marke" data-testid="wochennavigation-aktuell">
-          Aktuelle Woche
-        </p>
-      ) : null}
-
-      <Link
-        href={modell.heuteUrl}
-        className="wochennavigation__ziel"
-        aria-current={modell.istAktuelleWoche ? "page" : undefined}
-        data-testid="wochennavigation-heute"
-      >
-        Heute
-      </Link>
-      <Link
-        href={modell.naechsteUrl}
-        className="wochennavigation__ziel"
-        data-testid="wochennavigation-naechste"
-      >
-        Nächste Woche
-      </Link>
-    </nav>
+    <DateRangeControl
+      label="Wochennavigation"
+      testId="wochennavigation"
+      linkComponent={WochenLink}
+      previous={{
+        label: "Vorherige Woche",
+        href: modell.vorherigeUrl,
+        testId: "wochennavigation-vorherige",
+      }}
+      next={{
+        label: "Nächste Woche",
+        href: modell.naechsteUrl,
+        testId: "wochennavigation-naechste",
+      }}
+      reset={{
+        label: "Heute",
+        href: modell.heuteUrl,
+        testId: "wochennavigation-heute",
+        ...(laufend ? { current: true } : {}),
+      }}
+      rangeLabel={modell.isoWochenText}
+      rangeKey={modell.schluessel}
+      rangeDetail={modell.zeitraumText}
+      rangeLabelTestId="werkbank-woche-iso"
+      rangeDetailTestId="werkbank-woche-bereich"
+      currentMarkerTestId="wochennavigation-aktuell"
+      {...(laufend ? { currentMarker: "Aktuelle Woche" } : {})}
+    />
   );
 }

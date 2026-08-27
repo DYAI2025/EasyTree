@@ -107,6 +107,38 @@ const API_ALLOWED_PACKAGES: readonly RegExp[] = [
   /^jose$/,
 ];
 
+/**
+ * Was `packages/ui/src` importieren darf (EYT-80).
+ *
+ * Absichtlich eine ALLOWLIST — dieselbe Lehre wie bei `domain-allowlist` im
+ * Dateikopf: „domaenenfrei" ist ein universelles Verbot, und eine endliche
+ * Liste verbotener Pakete kann es nie ausdruecken. Eine Sperrliste
+ * `["@easytree/domain", "next"]` liesse `next/link`, `@easytree/domain/dist/…`
+ * und jedes kuenftige Fachpaket durch.
+ *
+ * `react` steht hier, weil ein React-Primitive ohne React keins ist — und ist
+ * der EINZIGE Eintrag. Ein Routerpaket steht bewusst NICHT hier:
+ * `DateRangeControl` bekommt sein Link-Element injiziert, damit dasselbe
+ * Primitive spaeter die Feld-App bedienen kann (EYT-80,
+ * Zwei-Client-Architektur, Confluence 8486960).
+ *
+ * `react/jsx-runtime` steht ebenfalls nicht hier, und das ist kein Versehen:
+ * `tsconfig.build.json` setzt `jsx: "react-jsx"`, der Laufzeitimport entsteht
+ * also beim EMIT und nie im Quelltext. `ts.preProcessFile` liest Quelltext,
+ * der Spezifizierer kann diese Regel damit gar nicht erreichen. Ein Eintrag,
+ * der nie feuern kann, verbraucht die Reviewsichtbarkeit dieser Liste fuer
+ * nichts.
+ *
+ * Dass `"react"` der einzige nicht-relative Spezifizierer unter
+ * `packages/ui/src` ist, steht hier bewusst OHNE Dateizahl: die Regel selbst
+ * prueft es bei jedem Lauf, denn jeder weitere Spezifizierer waere eine
+ * Verletzung. Eine mitgeschriebene Zahl waere dagegen sofort veraltet — genau
+ * das ist in diesem Slice passiert, als `4a6429e` eine zwoelfte Datei anlegte.
+ */
+const UI_ALLOWED_PACKAGES: readonly RegExp[] = [/^react$/];
+
+const UI_PACKAGE = "packages/ui/src/";
+
 export const RULES: readonly Rule[] = [
   {
     // ADR-001 Z. 74 — als Allowlist formuliert, siehe Dateikopf.
@@ -278,6 +310,51 @@ export const RULES: readonly Rule[] = [
       ref.resolved?.startsWith("packages/contracts/src/testing/") === true
         ? `Produktionscode darf "${ref.specifier}" nicht importieren — @easytree/contracts/testing/* ist ausschliesslich Testinfrastruktur (EYT-103).`
         : null,
+  },
+  {
+    // EYT-80 — `packages/ui` ist domaenenfrei, API-frei, auth-frei und
+    // routerunabhaengig (ADR-001 Z. 77, Basisdesign v2.0, Zwei-Client-
+    // Architektur). Bis EYT-80 stand das als Zusage im Dateikopf von
+    // `packages/ui/src/index.ts` und sonst nirgends. Vier Regeln sahen
+    // `packages/ui` zwar im Geltungsbereich (`no-app-to-app`,
+    // `no-generic-shared-package`, `no-fixtures-in-production-code`,
+    // `no-contract-testing-in-production-code`), aber alle vier sind enge
+    // Verbote: KEINE beschraenkte die Abhaengigkeitsoberflaeche, und
+    // `@easytree/domain` wie `next/link` waeren durch alle vier gelaufen
+    // (gemessen 27.08.2026 am Stand vor dieser Regel: 11 Dateien unter
+    // packages/ui/src, und 0 Regeln mit Importliste).
+    //
+    // Die Dateizahl ist eine Momentaufnahme und waechst mit dem Paket — sie
+    // traegt hier nichts und darf nicht nachgepflegt werden. Verbindlich ist
+    // die Zusicherung „Regel ui-dependency-allowlist ueberwacht JEDE Datei
+    // unter packages/ui/src" in `architecture.test.ts`: sie vergleicht den
+    // Geltungsbereich bei JEDEM Lauf gegen die tatsaechlich eingesammelten
+    // Dateien und geht rot, wenn die Regel eine davon nicht sieht. Genau
+    // diese Zeile war schon einmal falsch: `4a6429e` legte `app-shell.tsx`
+    // an und machte aus 11 zwoelf, ohne dass irgendetwas rot wurde.
+    //
+    // Geltungsbereich ist `src/` und NICHT das ganze Paket: `test/` importiert
+    // zu Recht vitest und @testing-library, die eine Paket-Allowlist ablehnen
+    // muesste. `src/` ist zugleich genau die ausgelieferte Oberflaeche
+    // (tsconfig.build.json `include: ["src"]`, package.json `files: ["dist"]`).
+    id: "ui-dependency-allowlist",
+    inScope: (file): boolean => file.startsWith(UI_PACKAGE),
+    check: (ref): string | null => {
+      if (ref.isTypeReference) {
+        return `packages/ui darf keine /// <reference types="${ref.specifier}" /> fuehren — sie zieht eine ganze Ambient-Oberflaeche in den Scope.`;
+      }
+      if (!ref.specifier.startsWith(".")) {
+        if (UI_ALLOWED_PACKAGES.some((allowed) => allowed.test(ref.specifier))) return null;
+        return `"${ref.specifier}" steht nicht auf der Importliste von packages/ui/src. Erlaubt sind ausschliesslich react und paketinterne relative Pfade — Fachbegriffe, Vertraege, Router und HTTP-Clients gehoeren in die Anwendung. Der Ausweg ist NICHT, diese Liste zu erweitern: ein Primitive bekommt sein Link-Element, seinen Formatierer oder seine Daten als Prop injiziert, damit es auch die Feld-App bedienen kann (EYT-80).`;
+      }
+      if (ref.resolved === null) {
+        return `Relativer Import "${ref.specifier}" ist nicht aufloesbar — der Scanner koennte ihn sonst stillschweigend uebergehen.`;
+      }
+      if (!ref.resolved.startsWith(UI_PACKAGE)) {
+        return `packages/ui darf nicht nach "${ref.resolved}" hinausgreifen (EYT-80).`;
+      }
+      return null;
+    },
   },
 ];
 

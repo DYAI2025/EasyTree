@@ -94,7 +94,7 @@ body {
 }
 
 /* Skip-Link: erstes fokussierbares Element, sichtbar bei Fokus. */
-.skip-link {
+.eyt-app-shell__skip-link {
   position: absolute;
   left: var(--space);
   top: -100%;
@@ -106,12 +106,12 @@ body {
   text-decoration: none;
 }
 
-.skip-link:focus-visible,
-.skip-link:focus {
+.eyt-app-shell__skip-link:focus-visible,
+.eyt-app-shell__skip-link:focus {
   top: 0;
 }
 
-.app-header {
+.eyt-app-shell__header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -120,7 +120,7 @@ body {
   border-bottom: 1px solid var(--color-border);
 }
 
-.app-brand {
+.eyt-app-shell__brand {
   font-weight: 700;
   font-size: 1.25rem;
   color: var(--color-brand);
@@ -144,7 +144,7 @@ body {
   font-weight: 700;
 }
 
-.app-main {
+.eyt-app-shell__main {
   flex: 1;
   width: 100%;
   max-width: 60rem;
@@ -152,7 +152,7 @@ body {
   padding: var(--space);
 }
 
-.app-footer {
+.eyt-app-shell__footer {
   padding: var(--space);
   border-top: 1px solid var(--color-border);
   font-size: 0.875rem;
@@ -255,11 +255,11 @@ body {
  * Basisdesign v2.0 — Werkbank-Bausteine des Kosten-Slices
  * ============================================================ */
 
-.app-header {
+.eyt-app-shell__header {
   background: var(--eyt-bg-surface);
 }
 
-.app-session {
+.eyt-app-shell__session {
   margin-left: auto;
   display: flex;
   align-items: center;
@@ -580,8 +580,16 @@ body {
  * Nur Anordnung — Farben kommen ausschliesslich aus den bestehenden Tokens
  * oben in dieser Datei, es kommt kein einziges neues Farbliteral dazu. Die
  * Bedienleiste bekommt hier erstmals ueberhaupt eine Darstellung: bis M6 trug
- * `.wochennavigation` eine Klasse ohne jede Regel, die Bedienelemente standen
+ * `.eyt-date-range` eine Klasse ohne jede Regel, die Bedienelemente standen
  * also als nackte Absaetze untereinander.
+ *
+ * Seit EYT-80 traegt diese Leiste das Primitive `DateRangeControl` aus
+ * `@easytree/ui`; die Namen unten sind deshalb `eyt-date-range*` und werden
+ * DORT vergeben. Beide Haelften der Kopplung sind bewacht: dass es hier zu
+ * jedem Namen eine Regel gibt, haelt `apps/web/test/app-shell-styles.test.ts`,
+ * und dass das Paket die Namen ueberhaupt ausgibt, der Fall „gibt alle sieben
+ * Klassennamen des Bedienbereichs aus" in
+ * `packages/ui/test/date-range-control.test.tsx`.
  */
 .werkbank {
   display: flex;
@@ -604,7 +612,7 @@ body {
  * zuerst, die Wege dahinter — auf einer schmalen Flaeche ist „welche Woche"
  * die erste Frage, nicht „wohin als naechstes".
  */
-.wochennavigation {
+.eyt-date-range {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -615,7 +623,7 @@ body {
   background: var(--eyt-bg-surface);
 }
 
-.wochennavigation__woche {
+.eyt-date-range__range {
   margin: 0;
   font-weight: 700;
   /* Woche und Zeitraum gehoeren zusammen und bleiben deshalb beieinander,
@@ -623,7 +631,7 @@ body {
   flex-basis: 100%;
 }
 
-.wochennavigation__zeitraum {
+.eyt-date-range__detail {
   margin: 0;
   flex-basis: 100%;
   color: var(--eyt-text-secondary);
@@ -633,13 +641,13 @@ body {
  * Die laufende Woche ist ueber TEXT kenntlich (`AC-018`) — diese Regel gibt
  * ihr nur Platz, sie traegt die Aussage nicht.
  */
-.wochennavigation__marke {
+.eyt-date-range__marker {
   margin: 0;
   color: var(--eyt-text-secondary);
   font-size: 0.875rem;
 }
 
-.wochennavigation__ziel {
+.eyt-date-range__action {
   /* 40 px Mindesthoehe fuer Zeigegeraete (Basisdesign v2.0 §2.3). */
   display: inline-flex;
   align-items: center;

@@ -99,6 +99,57 @@ describe("Accessibility-Baseline der Shell (EYT-41)", () => {
 });
 
 /**
+ * EYT-80 — die Shell komponiert den geteilten Rahmen, ohne Politik abzugeben.
+ *
+ * Diese Zusicherungen sind der Gegenpol zur Extraktion: sie halten fest, dass
+ * NACH dem Umbau immer noch `apps/web` entscheidet, wer welche Punkte sieht.
+ * Ohne sie waere „AppShell benutzt jetzt @easytree/ui" eine Behauptung ueber
+ * den Import und keine ueber das Verhalten.
+ *
+ * Sie sind bewusst VOR dem Umbau geschrieben und muessen schon auf dem alten
+ * Stand gruen sein — eine Charakterisierung, kein roter TDD-Schritt. Das
+ * entbindet sie nicht von der Hausregel: jede benannte Gegenmutation steht
+ * unten am Fall und ist ausgefuehrt worden.
+ *
+ * ## Ein dritter Fall stand hier und ist ersatzlos entfallen
+ *
+ * Er verglich `anker.getAttribute("href")` mit `#${getByRole("main").id}`.
+ * Beide Seiten rendert das Primitive aus EINER Variablen (`mainId`) — die
+ * Gleichung gilt darum bauartbedingt, und keine Aenderung in `apps/web` kann
+ * sie brechen. Auch nicht die naheliegendste: `mainId="inhalt-feld"` an
+ * `<UiAppShell>` durchgereicht bewegt Anker UND Landmark gemeinsam. Gemessen
+ * 27.08.2026 blieb der Fall dabei gruen, waehrend `:80` (`href ===
+ * "#hauptinhalt"`) und `:90` (`main.id === "hauptinhalt"`) beide rot wurden —
+ * die zwei Zusicherungen also, die den Wert unabhaengig voneinander auf das
+ * Literal festnageln. Dass die Kopplung fuer JEDE id haelt, misst
+ * `packages/ui/test/app-shell.test.tsx` am Primitive selbst.
+ */
+describe("AppShell — Komposition ohne Politikverlust (EYT-80)", () => {
+  it("stellt Marke und Navigation weiterhin in die banner-Landmark", () => {
+    // Gegenmutation (ausgefuehrt 27.08.2026): in
+    // `apps/web/components/app-shell.tsx` das Prop `navigation={…}` samt
+    // seinem `<nav aria-label="Hauptnavigation">` streichen. Der Rahmen stellt
+    // dann keine Navigation mehr hin, `getByRole("navigation", …)` findet
+    // nichts und dieser Fall wird rot.
+    const { getByRole } = renderShell();
+    const kopf = getByRole("banner");
+    expect(kopf.textContent).toContain("easyTree");
+    expect(kopf.contains(getByRole("navigation", { name: "Hauptnavigation" }))).toBe(true);
+  });
+
+  it("traegt die Fusszeile als contentinfo", () => {
+    // Gegenmutation (ausgefuehrt 27.08.2026): das Prop `footer={…}` streichen.
+    // `fehlt(footer)` greift dann, das `<footer>`-Element entsteht gar nicht
+    // erst — die contentinfo-Landmark fehlt und dieser Fall wird rot. Das ist
+    // der Gegenpol zu `packages/ui`, wo dieselbe Abwesenheit die ZUSAGE ist:
+    // dort wird geprueft, dass keine LEERE Landmark stehen bleibt, hier, dass
+    // `apps/web` die Fusszeile ueberhaupt noch mitgibt.
+    const { getByRole } = renderShell();
+    expect(getByRole("contentinfo").textContent).toContain("Arboscus Teamplaner");
+  });
+});
+
+/**
  * Die Kostenansicht ist die erste Ansicht mit ZWEI Datentabellen und einem
  * Formular auf einem Screen (EYT-144). Genau dort entstehen die Verstoesse, die
  * die Shell-Baseline nicht sehen kann: eine Tabelle ohne `caption`, ein

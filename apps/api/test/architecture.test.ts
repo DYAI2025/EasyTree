@@ -103,6 +103,28 @@ describe("Architekturgrenzen", () => {
     expect(scopeCounts.get(ruleId)?.size ?? 0).toBeGreaterThan(0);
   });
 
+  it("Regel ui-dependency-allowlist ueberwacht JEDE Datei unter packages/ui/src", () => {
+    // `scopeCounts >= 1` unterscheidet nicht zwischen „bewacht das Paket" und
+    // „bewacht eine Datei". Gemessen 27.08.2026: eine Verengung auf
+    // `packages/ui/src/b` bewacht 1 von 11 Dateien, und VOR dieser Zusicherung
+    // blieben dabei beide Suiten vollstaendig gruen — der Waechter waere still
+    // abgeruestet gewesen. Diese Zeile nennt die Verengung jetzt beim Namen
+    // (1 statt 11); die Sichtbarkeitsprobe im Rot-Fall („laesst react und
+    // paketinterne Pfade in packages/ui zu") faellt unabhaengig davon ebenfalls.
+    //
+    // Die linke Seite kommt aus dem Praefix ueber die eingesammelten Importe,
+    // die rechte aus `inScope` der Regel. Beide Wege muessen dieselbe Menge
+    // ergeben. Importfreie Dateien tauchen auf keiner Seite auf, deshalb kann
+    // ein neues Primitive ohne Import diese Zusicherung nicht falsch rot machen.
+    const ausDemPraefix = new Set(
+      refs.filter((ref) => ref.from.startsWith("packages/ui/src/")).map((ref) => ref.from),
+    );
+    expect(ausDemPraefix.size).toBeGreaterThan(5);
+    expect([...(scopeCounts.get("ui-dependency-allowlist") ?? [])].sort()).toEqual(
+      [...ausDemPraefix].sort(),
+    );
+  });
+
   it.each([...SCAFFOLDED_MODULES])(
     "Modul %s besitzt echten Inhalt und eine oeffentliche API",
     (slug) => {

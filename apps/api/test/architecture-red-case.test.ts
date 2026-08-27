@@ -209,7 +209,68 @@ describe("Rot-Fall", () => {
     rmSync(join(root, "apps/api/src/modules/workforce/services"), { recursive: true, force: true });
   });
 
+  it("faengt Domain-, Vertrags- und Routerimporte in packages/ui", () => {
+    // Die drei realistischen Einbruchstellen einer geteilten UI-Bibliothek:
+    // ein Domaintyp „nur fuer die Typisierung", ein Vertrags-DTO „nur fuer die
+    // Props", und der Router, weil ein Link ja irgendwohin muss. Alle drei
+    // wuerden `packages/ui` an easyTree binden und die Wiederverwendung in der
+    // Feld-App unmoeglich machen.
+    write(
+      "packages/ui/src/bad.tsx",
+      [
+        'import type { PlanningWeek } from "@easytree/domain";',
+        'import type { SessionDto } from "@easytree/contracts";',
+        'import Link from "next/link";',
+        'import { useRouter } from "next/navigation";',
+        "export const bad = [Link, useRouter] as const;",
+        "export type Props = { week: PlanningWeek; session: SessionDto };",
+      ].join("\n") + "\n",
+    );
+
+    const found = violationsFor().violations.filter((v) => v.rule === "ui-dependency-allowlist");
+    const messages = found.map((v) => v.message);
+    for (const needle of [
+      "@easytree/domain",
+      "@easytree/contracts",
+      "next/link",
+      "next/navigation",
+    ]) {
+      expect(
+        messages.some((m) => m.includes(needle)),
+        `nicht gemeldet: ${needle}`,
+      ).toBe(true);
+    }
+    rmSync(join(root, "packages/ui"), { recursive: true, force: true });
+  });
+
+  it("laesst react und paketinterne Pfade in packages/ui zu", () => {
+    // Ohne diese Gegenprobe waere eine Regel, die ALLES meldet, ebenso gruen.
+    write("packages/ui/src/ok-nachbar.tsx", "export const nachbar = 1;\n");
+    write(
+      "packages/ui/src/ok.tsx",
+      [
+        'import type { ReactNode } from "react";',
+        'import { nachbar } from "./ok-nachbar.js";',
+        "export const ok = (kind: ReactNode) => [kind, nachbar];",
+      ].join("\n") + "\n",
+    );
+
+    const alle = violationsFor();
+    // Erst die Sichtbarkeit, dann die Sauberkeit: waere `ok.tsx` gar nicht
+    // gescannt worden — Pfadtippfehler, geaenderte SOURCE_EXTENSIONS, ein neuer
+    // SKIP_DIRS-Eintrag —, waere die leere Liste unten ohne jede Messung gruen.
+    expect(alle.scopeCounts.get("ui-dependency-allowlist")).toContain("packages/ui/src/ok.tsx");
+    const gemeldet = alle.violations
+      .filter((v) => v.rule === "ui-dependency-allowlist")
+      .filter((v) => v.file === "packages/ui/src/ok.tsx");
+    expect(gemeldet).toEqual([]);
+    rmSync(join(root, "packages/ui"), { recursive: true, force: true });
+  });
+
   it("ist am sauberen Baum gruen — der Rot-Fall kommt von den Verstoessen, nicht vom Aufbau", () => {
+    // Steht bewusst am ENDE des Blocks: als Schlussbilanz faengt sie eine
+    // Fixture, die ein frueherer Fall liegen gelassen hat. Weiter oben wuerde
+    // sie das nicht mehr tun.
     expect(violationsFor().violations).toEqual([]);
   });
 });
