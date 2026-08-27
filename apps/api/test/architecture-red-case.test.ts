@@ -209,10 +209,6 @@ describe("Rot-Fall", () => {
     rmSync(join(root, "apps/api/src/modules/workforce/services"), { recursive: true, force: true });
   });
 
-  it("ist am sauberen Baum gruen — der Rot-Fall kommt von den Verstoessen, nicht vom Aufbau", () => {
-    expect(violationsFor().violations).toEqual([]);
-  });
-
   it("faengt Domain-, Vertrags- und Routerimporte in packages/ui", () => {
     // Die drei realistischen Einbruchstellen einer geteilten UI-Bibliothek:
     // ein Domaintyp „nur fuer die Typisierung", ein Vertrags-DTO „nur fuer die
@@ -244,6 +240,7 @@ describe("Rot-Fall", () => {
         `nicht gemeldet: ${needle}`,
       ).toBe(true);
     }
+    rmSync(join(root, "packages/ui"), { recursive: true, force: true });
   });
 
   it("laesst react und paketinterne Pfade in packages/ui zu", () => {
@@ -258,9 +255,22 @@ describe("Rot-Fall", () => {
       ].join("\n") + "\n",
     );
 
-    const gemeldet = violationsFor()
-      .violations.filter((v) => v.rule === "ui-dependency-allowlist")
+    const alle = violationsFor();
+    // Erst die Sichtbarkeit, dann die Sauberkeit: waere `ok.tsx` gar nicht
+    // gescannt worden — Pfadtippfehler, geaenderte SOURCE_EXTENSIONS, ein neuer
+    // SKIP_DIRS-Eintrag —, waere die leere Liste unten ohne jede Messung gruen.
+    expect(alle.scopeCounts.get("ui-dependency-allowlist")).toContain("packages/ui/src/ok.tsx");
+    const gemeldet = alle.violations
+      .filter((v) => v.rule === "ui-dependency-allowlist")
       .filter((v) => v.file === "packages/ui/src/ok.tsx");
     expect(gemeldet).toEqual([]);
+    rmSync(join(root, "packages/ui"), { recursive: true, force: true });
+  });
+
+  it("ist am sauberen Baum gruen — der Rot-Fall kommt von den Verstoessen, nicht vom Aufbau", () => {
+    // Steht bewusst am ENDE des Blocks: als Schlussbilanz faengt sie eine
+    // Fixture, die ein frueherer Fall liegen gelassen hat. Weiter oben wuerde
+    // sie das nicht mehr tun.
+    expect(violationsFor().violations).toEqual([]);
   });
 });
