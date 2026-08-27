@@ -316,8 +316,17 @@ export const RULES: readonly Rule[] = [
     // `no-contract-testing-in-production-code`), aber alle vier sind enge
     // Verbote: KEINE beschraenkte die Abhaengigkeitsoberflaeche, und
     // `@easytree/domain` wie `next/link` waeren durch alle vier gelaufen
-    // (gemessen 27.08.2026: 11 Dateien unter packages/ui/src, 0 Regeln mit
-    // Importliste).
+    // (gemessen 27.08.2026 am Stand vor dieser Regel: 11 Dateien unter
+    // packages/ui/src, davon 0 mit Importliste).
+    //
+    // Die Dateizahl ist eine Momentaufnahme und waechst mit dem Paket — sie
+    // traegt hier nichts und darf nicht nachgepflegt werden. Verbindlich ist
+    // die Zusicherung „Regel ui-dependency-allowlist ueberwacht JEDE Datei
+    // unter packages/ui/src" in `architecture.test.ts`: sie vergleicht den
+    // Geltungsbereich bei JEDEM Lauf gegen die tatsaechlich eingesammelten
+    // Dateien und geht rot, wenn die Regel eine davon nicht sieht. Genau
+    // diese Zeile war schon einmal falsch: `4a6429e` legte `app-shell.tsx`
+    // an und machte aus 11 zwoelf, ohne dass irgendetwas rot wurde.
     //
     // Geltungsbereich ist `src/` und NICHT das ganze Paket: `test/` importiert
     // zu Recht vitest und @testing-library, die eine Paket-Allowlist ablehnen
