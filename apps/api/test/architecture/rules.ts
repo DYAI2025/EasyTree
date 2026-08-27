@@ -107,6 +107,24 @@ const API_ALLOWED_PACKAGES: readonly RegExp[] = [
   /^jose$/,
 ];
 
+/**
+ * Was `packages/ui/src` importieren darf (EYT-80).
+ *
+ * Absichtlich eine ALLOWLIST — dieselbe Lehre wie bei `domain-allowlist` im
+ * Dateikopf: „domaenenfrei" ist ein universelles Verbot, und eine endliche
+ * Liste verbotener Pakete kann es nie ausdruecken. Eine Sperrliste
+ * `["@easytree/domain", "next"]` liesse `next/link`, `@easytree/domain/dist/…`
+ * und jedes kuenftige Fachpaket durch.
+ *
+ * `react` steht hier, weil ein React-Primitive ohne React keins ist. Ein
+ * Routerpaket steht bewusst NICHT hier: `DateRangeControl` bekommt sein
+ * Link-Element injiziert, damit dasselbe Primitive spaeter die Feld-App
+ * bedienen kann (EYT-80, Zwei-Client-Architektur, Confluence 8486960).
+ */
+const UI_ALLOWED_PACKAGES: readonly RegExp[] = [/^react$/, /^react\/jsx-runtime$/];
+
+const UI_PACKAGE = "packages/ui/src/";
+
 export const RULES: readonly Rule[] = [
   {
     // ADR-001 Z. 74 — als Allowlist formuliert, siehe Dateikopf.
@@ -278,6 +296,31 @@ export const RULES: readonly Rule[] = [
       ref.resolved?.startsWith("packages/contracts/src/testing/") === true
         ? `Produktionscode darf "${ref.specifier}" nicht importieren — @easytree/contracts/testing/* ist ausschliesslich Testinfrastruktur (EYT-103).`
         : null,
+  },
+  {
+    // EYT-80 — `packages/ui` ist domaenenfrei, API-frei, auth-frei und
+    // routerunabhaengig (ADR-001 Z. 77, Basisdesign v2.0, Zwei-Client-
+    // Architektur). Bis EYT-80 war das eine Zusage im Dateikopf von
+    // `packages/ui/src/index.ts` und sonst nirgends: KEINE Regel hatte
+    // `packages/ui` im Geltungsbereich, gemessen 27.08.2026.
+    id: "ui-dependency-allowlist",
+    inScope: (file): boolean => file.startsWith(UI_PACKAGE),
+    check: (ref): string | null => {
+      if (ref.isTypeReference) {
+        return `packages/ui darf keine /// <reference types="${ref.specifier}" /> fuehren — sie zieht eine ganze Ambient-Oberflaeche in den Scope.`;
+      }
+      if (!ref.specifier.startsWith(".")) {
+        if (UI_ALLOWED_PACKAGES.some((allowed) => allowed.test(ref.specifier))) return null;
+        return `"${ref.specifier}" steht nicht auf der Importliste von packages/ui/src. Erlaubt sind ausschliesslich react und paketinterne relative Pfade — Fachbegriffe, Vertraege, Router und HTTP-Clients gehoeren in die Anwendung (EYT-80).`;
+      }
+      if (ref.resolved === null) {
+        return `Relativer Import "${ref.specifier}" ist nicht aufloesbar — der Scanner koennte ihn sonst stillschweigend uebergehen.`;
+      }
+      if (!ref.resolved.startsWith(UI_PACKAGE)) {
+        return `packages/ui darf nicht nach "${ref.resolved}" hinausgreifen (EYT-80).`;
+      }
+      return null;
+    },
   },
 ];
 
