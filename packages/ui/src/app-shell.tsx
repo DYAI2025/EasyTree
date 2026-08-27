@@ -45,16 +45,27 @@ export interface AppShellProps {
 }
 
 /**
- * Ist der Slot abwesend? `undefined`, `null` und `false` zaehlen alle als
- * abwesend, weil `bedingung && <X/>` und `bedingung ? <X/> : null` die beiden
- * Formen sind, die eine aufrufende Anwendung tatsaechlich schreibt. Mit einer
- * blossen `=== undefined`-Pruefung entstuende daraus eine LEERE
- * contentinfo-Landmark, und axe meldet die nicht (gemessen 27.08.2026, auch
- * mit `best-practice`).
+ * Erkennt die drei IDIOME DER ABWESENHEIT — mehr nicht, und der Name sagt
+ * bewusst nicht mehr zu.
  *
- * Bewusste Grenze: ein leerer String bleibt ein gerenderter Wert. `""` hat die
- * aufrufende Anwendung gewaehlt; `undefined`/`null`/`false` sind die Formen
- * der Abwesenheit.
+ * Abgedeckt ist genau das, womit eine aufrufende Anwendung "kein Slot"
+ * ausdrueckt: das Prop gar nicht setzen (`undefined`), `bedingung ? <X/> :
+ * null` (`null`) und `bedingung && <X/>` (`false`). Mit einer blossen
+ * `=== undefined`-Pruefung entstuende aus den letzten beiden eine LEERE
+ * contentinfo-Landmark, und axe meldet die nicht (gemessen 27.08.2026, auch
+ * mit `best-practice`) — nur ein Test haelt das.
+ *
+ * NICHT abgedeckt und auch nicht abdeckbar: ein Slot, der lediglich zu nichts
+ * RENDERT. Ein leerer String, ein leeres Fragment oder eine Komponente, die
+ * `null` zurueckgibt, erzeugen die Huelle weiterhin. Von aussen ist das nicht
+ * unterscheidbar — diese Pruefung sieht den Knoten, nicht sein Ergebnis. Das
+ * ist eine Grenze der Pruefung, kein Versehen: `""` ist kein
+ * Abwesenheits-Idiom, sondern ein Wert, den die Anwendung uebergeben hat, und
+ * ein Primitive, das uebergebene Werte still verschluckt, raet. Die Grenze ist
+ * in `test/app-shell.test.tsx` als Zusage festgenagelt.
+ *
+ * Deshalb auch keine blosse Wahrheitspruefung: die verschluckte zusaetzlich
+ * `""` und `0` und machte den benannten Waechter zu einem `!slot`.
  */
 function fehlt(knoten: ReactNode): boolean {
   return knoten === undefined || knoten === null || knoten === false;

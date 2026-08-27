@@ -72,8 +72,15 @@ describe("AppShell — Struktur", () => {
       sessionArea: <span>Sitzung</span>,
     });
     const kopf = screen.getByRole("banner");
-    expect(kopf.contains(screen.getByText("Marke"))).toBe(true);
     expect(kopf.contains(screen.getByRole("navigation", { name: "Test" }))).toBe(true);
+
+    // Die Marke bekommt eine Huelle, und die traegt in der Werkbank eigene
+    // Regeln (heute `.app-brand`, `apps/web/app/globals.css:123`). Ein blosses
+    // `kopf.contains(...)` waere auch ohne sie wahr — dieselbe Luecke wie beim
+    // Sitzungsbereich, deshalb dieselbe Zusicherung.
+    const markenhuelle = container.querySelector(".eyt-app-shell__brand");
+    expect(markenhuelle).not.toBeNull();
+    expect(markenhuelle?.contains(screen.getByText("Marke"))).toBe(true);
 
     // Die Navigation bekommt bewusst KEINE Huelle: das `<nav>` der Anwendung
     // ist direktes Flex-Kind der Kopfleiste, und die Regeln der Werkbank
@@ -103,6 +110,33 @@ describe("AppShell — abwesende Slots erzeugen gar kein Element", () => {
   it.each(ABWESENDE_FORMEN)("laesst die Sitzungshuelle weg bei %s", (_form, wert) => {
     const { container } = rahmen({ sessionArea: wert });
     expect(container.querySelectorAll(".eyt-app-shell__session")).toHaveLength(0);
+  });
+});
+
+describe("AppShell — ein leerer String ist ein Wert, keine Abwesenheit", () => {
+  /*
+   * Die Grenze von `fehlt`, hier als ZUSAGE und nicht als Zufall.
+   *
+   * `""` gehoert nicht zu den drei Abwesenheits-Idiomen: es ist etwas, das die
+   * aufrufende Anwendung uebergeben hat, und ein Primitive, das uebergebene
+   * Werte still verschluckt, raet. Der Preis ist bekannt und wird bewusst
+   * gezahlt — es entsteht dieselbe leere Landmark, vor der die Faelle oben
+   * schuetzen. Vollstaendig kann diese Pruefung ohnehin nicht sein: sie sieht
+   * den Knoten, nicht sein Ergebnis, und eine Komponente, die `null`
+   * zurueckgibt, ist von aussen nicht von Inhalt zu unterscheiden.
+   *
+   * Zweiter Ertrag: diese zwei Faelle machen die Wahrheitspruefung
+   * (`footer ? ... : null`) angreifbar — die laesst `""` weg und faellt hier
+   * auf. Der Waechter hat damit ZWEI unabhaengige Gegenmutationen statt einer.
+   */
+  it("rendert die contentinfo-Landmark auch bei footer als leerem String", () => {
+    rahmen({ footer: "" });
+    expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
+  });
+
+  it("rendert die Sitzungshuelle auch bei sessionArea als leerem String", () => {
+    const { container } = rahmen({ sessionArea: "" });
+    expect(container.querySelectorAll(".eyt-app-shell__session")).toHaveLength(1);
   });
 });
 
