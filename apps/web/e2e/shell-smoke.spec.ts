@@ -320,6 +320,31 @@ test("Anmelden-Zugang erreicht das 40-px-Beruehrziel", async ({ page }) => {
   expect(box.height, `Anmelden ist ${box.height} px hoch`).toBeGreaterThanOrEqual(40);
 });
 
+test("Wochenwechsel erreicht das 40-px-Beruehrziel", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // Dieselbe Route, die unten schon serverseitig gerendert wird: die
+  // Wochennavigation steht dort OHNE laufende API, weil ihr Modell in
+  // `lib/wochennavigation.ts` allein aus dem Adressparameter entsteht.
+  await page.goto("/planung?weekKey=2026-W32");
+  const naechste = page.getByTestId("wochennavigation-naechste");
+  await expect(naechste).toBeVisible();
+  const box = await rechteck(naechste);
+
+  // Basisdesign v2.0 §2.3, und bis EYT-80 von NICHTS gemessen: die vier
+  // Geometriefaelle oben besuchen alle `/`, wo es keine Wochenleiste gibt.
+  // Getragen wird die Hoehe allein von `min-height: 2.5rem` in
+  // `.eyt-date-range__action`; Schriftgrad und Zeilenhoehe ergeben von sich aus
+  // weniger. Gegenmutation (ausgefuehrt 27.08.2026): die Zeile aus
+  // `globals.css` entfernen und neu bauen — gemessen bleiben dann 24 px, und
+  // diese Zusicherung wird rot.
+  //
+  // Warum „Nächste Woche" und nicht „Heute": alle drei Wege tragen dieselbe
+  // Klasse, aber „Heute" ist im Fehlerfall das einzige verbleibende Element und
+  // damit der Weg, der ohnehin am haeufigsten angefasst wird. Ein Blaetterweg
+  // faellt weg, sobald jemand die Klasse nur noch auf den Rueckweg legt.
+  expect(box.height, `Nächste Woche ist ${box.height} px hoch`).toBeGreaterThanOrEqual(40);
+});
+
 /**
  * Jede Route rendert serverseitig ueberhaupt (EYT-107).
  *

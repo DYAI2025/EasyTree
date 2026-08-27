@@ -1,26 +1,44 @@
 /**
- * Die sechs Klassen des geteilten Rahmens haben eine Regel (EYT-80).
+ * Die elf Klassen der geteilten Bausteine haben eine Regel (EYT-80).
+ *
+ * Bewacht werden zwei Bausteine aus `@easytree/ui`: der Rahmen `AppShell`
+ * (sechs Klassen) und die Bedienleiste `DateRangeControl` (fuenf Klassen mit
+ * Regel, siehe unten).
  *
  * Ohne diese Zusicherung ist die Umbenennung in `globals.css` ungedeckt: kein
- * Test und kein e2e-Nachweis nennt einen Klassennamen, und jede der sechs
+ * Test und kein e2e-Nachweis nennt einen Klassennamen, und jede der elf
  * Regeln koennte beim Umbenennen verlorengehen, ohne dass einer der elf
  * Pflichtjobs rot wird. Der teuerste Einzelfall waere
  * `.eyt-app-shell__skip-link` — ohne `position: absolute; top: -100%` stuende
  * der Sprunganker dauerhaft sichtbar auf jeder Seite, und alle bestehenden
  * Sprunganker-Zusicherungen pruefen Existenz, Reihenfolge und Fokus, nie
- * Sichtbarkeit.
+ * Sichtbarkeit. Bei der Bedienleiste ist es `.eyt-date-range__action`: ohne
+ * `min-height: 2.5rem` faellt jedes Bedienelement der Wochennavigation unter
+ * das 40-px-Beruehrziel (Basisdesign v2.0 §2.3). DIESE eine Regel ist
+ * zusaetzlich im echten Browser vermessen — „Wochenwechsel erreicht das
+ * 40-px-Beruehrziel" in `apps/web/e2e/shell-smoke.spec.ts`; die anderen zehn
+ * sind es nicht.
  *
  * Diese Datei deckt AUSSCHLIESSLICH die Stylesheet-Seite der Kopplung ab: dass
- * `globals.css` zu jedem Namen eine Regel traegt. Dass das Paket diese Namen
- * ueberhaupt AUSGIBT — die Emitter-Seite — haelt der Fall „gibt alle sechs
- * Klassennamen des Rahmens aus" in `packages/ui/test/app-shell.test.tsx`; eine
- * Umbenennung dort laesst jede Regel hier unberuehrt stehen und faellt hier
- * nicht auf.
+ * `globals.css` zu jedem Namen eine Regel traegt. Dass die Pakete diese Namen
+ * ueberhaupt AUSGEBEN — die Emitter-Seite — halten der Fall „gibt alle sechs
+ * Klassennamen des Rahmens aus" in `packages/ui/test/app-shell.test.tsx` und
+ * „gibt alle sieben Klassennamen des Bedienbereichs aus" in
+ * `packages/ui/test/date-range-control.test.tsx`; eine Umbenennung dort laesst
+ * jede Regel hier unberuehrt stehen und faellt hier nicht auf. Beide
+ * Gegenmutationen sind fuer die Bedienleiste ausgefuehrt worden (27.08.2026)
+ * und machen je genau EINE der beiden Haelften rot.
  *
- * Bewusst auf diese sechs eingegrenzt: die allgemeine Fassung „jede von
- * packages/ui emittierte Klasse hat eine Regel" waere HEUTE rot (acht Klassen
- * ohne Regel, gemessen 27.08.2026) und braeuchte zuerst eine begruendete
- * Ausnahmeliste.
+ * Bewusst auf diese elf eingegrenzt: die allgemeine Fassung „jede von
+ * packages/ui emittierte Klasse hat eine Regel" waere HEUTE rot und braeuchte
+ * zuerst eine begruendete Ausnahmeliste. Gemessen 27.08.2026: von 31
+ * emittierten `eyt-`-Klassen haben 10 keine Regel — darunter die beiden
+ * uebrigen des Bedienbereichs, `.eyt-date-range__range-text` und
+ * `.eyt-date-range__range-key`. Beide sind hier ABSICHTLICH nicht gelistet:
+ * sie hatten unter ihren Vorgaengernamen (`.wochennavigation__woche-text`,
+ * `.wochennavigation__woche-schluessel`) ebenfalls nie eine Regel, und der
+ * Schluessel wird ohnehin von `VisuallyHidden` per Inline-Stil versteckt, nicht
+ * vom Stylesheet.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,6 +64,11 @@ const KLASSEN = [
   "eyt-app-shell__session",
   "eyt-app-shell__main",
   "eyt-app-shell__footer",
+  "eyt-date-range",
+  "eyt-date-range__range",
+  "eyt-date-range__detail",
+  "eyt-date-range__marker",
+  "eyt-date-range__action",
 ] as const;
 
 /**
@@ -90,7 +113,7 @@ function letzterWert(bloecke: { rumpf: string }[], eigenschaft: string): string 
   return (treffer[treffer.length - 1]?.[1] ?? "").trim();
 }
 
-describe("EYT-80 — der geteilte Rahmen ist gestaltet", () => {
+describe("EYT-80 — die geteilten Bausteine sind gestaltet", () => {
   it("liest ueberhaupt eine Stylesheet-Datei", () => {
     /*
      * Was diese Zeile NICHT faengt: einen falschen Pfad. `readFileSync` wirft
