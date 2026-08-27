@@ -446,7 +446,12 @@ const KANONISCHE_ROLLEN: ReadonlyArray<readonly [string, string]> = [
   ["--eyt-text-secondary", "rgb(91, 86, 78)"],
   ["--eyt-border-default", "rgb(216, 212, 203)"],
   ["--eyt-action-primary", "rgb(30, 82, 49)"],
+  // Auch die repo-eigene und die abgeleitete Rolle werden AUSGELIEFERT —
+  // dass ihre Werte richtig SIND, bewacht packages/ui; dass sie im gebauten
+  // Browser ankommen, kann nur dieser Fall sehen (PO-Review PR #96).
+  ["--eyt-action-primary-contrast", "rgb(255, 255, 255)"],
   ["--eyt-state-published-bg", "rgb(225, 235, 226)"],
+  ["--eyt-state-published-text", "rgb(30, 82, 49)"],
   ["--eyt-state-draft-text", "rgb(122, 83, 0)"],
   ["--eyt-state-draft-bg", "rgb(244, 232, 206)"],
   ["--eyt-state-danger-text", "rgb(155, 44, 31)"],

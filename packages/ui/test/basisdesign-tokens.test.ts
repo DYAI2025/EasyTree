@@ -25,18 +25,136 @@ const rohCss = readFileSync(join(process.cwd(), "src/basisdesign-v2.css"), "utf8
  */
 const css = rohCss.replace(/\/\*[\s\S]*?\*\//g, "");
 
-/** Deklarationen (`--eyt-x: #abc`), NICHT Verwendungen (`var(--eyt-x)`). */
-function deklarationen(abschnitt: string): Map<string, string> {
+/*
+ * Frueher wurde die Datei am ERSTEN `@media` geteilt und jede
+ * `--eyt-`-Deklaration selektorblind eingesammelt. Beides war strukturell
+ * unsicher (PO-Review PR #96): ein spaeter `:root`-Block NACH dem Dunkelblock
+ * ueberschreibt im echten Browser den Hellmodus, landete hier aber im
+ * DUNKEL-Abschnitt und blieb gruen; und eine Deklaration unter einem fremden
+ * Selektor (`.dunkel { … }`) zaehlte, als stuende sie in `:root`. Deshalb wird
+ * die Struktur jetzt VOLLSTAENDIG zerlegt statt geteilt: die kanonische Datei
+ * besteht aus genau einem hellen `:root`-Block, gefolgt von genau einem
+ * `@media (prefers-color-scheme: dark)`-Block mit genau einem inneren `:root`
+ * — und aus nichts anderem. Jede Abweichung bekommt einen benannten Eintrag in
+ * STRUKTURFEHLER. Kein allgemeiner CSS-Parser als Abhaengigkeit: die erlaubte
+ * Form ist endlich, und ein Klammerzaehler prueft sie deterministisch.
+ */
+interface Block {
+  prelude: string;
+  koerper: string;
+}
+
+function zerlegeTopLevel(quelle: string): { bloecke: Block[]; rest: string } {
+  const bloecke: Block[] = [];
+  let ausserhalb = "";
+  let i = 0;
+  while (i < quelle.length) {
+    if (quelle[i] === "{") {
+      let tiefe = 1;
+      let j = i + 1;
+      while (j < quelle.length && tiefe > 0) {
+        if (quelle[j] === "{") tiefe += 1;
+        if (quelle[j] === "}") tiefe -= 1;
+        j += 1;
+      }
+      if (tiefe > 0) {
+        // Unbalancierte Klammer: alles ab hier wird als Rest sichtbar.
+        ausserhalb += quelle.slice(i);
+        break;
+      }
+      bloecke.push({
+        prelude: ausserhalb.replace(/\s+/g, " ").trim(),
+        koerper: quelle.slice(i + 1, j - 1),
+      });
+      ausserhalb = "";
+      i = j;
+    } else {
+      ausserhalb += quelle[i];
+      i += 1;
+    }
+  }
+  return { bloecke, rest: ausserhalb.trim() };
+}
+
+const STRUKTURFEHLER: string[] = [];
+
+/** Ein reiner Tokenblock: nur `--eyt-*`-Deklarationen, jede genau einmal. */
+function tokenzeilen(koerper: string, kontext: string): Map<string, string> {
   const gefunden = new Map<string, string>();
-  for (const treffer of abschnitt.matchAll(/(?:^|[;{])\s*(--eyt-[\w-]+)\s*:\s*([^;}]+)/g)) {
-    gefunden.set(treffer[1] ?? "", (treffer[2] ?? "").trim().toLowerCase());
+  for (const roh of koerper.split(";")) {
+    const anweisung = roh.trim();
+    if (anweisung === "") continue;
+    // Ein verschachtelter Selektor im :root traegt Klammern und faellt hier
+    // durch — CSS-Nesting kann eine Deklaration also nicht mehr einschleusen.
+    const treffer = /^(--eyt-[\w-]+)\s*:\s*([^;{}]+)$/.exec(anweisung);
+    if (treffer === null) {
+      STRUKTURFEHLER.push(`${kontext}: keine reine --eyt-Deklaration: "${anweisung.slice(0, 60)}"`);
+      continue;
+    }
+    const name = treffer[1] ?? "";
+    if (gefunden.has(name)) {
+      // Doppelt im selben Block: die letzte gewaenne leise.
+      STRUKTURFEHLER.push(`${kontext}: ${name} doppelt deklariert`);
+    }
+    gefunden.set(name, (treffer[2] ?? "").trim().toLowerCase());
   }
   return gefunden;
 }
 
-const grenze = css.indexOf("@media");
-const HELL = deklarationen(grenze >= 0 ? css.slice(0, grenze) : css);
-const DUNKEL = deklarationen(grenze >= 0 ? css.slice(grenze) : "");
+const { bloecke, rest } = zerlegeTopLevel(css);
+if (rest !== "") {
+  STRUKTURFEHLER.push(`Text ausserhalb der beiden Bloecke: "${rest.slice(0, 60)}"`);
+}
+if (bloecke.length !== 2) {
+  STRUKTURFEHLER.push(
+    `${bloecke.length} Top-Level-Bloecke statt 2: ${bloecke
+      .map((b) => b.prelude || "(leer)")
+      .join(" · ")}`,
+  );
+}
+
+const hellBlock = bloecke[0];
+if (hellBlock !== undefined && hellBlock.prelude !== ":root") {
+  STRUKTURFEHLER.push(`erster Block ist "${hellBlock.prelude}" statt ":root"`);
+}
+
+let dunkelKoerper: string | undefined;
+const dunkelAussen = bloecke[1];
+if (dunkelAussen !== undefined) {
+  if (dunkelAussen.prelude !== "@media (prefers-color-scheme: dark)") {
+    STRUKTURFEHLER.push(
+      `zweiter Block ist "${dunkelAussen.prelude}" statt "@media (prefers-color-scheme: dark)"`,
+    );
+  } else {
+    const innen = zerlegeTopLevel(dunkelAussen.koerper);
+    if (innen.rest !== "") {
+      STRUKTURFEHLER.push(`Text im Medienblock ausserhalb von :root: "${innen.rest.slice(0, 60)}"`);
+    }
+    const innerer = innen.bloecke[0];
+    if (innen.bloecke.length === 1 && innerer !== undefined && innerer.prelude === ":root") {
+      dunkelKoerper = innerer.koerper;
+    } else {
+      STRUKTURFEHLER.push(
+        `der Medienblock traegt ${innen.bloecke.length} innere Bloecke (${innen.bloecke
+          .map((b) => b.prelude || "(leer)")
+          .join(" · ")}) statt genau einem :root`,
+      );
+    }
+  }
+}
+
+/*
+ * HELL/DUNKEL entstehen NUR aus den beiden korrekt aufgehaengten
+ * :root-Koerpern. Eine Deklaration unter einem fremden Selektor kann die
+ * Karten also nicht mehr erreichen — sie steht stattdessen namentlich in
+ * STRUKTURFEHLER.
+ */
+const HELL =
+  hellBlock !== undefined && hellBlock.prelude === ":root"
+    ? tokenzeilen(hellBlock.koerper, "hell")
+    : new Map<string, string>();
+const DUNKEL =
+  dunkelKoerper === undefined ? new Map<string, string>() : tokenzeilen(dunkelKoerper, "dunkel");
 
 /**
  * Confluence 8814623 §2.1 — die dreizehn genehmigten Rollen.
@@ -123,20 +241,21 @@ describe("Basisdesign v2.0 §2.1 — kanonische Tokenquelle (EYT-80)", () => {
     expect(DUNKEL.size, "dunkel").toBe(erwartet);
   });
 
-  it("traegt genau einen Medienblock, und zwar den Dunkelmodus", () => {
+  it("besteht aus genau zwei Bloecken: :root, dann @media (prefers-color-scheme: dark) > :root", () => {
     /*
-     * `HELL` und `DUNKEL` teilen die Datei am ERSTEN `@media`. Ohne diese
-     * Zusicherung ist das eine Annahme statt einer Zusage. Der leise Fall ist
-     * NICHT ein fehlender Dunkelblock — der faellt oben beim Zaehlen auf —,
-     * sondern ein ZWEITER, spaeterer Medienblock, der eine `--eyt-`-Rolle neu
-     * setzt: `deklarationen` laesst den letzten gewinnen, und beide Gates
-     * messen dann einen Wert, der im Dunkelblock gar nicht steht.
-     * `apps/web/app/globals.css` traegt heute drei weitere Medienbloecke, die
-     * Form ist also nicht hypothetisch.
+     * DIE strukturelle Zusage, auf der alle Karten oben stehen. Der leise
+     * Fall ist nicht der fehlende Dunkelblock — der faellt beim Zaehlen auf —,
+     * sondern JEDER Weg, auf dem eine Deklaration ausserhalb der beiden
+     * :root-Koerper die echte Kaskade aendert, waehrend die Karten sie anders
+     * oder gar nicht sehen: ein spaeter :root-Ueberschreiber NACH dem
+     * Medienblock (wirkt im echten Hellmodus, landete frueher im
+     * DUNKEL-Abschnitt), ein zweiter Medienblock, Tokens unter einem fremden
+     * Selektor, ein verschachtelter Selektor im :root, eine doppelte
+     * Deklaration. Jede dieser Formen steht namentlich in STRUKTURFEHLER,
+     * und die Reihenfolge hell → dunkel ist mitbewacht — nur so gewinnt der
+     * Dunkelblock die Kaskade bei gleicher Spezifitaet.
      */
-    expect([...css.matchAll(/@media[^{]*/g)].map((m) => m[0].trim())).toEqual([
-      "@media (prefers-color-scheme: dark)",
-    ]);
+    expect(STRUKTURFEHLER).toEqual([]);
   });
 
   it("deklariert beide Modi deckungsgleich und alle genehmigten Rollen", () => {
