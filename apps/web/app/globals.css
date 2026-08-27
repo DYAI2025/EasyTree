@@ -94,7 +94,7 @@ body {
 }
 
 /* Skip-Link: erstes fokussierbares Element, sichtbar bei Fokus. */
-.skip-link {
+.eyt-app-shell__skip-link {
   position: absolute;
   left: var(--space);
   top: -100%;
@@ -106,12 +106,12 @@ body {
   text-decoration: none;
 }
 
-.skip-link:focus-visible,
-.skip-link:focus {
+.eyt-app-shell__skip-link:focus-visible,
+.eyt-app-shell__skip-link:focus {
   top: 0;
 }
 
-.app-header {
+.eyt-app-shell__header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -120,7 +120,7 @@ body {
   border-bottom: 1px solid var(--color-border);
 }
 
-.app-brand {
+.eyt-app-shell__brand {
   font-weight: 700;
   font-size: 1.25rem;
   color: var(--color-brand);
@@ -144,7 +144,7 @@ body {
   font-weight: 700;
 }
 
-.app-main {
+.eyt-app-shell__main {
   flex: 1;
   width: 100%;
   max-width: 60rem;
@@ -152,7 +152,7 @@ body {
   padding: var(--space);
 }
 
-.app-footer {
+.eyt-app-shell__footer {
   padding: var(--space);
   border-top: 1px solid var(--color-border);
   font-size: 0.875rem;
@@ -255,11 +255,11 @@ body {
  * Basisdesign v2.0 — Werkbank-Bausteine des Kosten-Slices
  * ============================================================ */
 
-.app-header {
+.eyt-app-shell__header {
   background: var(--eyt-bg-surface);
 }
 
-.app-session {
+.eyt-app-shell__session {
   margin-left: auto;
   display: flex;
   align-items: center;
