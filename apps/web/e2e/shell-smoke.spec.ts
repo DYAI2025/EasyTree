@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 const VIEWPORTS = [
   { name: "320px (200%-Zoom-Aequivalent)", width: 320, height: 720 },
@@ -146,6 +146,131 @@ test("Tab-Zyklus: alle interaktiven Elemente erreichbar, sichtbarer Fokus, keine
     () => `${document.activeElement?.tagName}:${document.activeElement?.textContent?.trim()}`,
   );
   expect(after).not.toBe(visited[visited.length - 1]);
+});
+
+/**
+ * ## Das AUSSEHEN des Rahmens, nicht sein Text (EYT-80)
+ *
+ * Die vier Faelle unten messen Lage und Groesse im echten Browser. Gemessen
+ * 27.08.2026 gab es dafuer im ganzen Repository keine Zusicherung:
+ * `apps/web/test/app-shell-styles.test.ts` vergleicht Zeichenketten IM
+ * Stylesheet, und ein Klassenname im Stylesheet beweist weder Lage noch
+ * Groesse; `grep -rn 'boundingBox|getComputedStyle|toHaveCSS' apps/web/test
+ * apps/web/e2e` fand drei Fokussonden und null Layoutaussagen.
+ *
+ * Ohne diese Faelle waeren gruen durchgegangen: ein dauerhaft sichtbarer
+ * Sprunganker, eine untereinander gestapelte Kopfleiste, ein nicht mehr rechts
+ * stehender Sitzungsbereich, eine randlos volle Hauptspalte und ein
+ * Bedienelement unter dem 40-px-Ziel.
+ *
+ * Warum hier und nicht in jsdom: jsdom hat kein Layout und liefert fuer jedes
+ * Rechteck Nullen. Nur `web-smoke` laeuft gegen den Produktions-Build.
+ */
+
+/** Rechteck eines Elements — explizit als Zahlen, eine DOMRect ist nicht serialisierbar. */
+function rechteck(ziel: Locator) {
+  return ziel.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      top: r.top,
+      right: r.right,
+      bottom: r.bottom,
+      left: r.left,
+      width: r.width,
+      height: r.height,
+    };
+  });
+}
+
+test("Sprunganker liegt ausserhalb des Bildes, bis er den Fokus hat", async ({ page }) => {
+  await page.goto("/");
+  const anker = page.locator("a[href='#hauptinhalt']");
+
+  // Versteckt ist er ALLEIN durch `position: absolute` plus `top: -100%` in
+  // `.eyt-app-shell__skip-link`; ein `display: none` gibt es nicht, und alle
+  // bisherigen Zusicherungen zum Sprunganker pruefen Existenz, Reihenfolge und
+  // Fokus — nie Sichtbarkeit. Gegenmutation (ausgefuehrt 27.08.2026): beide
+  // Deklarationen loeschen und neu bauen; er steht dann im Fluss und diese
+  // Zeile wird rot mit `bottom=40`.
+  const versteckt = await rechteck(anker);
+  expect(
+    versteckt.bottom,
+    `Sprunganker steht ohne Fokus im Bild (bottom=${versteckt.bottom})`,
+  ).toBeLessThanOrEqual(0);
+
+  await page.keyboard.press("Tab");
+  await expect(anker).toBeFocused();
+  // Zweite Haelfte, eigene Gegenmutation: `top: 0` aus der :focus-Regel
+  // entfernen — dann bleibt er auch mit Fokus oberhalb des Bildes.
+  const sichtbar = await rechteck(anker);
+  expect(
+    sichtbar.top,
+    `Sprunganker kommt mit Fokus nicht ins Bild (top=${sichtbar.top})`,
+  ).toBeGreaterThanOrEqual(0);
+});
+
+test("Kopfleiste ist EINE Zeile mit dem Sitzungsbereich rechts", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+  const kopf = page.getByRole("banner");
+  const anmelden = kopf.getByRole("link", { name: "Anmelden" });
+  await expect(anmelden).toBeVisible();
+
+  const kopfBox = await rechteck(kopf);
+  const anmeldenBox = await rechteck(anmelden);
+  const abstandRechts = kopfBox.right - anmeldenBox.right;
+  const abstandLinks = anmeldenBox.left - kopfBox.left;
+
+  // EINE Zusicherung, ZWEI Regeln — beide Gegenmutationen sind ausgefuehrt und
+  // wurden rot (27.08.2026): ohne `margin-left: auto` auf
+  // `.eyt-app-shell__session` steht der Zugang direkt hinter der Navigation
+  // (rechts=1008.9, links=172.0); ohne `display: flex` auf
+  // `.eyt-app-shell__header` stapeln sich Marke, Navigation und
+  // Sitzungsbereich untereinander und er rutscht an den linken Rand
+  // (rechts=1165.0, links=16). In beiden Faellen kippt dasselbe Verhaeltnis.
+  expect(
+    abstandRechts,
+    `Anmelden steht nicht rechts: rechts=${abstandRechts}, links=${abstandLinks}`,
+  ).toBeLessThan(abstandLinks);
+});
+
+test("Hauptspalte ist begrenzt und mittig", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const haupt = await rechteck(page.getByRole("main"));
+  const buehne = await page.evaluate(() => document.documentElement.clientWidth);
+
+  // `max-width: 60rem` auf `.eyt-app-shell__main`; ohne die Regel gemessen
+  // `width=1440` (Gegenmutation ausgefuehrt 27.08.2026). Zusaetzlich gegen die
+  // tatsaechliche Buehnenbreite verglichen: ein Rollbalken unterschreitet die
+  // 1440 von selbst, die reine Zahlengrenze bliebe dann still gruen.
+  expect(haupt.width, `Hauptspalte fuellt die Breite (width=${haupt.width})`).toBeLessThan(1440);
+  expect(haupt.width, `Hauptspalte fuellt die Buehne (${haupt.width} von ${buehne})`).toBeLessThan(
+    buehne,
+  );
+
+  // `margin: 0 auto`. Ohne die Regel steht die Spalte am linken Rand —
+  // gemessen `links=0, rechts=480` (Gegenmutation ausgefuehrt 27.08.2026).
+  const randLinks = haupt.left;
+  const randRechts = buehne - haupt.right;
+  expect(
+    Math.abs(randLinks - randRechts),
+    `Hauptspalte nicht mittig: links=${randLinks}, rechts=${randRechts}`,
+  ).toBeLessThanOrEqual(2);
+});
+
+test("Sitzungs-Bedienelement erreicht das 40-px-Beruehrziel", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+  const anmelden = page.getByRole("banner").getByRole("link", { name: "Anmelden" });
+  await expect(anmelden).toBeVisible();
+  const box = await rechteck(anmelden);
+
+  // Basisdesign v2.0 §2.3. Getragen wird das ALLEIN von `min-height: 40px` im
+  // Block `.app-logout, .app-login-link`: Polsterung, Zeilenhoehe und Rahmen
+  // ergeben von sich aus weniger. Gegenmutation (ausgefuehrt 27.08.2026): die
+  // Zeile entfernen und neu bauen — gemessen bleiben dann 38 px.
+  expect(box.height, `Anmelden ist ${box.height} px hoch`).toBeGreaterThanOrEqual(40);
 });
 
 /**
