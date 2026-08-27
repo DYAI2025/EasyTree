@@ -322,7 +322,7 @@ export const RULES: readonly Rule[] = [
     // Verbote: KEINE beschraenkte die Abhaengigkeitsoberflaeche, und
     // `@easytree/domain` wie `next/link` waeren durch alle vier gelaufen
     // (gemessen 27.08.2026 am Stand vor dieser Regel: 11 Dateien unter
-    // packages/ui/src, davon 0 mit Importliste).
+    // packages/ui/src, und 0 Regeln mit Importliste).
     //
     // Die Dateizahl ist eine Momentaufnahme und waechst mit dem Paket — sie
     // traegt hier nichts und darf nicht nachgepflegt werden. Verbindlich ist
