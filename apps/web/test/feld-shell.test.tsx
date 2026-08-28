@@ -93,7 +93,9 @@ describe("Feld-Shell (EYT-113)", () => {
     const ansicht = renderFeld();
     await ansicht.findByTestId("feld-abmelden");
     expect(
-      ansicht.container.querySelectorAll('a[href="/planung"], a[href="/kosten"], a[href^="/kosten/"]'),
+      ansicht.container.querySelectorAll(
+        'a[href="/planung"], a[href="/kosten"], a[href^="/kosten/"]',
+      ),
     ).toHaveLength(0);
   });
 
