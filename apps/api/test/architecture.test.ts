@@ -12,7 +12,7 @@
  * Dateien — er belohnt nicht das Anlegen leerer Dateien, um einen Zähler zu heben.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -57,6 +57,9 @@ const tsconfigFiles = [
 function istGewolltUnaufloesbar(von: string, spezifizierer: string): boolean {
   return /^apps\/[^/]+\/cloudflare\/[^/]+\.mjs$/.test(von) && spezifizierer.startsWith("../dist/");
 }
+
+/** Die drei Verzeichnisse der Feld-Shell (EYT-113) — eine Liste, zwei Faelle. */
+const FELD_PRAEFIXE = ["apps/web/app/feld/", "apps/web/components/feld/", "apps/web/lib/feld/"];
 
 const refs = extractImports(repoRoot, files);
 const { violations, scopeCounts } = evaluate(refs);
@@ -130,17 +133,47 @@ describe("Architekturgrenzen", () => {
     // nicht zwischen "bewacht die Shell" und "bewacht eine Datei". Die linke
     // Seite kommt aus den Praefixen ueber die eingesammelten Importe, die
     // rechte aus `inScope` der Regel — beide Wege muessen dieselbe Menge
-    // ergeben. Importfreie Dateien tauchen auf keiner Seite auf.
-    const feldPraefixe = ["apps/web/app/feld/", "apps/web/components/feld/", "apps/web/lib/feld/"];
+    // ergeben. Importfreie Dateien tauchen auf keiner Seite auf; dass der
+    // SCANNER keine Feld-Datei verschluckt, sichert der naechste Fall.
     const ausDemPraefix = new Set(
       refs
-        .filter((ref) => feldPraefixe.some((praefix) => ref.from.startsWith(praefix)))
+        .filter((ref) => FELD_PRAEFIXE.some((praefix) => ref.from.startsWith(praefix)))
         .map((ref) => ref.from),
     );
     expect(ausDemPraefix.size).toBeGreaterThan(3);
     expect([...(scopeCounts.get("feld-shell-boundary") ?? [])].sort()).toEqual(
       [...ausDemPraefix].sort(),
     );
+  });
+
+  it("der Collector sammelt JEDE Quelldatei der Feld-Shell von der Platte ein", () => {
+    // Sourcery-Befund an PR #97: der refs-basierte Mengenvergleich oben ist
+    // gegenueber Dateien blind, die der Scanner NIE einsammelt — die fehlen
+    // dann auf beiden Seiten, und der Vergleich bleibt gruen. Deshalb hier
+    // die unabhaengige Wahrheit: ein eigenes Verzeichnislisting der drei
+    // Feld-Verzeichnisse (readdirSync, nicht der Collector selbst) muss
+    // exakt der Menge entsprechen, die `collectSourceFiles` eingesammelt
+    // hat. Ein SKIP_DIRS-Fehler oder eine vergessene Endung wird damit rot,
+    // und eine neue importfreie Datei erscheint auf beiden Seiten — sie hat
+    // zwar nichts zu pruefen (keine Importe, keine moegliche Verletzung),
+    // aber ihr Einsammeln ist ab jetzt zugesichert.
+    const QUELL_ENDUNGEN = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+    const vonDerPlatte: string[] = [];
+    for (const wurzel of FELD_PRAEFIXE) {
+      const absolut = join(repoRoot, wurzel);
+      if (!existsSync(absolut)) continue;
+      for (const eintrag of readdirSync(absolut, { recursive: true, withFileTypes: true })) {
+        if (!eintrag.isFile() || !QUELL_ENDUNGEN.test(eintrag.name)) continue;
+        vonDerPlatte.push(
+          relative(repoRoot, join(eintrag.parentPath, eintrag.name)).split("\\").join("/"),
+        );
+      }
+    }
+    expect(vonDerPlatte.length).toBeGreaterThan(3);
+    const eingesammelt = files
+      .filter((datei) => FELD_PRAEFIXE.some((praefix) => datei.startsWith(praefix)))
+      .sort();
+    expect(eingesammelt).toEqual([...vonDerPlatte].sort());
   });
 
   it.each([...SCAFFOLDED_MODULES])(
