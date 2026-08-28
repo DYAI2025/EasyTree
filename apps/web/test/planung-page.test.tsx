@@ -17,7 +17,7 @@
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import PlanungPage from "../app/planung/page";
+import PlanungPage from "../app/(werkbank)/planung/page";
 import { AuthGatewayProvider } from "../lib/auth-gateway-provider";
 import { PlanningGatewayProvider } from "../lib/planning-gateway-provider";
 import { SessionProvider } from "../lib/session-provider";

@@ -71,6 +71,18 @@ const ABNAHME_BREITEN = [
 ] as const;
 
 /**
+ * EYT-113: Abnahmebreiten der FELD-Shell — mobile-first 320/375 px laut
+ * Akzeptanzkriterium. Bewusst eine eigene Liste: die Werkbank wird auf
+ * Desktopbreiten abgenommen, die Feld-Shell auf Telefonbreiten; eine
+ * gemeinsame Liste wuerde beiden Flaechen Breiten zusichern, fuer die sie
+ * nicht entworfen sind.
+ */
+const FELD_BREITEN = [
+  { name: "320 px", width: 320, height: 640 },
+  { name: "375 px", width: 375, height: 720 },
+] as const;
+
+/**
  * Tastaturbedienbarkeit und SICHTBARER Fokus auf einer angemeldeten Flaeche
  * (EYT-141/EYT-137: „Tastatur, sichtbarer Fokus").
  *
@@ -192,10 +204,14 @@ async function pruefeTastaturUndFokus(seite: Page, flaeche: string): Promise<voi
   expect(entkommen, `Tastaturfalle auf ${flaeche}: Fokus bleibt auf ${vorher}`).toBe(true);
 }
 
-async function pruefeBarrierefreiheit(seite: Page, flaeche: string): Promise<void> {
+async function pruefeBarrierefreiheit(
+  seite: Page,
+  flaeche: string,
+  breiten: ReadonlyArray<{ name: string; width: number; height: number }> = ABNAHME_BREITEN,
+): Promise<void> {
   const urspruenglich = seite.viewportSize();
 
-  for (const breite of ABNAHME_BREITEN) {
+  for (const breite of breiten) {
     await seite.setViewportSize({ width: breite.width, height: breite.height });
 
     const proBreite = await new AxeBuilder({ page: seite })
@@ -3038,7 +3054,9 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
       // Schlaegt der Login wirklich fehl, zeigt das Formular einen Banner mit
       // role="alert". Auf beides zu warten macht aus einem stillen Timeout
       // eine benannte Ursache.
-      const angemeldet = seite.waitForURL("**/kosten");
+      // Seit EYT-113 landet ein Konto ohne Leitungsrolle in der Feld-Shell —
+      // B hat gar keine Mitgliedschaft und gehoert damit erst recht dorthin.
+      const angemeldet = seite.waitForURL("**/feld");
       const abgelehnt = seite
         .getByRole("alert")
         .filter({ hasText: "Anmeldung fehlgeschlagen" })
@@ -3053,6 +3071,10 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
       // berechtigt ist er nicht — das ist der Unterschied, um den es geht.
       const kekse = await kontext.cookies();
       expect(kekse.find((k) => k.name === "eyt_access")?.httpOnly).toBe(true);
+
+      // Und die Feld-Shell bleibt ehrlich: ohne Mitgliedschaft gibt es keine
+      // fachliche Flaeche, sondern den benannten Leerzustand (EYT-113).
+      await expect(seite.getByTestId("feld-ohne-organisation")).toBeVisible();
     });
 
     await test.step("die Sitzung nennt Bs eigene Id, nicht die von A", async () => {
@@ -3210,6 +3232,159 @@ test("Benutzer B ist angemeldet, aber ohne Mitgliedschaft ausgesperrt", async ({
       mkdirSync(ARTEFAKTE, { recursive: true });
       await seite.screenshot({ path: join(ARTEFAKTE, "03-benutzer-b-ohne-zugang.png") });
     });
+  } finally {
+    await kontext.close();
+  }
+});
+
+/**
+ * EYT-113 — die Feld-Reise: ein realer member erreicht aufgrund seiner
+ * serverseitig verifizierten Session die Mitarbeiter-Feld-Shell; die Werkbank
+ * bleibt ihm verschlossen, und zwar am RECHT, nicht an der Route.
+ *
+ * Die member-Mitgliedschaft ist dieselbe Leihgabe wie in 9c5/9g2
+ * (`eyt136-member-an.sql`/`-aus.sql`): kein neuer Benutzer, `auth.users`
+ * bleibt unberuehrt, und die Nachbedingung der Rueckgabe ist der primaere
+ * Waechter gegen eine ueberlebende Leihgabe. Der Aufruf steht im `try`,
+ * die Rueckgabe laeuft auf jedem Weg (Begruendung woertlich bei 9c5).
+ */
+test("EYT-113: ein member erreicht die Feld-Shell, die Werkbank bleibt zu", async ({ browser }) => {
+  const emailB = pflicht("EASYTREE_JOURNEY_EMAIL_B");
+  const passwortB = pflicht("EASYTREE_JOURNEY_PASSWORT_B");
+  const idA = pflicht("EASYTREE_JOURNEY_USER_A");
+  const idB = pflicht("EASYTREE_JOURNEY_USER_B");
+  const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+  const kontext = await browser.newContext();
+  const seite = await kontext.newPage();
+  const bericht: Record<string, unknown> = { ticket: "EYT-113", benutzer: "B als member" };
+  ZUSAMMENFASSUNGEN.set(test.info().testId, { datei: "zusammenfassung-feld.json", bericht });
+
+  let fehlerAusFall: [unknown] | null = null;
+  try {
+    const an = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt136-member-an.sql"),
+      ["-v", `benutzer_a=${idA}`, "-v", `benutzer_b=${idB}`],
+      "[eyt136-member-an]",
+    );
+    console.log(`  ${an}`);
+
+    await test.step("Login fuehrt einen member in die Feld-Shell", async () => {
+      await seite.goto("/anmelden");
+      await seite.getByLabel("E-Mail").fill(emailB);
+      await seite.getByLabel("Passwort").fill(passwortB);
+      await seite.getByRole("button", { name: "Anmelden" }).click();
+
+      const angekommen = seite.waitForURL("**/feld");
+      const abgelehnt = seite
+        .getByRole("alert")
+        .filter({ hasText: "Anmeldung fehlgeschlagen" })
+        .waitFor({ state: "visible" });
+      await Promise.race([angekommen, abgelehnt]);
+      await expect(
+        seite.getByRole("alert").filter({ hasText: "Anmeldung fehlgeschlagen" }),
+      ).toHaveCount(0);
+      await angekommen;
+
+      // Die Shell nennt die REALEN Sessiondaten — Organisation und Rolle aus
+      // der serverseitig aufgeloesten Sitzung, keine Attrappe.
+      await expect(seite.getByTestId("feld-shell")).toBeVisible();
+      await expect(seite.getByTestId("feld-org")).toHaveText(ORG_NAME);
+      await expect(seite.getByTestId("feld-rolle")).toHaveText("Mitarbeiter");
+      bericht["landung"] = { url: seite.url() };
+    });
+
+    await test.step("die Feld-Shell zeigt keine Werkbank-Navigation", async () => {
+      await expect(seite.getByRole("link", { name: "Planung" })).toHaveCount(0);
+      await expect(seite.getByRole("link", { name: "Kosten" })).toHaveCount(0);
+      const werkbankLinks = await seite.evaluate(
+        () => document.querySelectorAll('a[href="/planung"], a[href="/kosten"]').length,
+      );
+      expect(werkbankLinks).toBe(0);
+      bericht["keine_werkbank_navigation"] = true;
+    });
+
+    await test.step("auch die Startseite leitet den member serverseitig ins Feld", async () => {
+      await seite.goto("/");
+      await seite.waitForURL("**/feld");
+      await expect(seite.getByTestId("feld-shell")).toBeVisible();
+      bericht["start_dispatch"] = true;
+    });
+
+    await test.step("Feld-Shell bei 320/375 px: axe, Reflow, Tastatur, Fokus", async () => {
+      await pruefeBarrierefreiheit(seite, "/feld", FELD_BREITEN);
+
+      // Touch-Ziel nach Basisdesign v2.0 §2.3 (mindestens 40 px): das eine
+      // reale Bedienelement der Shell, gemessen auf der kleinsten Breite.
+      await seite.setViewportSize({ width: 320, height: 640 });
+      const abmelden = await seite.getByTestId("feld-abmelden").boundingBox();
+      expect(abmelden).not.toBeNull();
+      expect(abmelden!.height).toBeGreaterThanOrEqual(40);
+
+      mkdirSync(ARTEFAKTE, { recursive: true });
+      await seite.screenshot({ path: join(ARTEFAKTE, "04-feld-shell-320.png") });
+      await seite.setViewportSize({ width: 375, height: 720 });
+      await seite.screenshot({ path: join(ARTEFAKTE, "05-feld-shell-375.png") });
+      bericht["responsive"] = { breiten: [320, 375], touchziel_abmelden_px: abmelden!.height };
+    });
+
+    await test.step("Cross-Shell: die Werkbank gibt dem member nichts preis", async () => {
+      // B ist jetzt member GENAU EINER Organisation: der Zustand auf /planung
+      // ist Forbidden — nicht "Organisation erforderlich" wie bei B ohne
+      // Mitgliedschaft (dort geprueft) und nicht der Kosteninhalt (9g2 prueft
+      // die Kostenflaeche desselben members).
+      await seite.goto(`/planung?weekKey=${PLANWOCHE}`);
+      await expect(seite.getByTestId("planung-forbidden")).toBeVisible();
+      await expect(seite.getByTestId("planungsfenster-stand")).toHaveCount(0);
+      await expect(seite.getByTestId("planung-veroeffentlichen")).toHaveCount(0);
+
+      // Der Server lehnt unabhaengig von der Oberflaeche ab — 403, nicht 400:
+      // mit genau einer aktiven Mitgliedschaft ist die Organisation eindeutig,
+      // es fehlt das RECHT.
+      const fenster = await seite.request.get(`/api/v1/planung/fenster?weekKey=${PLANWOCHE}`);
+      expect(fenster.status()).toBe(403);
+      expect(await fenster.text()).not.toContain(MITARBEITER_NAME);
+      const mitarbeiter = await seite.request.get("/api/v1/kosten/mitarbeiter");
+      expect(mitarbeiter.status()).toBe(403);
+      expect(await mitarbeiter.text()).not.toContain(MITARBEITER_NAME);
+      bericht["cross_shell"] = {
+        planung_fenster: fenster.status(),
+        kosten_mitarbeiter: mitarbeiter.status(),
+        erwartet: 403,
+      };
+    });
+  } catch (fehler) {
+    fehlerAusFall = [fehler];
+  }
+
+  // Rueckgabe der Leihgabe auf JEDEM Weg — die Nachbedingung in
+  // `eyt136-member-aus.sql` (leihe/b_gesamt = 0) ist der primaere Waechter.
+  const aus = psqlMitMarker(
+    verwaltung,
+    join(HIER, "eyt136-member-aus.sql"),
+    ["-v", `benutzer_a=${idA}`, "-v", `benutzer_b=${idB}`],
+    "[eyt136-member-aus]",
+  );
+  console.log(`  ${aus}`);
+  await kontext.close();
+  if (fehlerAusFall !== null) throw fehlerAusFall[0];
+});
+
+/**
+ * EYT-113 — fail-closed ohne Sitzung: /feld ist keine oeffentliche Flaeche.
+ * Das Server-Gate (app/feld/layout.tsx) fragt die API und leitet Abgemeldete
+ * zur Anmeldung, BEVOR irgendein Shell-Inhalt ausgeliefert wird.
+ */
+test("EYT-113: ohne Sitzung fuehrt /feld zur Anmeldung", async ({ browser }) => {
+  const kontext = await browser.newContext();
+  const seite = await kontext.newPage();
+  try {
+    await seite.goto("/feld");
+    await seite.waitForURL("**/anmelden");
+    await expect(seite.getByRole("heading", { name: "Anmelden", level: 1 })).toBeVisible();
+    await expect(seite.getByTestId("feld-shell")).toHaveCount(0);
+    await expect(seite.getByTestId("feld-org")).toHaveCount(0);
   } finally {
     await kontext.close();
   }

@@ -1,8 +1,14 @@
 import { Button, Card } from "@easytree/ui";
 
-import { ApiStatus } from "../components/api-status";
+import { ApiStatus } from "./api-status";
 
-export default function HomePage() {
+/**
+ * Inhalt der Werkbank-Startseite — bewusst eine synchrone Komponente ohne
+ * Serverbezug: `app/(werkbank)/page.tsx` entscheidet davor serverseitig
+ * ueber die Start-Shell (EYT-113), und `test/a11y.test.tsx` rendert diesen
+ * Inhalt direkt in jsdom, wo ein async Server Component nicht laufen kann.
+ */
+export function StartInhalt() {
   return (
     <>
       <h1>Willkommen bei easyTree</h1>

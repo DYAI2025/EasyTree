@@ -99,6 +99,31 @@ describe("Rot-Fall", () => {
     rmSync(join(root, "apps/api/src/modules/planning"), { recursive: true, force: true });
   });
 
+  it("faengt einen Werkbank-Import und ein fremdes Paket in der Feld-Shell", () => {
+    // Der realistischste Verstoss der Zwei-Client-Architektur (EYT-113): eine
+    // Feld-Datei importiert eine Kosten-Komponente der Werkbank — und ein
+    // Paket, das nicht auf der Feld-Allowlist steht.
+    write("apps/web/components/kosten-ansicht.tsx", "export const KostenAnsicht = 1;\n");
+    write(
+      "apps/web/app/feld/bad.tsx",
+      [
+        'import { KostenAnsicht } from "../../components/kosten-ansicht";',
+        'import { irgendwas } from "@easytree/domain";',
+        "export const bad = [KostenAnsicht, irgendwas] as const;",
+      ].join("\n") + "\n",
+    );
+    const found = violationsFor().violations.filter((v) => v.rule === "feld-shell-boundary");
+    expect(
+      found.some((v) => v.message.includes("apps/web/components/kosten-ansicht")),
+      "Werkbank-Import nicht erkannt",
+    ).toBe(true);
+    expect(
+      found.some((v) => v.message.includes('"@easytree/domain"')),
+      "fremdes Paket nicht erkannt",
+    ).toBe(true);
+    rmSync(join(root, "apps/web"), { recursive: true, force: true });
+  });
+
   it("faengt einen Querimport an der oeffentlichen Modul-API vorbei", () => {
     write(
       "apps/api/src/modules/planning/application/bypass.ts",

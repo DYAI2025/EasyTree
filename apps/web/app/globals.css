@@ -648,3 +648,52 @@ body {
   color: var(--eyt-text-secondary);
   font-size: 0.875rem;
 }
+
+/* ============================================================
+ * Basisdesign v2.0 — Feld-Shell (EYT-113)
+ * ============================================================ */
+
+/* Die Feld-Shell teilt das Geruest (eyt-app-shell__*) mit der Werkbank;
+   eigen ist nur die Feld-Informationsarchitektur. Mobile-first: alles
+   einspaltig, keine Mindestbreiten — 320 px ist die Grundflaeche. */
+
+.feld-marke {
+  color: var(--eyt-text-secondary);
+  font-weight: 400;
+}
+
+.feld-organisationen {
+  margin: 0 0 var(--space);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.feld-organisation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: var(--space);
+  border: 1px solid var(--eyt-border-default);
+  border-radius: var(--radius);
+  background: var(--eyt-bg-surface);
+}
+
+.feld-organisation__name {
+  font-weight: 700;
+}
+
+.feld-organisation__rolle {
+  color: var(--eyt-text-secondary);
+  font-size: 0.875rem;
+}
+
+/* Ehrliche Fehlerflaeche des Server-Gates: dieselbe main-Vermessung wie die
+   Shell, damit die Meldung nicht am Viewportrand klebt. */
+.feld-gate {
+  display: grid;
+  align-content: start;
+}

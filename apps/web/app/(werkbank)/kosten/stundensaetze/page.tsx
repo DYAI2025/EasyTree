@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 
 import { PageHeader } from "@easytree/ui";
 
-import { KostenZugang } from "../../../components/kosten-zugang";
-import { RateManagement } from "../../../components/rate-management";
+import { KostenZugang } from "../../../../components/kosten-zugang";
+import { RateManagement } from "../../../../components/rate-management";
 
 export const metadata: Metadata = { title: "Stundensätze — easyTree" };
 

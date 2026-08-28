@@ -139,6 +139,47 @@ const UI_ALLOWED_PACKAGES: readonly RegExp[] = [/^react$/];
 
 const UI_PACKAGE = "packages/ui/src/";
 
+/**
+ * Was die FELD-SHELL importieren darf (EYT-113).
+ *
+ * Die Mitarbeiter-Shell (`apps/web/app/feld/`, `apps/web/components/feld/`,
+ * `apps/web/lib/feld/`) teilt Auth-, API-, Vertrags- und Domainbasis mit der
+ * Werkbank — aber KEINE Werkbank-Oberflaeche: Admin- und Kosten-Komponenten
+ * duerfen das Mitarbeiter-Bundle nicht erreichen, auch nicht unbeabsichtigt.
+ * Wieder eine ALLOWLIST (dieselbe Lehre wie `domain-allowlist`): eine
+ * Sperrliste `components/kosten-*` liesse jede kuenftige Admin-Komponente
+ * durch, bis jemand die Liste pflegt.
+ *
+ * `@easytree/domain` steht bewusst NICHT hier: die Feld-Shell dieses
+ * Inkrements braucht es nicht, und eine Allowlist waechst erst, wenn ein
+ * realer Konsument es verlangt.
+ */
+const FELD_SHELL_SCOPES: readonly string[] = [
+  "apps/web/app/feld/",
+  "apps/web/components/feld/",
+  "apps/web/lib/feld/",
+];
+
+const FELD_ALLOWED_PACKAGES: readonly RegExp[] = [
+  /^react$/,
+  /^next$/,
+  /^next\/.+$/,
+  /^@easytree\/ui$/,
+  /^@easytree\/contracts$/,
+];
+
+/**
+ * Wohin relative Importe der Feld-Shell aufgeloest zeigen duerfen: in die
+ * Feld-Verzeichnisse selbst und in die geteilte Infrastruktur `lib/`
+ * (Session-Provider, Gateways, Proxyziel). `components/` ausserhalb von
+ * `components/feld/` ist Werkbank-Oberflaeche und bleibt draussen.
+ */
+const FELD_ALLOWED_RESOLVED: readonly string[] = [
+  "apps/web/app/feld/",
+  "apps/web/components/feld/",
+  "apps/web/lib/",
+];
+
 export const RULES: readonly Rule[] = [
   {
     // ADR-001 Z. 74 — als Allowlist formuliert, siehe Dateikopf.
@@ -352,6 +393,28 @@ export const RULES: readonly Rule[] = [
       }
       if (!ref.resolved.startsWith(UI_PACKAGE)) {
         return `packages/ui darf nicht nach "${ref.resolved}" hinausgreifen (EYT-80).`;
+      }
+      return null;
+    },
+  },
+  {
+    // EYT-113 — die Import-Grenze der Zwei-Client-Architektur, als Allowlist.
+    id: "feld-shell-boundary",
+    inScope: (file): boolean => FELD_SHELL_SCOPES.some((scope) => file.startsWith(scope)),
+    check: (ref): string | null => {
+      if (ref.isTypeReference) {
+        return `Die Feld-Shell darf keine /// <reference types="${ref.specifier}" /> fuehren — sie zieht eine ganze Ambient-Oberflaeche in den Scope.`;
+      }
+      if (!ref.specifier.startsWith(".")) {
+        if (FELD_ALLOWED_PACKAGES.some((allowed) => allowed.test(ref.specifier))) return null;
+        return `"${ref.specifier}" steht nicht auf der Importliste der Feld-Shell (EYT-113). Erlaubt sind react, next, @easytree/ui und @easytree/contracts. Der Ausweg ist NICHT, diese Liste blind zu erweitern: was die Feld-Shell braucht, kommt als geteiltes Primitive nach packages/ui oder als geteilte Infrastruktur nach apps/web/lib.`;
+      }
+      const resolved = ref.resolved;
+      if (resolved === null) {
+        return `Relativer Import "${ref.specifier}" ist nicht aufloesbar — der Scanner koennte ihn sonst stillschweigend uebergehen.`;
+      }
+      if (!FELD_ALLOWED_RESOLVED.some((prefix) => resolved.startsWith(prefix))) {
+        return `Die Feld-Shell darf nicht nach "${resolved}" greifen (EYT-113): Werkbank-Komponenten und -Seiten bleiben aus dem Mitarbeiter-Bundle draussen.`;
       }
       return null;
     },
