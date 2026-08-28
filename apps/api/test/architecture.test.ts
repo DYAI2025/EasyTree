@@ -125,6 +125,24 @@ describe("Architekturgrenzen", () => {
     );
   });
 
+  it("Regel feld-shell-boundary ueberwacht JEDE Datei der Feld-Shell", () => {
+    // Dieselbe Lehre wie bei ui-dependency-allowlist: `>= 1` unterscheidet
+    // nicht zwischen "bewacht die Shell" und "bewacht eine Datei". Die linke
+    // Seite kommt aus den Praefixen ueber die eingesammelten Importe, die
+    // rechte aus `inScope` der Regel — beide Wege muessen dieselbe Menge
+    // ergeben. Importfreie Dateien tauchen auf keiner Seite auf.
+    const feldPraefixe = ["apps/web/app/feld/", "apps/web/components/feld/", "apps/web/lib/feld/"];
+    const ausDemPraefix = new Set(
+      refs
+        .filter((ref) => feldPraefixe.some((praefix) => ref.from.startsWith(praefix)))
+        .map((ref) => ref.from),
+    );
+    expect(ausDemPraefix.size).toBeGreaterThan(3);
+    expect([...(scopeCounts.get("feld-shell-boundary") ?? [])].sort()).toEqual(
+      [...ausDemPraefix].sort(),
+    );
+  });
+
   it.each([...SCAFFOLDED_MODULES])(
     "Modul %s besitzt echten Inhalt und eine oeffentliche API",
     (slug) => {
