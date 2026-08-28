@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
-import { AppShell } from "../components/app-shell";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -21,13 +20,16 @@ export const viewport: Viewport = {
   themeColor: "#166534",
 };
 
+/**
+ * Wurzel-Layout: nur Dokumentrahmen und Provider (EYT-113). Welche Shell ein
+ * Nutzer sieht, entscheiden die Layouts der Teilbäume — `(werkbank)` für die
+ * Admin-Werkbank, `feld` für die Mitarbeiter-Feld-Shell.
+ */
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="de">
       <body>
-        <Providers>
-          <AppShell>{children}</AppShell>
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

@@ -1,6 +1,6 @@
 import { Button, Card } from "@easytree/ui";
 
-import { ApiStatus } from "../components/api-status";
+import { ApiStatus } from "../../components/api-status";
 
 export default function HomePage() {
   return (

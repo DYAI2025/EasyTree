@@ -39,7 +39,7 @@ import type {
 import { render } from "@testing-library/react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import PlanungPage from "../../app/planung/page";
+import PlanungPage from "../../app/(werkbank)/planung/page";
 import { Providers } from "../../app/providers";
 import { AppShell } from "../../components/app-shell";
 import { navigation, navigieren } from "./navigation-attrappe";

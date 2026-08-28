@@ -1,8 +1,8 @@
 import { EUROPE_BERLIN } from "@easytree/domain";
 
-import { PlanungAnsicht } from "../../components/planung-ansicht";
-import { PlanungsWerkbank } from "../../components/planungs-werkbank";
-import { wochenmodell, type Fehlergrund } from "../../lib/wochennavigation";
+import { PlanungAnsicht } from "../../../components/planung-ansicht";
+import { PlanungsWerkbank } from "../../../components/planungs-werkbank";
+import { wochenmodell, type Fehlergrund } from "../../../lib/wochennavigation";
 
 /**
  * Einstieg in die Planungswerkbank (EYT-50, erweitert um EYT-140 M5).

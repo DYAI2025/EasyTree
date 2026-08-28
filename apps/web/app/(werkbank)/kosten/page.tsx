@@ -4,8 +4,8 @@ import Link from "next/link";
 import { IdSchema } from "@easytree/contracts";
 import { Card, PageHeader } from "@easytree/ui";
 
-import { KostenAnsicht } from "../../components/kosten-ansicht";
-import { KostenZugang } from "../../components/kosten-zugang";
+import { KostenAnsicht } from "../../../components/kosten-ansicht";
+import { KostenZugang } from "../../../components/kosten-zugang";
 
 export const metadata: Metadata = { title: "Kosten — easyTree" };
 

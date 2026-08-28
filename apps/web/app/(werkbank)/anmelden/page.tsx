@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import { PageHeader } from "@easytree/ui";
 
-import { LoginForm } from "../../components/login-form";
+import { LoginForm } from "../../../components/login-form";
 
 export const metadata: Metadata = { title: "Anmelden — easyTree" };
 
