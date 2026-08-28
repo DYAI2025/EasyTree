@@ -501,3 +501,24 @@ for (const pfad of ["/", "/planung", "/kosten"]) {
     }
   });
 }
+
+/**
+ * EYT-113: /feld ohne API — das Server-Gate weiss NICHTS und handelt das
+ * fail-closed: ehrliche Fehlerflaeche statt Shell, und KEINE Umleitung zur
+ * Anmeldung. Nichtwissen ist nicht "abgemeldet" — eine Umleitung wuerde bei
+ * einem API-Ausfall angemeldete Nutzer aussperren. Der Prozess haelt die
+ * Route; genau dieses Verhalten unterscheidet den Ausfall vom 401.
+ */
+test("EYT-113: /feld ohne API zeigt die ehrliche Fehlerflaeche, keine Shell", async ({ page }) => {
+  await page.goto("/feld");
+  await expect(page.getByTestId("feld-sitzung-unbekannt")).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/feld");
+  await expect(page.getByTestId("feld-shell")).toHaveCount(0);
+  await expect(page.getByTestId("feld-abmelden")).toHaveCount(0);
+  // Die Fehlerflaeche ist selbst zugaenglich: eine main-Landmark, und die
+  // Meldung ist assertiv. Bewusst NICHT getByRole("alert") ohne Filter:
+  // Nexts Route-Announcer traegt ebenfalls role=alert (strict-mode-Treffer,
+  // gemessen 28.08.2026) — geprueft wird das Element der Fehlerflaeche.
+  await expect(page.getByRole("main")).toBeVisible();
+  await expect(page.getByTestId("feld-sitzung-unbekannt")).toHaveAttribute("role", "alert");
+});
