@@ -8,6 +8,7 @@ import { PrimaryAction, StateBanner } from "@easytree/ui";
 
 import { useAuthGateway } from "../lib/auth-gateway-provider";
 import { useSession } from "../lib/session-provider";
+import { startShellFuer } from "../lib/feld/start-shell";
 
 /** Vollstaendig, ohne Default-Zweig — dieselbe Regel wie in der Planung. */
 const FEHLERTEXT: Record<GatewayFailure, string> = {
@@ -41,7 +42,11 @@ export function LoginForm() {
     }
     // Kein Optimismus: die Sitzung wird NEU vom Server geladen, dann Weiterleitung.
     neuLaden();
-    router.push("/kosten");
+    // Start-Shell aus der SERVER-Antwort des Logins (EYT-113): das DTO ist die
+    // frisch verifizierte Session, kein Client-Zustand. Leitungsrollen landen
+    // wie bisher in der Werkbank, reine member in der Feld-App — und das
+    // Server-Gate unter /feld prueft die Session dort ERNEUT.
+    router.push(startShellFuer(ergebnis.value) === "feld" ? "/feld" : "/kosten");
   }
 
   return (

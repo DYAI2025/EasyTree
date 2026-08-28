@@ -1,28 +1,26 @@
-import { Button, Card } from "@easytree/ui";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
-import { ApiStatus } from "../../components/api-status";
+import { StartInhalt } from "../../components/start-inhalt";
+import { leseServerSitzung } from "../../lib/feld/sitzung-server";
+import { startShellFuer } from "../../lib/feld/start-shell";
 
-export default function HomePage() {
-  return (
-    <>
-      <h1>Willkommen bei easyTree</h1>
-      <p className="lead">
-        Die mobile-first Web-Shell für easyTree. Fachliche Inhalte folgen in den nächsten Sprints —
-        diese Seite ist der barrierefreie Rahmen (EYT-41).
-      </p>
-      <div className="card-grid">
-        <Card id="status" title="Plattformstatus">
-          <ApiStatus />
-          <p>Die Shell spricht die API ausschließlich über den injizierten ApiClient an.</p>
-        </Card>
-        <Card title="Installierbar (PWA)">
-          <p>
-            easyTree lässt sich als App installieren (Manifest, display standalone). Eine
-            Offline-Schreibqueue gibt es bewusst nicht — gearbeitet wird online.
-          </p>
-          <Button variant="ghost">Mehr erfahren</Button>
-        </Card>
-      </div>
-    </>
-  );
+/**
+ * Werkbank-Startseite mit Start-Shell-Dispatch (EYT-113): die zulaessige
+ * Start-Shell folgt SERVERSEITIG aus der real verifizierten Session. Wer
+ * ausschliesslich als member arbeitet, gehoert ins Feld und wird dorthin
+ * geleitet — die Route selbst verleiht kein Recht, sie liest nur.
+ *
+ * Abgemeldete und NICHT PRUEFBARE Sitzungen sehen die Startseite unveraendert:
+ * sie ist oeffentlich, und Nichtwissen darf niemanden aussperren oder
+ * umleiten (fail-open ist hier richtig, weil kein Inhalt geschuetzt ist —
+ * geschuetzte Inhalte pruefen API und RLS).
+ */
+export default async function HomePage() {
+  const kopfzeilen = await headers();
+  const sitzung = await leseServerSitzung(kopfzeilen.get("cookie"));
+  if (sitzung.zustand === "angemeldet" && startShellFuer(sitzung.session) === "feld") {
+    redirect("/feld");
+  }
+  return <StartInhalt />;
 }

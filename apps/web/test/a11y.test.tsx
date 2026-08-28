@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpAuthGateway, type CostSnapshot, type CostsGateway } from "@easytree/contracts";
 
 import RootLayout from "../app/layout";
-import HomePage from "../app/(werkbank)/page";
+import { StartInhalt } from "../components/start-inhalt";
 import { AppShell } from "../components/app-shell";
 import { KostenAnsicht } from "../components/kosten-ansicht";
 import { createApiClient } from "../lib/api-client";
@@ -51,7 +51,7 @@ function renderShell() {
       <AuthGatewayProvider gateway={auth}>
         <SessionProvider>
           <AppShell>
-            <HomePage />
+            <StartInhalt />
           </AppShell>
         </SessionProvider>
       </AuthGatewayProvider>
