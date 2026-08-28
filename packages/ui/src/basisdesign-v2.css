@@ -1,0 +1,63 @@
+/*
+ * Basisdesign v2.0 §2.1 — die verbindliche Tokenbasis (Confluence 8814623).
+ *
+ * DIESE Datei ist die einzige Quelle der semantischen Farbrollen. `apps/web`
+ * haelt keine zweite Fassung mehr, sondern bindet diese hier ein; damit gibt es
+ * keine Abweichung mehr zu bewachen, weil es keine zweite Liste mehr gibt.
+ *
+ * Bewacht wird sie von `test/basisdesign-tokens.test.ts`: dort steht die
+ * Confluence-Tabelle als ERWARTUNG, hier stehen die Werte, und jedes Paar, das
+ * als normaler Kleintext vorkommt, muss 4.5:1 erreichen.
+ *
+ * Zwei Rollen stehen NICHT in §2.1: `--eyt-state-published-text` ist eine
+ * Ableitung aus `--eyt-action-primary`, `--eyt-action-primary-contrast` ist
+ * repo-eigen gewaehlt. Der Test haelt beide fest; ausgegeben werden sie nie
+ * als „genehmigte Werte“.
+ *
+ * Kein Layout, keine Klassen, keine Schrift: das Paket besitzt die WERTE, die
+ * Anwendung besitzt die Gestaltung (`apps/web/app/globals.css`).
+ */
+
+:root {
+  --eyt-bg-canvas: #f6f4ef;
+  --eyt-bg-surface: #ffffff;
+  --eyt-text-primary: #1d1b18;
+  --eyt-text-secondary: #5b564e;
+  --eyt-border-default: #d8d4cb;
+  --eyt-action-primary: #1e5231;
+  --eyt-action-primary-contrast: #ffffff;
+  --eyt-state-published-bg: #e1ebe2;
+  --eyt-state-published-text: #1e5231;
+  --eyt-state-draft-text: #7a5300;
+  --eyt-state-draft-bg: #f4e8ce;
+  --eyt-state-danger-text: #9b2c1f;
+  --eyt-state-danger-bg: #f7e3df;
+  --eyt-state-info-text: #155e75;
+  --eyt-state-info-bg: #deedf2;
+}
+
+/*
+ * Dunkelmodus folgt dem SYSTEM (Basisdesign §7: „Dark Mode folgt System oder
+ * expliziter Nutzereinstellung, nicht einer ungeprueften automatischen
+ * Annahme“). Jede Rolle wird vollstaendig neu gesetzt — kein Teilsatz, damit
+ * keine Rolle unbemerkt im Hellwert stehen bleibt.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --eyt-bg-canvas: #161513;
+    --eyt-bg-surface: #211f1c;
+    --eyt-text-primary: #f1efe9;
+    --eyt-text-secondary: #b0aaa0;
+    --eyt-border-default: #3a3733;
+    --eyt-action-primary: #8fc7a2;
+    --eyt-action-primary-contrast: #161513;
+    --eyt-state-published-bg: #22352a;
+    --eyt-state-published-text: #8fc7a2;
+    --eyt-state-draft-text: #e3b95b;
+    --eyt-state-draft-bg: #3a2f17;
+    --eyt-state-danger-text: #f0a08f;
+    --eyt-state-danger-bg: #41211c;
+    --eyt-state-info-text: #7cc1db;
+    --eyt-state-info-bg: #1c3540;
+  }
+}

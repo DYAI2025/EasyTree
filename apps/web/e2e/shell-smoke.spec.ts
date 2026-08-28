@@ -410,3 +410,94 @@ for (const route of ROUTEN) {
     expect(results.violations, `${route.pfad}: ${JSON.stringify(results.violations)}`).toEqual([]);
   });
 }
+
+/**
+ * Die Tokens erreichen die GEBAUTE Anwendung (EYT-80 Inkrement 2).
+ *
+ * Die Datei-Waechter in `apps/web/test/basisdesign-tokens.test.ts` und
+ * `packages/ui/test/basisdesign-tokens.test.ts` lesen Quelltext. Sie koennen
+ * nicht sehen, ob Next den `@import` aufloest, ob das Paket seine CSS-Datei
+ * ueberhaupt ausliefert oder ob ein Bundler sie als nebenwirkungsfrei
+ * wegwirft. Dieser Fall liest den BERECHNETEN Wert im Chromium.
+ *
+ * Verglichen wird die FARBE, nicht die Schreibweise. Gemessen 27.08.2026
+ * verkuerzt der Minifier des Produktionsbaus `#ffffff` zu `#fff` — und
+ * `getComputedStyle` normalisiert den Wert einer Custom Property NICHT, weil
+ * sie bis zur Verwendung ein beliebiges Token ist. Ein Zeichenkettenvergleich
+ * haette hier also den Minifier geprueft und nicht die Farbe. Darum wird der
+ * rohe Wert einer Sonde als `color` zugewiesen und von Chromium selbst als
+ * `rgb(…)` zurueckgelesen: das ist unabhaengig von Schreibweise, Minifier und
+ * kuenftigen Formatwechseln.
+ *
+ * Drei Routen, weil die Zusage „auf den realen Produktflaechen" lautet und
+ * nicht „auf der Startseite". Im `web-smoke` laeuft keine API; alle drei
+ * antworten trotzdem mit 200 und tragen dieselbe CSS-Datei. Geprueft werden
+ * hier die TOKENWERTE, nicht der angemeldete Zustand — der gehoert dem
+ * auth-journey.
+ *
+ * Hellmodus: Playwright startet ohne `colorScheme`-Angabe, und der Standard
+ * ist `light`. Die Dunkelwerte sind hier bewusst NICHT gemessen; sie haengen
+ * an `packages/ui/test/basisdesign-tokens.test.ts`.
+ */
+const KANONISCHE_ROLLEN: ReadonlyArray<readonly [string, string]> = [
+  ["--eyt-bg-canvas", "rgb(246, 244, 239)"],
+  ["--eyt-bg-surface", "rgb(255, 255, 255)"],
+  ["--eyt-text-primary", "rgb(29, 27, 24)"],
+  ["--eyt-text-secondary", "rgb(91, 86, 78)"],
+  ["--eyt-border-default", "rgb(216, 212, 203)"],
+  ["--eyt-action-primary", "rgb(30, 82, 49)"],
+  // Auch die repo-eigene und die abgeleitete Rolle werden AUSGELIEFERT —
+  // dass ihre Werte richtig SIND, bewacht packages/ui; dass sie im gebauten
+  // Browser ankommen, kann nur dieser Fall sehen (PO-Review PR #96).
+  ["--eyt-action-primary-contrast", "rgb(255, 255, 255)"],
+  ["--eyt-state-published-bg", "rgb(225, 235, 226)"],
+  ["--eyt-state-published-text", "rgb(30, 82, 49)"],
+  ["--eyt-state-draft-text", "rgb(122, 83, 0)"],
+  ["--eyt-state-draft-bg", "rgb(244, 232, 206)"],
+  ["--eyt-state-danger-text", "rgb(155, 44, 31)"],
+  ["--eyt-state-danger-bg", "rgb(247, 227, 223)"],
+  ["--eyt-state-info-text", "rgb(21, 94, 117)"],
+  ["--eyt-state-info-bg", "rgb(222, 237, 242)"],
+];
+
+for (const pfad of ["/", "/planung", "/kosten"]) {
+  test(`${pfad} liefert die kanonischen Basisdesign-Tokens aus`, async ({ page }) => {
+    await page.goto(pfad);
+    await expect(page.getByRole("main")).toBeVisible();
+
+    const gemessen = await page.evaluate(
+      (namen) => {
+        const wurzel = getComputedStyle(document.documentElement);
+        const sonde = document.createElement("span");
+        document.body.append(sonde);
+        try {
+          return Object.fromEntries(
+            namen.map((name) => {
+              const roh = wurzel.getPropertyValue(name).trim();
+              // Erst leeren, dann setzen: lehnt der CSS-Parser den Wert ab,
+              // bleibt `style.color` leer — und `angenommen` deckt genau den
+              // Fall auf, in dem eine fehlende Rolle sonst die geerbte Farbe
+              // der Sonde gemessen haette und zufaellig gruen waere.
+              sonde.style.color = "";
+              sonde.style.color = roh;
+              const angenommen = sonde.style.color !== "";
+              return [name, { roh, angenommen, farbe: getComputedStyle(sonde).color }];
+            }),
+          );
+        } finally {
+          sonde.remove();
+        }
+      },
+      KANONISCHE_ROLLEN.map(([name]) => name),
+    );
+
+    for (const [name, farbe] of KANONISCHE_ROLLEN) {
+      const wert = gemessen[name];
+      expect(wert?.roh, `${pfad}: ${name} ist nicht deklariert`).toBeTruthy();
+      expect(wert?.angenommen, `${pfad}: ${name} = "${wert?.roh}" ist keine gueltige Farbe`).toBe(
+        true,
+      );
+      expect(wert?.farbe, `${pfad}: ${name} (roh: "${wert?.roh}")`).toBe(farbe);
+    }
+  });
+}
