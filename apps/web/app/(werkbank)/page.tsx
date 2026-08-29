@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { StartInhalt } from "../../components/start-inhalt";
-import { leseServerSitzung } from "../../lib/feld/sitzung-server";
+import { leseServerSitzung } from "../../lib/sitzung-server";
 import { startShellFuer } from "../../lib/feld/start-shell";
 
 /**

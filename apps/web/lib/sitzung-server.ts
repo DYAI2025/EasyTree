@@ -1,6 +1,6 @@
 import { API_BASE_PATH, SessionDtoSchema, type SessionDto } from "@easytree/contracts";
 
-import { aktuellesProxyziel } from "../proxy-durchreichen";
+import { aktuellesProxyziel } from "./proxy-durchreichen";
 
 /**
  * Serverseitige Sitzungslesung (EYT-113).
