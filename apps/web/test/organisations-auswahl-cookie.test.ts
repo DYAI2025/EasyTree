@@ -43,6 +43,18 @@ describe("liesOrgAuswahl", () => {
     // Gegenmutation: Namensvergleich auf endsWith umstellen -> rot.
     expect(liesOrgAuswahl("xeyt_org=evil")).toBeNull();
   });
+
+  it("liefert null fuer kaputte Prozentkodierung — und wirft nicht", () => {
+    // Ein Browser darf `eyt_org=%` senden; decodeURIComponent wirft darauf
+    // URIError. Da die Kompositionswurzel den Selector beim Client-Start
+    // liest, wuerde eine Ausnahme hier den Client crashen statt fail-closed
+    // in den Kein-Auswahl-Zustand zu fallen (PR-#99-Reviewbefund).
+    // Gegenmutation: das try/catch um decodeURIComponent entfernen -> rot.
+    expect(liesOrgAuswahl("eyt_org=%")).toBeNull();
+    expect(liesOrgAuswahl("eyt_org=%2")).toBeNull();
+    expect(liesOrgAuswahl("eyt_org=%GG")).toBeNull();
+    expect(liesOrgAuswahl("eyt_access=abc; eyt_org=%E0%A4%A; x=1")).toBeNull();
+  });
 });
 
 describe("Dokument-Funktionen", () => {

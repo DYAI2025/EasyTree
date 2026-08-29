@@ -3815,6 +3815,46 @@ test("EYT-113 I2: die Kosten-Ladegrenze folgt der ausgewaehlten Organisation", a
         chunk_anfragen_nachher: kostenChunkAnfragen().length,
       };
     });
+
+    await test.step("h — ein KAPUTTER Selector-Cookie crasht nichts und oeffnet nichts", async () => {
+      // PR-#99-Reviewbefund: `eyt_org=%` liess decodeURIComponent mit
+      // URIError werfen — und die Kompositionswurzel liest den Selector beim
+      // Client-Start, der Crash traefe also jede Seite. Fail-closed heisst
+      // hier dreifach: keine unbehandelte Client-Ausnahme, die Flaeche bleibt
+      // renderbar, und die Auswahl faellt in "Organisation waehlen" statt in
+      // irgendeinen Kosteninhalt.
+      // Gegenmutation: das try/catch um decodeURIComponent in
+      // `lib/organisations-auswahl-cookie.ts` entfernen -> pageerror-Liste
+      // nicht leer, dieser Schritt rot.
+      const seitenfehler: string[] = [];
+      seite.on("pageerror", (fehler) => seitenfehler.push(String(fehler)));
+      const anfragenVorKaputt = kostenChunkAnfragen().length;
+      await kontext.addCookies([{ name: "eyt_org", value: "%", url: new URL(seite.url()).origin }]);
+      await seite.reload();
+
+      await expect(seite.getByTestId("kosten-org-auswahl")).toBeVisible();
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-laedt")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-flaeche-laedt")).toHaveCount(0);
+      expect(seitenfehler, "h: unbehandelte Client-Ausnahmen").toEqual([]);
+
+      // Netz UND Dokument, aus demselben gemessenen Grund wie in (g).
+      expect(kostenChunkAnfragen().length, "h: neue Kosten-Chunk-Anfragen").toBe(anfragenVorKaputt);
+      const inhalt = await seite.content();
+      for (const datei of kostenChunks) {
+        expect(inhalt, `h: ${datei} steht im Dokument`).not.toContain(datei);
+      }
+      expect(inhalt, "h: Betrag im Dokument").not.toContain(ERWARTETER_BETRAG);
+      expect(inhalt, "h: Kostenanzeige im Dokument").not.toContain(ERWARTETE_KOSTEN_ANZEIGE);
+      bericht["h_kaputter_selector"] = {
+        cookie_wert: "%",
+        oberflaeche: "kosten-org-auswahl",
+        seitenfehler: seitenfehler.length,
+        chunk_anfragen_vorher: anfragenVorKaputt,
+        chunk_anfragen_nachher: kostenChunkAnfragen().length,
+      };
+    });
   } catch (e) {
     fehlerAusFall = [e];
   }

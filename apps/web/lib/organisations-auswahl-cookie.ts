@@ -18,7 +18,16 @@ export function liesOrgAuswahl(cookieHeader: string | null): string | null {
     if (gleich === -1) continue;
     if (teil.slice(0, gleich).trim() !== ORG_AUSWAHL_COOKIE) continue;
     const wert = teil.slice(gleich + 1).trim();
-    return wert === "" ? null : decodeURIComponent(wert);
+    if (wert === "") return null;
+    // Kaputte Prozentkodierung (z. B. `eyt_org=%`) laesst decodeURIComponent
+    // mit URIError werfen — und die Kompositionswurzel liest den Selector
+    // beim Client-Start. Fail-closed heisst hier: kein Wert, keine Ausnahme;
+    // kein Rueckfall, keine Normalisierung in eine gueltige Organisation.
+    try {
+      return decodeURIComponent(wert);
+    } catch {
+      return null;
+    }
   }
   return null;
 }
