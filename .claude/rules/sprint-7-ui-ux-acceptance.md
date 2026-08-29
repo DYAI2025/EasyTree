@@ -146,6 +146,43 @@ Admin-/Kosten-/Fremddatenzugriff.
 Noch nicht implementierte Fachfunktionen dürfen nicht als Fake-Journey ergänzt
 werden.
 
+## Testintegrität
+
+### Reale Umgebung
+
+Pflicht-Acceptance-Journeys laufen gegen eine isolierte
+Nicht-Produktionsumgebung mit realer Authentifizierung, realer API und realem
+PostgreSQL/RLS. Testdaten dürfen kontrolliert und reproduzierbar sein; die
+Anwendung selbst darf keine Mock-/Fixture-Antworten als operative
+Produktwahrheit verwenden.
+
+### Gegenbeweis (Counterexample Proof)
+
+Ein absichtlich gebrochener Auth-, Persistenz- oder Routingpfad muss mindestens einen passenden Journey-Test rot machen; ein grüner Test ohne nachgewiesene Fähigkeit, den relevanten Defekt zu erkennen, genügt nicht als EYT-148-Abnahmenachweis.
+
+Die Gegenprobe erfolgt kontrolliert, reversibel und ausschließlich im
+Test-/CI-Kontext — niemals durch Mutation einer produktiven Umgebung.
+
+### Merge Blocking
+
+Verpflichtende Journey-, Accessibility- und relevante Visual-Regression-Gates müssen vor finaler EYT-148-Abnahme tatsächlich merge-blockierend erzwungen sein; ein grüner freiwilliger CI-Job, den GitHub beim Merge ignorieren könnte, erfüllt dieses Acceptance-Gate nicht.
+
+Stand heute erzwingt das aktive Ruleset die elf bestehenden CI-Kontexte
+(inklusive `unit-tests`, in dem dieser Regel-Wächter läuft). Daraus folgt
+NICHT, dass die vollständigen EYT-148-Journey-/Accessibility-/Visual-Gates
+bereits existieren: Dieser Abschnitt beschreibt das erforderliche End-Gate für
+EYT-148, keinen bereits erfüllten Zustand. Diese Gates werden im Verlauf von
+Sprint 7 aufgebaut und sind spätestens vor finalem
+`READY_FOR_PO_VISUAL_REVIEW` auf dem exakten Acceptance-Head grün und
+merge-blockierend.
+
+### Evidence Binding
+
+Acceptance-Evidenz ist an den exakten Git-Head-SHA, die Umgebung,
+Browser/Version, die Rolle und die relevanten Server-/Plan-/Snapshot-IDs
+gebunden. Evidenz eines älteren Heads wird niemals auf einen neueren Commit
+übertragen.
+
 ## PO Acceptance Evidence
 
 Für den finalen Sprint-Kandidaten muss ein Evidence Package erzeugbar sein,

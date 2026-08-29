@@ -62,6 +62,16 @@ const MARKER_REMOVAL =
   "Diese Regel darf erst entfernt oder archiviert werden, nachdem Sprint 7 in " +
   "Jira formal PO-abgenommen und geschlossen ist und alle wiederverwendbaren " +
   "Anforderungen in dauerhafte Frontend-Qualitätsregeln überführt wurden.";
+const MARKER_COUNTEREXAMPLE =
+  "Ein absichtlich gebrochener Auth-, Persistenz- oder Routingpfad muss " +
+  "mindestens einen passenden Journey-Test rot machen; ein grüner Test ohne " +
+  "nachgewiesene Fähigkeit, den relevanten Defekt zu erkennen, genügt nicht " +
+  "als EYT-148-Abnahmenachweis.";
+const MARKER_MERGE_BLOCKING =
+  "Verpflichtende Journey-, Accessibility- und relevante " +
+  "Visual-Regression-Gates müssen vor finaler EYT-148-Abnahme tatsächlich " +
+  "merge-blockierend erzwungen sein; ein grüner freiwilliger CI-Job, den " +
+  "GitHub beim Merge ignorieren könnte, erfüllt dieses Acceptance-Gate nicht.";
 
 /** Pflichtabschnitte — das Fehlen eines Abschnitts hebt eine Zusicherung auf. */
 const REQUIRED_SECTIONS = [
@@ -77,6 +87,7 @@ const REQUIRED_SECTIONS = [
   "Browser Integrity",
   "Autorisierung",
   "EYT-148 Final Journey Gate",
+  "Testintegrität",
   "PO Acceptance Evidence",
   "Human Gate",
 ] as const;
@@ -186,6 +197,19 @@ describe("Sprint-7-UI/UX-Abnahmevertrag (EYT-148)", () => {
 
   it("verankert den realen Auth->API->PostgreSQL/RLS-Abnahmegrundsatz", () => {
     expect(rule).toContain(MARKER_REAL_STACK);
+  });
+
+  it("erzwingt den Gegenbeweis-Grundsatz der Testintegritaet (EYT-148)", () => {
+    // Ohne diesen Satz koennte ein dauerhaft gruener Journey-Test als
+    // Abnahmenachweis gelten, ohne je bewiesen zu haben, dass er einen
+    // gebrochenen Auth-/Persistenz-/Routingpfad ueberhaupt erkennt.
+    expect(rule).toContain(MARKER_COUNTEREXAMPLE);
+  });
+
+  it("erzwingt merge-blockierende Sprint-7-Gates vor finaler Abnahme", () => {
+    // Ohne diesen Satz koennte ein freiwilliger (nicht required) CI-Job als
+    // EYT-148-Gate ausgegeben werden, den GitHub beim Merge ignoriert.
+    expect(rule).toContain(MARKER_MERGE_BLOCKING);
   });
 
   it("wird von CLAUDE.md als bindend referenziert", () => {
