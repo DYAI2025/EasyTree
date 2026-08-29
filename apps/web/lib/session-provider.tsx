@@ -13,6 +13,12 @@ import { useAuthGateway } from "./auth-gateway-provider";
  * kein LocalStorage, kein Mock, keine abgeleitete Wahrheit. `laedt` ist das
  * Warten auf die erste Antwort; `fehler` heisst: der Zustand ist UNBEKANNT
  * (Netz/Server), nicht "abgemeldet" — die UI unterscheidet das sichtbar.
+ *
+ * Die Organisationsauswahl wird als Selector-Cookie an den Server gemeldet
+ * (die Kompositionswurzel schreibt es), aber NIE als Wahrheit gelesen —
+ * Wahrheit bleibt `GET /auth/session`: `initialeOrganisationId` ist nur der
+ * Startwert der Auswahl und zaehlt erst, wenn die Id in der verifizierten
+ * Session steht (EYT-113 Inkrement 2).
  */
 export type SessionZustand =
   | { zustand: "laedt" }
@@ -36,6 +42,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 export function SessionProvider({
   children,
   onOrganisationChange,
+  initialeOrganisationId,
 }: {
   children: ReactNode;
   /**
@@ -44,10 +51,18 @@ export function SessionProvider({
    * je einen Header sehen.
    */
   onOrganisationChange?: (id: string | null) => void;
+  /**
+   * Beim Mount gelesene Auswahl (Selector-Cookie). Nur ein Startwert:
+   * gueltig wird sie erst durch `orgs.find` gegen die verifizierte Session —
+   * eine fremde Id faellt dort ersatzlos.
+   */
+  initialeOrganisationId?: string | null;
 }) {
   const gateway = useAuthGateway();
   const [sitzung, setSitzung] = useState<SessionZustand>({ zustand: "laedt" });
-  const [gewaehlteOrgId, setGewaehlteOrgId] = useState<string | null>(null);
+  const [gewaehlteOrgId, setGewaehlteOrgId] = useState<string | null>(
+    initialeOrganisationId ?? null,
+  );
   const [ladelauf, setLadelauf] = useState(0);
 
   useEffect(() => {
@@ -77,8 +92,13 @@ export function SessionProvider({
   }, [sitzung, gewaehlteOrgId]);
 
   useEffect(() => {
+    // Solange die Sitzung ungeklaert ist ("laedt"/"fehler"), wird NICHT
+    // gemeldet: ein transienter null wuerde das Auswahl-Cookie bei jedem
+    // Seitenaufbau loeschen. "abgemeldet" ist dagegen eine klare Auskunft
+    // und meldet null.
+    if (sitzung.zustand === "laedt" || sitzung.zustand === "fehler") return;
     onOrganisationChange?.(organisation?.id ?? null);
-  }, [organisation, onOrganisationChange]);
+  }, [sitzung, organisation, onOrganisationChange]);
 
   const wert = useMemo<SessionContextValue>(
     () => ({

@@ -5,7 +5,9 @@ import { IdSchema } from "@easytree/contracts";
 import { Card, PageHeader } from "@easytree/ui";
 
 import { KostenAnsicht } from "../../../components/kosten-ansicht";
+import { KostenGrenze } from "../../../components/kosten-grenze";
 import { KostenZugang } from "../../../components/kosten-zugang";
+import { leseKostenFreigabe } from "../../../lib/kosten-freigabe";
 
 export const metadata: Metadata = { title: "Kosten — easyTree" };
 
@@ -23,12 +25,21 @@ export const metadata: Metadata = { title: "Kosten — easyTree" };
  * Kein stiller Default: ein unbrauchbarer Parameter wird SICHTBAR abgelehnt und
  * das Gateway gar nicht erst gerufen (dasselbe Muster wie `/planung`). Ein
  * mehrfach angegebener Parameter ist keine Id, sondern eine mehrdeutige Angabe.
+ *
+ * Seit EYT-113 Inkrement 2 steht VOR jedem Kosteninhalt die serverseitige
+ * Ladegrenze: `leseKostenFreigabe()` prueft das `costs.read` der
+ * AUSGEWAEHLTEN Organisation, fail-closed — jeder Verweigerungszustand
+ * rendert `KostenGrenze` statt der Kosten-Client-Komponenten. Die
+ * `headers()`/`cookies()`-Lesezugriffe in `leseKostenFreigabe` machen die
+ * Route dynamisch; das ist gewollt (EYT-126: nichts davon darf zur Bauzeit
+ * festgeschrieben werden).
  */
 export default async function KostenPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const freigabe = await leseKostenFreigabe();
   const params = await searchParams;
   const roh = params["snapshot"];
   const geprueft =
@@ -53,25 +64,29 @@ export default async function KostenPage({
         title="Kosten"
         description="Geplante Personalkosten je Baustelle und Tag — aus veröffentlichten Planversionen, bis zur Einzelposition."
       />
-      <KostenZugang>
-        {geprueft !== null && !geprueft.success ? (
-          <p data-testid="kosten-parameterfehler" role="alert">
-            Keine gültige Snapshot-Id in der Adresse. Erwartet wird
-            `?snapshot=&lt;id-aus-der-Kostenansicht&gt;`.
-          </p>
-        ) : (
-          <KostenAnsicht snapshotId={geprueft === null ? null : geprueft.data} />
-        )}
-        <Card title="Stundensätze">
-          <p>
-            Interne Netto-Stundensätze je Mitarbeiter, versioniert mit Gültigkeit — die Grundlage
-            jeder Kostenberechnung.
-          </p>
-          <p>
-            <Link href="/kosten/stundensaetze">Zur Stundensatzverwaltung</Link>
-          </p>
-        </Card>
-      </KostenZugang>
+      {freigabe.art !== "gewaehrt" ? (
+        <KostenGrenze freigabe={freigabe} />
+      ) : (
+        <KostenZugang>
+          {geprueft !== null && !geprueft.success ? (
+            <p data-testid="kosten-parameterfehler" role="alert">
+              Keine gültige Snapshot-Id in der Adresse. Erwartet wird
+              `?snapshot=&lt;id-aus-der-Kostenansicht&gt;`.
+            </p>
+          ) : (
+            <KostenAnsicht snapshotId={geprueft === null ? null : geprueft.data} />
+          )}
+          <Card title="Stundensätze">
+            <p>
+              Interne Netto-Stundensätze je Mitarbeiter, versioniert mit Gültigkeit — die Grundlage
+              jeder Kostenberechnung.
+            </p>
+            <p>
+              <Link href="/kosten/stundensaetze">Zur Stundensatzverwaltung</Link>
+            </p>
+          </Card>
+        </KostenZugang>
+      )}
     </section>
   );
 }
