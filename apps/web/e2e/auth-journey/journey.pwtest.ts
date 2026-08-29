@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import AxeBuilder from "@axe-core/playwright";
@@ -341,6 +341,15 @@ async function pruefeBarrierefreiheit(
  * - Die Kosten-Navigation unabhaengig von `costs.read` rendern (Schritt 6
  *   bliebe gruen, aber Schritt 11 nach dem Abmelden wuerde rot).
  * - Das Logout ohne loeschende Cookies (Schritt 12).
+ *   NACHTRAG EYT-113 Inkrement 2: `eyt_org` ist der bewusst SICHTBARE
+ *   Selector der Organisationsauswahl (nie Autorisierung, nie Geheimnis —
+ *   der Server prueft ihn gegen die echte Session). Schritt 11 prueft
+ *   seither die NAMENSMENGE der sichtbaren Cookies (Teilmenge von
+ *   { eyt_org }) und den Wert (exakt die Org-UUID, kein Punkt) statt Leere —
+ *   ein `eyt_access` ohne `HttpOnly` macht ihn also WEITERHIN rot, jeder
+ *   neue sichtbare Cookie ebenfalls. Und Schritt 12 sichert zusaetzlich zu,
+ *   dass das Abmelden den Selector loescht: Clear-Zweig
+ *   (`schreibeOrgAuswahl(null)`) in `app/providers.tsx` entfernen -> rot.
  * - `app.is_runtime_channel()` aus der Update-Policy von `plan_versions`
  *   entfernen (Migration 0015): Schritt 9c2 wird rot, weil PostgREST die
  *   Planversion dann tatsaechlich veroeffentlicht. Das ist der P1-Nachweis
@@ -396,6 +405,44 @@ async function pruefeBarrierefreiheit(
 // Playwright-Konfigurationen benutzen aus demselben Grund keine.
 const HIER = __dirname;
 const ARTEFAKTE = join(HIER, "..", "..", "test-results", "auth-journey");
+
+/**
+ * EYT-113 Inkrement 2 — die Kosten-Chunkmenge des LAUFENDEN Builds.
+ *
+ * Die serverseitige Ladegrenze verspricht: in einem Verweigerungszustand
+ * referenziert die Kostenroute KEINE Kosten-Client-Komponente — also weder
+ * eine Chunk-Anfrage noch eine Chunk-Referenz im Dokument. Welche Dateien
+ * das sind, wechselt mit jedem Build (die Namen tragen Hashes); abgeleitet
+ * wird die Menge deshalb zur LAUFZEIT aus `.next/static/chunks/*.js`, ueber
+ * drei Marker, die je genau EINE Quelldatei besitzt:
+ *
+ *   - `eyt-kosten-ansicht`  (components/kosten-ansicht.tsx)
+ *   - `kosten-laedt`        (components/kosten-zugang.tsx)
+ *   - `saetze-laedt`        (components/rate-management.tsx)
+ *
+ * Leere Menge => Wurf, nicht leere Rueckgabe: ein Waechter, der nichts findet,
+ * wachte sonst still ueber nichts (`guard-exists-but-never-visits-the-surface`).
+ * Gegenmutation: einen der drei Marker verschreiben — bei nur einem faellt die
+ * Menge auf eine Datei zusammen und die Positivkontrolle unten schrumpft, bei
+ * allen dreien wirft diese Funktion.
+ */
+function kostenChunkDateien(): string[] {
+  const chunkVerzeichnis = join(HIER, "..", "..", ".next", "static", "chunks");
+  const marker = ["eyt-kosten-ansicht", "kosten-laedt", "saetze-laedt"] as const;
+  const dateien = readdirSync(chunkVerzeichnis)
+    .filter((name) => name.endsWith(".js"))
+    .filter((name) => {
+      const inhalt = readFileSync(join(chunkVerzeichnis, name), "utf8");
+      return marker.some((m) => inhalt.includes(m));
+    });
+  if (dateien.length === 0) {
+    throw new Error(
+      "[auth-journey] EYT-113: kein Chunk unter .next/static/chunks traegt einen der drei " +
+        "Kosten-Marker — die Ladegrenzen-Zusicherungen waeren vakuos.",
+    );
+  }
+  return dateien;
+}
 
 const ORG_ID = "00000000-0000-4000-8000-00000000e201";
 const ORG_NAME = "E2E Reiseorganisation";
@@ -868,6 +915,17 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     if (pfad.startsWith("/api/")) apiAufrufe.push(`${anfrage.method()} ${pfad}`);
   });
 
+  /**
+   * EYT-113: jede angeforderte Chunk-Datei — die Positivkontrolle der
+   * Ladegrenze. VOR der ersten Navigation registriert, sonst fehlte genau
+   * die Anfrage, die beim Einstieg in `/kosten` faellt.
+   */
+  const chunkAnfragen: string[] = [];
+  page.on("request", (anfrage) => {
+    const pfad = new URL(anfrage.url()).pathname;
+    if (pfad.startsWith("/_next/static/chunks/")) chunkAnfragen.push(pfad);
+  });
+
   const bericht: Record<string, unknown> = {
     ticket: "EYT-106",
     paket: "B",
@@ -918,6 +976,30 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     // Schrittes bleibt dieselbe: angemeldet, berechtigt, und OHNE Zahlen.
     await expect(page.getByTestId("kosten-kein-snapshot")).toBeVisible();
     await expect(page.getByLabel("Von Woche")).toBeVisible();
+  });
+
+  await test.step("3b — EYT-113 Positivkontrolle: der Berechtigte laedt die Kosten-Chunks", async () => {
+    // Die Gegenseite des member-Nachweises in der Feld-Reise unten: nur wenn
+    // die abgeleitete Chunkmenge beim BERECHTIGTEN nachweislich angefordert
+    // wird, sagt ihr Ausbleiben beim Unberechtigten etwas aus. Gegenmutation:
+    // einen Marker in `kostenChunkDateien()` verschreiben — die Ableitung
+    // wirft, oder diese Schnittmenge wird leer.
+    const kostenChunks = kostenChunkDateien();
+    const geladeneKostenChunks = chunkAnfragen.filter((pfad) =>
+      kostenChunks.some((datei) => pfad.endsWith(`/${datei}`)),
+    );
+    expect(
+      geladeneKostenChunks.length,
+      `Kosten-Chunks [${kostenChunks.join(", ")}] — keiner wurde angefordert`,
+    ).toBeGreaterThan(0);
+    await page.screenshot({
+      path: test.info().outputPath("eyt113-kosten-positiv.png"),
+      fullPage: true,
+    });
+    schritte["3b_eyt113_positivkontrolle"] = {
+      kosten_chunks: kostenChunks,
+      angefordert: geladeneKostenChunks,
+    };
   });
 
   await test.step("4 — Sicherheitsnachweis: beide Sitzungscookies sind HttpOnly und Strict", async () => {
@@ -2925,12 +3007,40 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     const speicher = await page.evaluate(() => ({
       local: Object.entries(localStorage).map(([k, v]) => `${k}=${String(v)}`),
       session: Object.entries(sessionStorage).map(([k, v]) => `${k}=${String(v)}`),
-      // Cookies, die JavaScript SEHEN kann — bei HttpOnly ist das keiner.
+      // Cookies, die JavaScript SEHEN kann — die Token-Cookies (HttpOnly)
+      // gehoeren NIE dazu.
       sichtbareCookies: document.cookie,
     }));
     expect(speicher.local).toEqual([]);
     expect(speicher.session).toEqual([]);
-    expect(speicher.sichtbareCookies).toBe("");
+
+    // Seit EYT-113 Inkrement 2 ist GENAU EIN sichtbares Cookie vorgesehen:
+    // `eyt_org`, der Selector der Organisationsauswahl (nie Autorisierung,
+    // nie Geheimnis — der Server prueft ihn gegen die real verifizierte
+    // Session, lib/kosten-freigabe.ts). Die Zusicherung prueft seither die
+    // NAMENSMENGE und den Wert statt Leere — jeder neue sichtbare Cookie
+    // macht sie rot: ein `eyt_access`/`eyt_refresh` ohne HttpOnly genauso
+    // wie jeder fremde Name, und ein Tokenwert im Selector faellt am
+    // Wertevergleich plus Punkt-Waechter.
+    const sichtbare = speicher.sichtbareCookies
+      .split(";")
+      .map((teil) => teil.trim())
+      .filter((teil) => teil !== "")
+      .map((teil) => {
+        const gleich = teil.indexOf("=");
+        return gleich === -1
+          ? { name: teil, wert: "" }
+          : { name: teil.slice(0, gleich), wert: teil.slice(gleich + 1) };
+      });
+    // Namensmenge: Teilmenge von { eyt_org } — strenger als die alte
+    // Leere-Zusicherung fuer alles, was nicht der Selector ist.
+    const fremdeNamen = sichtbare.map((c) => c.name).filter((name) => name !== "eyt_org");
+    expect(fremdeNamen).toEqual([]);
+    // Wert: exakt die Fixtur-Organisation — eine UUID, strukturell kein JWT.
+    const orgCookie = sichtbare.find((c) => c.name === "eyt_org");
+    expect(orgCookie?.wert).toBe(ORG_ID);
+    // Ein JWT traegt immer zwei Punkte, eine Org-UUID keinen einzigen.
+    expect(orgCookie?.wert).not.toContain(".");
 
     // `eyJ` ist der Anfang jedes base64url-kodierten JWT-Headers. Erscheint er
     // im gerenderten HTML, ist ein Token in den DOM geraten.
@@ -2940,7 +3050,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     schritte["11_browserspeicher"] = {
       localStorage: 0,
       sessionStorage: 0,
-      sichtbare_cookies: "",
+      sichtbare_cookies: speicher.sichtbareCookies,
       token_im_dom: false,
     };
   });
@@ -2952,6 +3062,16 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     const danach = await context.cookies();
     expect(danach.find((k) => k.name === "eyt_access")).toBeUndefined();
     expect(danach.find((k) => k.name === "eyt_refresh")).toBeUndefined();
+
+    // EYT-113: das Abmelden loescht auch den Selector `eyt_org`. Das ist der
+    // Clear-Zweig der Kompositionswurzel — onOrganisationChange(null) ->
+    // schreibeOrgAuswahl(null) in app/providers.tsx —, den sonst kein
+    // Nachweis ausuebt. Er feuert in einem React-Effekt NACH dem
+    // Abmelde-Commit, deshalb poll statt Einmal-Blick. Gegenmutation:
+    // Clear-Zweig in providers.tsx entfernen -> diese Zusicherung wird rot.
+    await expect
+      .poll(async () => (await context.cookies()).map((k) => k.name))
+      .not.toContain("eyt_org");
 
     // Nicht nur "das Cookie ist weg", sondern "der Server laesst nicht mehr
     // durch": ohne diese Zusicherung bewiese der Test nur, dass der Browser
@@ -2968,6 +3088,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
 
     schritte["12_abmeldung"] = {
       cookies_geloescht: true,
+      selector_geloescht: true,
       session_status: sitzung.status(),
       kosten_status: kosten.status(),
     };
@@ -3354,6 +3475,68 @@ test("EYT-113: ein member erreicht die Feld-Shell, die Werkbank bleibt zu", asyn
         erwartet: 403,
       };
     });
+
+    await test.step("EYT-113 Inkrement 2: die Kostenrouten liefern dem member keine Kosten-Chunks", async () => {
+      // Serverseitige LADEGRENZE, nicht nur Anzeige-Grenze: fuer einen member
+      // ohne `costs.read` darf die Kostenroute die Kosten-Client-Komponenten
+      // gar nicht erst referenzieren — kein Chunk-Abruf, keine Chunk-Referenz
+      // im Dokument, keine Wirtschaftsdaten. Die Positivkontrolle dazu steht
+      // in Schritt 3b der Hauptreise: dort fordert der BERECHTIGTE dieselbe
+      // abgeleitete Chunkmenge nachweislich an.
+      const kostenChunks = kostenChunkDateien();
+
+      // Sammler VOR der Navigation — sonst fehlte genau die erste Anfrage.
+      const chunkAnfragenB: string[] = [];
+      seite.on("request", (anfrage) => {
+        const pfad = new URL(anfrage.url()).pathname;
+        if (pfad.startsWith("/_next/static/chunks/")) chunkAnfragenB.push(pfad);
+      });
+
+      for (const route of ["/kosten", "/kosten/stundensaetze"] as const) {
+        await seite.goto(route);
+        // Der vorgesehene Endzustand als Anker: erst wenn die Forbidden-
+        // Flaeche steht, misst die Inhaltspruefung den fertigen Zustand und
+        // nicht einen Ladezwischenstand.
+        await expect(seite.getByTestId("kosten-forbidden"), `${route}: Forbidden`).toBeVisible();
+
+        // Netzseite der Ladegrenze. Gegenmutation: das Gate aus
+        // `kosten/page.tsx` bzw. `stundensaetze/page.tsx` entfernen — die
+        // Route fordert die Kosten-Chunks dann wieder an.
+        const geladeneKostenChunks = chunkAnfragenB.filter((pfad) =>
+          kostenChunks.some((datei) => pfad.includes(datei)),
+        );
+        expect(geladeneKostenChunks, `${route}: angeforderte Kosten-Chunks`).toEqual([]);
+
+        // Dokumentseite der Ladegrenze: schon die REFERENZ im HTML ist das
+        // Leck, nicht erst der erfolgreiche Abruf (ein Browser mit Cache
+        // fordert nichts an und truege die Referenz trotzdem). Gegenmutation:
+        // dieselbe wie oben.
+        const inhalt = await seite.content();
+        for (const datei of kostenChunks) {
+          expect(inhalt, `${route}: ${datei} steht im Dokument`).not.toContain(datei);
+        }
+
+        // Keine Wirtschaftsdaten im Dokument — Satzbetrag, Kostenanzeige,
+        // Minor Units, Mitarbeitername (dieselben Fixturkonstanten wie in
+        // 9g2). Gegenmutation: den Kosteninhalt serverseitig auch im
+        // Verweigerungszweig rendern und nur per CSS verbergen.
+        expect(inhalt, `${route}: Satzbetrag im Dokument`).not.toContain(ERWARTETER_BETRAG);
+        expect(inhalt, `${route}: Kostenanzeige im Dokument`).not.toContain(
+          ERWARTETE_KOSTEN_ANZEIGE,
+        );
+        expect(inhalt, `${route}: Minor Units im Dokument`).not.toContain(ERWARTETE_KOSTEN_MINOR);
+        expect(inhalt, `${route}: Mitarbeitername im Dokument`).not.toContain(MITARBEITER_NAME);
+      }
+
+      await seite.screenshot({
+        path: test.info().outputPath("eyt113-kosten-forbidden.png"),
+        fullPage: true,
+      });
+      bericht["eyt113_ladegrenze"] = {
+        kosten_chunks: kostenChunks,
+        chunk_anfragen_gesamt: chunkAnfragenB.length,
+      };
+    });
   } catch (fehler) {
     fehlerAusFall = [fehler];
   }
@@ -3388,4 +3571,322 @@ test("EYT-113: ohne Sitzung fuehrt /feld zur Anmeldung", async ({ browser }) => 
   } finally {
     await kontext.close();
   }
+});
+
+/**
+ * EYT-113 Inkrement 2 — der PO-Entscheidungskern (29.08.2026): die
+ * Kosten-Ladegrenze folgt der AUSGEWAEHLTEN Organisation, nicht irgendeiner.
+ *
+ * Reisender A traegt `costs.read` in der Reiseorganisation — und bekommt fuer
+ * die Dauer dieses Nachweises eine ZWEITE Organisation geliehen, in der er
+ * blosser `member` ohne Kostenrecht ist (`eyt113-zweitorg-an.sql`, Rueckgabe
+ * `eyt113-zweitorg-aus.sql`; Praemissen- und Nachbedingungswaechter dort).
+ * Erst dieses Paar unterscheidet die richtige Grenze von einer Any-Org-
+ * Pruefung: derselbe Benutzer, dasselbe Recht, und trotzdem entscheidet
+ * allein die Auswahl.
+ *
+ * Jede Phase nennt ihr Requirement und die Gegenmutation, die sie rot macht:
+ *
+ * - (a) REQ-L1c — Any-Org-Rueckfall in `kostenFreigabe` (bei fehlender
+ *   Auswahl die erste Organisation nehmen): statt "Organisation waehlen"
+ *   stuende der Kosteninhalt, und die Chunkmenge waere nicht leer.
+ * - (b) REQ-L1b — `kostenFreigabe` prueft `costs.read` ueber ALLE
+ *   Organisationen statt ueber die ausgewaehlte: die Zweitorganisation wuerde
+ *   gewaehrt, weil A das Recht ANDERSWO traegt.
+ * - (c) REQ-L6 — das Server-Gate aus `stundensaetze/page.tsx` entfernen: die
+ *   Route referenziert und laedt die Kosten-Chunks wieder.
+ * - (d) REQ-L5 — `pruefeRecht` in `MembershipCostAccessPolicy` auf "immer ok":
+ *   der direkte API-Aufruf mit dem Zweitorg-Header antwortete 200.
+ * - (e) REQ-L4 — den `router.refresh()` aus `setOrganisation`
+ *   (`app/providers.tsx`) entfernen: die Server-Flaeche folgte der Auswahl
+ *   nicht, `kosten-kein-snapshot` erschiene nie.
+ * - (f) — den Cookie-Startwert (`initialeOrganisationId`) nicht mehr lesen:
+ *   nach dem Reload stuende wieder "Organisation waehlen".
+ * - (g) — den Selector-Cookie als AUTORITAET lesen (Freigabe ohne Abgleich
+ *   gegen die Session): eine fremde Id im Cookie oeffnete den Kostenbereich,
+ *   statt fail-closed in "Organisation waehlen" zu fallen.
+ */
+const ZWEITORG_ID = "00000000-0000-4000-8000-00000000e213";
+const ZWEITORG_NAME = "EYT-113 Zweitorganisation";
+/** Eine Id, die in KEINER Session steht — die Manipulationssonde in (g). */
+const FREMDE_AUSWAHL = "00000000-0000-4000-8000-00000000dead";
+
+test("EYT-113 I2: die Kosten-Ladegrenze folgt der ausgewaehlten Organisation", async ({
+  browser,
+}) => {
+  const email = pflicht("EASYTREE_JOURNEY_EMAIL_A");
+  const passwort = pflicht("EASYTREE_JOURNEY_PASSWORT_A");
+  const idA = pflicht("EASYTREE_JOURNEY_USER_A");
+  const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+  const kontext = await browser.newContext();
+  const seite = await kontext.newPage();
+  const bericht: Record<string, unknown> = {
+    ticket: "EYT-113",
+    inkrement: 2,
+    benutzer: "A mit zwei Organisationen",
+  };
+  ZUSAMMENFASSUNGEN.set(test.info().testId, { datei: "zusammenfassung-mehrorg.json", bericht });
+
+  let fehlerAusFall: [unknown] | null = null;
+  try {
+    // Die Leihgabe steht im `try`, weil das Skript die Zeilen committet,
+    // BEVOR es seine Nachbedingung prueft — dieselbe Begruendung wie in 9g2.
+    const an = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt113-zweitorg-an.sql"),
+      ["-v", `benutzer_a=${idA}`],
+      "[eyt113-zweitorg-an]",
+    );
+    console.log(`  ${an}`);
+    bericht["leihgabe"] = an;
+
+    // Chunkmenge und Sammler VOR der ersten Navigation — sonst fehlte genau
+    // die Anfrage, die beim Einstieg faellt (dasselbe Muster wie 3b/Feld).
+    const kostenChunks = kostenChunkDateien();
+    const chunkAnfragen: string[] = [];
+    seite.on("request", (anfrage) => {
+      const pfad = new URL(anfrage.url()).pathname;
+      if (pfad.startsWith("/_next/static/chunks/")) chunkAnfragen.push(pfad);
+    });
+    const kostenChunkAnfragen = (): string[] =>
+      chunkAnfragen.filter((pfad) => kostenChunks.some((datei) => pfad.includes(datei)));
+
+    await test.step("a — ohne Auswahl faellt /kosten fail-closed auf 'Organisation waehlen' (REQ-L1c)", async () => {
+      // A ist owner der Reiseorganisation -> Leitungsrolle -> die Anmeldung
+      // fuehrt in die Werkbank (/kosten). Mit ZWEI Organisationen und ohne
+      // Selector-Cookie waehlt NIEMAND still aus (PO-Entscheidung): der
+      // Server rendert die Auswahlaufforderung, keine Kostenflaeche.
+      await seite.goto("/anmelden");
+      await seite.getByLabel("E-Mail").fill(email);
+      await seite.getByLabel("Passwort").fill(passwort);
+      await seite.getByRole("button", { name: "Anmelden" }).click();
+
+      const angekommen = seite.waitForURL("**/kosten");
+      const abgelehnt = seite
+        .getByRole("alert")
+        .filter({ hasText: "Anmeldung fehlgeschlagen" })
+        .waitFor({ state: "visible" });
+      await Promise.race([angekommen, abgelehnt]);
+      await expect(
+        seite.getByRole("alert").filter({ hasText: "Anmeldung fehlgeschlagen" }),
+      ).toHaveCount(0);
+      await angekommen;
+
+      await expect(seite.getByTestId("kosten-org-auswahl")).toBeVisible();
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-unauthenticated")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-laedt")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-flaeche-laedt")).toHaveCount(0);
+      expect(kostenChunkAnfragen(), "a: angeforderte Kosten-Chunks").toEqual([]);
+      bericht["a_keine_auswahl"] = {
+        oberflaeche: "kosten-org-auswahl",
+        kosten_chunk_anfragen: [...kostenChunkAnfragen()],
+      };
+    });
+
+    await test.step("b — die Zweitorganisation auswaehlen: Forbidden, keine Chunks (REQ-L1b)", async () => {
+      // Die ECHTE Bedienung: der Picker der Kopfleiste (er erscheint erst ab
+      // zwei Organisationen) schreibt den Selector-Cookie und laesst die
+      // Server-Flaeche per `router.refresh()` folgen. As Recht in der
+      // REISEorganisation darf hier nichts gewaehren — das ist der Kern der
+      // PO-Entscheidung.
+      await seite.getByLabel("Organisation").selectOption({ label: ZWEITORG_NAME });
+
+      const forbidden = seite.getByTestId("kosten-forbidden");
+      await expect(forbidden).toBeVisible();
+      // Der Banner nennt die AUSGEWAEHLTE Organisation: die Ablehnung kommt
+      // aus der Zweitorganisation, nicht aus einer Any-Org-Aussage.
+      await expect(forbidden).toContainText(ZWEITORG_NAME);
+      await expect(seite.getByTestId("kosten-org-auswahl")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toHaveCount(0);
+      expect(kostenChunkAnfragen(), "b: angeforderte Kosten-Chunks").toEqual([]);
+
+      await seite.screenshot({
+        path: test.info().outputPath("eyt113-mehrorg-forbidden.png"),
+        fullPage: true,
+      });
+      bericht["b_zweitorg_forbidden"] = {
+        oberflaeche: "kosten-forbidden",
+        kosten_chunk_anfragen: [...kostenChunkAnfragen()],
+      };
+    });
+
+    await test.step("c — auch die direkte URL /kosten/stundensaetze bleibt zu (REQ-L6)", async () => {
+      await seite.goto("/kosten/stundensaetze");
+      await expect(seite.getByTestId("kosten-forbidden")).toBeVisible();
+      await expect(seite.getByTestId("saetze-flaeche-laedt")).toHaveCount(0);
+      expect(kostenChunkAnfragen(), "c: angeforderte Kosten-Chunks").toEqual([]);
+
+      // Dokumentseite der Ladegrenze: schon die REFERENZ im HTML ist das
+      // Leck, nicht erst der erfolgreiche Abruf (Begruendung woertlich im
+      // Feld-Nachweis oben).
+      const inhalt = await seite.content();
+      for (const datei of kostenChunks) {
+        expect(inhalt, `c: ${datei} steht im Dokument`).not.toContain(datei);
+      }
+      bericht["c_direkte_url"] = {
+        oberflaeche: "kosten-forbidden",
+        kosten_chunk_anfragen: [...kostenChunkAnfragen()],
+      };
+    });
+
+    await test.step("d — die API lehnt den Zweitorg-Header unabhaengig von der Oberflaeche ab (REQ-L5)", async () => {
+      // Der Auswahlheader waehlt nur aus, er autorisiert nichts: in der
+      // Zweitorganisation ist A member ohne `costs.read`, also 403 — am
+      // RECHT, nicht an der Mitgliedschaft.
+      const antwort = await seite.request.get("/api/v1/kosten/mitarbeiter", {
+        headers: { "X-EasyTree-Organization-Id": ZWEITORG_ID },
+      });
+      expect(antwort.status(), "d: Kosten-API mit Zweitorg-Header").toBe(403);
+      expect(await antwort.text()).not.toContain(MITARBEITER_NAME);
+      bericht["d_api_zweitorg"] = { status: antwort.status(), erwartet: 403 };
+    });
+
+    await test.step("e — die Reiseorganisation auswaehlen: Inhalt UND Chunks kommen (REQ-L4)", async () => {
+      // Die Positivkontrolle im SELBEN Kontext: erst der Wechsel auf die
+      // berechtigte Organisation oeffnet die Flaeche — und erst jetzt fordert
+      // der Browser die Kosten-Chunks an. Ohne sie sagte die leere Menge in
+      // (a)-(c) nichts (guard-exists-but-never-visits-the-surface).
+      await seite.goto("/kosten");
+      await expect(seite.getByTestId("kosten-forbidden")).toBeVisible();
+      await seite.getByLabel("Organisation").selectOption({ label: ORG_NAME });
+
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toBeVisible();
+      await expect(seite.getByLabel("Von Woche")).toBeVisible();
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      expect(
+        kostenChunkAnfragen().length,
+        `e: Kosten-Chunks [${kostenChunks.join(", ")}] — keiner wurde angefordert`,
+      ).toBeGreaterThan(0);
+
+      // Der Selector-Cookie traegt jetzt genau die Reiseorganisation.
+      const orgCookie = cookie(await kontext.cookies(), "eyt_org");
+      expect(orgCookie.value).toBe(ORG_ID);
+      bericht["e_reiseorg_gewaehrt"] = {
+        oberflaeche: "kosten-kein-snapshot",
+        kosten_chunk_anfragen: [...kostenChunkAnfragen()],
+        eyt_org: orgCookie.value,
+      };
+    });
+
+    await test.step("f — die Auswahl ueberlebt den Reload (Cookie-Startwert)", async () => {
+      await seite.reload();
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toBeVisible();
+      await expect(seite.getByTestId("kosten-org-auswahl")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      bericht["f_reload"] = { oberflaeche: "kosten-kein-snapshot" };
+    });
+
+    await test.step("g — ein manipulierter Selector-Cookie oeffnet NICHTS (fail-closed)", async () => {
+      // Der Selector ist Auswahl, nie Autoritaet: eine Id, die NICHT in der
+      // verifizierten Session steht, faellt serverseitig ersatzlos — zurueck
+      // in "Organisation waehlen", nicht in irgendeinen Kosteninhalt.
+      const anfragenVorManipulation = kostenChunkAnfragen().length;
+      await kontext.addCookies([
+        { name: "eyt_org", value: FREMDE_AUSWAHL, url: new URL(seite.url()).origin },
+      ]);
+      await seite.reload();
+
+      await expect(seite.getByTestId("kosten-org-auswahl")).toBeVisible();
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-laedt")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-flaeche-laedt")).toHaveCount(0);
+
+      // Netz UND Dokument, aus einem gemessenen Grund BEIDE: (e) hat die
+      // Chunks in DIESEM Kontext bereits geladen — ein Browser mit Cache
+      // fordert eine referenzierte Datei unter Umstaenden gar nicht neu an,
+      // die Anfragenzaehlung allein koennte ein Leck also uebersehen. Die
+      // Dokumentpruefung traegt deshalb den Beweis (keine Referenz), die
+      // Zaehlung bleibt als zusaetzlicher Riegel stehen.
+      expect(kostenChunkAnfragen().length, "g: neue Kosten-Chunk-Anfragen").toBe(
+        anfragenVorManipulation,
+      );
+      const inhalt = await seite.content();
+      for (const datei of kostenChunks) {
+        expect(inhalt, `g: ${datei} steht im Dokument`).not.toContain(datei);
+      }
+      bericht["g_manipulation"] = {
+        cookie_wert: FREMDE_AUSWAHL,
+        oberflaeche: "kosten-org-auswahl",
+        chunk_anfragen_vorher: anfragenVorManipulation,
+        chunk_anfragen_nachher: kostenChunkAnfragen().length,
+      };
+    });
+
+    await test.step("h — ein KAPUTTER Selector-Cookie crasht nichts und oeffnet nichts", async () => {
+      // PR-#99-Reviewbefund: `eyt_org=%` liess decodeURIComponent mit
+      // URIError werfen — und die Kompositionswurzel liest den Selector beim
+      // Client-Start, der Crash traefe also jede Seite. Fail-closed heisst
+      // hier dreifach: keine unbehandelte Client-Ausnahme, die Flaeche bleibt
+      // renderbar, und die Auswahl faellt in "Organisation waehlen" statt in
+      // irgendeinen Kosteninhalt.
+      // Gegenmutation: das try/catch um decodeURIComponent in
+      // `lib/organisations-auswahl-cookie.ts` entfernen -> pageerror-Liste
+      // nicht leer, dieser Schritt rot.
+      const seitenfehler: string[] = [];
+      seite.on("pageerror", (fehler) => seitenfehler.push(String(fehler)));
+      const anfragenVorKaputt = kostenChunkAnfragen().length;
+      await kontext.addCookies([{ name: "eyt_org", value: "%", url: new URL(seite.url()).origin }]);
+      await seite.reload();
+
+      await expect(seite.getByTestId("kosten-org-auswahl")).toBeVisible();
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-laedt")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-flaeche-laedt")).toHaveCount(0);
+      expect(seitenfehler, "h: unbehandelte Client-Ausnahmen").toEqual([]);
+
+      // Netz UND Dokument, aus demselben gemessenen Grund wie in (g).
+      expect(kostenChunkAnfragen().length, "h: neue Kosten-Chunk-Anfragen").toBe(anfragenVorKaputt);
+      const inhalt = await seite.content();
+      for (const datei of kostenChunks) {
+        expect(inhalt, `h: ${datei} steht im Dokument`).not.toContain(datei);
+      }
+      expect(inhalt, "h: Betrag im Dokument").not.toContain(ERWARTETER_BETRAG);
+      expect(inhalt, "h: Kostenanzeige im Dokument").not.toContain(ERWARTETE_KOSTEN_ANZEIGE);
+      bericht["h_kaputter_selector"] = {
+        cookie_wert: "%",
+        oberflaeche: "kosten-org-auswahl",
+        seitenfehler: seitenfehler.length,
+        chunk_anfragen_vorher: anfragenVorKaputt,
+        chunk_anfragen_nachher: kostenChunkAnfragen().length,
+      };
+    });
+  } catch (e) {
+    fehlerAusFall = [e];
+  }
+
+  // Die Rueckgabe laeuft UNBEDINGT und ist idempotent — Wortlaut und
+  // Rangfolge wie in 9c5/9g2. Eine ueberlebende Leihgabe machte Schritt 5
+  // der Hauptreise ("genau eine Organisation") im naechsten Lauf rot-falsch
+  // und ist damit der dringendere Befund.
+  let fehlerAusRueckgabe: [unknown] | null = null;
+  try {
+    const aus = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt113-zweitorg-aus.sql"),
+      ["-v", `benutzer_a=${idA}`],
+      "[eyt113-zweitorg-aus]",
+    );
+    console.log(`  ${aus}`);
+    bericht["rueckgabe"] = aus;
+  } catch (e) {
+    fehlerAusRueckgabe = [e];
+  }
+
+  await kontext.close();
+
+  if (fehlerAusRueckgabe !== null && fehlerAusFall !== null) {
+    throw new AggregateError(
+      [fehlerAusRueckgabe[0], fehlerAusFall[0]],
+      "[auth-journey] EYT-113 I2: die Rueckgabe der geliehenen Zweitorganisation UND der " +
+        "Mehr-Org-Nachweis sind gescheitert. Beide Fehler stehen in `errors`; die " +
+        "ueberlebende Leihgabe ist der dringendere Befund.",
+    );
+  }
+  if (fehlerAusRueckgabe !== null) throw fehlerAusRueckgabe[0];
+  if (fehlerAusFall !== null) throw fehlerAusFall[0];
 });

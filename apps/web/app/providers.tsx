@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { createApiClient } from "../lib/api-client";
 import { ApiClientProvider } from "../lib/api-client-provider";
@@ -8,6 +9,7 @@ import { AuthGatewayProvider } from "../lib/auth-gateway-provider";
 import { createAuthGateway } from "../lib/auth-gateway-factory";
 import { CostsGatewayProvider } from "../lib/costs-gateway-provider";
 import { createCostsGateway } from "../lib/costs-gateway-factory";
+import { liesOrgAuswahlAusDokument, schreibeOrgAuswahl } from "../lib/organisations-auswahl-cookie";
 import { createPlanningGateway } from "../lib/planning-gateway-factory";
 import { PlanningGatewayProvider } from "../lib/planning-gateway-provider";
 import { SessionProvider } from "../lib/session-provider";
@@ -32,6 +34,7 @@ const SAME_ORIGIN = "";
  * stabil (kein Neubau bei jedem Orgwechsel).
  */
 export function Providers({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const client = useMemo(() => createApiClient(SAME_ORIGIN), []);
   const planning = useMemo(
     () => createPlanningGateway(SAME_ORIGIN, (input, init) => fetch(input, init)),
@@ -53,16 +56,36 @@ export function Providers({ children }: { children: ReactNode }) {
     [],
   );
 
-  const setOrganisation = useCallback((id: string | null) => {
-    organisationRef.current = id;
-  }, []);
+  const setOrganisation = useCallback(
+    (id: string | null) => {
+      organisationRef.current = id;
+      // Cookie = Selector fuer das Server-Gate (EYT-113 Inkrement 2); der
+      // refresh laesst die Server-Flaechen der Auswahl folgen. Der
+      // Gleichheits-Guard verhindert Refresh-Schleifen und den Extra-RSC-Lauf
+      // beim unveraenderten Reload.
+      if (liesOrgAuswahlAusDokument() !== id) {
+        schreibeOrgAuswahl(id);
+        router.refresh();
+      }
+    },
+    [router],
+  );
+
+  // Der Initialwert laeuft nur clientseitig (useState-Initializer); beim SSR
+  // liefert er null — folgenlos, solange die Sitzung ohnehin "laedt" rendert.
+  const [initialeOrganisationId] = useState(liesOrgAuswahlAusDokument);
 
   return (
     <ApiClientProvider client={client}>
       <PlanningGatewayProvider gateway={planning}>
         <AuthGatewayProvider gateway={auth}>
           <CostsGatewayProvider gateway={costs}>
-            <SessionProvider onOrganisationChange={setOrganisation}>{children}</SessionProvider>
+            <SessionProvider
+              onOrganisationChange={setOrganisation}
+              initialeOrganisationId={initialeOrganisationId}
+            >
+              {children}
+            </SessionProvider>
           </CostsGatewayProvider>
         </AuthGatewayProvider>
       </PlanningGatewayProvider>

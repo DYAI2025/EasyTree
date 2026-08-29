@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { leseServerSitzung } from "../lib/feld/sitzung-server";
+import { leseServerSitzung } from "../lib/sitzung-server";
 
 /**
  * Serverseitige Sitzungslesung (EYT-113): Server Components fragen die echte

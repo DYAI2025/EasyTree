@@ -445,6 +445,66 @@ export function evaluate(refs: readonly ImportRef[]): {
 }
 
 /**
+ * EYT-113 Inkrement 2 — das Server-Gate der Kosten-Seiten.
+ *
+ * Jede `page.tsx` unter `apps/web/app/(werkbank)/kosten/` MUSS
+ * `lib/kosten-freigabe` importieren: dort liegt `leseKostenFreigabe()`, die
+ * serverseitige, fail-closed Ladegrenze (costs.read der AUSGEWAEHLTEN
+ * Organisation). Eine Kosten-Seite ohne diesen Import rendert Kosteninhalt
+ * ohne Grenze — genau der Gate-Bypass, den EYT-113 verbietet.
+ *
+ * Wie `findStarReExports` bewusst KEIN Eintrag in `RULES`: das dortige
+ * `check(ref)` sieht einen einzelnen Import und kann Anwesenheit nur
+ * VERBIETEN. Eine Anwesenheits-PFLICHT braucht den Blick auf die ganze Datei
+ * samt Dateiliste — eine Seite ohne den Import erzeugt schlicht keinen `ref`,
+ * an dem eine ref-basierte Regel feuern koennte.
+ *
+ * Geprueft wird ueber den AUFGELOESTEN Importgraphen (`ref.resolved`), nicht
+ * ueber rohen Quelltext: `../../../lib/kosten-freigabe` und
+ * `../../../../lib/kosten-freigabe` treffen beide dieselbe Datei, und ein
+ * auskommentierter oder stringfoermiger Treffer zaehlt dank
+ * `ts.preProcessFile` gar nicht erst als Import.
+ *
+ * Nicht-Leerlauf: unter dem Muster MUESSEN mindestens 2 Seiten liegen
+ * (`/kosten` und `/kosten/stundensaetze`). Faellt die Zahl darunter —
+ * Umbenennung, Glob-Rost, SKIP_DIRS-Fehler —, meldet die Regel das als
+ * eigene Verletzung, statt still gruen zu bleiben.
+ */
+const KOSTEN_SEITEN_MUSTER = /^apps\/web\/app\/\(werkbank\)\/kosten\/(?:.+\/)?page\.tsx$/;
+const KOSTEN_FREIGABE_DATEI = "apps/web/lib/kosten-freigabe.ts";
+const KOSTEN_SEITEN_MINDESTZAHL = 2;
+
+export function findKostenSeitenOhneServerGate(
+  files: readonly string[],
+  refs: readonly ImportRef[],
+): Violation[] {
+  const out: Violation[] = [];
+  const seiten = files.filter((file) => KOSTEN_SEITEN_MUSTER.test(file));
+  if (seiten.length < KOSTEN_SEITEN_MINDESTZAHL) {
+    out.push({
+      rule: "kosten-server-gate",
+      file: "apps/web/app/(werkbank)/kosten/",
+      line: 0,
+      message: `Nur ${seiten.length} Kosten-Seite(n) unter apps/web/app/(werkbank)/kosten/ gefunden, erwartet sind mindestens ${KOSTEN_SEITEN_MINDESTZAHL}. Entweder wurden Seiten verschoben/umbenannt (dann Muster UND Mindestzahl bewusst nachziehen) oder der Scanner sieht sie nicht mehr — in beiden Faellen darf die Regel nicht still gruen bleiben (EYT-113 Inkrement 2).`,
+    });
+  }
+  for (const seite of seiten) {
+    const hatGate = refs.some(
+      (ref) => ref.from === seite && ref.resolved === KOSTEN_FREIGABE_DATEI,
+    );
+    if (!hatGate) {
+      out.push({
+        rule: "kosten-server-gate",
+        file: seite,
+        line: 1,
+        message: `${seite} importiert lib/kosten-freigabe nicht — jede Kosten-Seite MUSS die serverseitige Ladegrenze leseKostenFreigabe() vor jedem Kosteninhalt rufen (EYT-113 Inkrement 2, fail-closed).`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * `export *` in einer Modul-`index.ts` traegt das gesamte Domainmodell ueber die
  * Grenze und macht aus mehreren Modulen ein globales Modell (EYT-46 AK 5).
  * Benannte Re-Exporte sind der Vertrag; ein Stern ist keiner.

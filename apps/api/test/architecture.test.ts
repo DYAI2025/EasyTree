@@ -17,7 +17,12 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { MODULE_SLUGS, SCAFFOLDED_MODULES, TABLE_OWNERSHIP } from "../src/modules/module-catalogue";
-import { evaluate, findStarReExports, RULES } from "./architecture/rules";
+import {
+  evaluate,
+  findKostenSeitenOhneServerGate,
+  findStarReExports,
+  RULES,
+} from "./architecture/rules";
 import {
   collectFilesNamed,
   collectSourceFiles,
@@ -246,6 +251,20 @@ describe("Architekturgrenzen", () => {
 
   it("haelt Modul-index.ts frei von Stern-Re-Exporten", () => {
     expect(starReExports.map((v) => `${v.file}:${v.line}`)).toEqual([]);
+  });
+
+  it("haelt das Server-Gate auf JEDER Kosten-Seite (EYT-113)", () => {
+    // `kosten-server-gate` steht wie `index-named-exports-only` NICHT in
+    // RULES: eine Anwesenheits-PFLICHT braucht die Dateiliste, nicht den
+    // einzelnen Import (Begruendung in rules.ts). Der Nicht-Leerlauf
+    // (mindestens 2 Kosten-Seiten gesehen) liegt IN der Regel selbst und
+    // landet bei Glob-Rost hier als eigene Verletzung — die `>= 1`-Schleife
+    // ueber RULES weiter oben kann diese Regel nicht erfassen.
+    expect(
+      findKostenSeitenOhneServerGate(files, refs).map(
+        (v) => `${v.file}:${v.line} [${v.rule}] ${v.message}`,
+      ),
+    ).toEqual([]);
   });
 
   it("meldet keine Grenzverletzung", () => {

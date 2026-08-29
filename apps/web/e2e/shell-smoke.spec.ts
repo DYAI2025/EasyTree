@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator } from "@playwright/test";
 
@@ -521,4 +524,83 @@ test("EYT-113: /feld ohne API zeigt die ehrliche Fehlerflaeche, keine Shell", as
   // gemessen 28.08.2026) — geprueft wird das Element der Fehlerflaeche.
   await expect(page.getByRole("main")).toBeVisible();
   await expect(page.getByTestId("feld-sitzung-unbekannt")).toHaveAttribute("role", "alert");
+});
+
+/**
+ * EYT-113 Inkrement 2: /kosten ohne API — das Server-Gate weiss NICHTS und
+ * handelt das fail-closed: "Anmeldung nicht pruefbar" statt irgendeiner
+ * Kostenflaeche. Nichtwissen ist nicht "abgemeldet" (kein
+ * `kosten-unauthenticated`) und erst recht keine Freigabe (kein Lade- oder
+ * Inhaltszustand) — dieselbe Unterscheidung wie im /feld-Nachweis oben.
+ *
+ * Zusaetzlich die LADEGRENZE im billigsten Job: im Unbekannt-Zustand
+ * referenziert das Dokument keine Kosten-Client-Chunks und der Browser
+ * fordert keinen an. Welche Dateien das sind, wechselt mit jedem Build; die
+ * Menge wird deshalb zur Laufzeit aus `.next/static/chunks/*.js` abgeleitet —
+ * dieselben drei Marker wie im auth-journey (`kostenChunkDateien` dort), je
+ * genau EINE Quelldatei:
+ *
+ *   - `eyt-kosten-ansicht`  (components/kosten-ansicht.tsx)
+ *   - `kosten-laedt`        (components/kosten-zugang.tsx)
+ *   - `saetze-laedt`        (components/rate-management.tsx)
+ *
+ * Leere Menge => Wurf, nicht leere Rueckgabe: ein Waechter, der nichts
+ * findet, wachte sonst still ueber nichts. Gegenmutation: das Gate aus
+ * `app/(werkbank)/kosten/page.tsx` entfernen — die Route referenziert die
+ * Chunks im Unbekannt-Zustand wieder; oder einen Marker unten verschreiben —
+ * die Ableitung wirft.
+ */
+function kostenChunkDateien(): string[] {
+  const chunkVerzeichnis = join(__dirname, "..", ".next", "static", "chunks");
+  const marker = ["eyt-kosten-ansicht", "kosten-laedt", "saetze-laedt"] as const;
+  const dateien = readdirSync(chunkVerzeichnis)
+    .filter((name) => name.endsWith(".js"))
+    .filter((name) => {
+      const inhalt = readFileSync(join(chunkVerzeichnis, name), "utf8");
+      return marker.some((m) => inhalt.includes(m));
+    });
+  if (dateien.length === 0) {
+    throw new Error(
+      "[shell-smoke] EYT-113: kein Chunk unter .next/static/chunks traegt einen der drei " +
+        "Kosten-Marker — die Ladegrenzen-Zusicherung waere vakuos.",
+    );
+  }
+  return dateien;
+}
+
+test("EYT-113: /kosten ohne API zeigt 'Anmeldung nicht pruefbar', keine Kosten-Chunks", async ({
+  page,
+}) => {
+  const kostenChunks = kostenChunkDateien();
+  // Sammler VOR der Navigation — sonst fehlte genau die erste Anfrage.
+  const chunkAnfragen: string[] = [];
+  page.on("request", (anfrage) => {
+    const pfad = new URL(anfrage.url()).pathname;
+    if (pfad.startsWith("/_next/static/chunks/")) chunkAnfragen.push(pfad);
+  });
+
+  await page.goto("/kosten");
+  await expect(page.getByTestId("kosten-sitzung-unbekannt")).toBeVisible();
+  // Die Fehlerflaeche ist assertiv — dieselbe Pruefung wie im /feld-Nachweis;
+  // bewusst NICHT getByRole("alert") ohne Filter (Nexts Route-Announcer).
+  await expect(page.getByTestId("kosten-sitzung-unbekannt")).toHaveAttribute("role", "alert");
+
+  // Nichtwissen ist weder "abgemeldet" noch irgendein Freigabezustand.
+  await expect(page.getByTestId("kosten-unauthenticated")).toHaveCount(0);
+  await expect(page.getByTestId("kosten-laedt")).toHaveCount(0);
+  await expect(page.getByTestId("kosten-flaeche-laedt")).toHaveCount(0);
+
+  // Netzseite der Ladegrenze: kein Kosten-Chunk wurde angefordert …
+  const geladeneKostenChunks = chunkAnfragen.filter((pfad) =>
+    kostenChunks.some((datei) => pfad.includes(datei)),
+  );
+  expect(geladeneKostenChunks, "angeforderte Kosten-Chunks").toEqual([]);
+
+  // … und Dokumentseite: schon die REFERENZ im HTML waere das Leck, nicht
+  // erst der erfolgreiche Abruf (ein Browser mit Cache fordert nichts an und
+  // truege die Referenz trotzdem).
+  const inhalt = await page.content();
+  for (const datei of kostenChunks) {
+    expect(inhalt, `${datei} steht im Dokument`).not.toContain(datei);
+  }
 });

@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { IdSchema } from "@easytree/contracts";
-import { Card, PageHeader } from "@easytree/ui";
+import { PageHeader } from "@easytree/ui";
 
-import { KostenAnsicht } from "../../../components/kosten-ansicht";
-import { KostenZugang } from "../../../components/kosten-zugang";
+import { KostenFlaeche } from "../../../components/kosten-flaeche";
+import { KostenGrenze } from "../../../components/kosten-grenze";
+import { leseKostenFreigabe } from "../../../lib/kosten-freigabe";
 
 export const metadata: Metadata = { title: "Kosten — easyTree" };
 
@@ -23,16 +24,51 @@ export const metadata: Metadata = { title: "Kosten — easyTree" };
  * Kein stiller Default: ein unbrauchbarer Parameter wird SICHTBAR abgelehnt und
  * das Gateway gar nicht erst gerufen (dasselbe Muster wie `/planung`). Ein
  * mehrfach angegebener Parameter ist keine Id, sondern eine mehrdeutige Angabe.
+ *
+ * Seit EYT-113 Inkrement 2 steht VOR jedem Kosteninhalt die serverseitige
+ * Ladegrenze: `leseKostenFreigabe()` prueft das `costs.read` der
+ * AUSGEWAEHLTEN Organisation, fail-closed — jeder Verweigerungszustand
+ * rendert `KostenGrenze` statt der Kosten-Client-Komponenten. Die
+ * `headers()`/`cookies()`-Lesezugriffe in `leseKostenFreigabe` machen die
+ * Route dynamisch; das ist gewollt (EYT-126: nichts davon darf zur Bauzeit
+ * festgeschrieben werden).
  */
 export default async function KostenPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const freigabe = await leseKostenFreigabe();
   const params = await searchParams;
   const roh = params["snapshot"];
   const geprueft =
     roh === undefined ? null : IdSchema.safeParse(typeof roh === "string" ? roh : "");
+
+  // Client-seitige Importgrenze (EYT-113 Inkrement 2, D4 Stufe 3): die Seite
+  // verweist statisch NUR auf die kostenfreie `KostenFlaeche`; die
+  // eigentlichen Kosten-Client-Komponenten laedt erst deren `next/dynamic`.
+  // Stufe 2 (`await import()` im gewaehrten Zweig) reichte nicht — gemessen
+  // am 29.08.2026: Next 16.2.11/Turbopack schreibt die gesamte
+  // Client-Referenz-Chunkliste der Route als unbedingte `<script async>`-Tags
+  // in den Dokumentkopf, die Kosten-Chunks erreichten den verweigerten
+  // Browser trotzdem. Nur Lazy-Chunks im CLIENT-Modulgraphen stehen weder als
+  // Route-Entry noch im Client-Referenz-Manifest der Seite und werden erst
+  // angefordert, wenn der gewaehrte Zweig tatsaechlich rendert; der
+  // Journey-Nachweis (member, /kosten und /kosten/stundensaetze) misst genau
+  // das.
+  let inhalt: ReactNode;
+  if (freigabe.art !== "gewaehrt") {
+    inhalt = <KostenGrenze freigabe={freigabe} />;
+  } else {
+    inhalt = (
+      // Bei einem Parameterfehler ist `snapshotId` bewusst `null`: die
+      // Flaeche rendert dann den Fehlerhinweis und liest die Id nie.
+      <KostenFlaeche
+        snapshotId={geprueft !== null && geprueft.success ? geprueft.data : null}
+        parameterfehler={geprueft !== null && !geprueft.success}
+      />
+    );
+  }
 
   return (
     /*
@@ -53,25 +89,7 @@ export default async function KostenPage({
         title="Kosten"
         description="Geplante Personalkosten je Baustelle und Tag — aus veröffentlichten Planversionen, bis zur Einzelposition."
       />
-      <KostenZugang>
-        {geprueft !== null && !geprueft.success ? (
-          <p data-testid="kosten-parameterfehler" role="alert">
-            Keine gültige Snapshot-Id in der Adresse. Erwartet wird
-            `?snapshot=&lt;id-aus-der-Kostenansicht&gt;`.
-          </p>
-        ) : (
-          <KostenAnsicht snapshotId={geprueft === null ? null : geprueft.data} />
-        )}
-        <Card title="Stundensätze">
-          <p>
-            Interne Netto-Stundensätze je Mitarbeiter, versioniert mit Gültigkeit — die Grundlage
-            jeder Kostenberechnung.
-          </p>
-          <p>
-            <Link href="/kosten/stundensaetze">Zur Stundensatzverwaltung</Link>
-          </p>
-        </Card>
-      </KostenZugang>
+      {inhalt}
     </section>
   );
 }

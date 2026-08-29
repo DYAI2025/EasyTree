@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { ErrorState } from "@easytree/ui";
 
 import { FeldShell } from "../../components/feld/feld-shell";
-import { leseServerSitzung } from "../../lib/feld/sitzung-server";
+import { leseServerSitzung } from "../../lib/sitzung-server";
 
 export const metadata: Metadata = { title: "Feld — easyTree" };
 
