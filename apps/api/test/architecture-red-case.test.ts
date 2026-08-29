@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { evaluate, findStarReExports } from "./architecture/rules";
+import { evaluate, findKostenSeitenOhneServerGate, findStarReExports } from "./architecture/rules";
 import { collectSourceFiles, extractImports } from "./architecture/scan";
 
 let root: string;
@@ -290,6 +290,53 @@ describe("Rot-Fall", () => {
       .filter((v) => v.file === "packages/ui/src/ok.tsx");
     expect(gemeldet).toEqual([]);
     rmSync(join(root, "packages/ui"), { recursive: true, force: true });
+  });
+
+  it("faengt eine Kosten-Seite ohne Server-Gate — und laesst die mit Gate durch", () => {
+    // Der Gate-Bypass (EYT-113 Inkrement 2): eine Kosten-Seite referenziert
+    // Kosteninhalt, ruft aber die Ladegrenze nie. Sie bekommt bewusst einen
+    // ANDEREN Import — die Seite ist nicht importfrei, das Gate fehlt gezielt.
+    write("apps/web/lib/kosten-freigabe.ts", "export const leseKostenFreigabe = 1;\n");
+    write("apps/web/components/kosten-flaeche.tsx", "export const KostenFlaeche = 1;\n");
+    write(
+      "apps/web/app/(werkbank)/kosten/page.tsx",
+      'import { leseKostenFreigabe } from "../../../lib/kosten-freigabe";\nexport default leseKostenFreigabe;\n',
+    );
+    write(
+      "apps/web/app/(werkbank)/kosten/stundensaetze/page.tsx",
+      'import { KostenFlaeche } from "../../../../components/kosten-flaeche";\nexport default KostenFlaeche;\n',
+    );
+    const dateien = [...collectSourceFiles(root, "apps"), ...collectSourceFiles(root, "packages")];
+    const found = findKostenSeitenOhneServerGate(dateien, extractImports(root, dateien));
+    expect(found.map((v) => `${v.file} [${v.rule}]`)).toEqual([
+      "apps/web/app/(werkbank)/kosten/stundensaetze/page.tsx [kosten-server-gate]",
+    ]);
+    // Gegenprobe: MIT Gate (ueber den relativen, vom Scanner AUFGELOESTEN
+    // Pfad) ist die Liste leer — eine Regel, die alles meldet, waere sonst
+    // genauso "rot-faehig".
+    write(
+      "apps/web/app/(werkbank)/kosten/stundensaetze/page.tsx",
+      'import { leseKostenFreigabe } from "../../../../lib/kosten-freigabe";\nexport default leseKostenFreigabe;\n',
+    );
+    const dateien2 = [...collectSourceFiles(root, "apps"), ...collectSourceFiles(root, "packages")];
+    expect(findKostenSeitenOhneServerGate(dateien2, extractImports(root, dateien2))).toEqual([]);
+    rmSync(join(root, "apps/web"), { recursive: true, force: true });
+  });
+
+  it("geht rot, wenn unter kosten/ weniger als zwei Seiten liegen (Nicht-Leerlauf)", () => {
+    // Umbenennung/Glob-Rost: das Verzeichnis heisst ploetzlich anders, die
+    // Regel sieht 0 statt 2 Seiten — und meldet GENAU das, statt still gruen
+    // an einem leeren Geltungsbereich vorbeizulaufen.
+    write("apps/web/lib/kosten-freigabe.ts", "export const leseKostenFreigabe = 1;\n");
+    write(
+      "apps/web/app/(werkbank)/kostenrechnung/page.tsx",
+      'import { leseKostenFreigabe } from "../../../lib/kosten-freigabe";\nexport default leseKostenFreigabe;\n',
+    );
+    const dateien = [...collectSourceFiles(root, "apps"), ...collectSourceFiles(root, "packages")];
+    const found = findKostenSeitenOhneServerGate(dateien, extractImports(root, dateien));
+    expect(found.map((v) => v.rule)).toEqual(["kosten-server-gate"]);
+    expect(found[0]?.message).toContain("mindestens 2");
+    rmSync(join(root, "apps/web"), { recursive: true, force: true });
   });
 
   it("ist am sauberen Baum gruen — der Rot-Fall kommt von den Verstoessen, nicht vom Aufbau", () => {
