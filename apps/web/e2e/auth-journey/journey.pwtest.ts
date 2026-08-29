@@ -3572,3 +3572,281 @@ test("EYT-113: ohne Sitzung fuehrt /feld zur Anmeldung", async ({ browser }) => 
     await kontext.close();
   }
 });
+
+/**
+ * EYT-113 Inkrement 2 — der PO-Entscheidungskern (29.08.2026): die
+ * Kosten-Ladegrenze folgt der AUSGEWAEHLTEN Organisation, nicht irgendeiner.
+ *
+ * Reisender A traegt `costs.read` in der Reiseorganisation — und bekommt fuer
+ * die Dauer dieses Nachweises eine ZWEITE Organisation geliehen, in der er
+ * blosser `member` ohne Kostenrecht ist (`eyt113-zweitorg-an.sql`, Rueckgabe
+ * `eyt113-zweitorg-aus.sql`; Praemissen- und Nachbedingungswaechter dort).
+ * Erst dieses Paar unterscheidet die richtige Grenze von einer Any-Org-
+ * Pruefung: derselbe Benutzer, dasselbe Recht, und trotzdem entscheidet
+ * allein die Auswahl.
+ *
+ * Jede Phase nennt ihr Requirement und die Gegenmutation, die sie rot macht:
+ *
+ * - (a) REQ-L1c — Any-Org-Rueckfall in `kostenFreigabe` (bei fehlender
+ *   Auswahl die erste Organisation nehmen): statt "Organisation waehlen"
+ *   stuende der Kosteninhalt, und die Chunkmenge waere nicht leer.
+ * - (b) REQ-L1b — `kostenFreigabe` prueft `costs.read` ueber ALLE
+ *   Organisationen statt ueber die ausgewaehlte: die Zweitorganisation wuerde
+ *   gewaehrt, weil A das Recht ANDERSWO traegt.
+ * - (c) REQ-L6 — das Server-Gate aus `stundensaetze/page.tsx` entfernen: die
+ *   Route referenziert und laedt die Kosten-Chunks wieder.
+ * - (d) REQ-L5 — `pruefeRecht` in `MembershipCostAccessPolicy` auf "immer ok":
+ *   der direkte API-Aufruf mit dem Zweitorg-Header antwortete 200.
+ * - (e) REQ-L4 — den `router.refresh()` aus `setOrganisation`
+ *   (`app/providers.tsx`) entfernen: die Server-Flaeche folgte der Auswahl
+ *   nicht, `kosten-kein-snapshot` erschiene nie.
+ * - (f) — den Cookie-Startwert (`initialeOrganisationId`) nicht mehr lesen:
+ *   nach dem Reload stuende wieder "Organisation waehlen".
+ * - (g) — den Selector-Cookie als AUTORITAET lesen (Freigabe ohne Abgleich
+ *   gegen die Session): eine fremde Id im Cookie oeffnete den Kostenbereich,
+ *   statt fail-closed in "Organisation waehlen" zu fallen.
+ */
+const ZWEITORG_ID = "00000000-0000-4000-8000-00000000e213";
+const ZWEITORG_NAME = "EYT-113 Zweitorganisation";
+/** Eine Id, die in KEINER Session steht — die Manipulationssonde in (g). */
+const FREMDE_AUSWAHL = "00000000-0000-4000-8000-00000000dead";
+
+test("EYT-113 I2: die Kosten-Ladegrenze folgt der ausgewaehlten Organisation", async ({
+  browser,
+}) => {
+  const email = pflicht("EASYTREE_JOURNEY_EMAIL_A");
+  const passwort = pflicht("EASYTREE_JOURNEY_PASSWORT_A");
+  const idA = pflicht("EASYTREE_JOURNEY_USER_A");
+  const verwaltung = pflicht("EASYTREE_JOURNEY_ADMIN_DB_URL");
+
+  const kontext = await browser.newContext();
+  const seite = await kontext.newPage();
+  const bericht: Record<string, unknown> = {
+    ticket: "EYT-113",
+    inkrement: 2,
+    benutzer: "A mit zwei Organisationen",
+  };
+  ZUSAMMENFASSUNGEN.set(test.info().testId, { datei: "zusammenfassung-mehrorg.json", bericht });
+
+  let fehlerAusFall: [unknown] | null = null;
+  try {
+    // Die Leihgabe steht im `try`, weil das Skript die Zeilen committet,
+    // BEVOR es seine Nachbedingung prueft — dieselbe Begruendung wie in 9g2.
+    const an = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt113-zweitorg-an.sql"),
+      ["-v", `benutzer_a=${idA}`],
+      "[eyt113-zweitorg-an]",
+    );
+    console.log(`  ${an}`);
+    bericht["leihgabe"] = an;
+
+    // Chunkmenge und Sammler VOR der ersten Navigation — sonst fehlte genau
+    // die Anfrage, die beim Einstieg faellt (dasselbe Muster wie 3b/Feld).
+    const kostenChunks = kostenChunkDateien();
+    const chunkAnfragen: string[] = [];
+    seite.on("request", (anfrage) => {
+      const pfad = new URL(anfrage.url()).pathname;
+      if (pfad.startsWith("/_next/static/chunks/")) chunkAnfragen.push(pfad);
+    });
+    const kostenChunkAnfragen = (): string[] =>
+      chunkAnfragen.filter((pfad) => kostenChunks.some((datei) => pfad.includes(datei)));
+
+    await test.step("a — ohne Auswahl faellt /kosten fail-closed auf 'Organisation waehlen' (REQ-L1c)", async () => {
+      // A ist owner der Reiseorganisation -> Leitungsrolle -> die Anmeldung
+      // fuehrt in die Werkbank (/kosten). Mit ZWEI Organisationen und ohne
+      // Selector-Cookie waehlt NIEMAND still aus (PO-Entscheidung): der
+      // Server rendert die Auswahlaufforderung, keine Kostenflaeche.
+      await seite.goto("/anmelden");
+      await seite.getByLabel("E-Mail").fill(email);
+      await seite.getByLabel("Passwort").fill(passwort);
+      await seite.getByRole("button", { name: "Anmelden" }).click();
+
+      const angekommen = seite.waitForURL("**/kosten");
+      const abgelehnt = seite
+        .getByRole("alert")
+        .filter({ hasText: "Anmeldung fehlgeschlagen" })
+        .waitFor({ state: "visible" });
+      await Promise.race([angekommen, abgelehnt]);
+      await expect(
+        seite.getByRole("alert").filter({ hasText: "Anmeldung fehlgeschlagen" }),
+      ).toHaveCount(0);
+      await angekommen;
+
+      await expect(seite.getByTestId("kosten-org-auswahl")).toBeVisible();
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-unauthenticated")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-laedt")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-flaeche-laedt")).toHaveCount(0);
+      expect(kostenChunkAnfragen(), "a: angeforderte Kosten-Chunks").toEqual([]);
+      bericht["a_keine_auswahl"] = {
+        oberflaeche: "kosten-org-auswahl",
+        kosten_chunk_anfragen: [...kostenChunkAnfragen()],
+      };
+    });
+
+    await test.step("b — die Zweitorganisation auswaehlen: Forbidden, keine Chunks (REQ-L1b)", async () => {
+      // Die ECHTE Bedienung: der Picker der Kopfleiste (er erscheint erst ab
+      // zwei Organisationen) schreibt den Selector-Cookie und laesst die
+      // Server-Flaeche per `router.refresh()` folgen. As Recht in der
+      // REISEorganisation darf hier nichts gewaehren — das ist der Kern der
+      // PO-Entscheidung.
+      await seite.getByLabel("Organisation").selectOption({ label: ZWEITORG_NAME });
+
+      const forbidden = seite.getByTestId("kosten-forbidden");
+      await expect(forbidden).toBeVisible();
+      // Der Banner nennt die AUSGEWAEHLTE Organisation: die Ablehnung kommt
+      // aus der Zweitorganisation, nicht aus einer Any-Org-Aussage.
+      await expect(forbidden).toContainText(ZWEITORG_NAME);
+      await expect(seite.getByTestId("kosten-org-auswahl")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toHaveCount(0);
+      expect(kostenChunkAnfragen(), "b: angeforderte Kosten-Chunks").toEqual([]);
+
+      await seite.screenshot({
+        path: test.info().outputPath("eyt113-mehrorg-forbidden.png"),
+        fullPage: true,
+      });
+      bericht["b_zweitorg_forbidden"] = {
+        oberflaeche: "kosten-forbidden",
+        kosten_chunk_anfragen: [...kostenChunkAnfragen()],
+      };
+    });
+
+    await test.step("c — auch die direkte URL /kosten/stundensaetze bleibt zu (REQ-L6)", async () => {
+      await seite.goto("/kosten/stundensaetze");
+      await expect(seite.getByTestId("kosten-forbidden")).toBeVisible();
+      await expect(seite.getByTestId("saetze-flaeche-laedt")).toHaveCount(0);
+      expect(kostenChunkAnfragen(), "c: angeforderte Kosten-Chunks").toEqual([]);
+
+      // Dokumentseite der Ladegrenze: schon die REFERENZ im HTML ist das
+      // Leck, nicht erst der erfolgreiche Abruf (Begruendung woertlich im
+      // Feld-Nachweis oben).
+      const inhalt = await seite.content();
+      for (const datei of kostenChunks) {
+        expect(inhalt, `c: ${datei} steht im Dokument`).not.toContain(datei);
+      }
+      bericht["c_direkte_url"] = {
+        oberflaeche: "kosten-forbidden",
+        kosten_chunk_anfragen: [...kostenChunkAnfragen()],
+      };
+    });
+
+    await test.step("d — die API lehnt den Zweitorg-Header unabhaengig von der Oberflaeche ab (REQ-L5)", async () => {
+      // Der Auswahlheader waehlt nur aus, er autorisiert nichts: in der
+      // Zweitorganisation ist A member ohne `costs.read`, also 403 — am
+      // RECHT, nicht an der Mitgliedschaft.
+      const antwort = await seite.request.get("/api/v1/kosten/mitarbeiter", {
+        headers: { "X-EasyTree-Organization-Id": ZWEITORG_ID },
+      });
+      expect(antwort.status(), "d: Kosten-API mit Zweitorg-Header").toBe(403);
+      expect(await antwort.text()).not.toContain(MITARBEITER_NAME);
+      bericht["d_api_zweitorg"] = { status: antwort.status(), erwartet: 403 };
+    });
+
+    await test.step("e — die Reiseorganisation auswaehlen: Inhalt UND Chunks kommen (REQ-L4)", async () => {
+      // Die Positivkontrolle im SELBEN Kontext: erst der Wechsel auf die
+      // berechtigte Organisation oeffnet die Flaeche — und erst jetzt fordert
+      // der Browser die Kosten-Chunks an. Ohne sie sagte die leere Menge in
+      // (a)-(c) nichts (guard-exists-but-never-visits-the-surface).
+      await seite.goto("/kosten");
+      await expect(seite.getByTestId("kosten-forbidden")).toBeVisible();
+      await seite.getByLabel("Organisation").selectOption({ label: ORG_NAME });
+
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toBeVisible();
+      await expect(seite.getByLabel("Von Woche")).toBeVisible();
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      expect(
+        kostenChunkAnfragen().length,
+        `e: Kosten-Chunks [${kostenChunks.join(", ")}] — keiner wurde angefordert`,
+      ).toBeGreaterThan(0);
+
+      // Der Selector-Cookie traegt jetzt genau die Reiseorganisation.
+      const orgCookie = cookie(await kontext.cookies(), "eyt_org");
+      expect(orgCookie.value).toBe(ORG_ID);
+      bericht["e_reiseorg_gewaehrt"] = {
+        oberflaeche: "kosten-kein-snapshot",
+        kosten_chunk_anfragen: [...kostenChunkAnfragen()],
+        eyt_org: orgCookie.value,
+      };
+    });
+
+    await test.step("f — die Auswahl ueberlebt den Reload (Cookie-Startwert)", async () => {
+      await seite.reload();
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toBeVisible();
+      await expect(seite.getByTestId("kosten-org-auswahl")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      bericht["f_reload"] = { oberflaeche: "kosten-kein-snapshot" };
+    });
+
+    await test.step("g — ein manipulierter Selector-Cookie oeffnet NICHTS (fail-closed)", async () => {
+      // Der Selector ist Auswahl, nie Autoritaet: eine Id, die NICHT in der
+      // verifizierten Session steht, faellt serverseitig ersatzlos — zurueck
+      // in "Organisation waehlen", nicht in irgendeinen Kosteninhalt.
+      const anfragenVorManipulation = kostenChunkAnfragen().length;
+      await kontext.addCookies([
+        { name: "eyt_org", value: FREMDE_AUSWAHL, url: new URL(seite.url()).origin },
+      ]);
+      await seite.reload();
+
+      await expect(seite.getByTestId("kosten-org-auswahl")).toBeVisible();
+      await expect(seite.getByTestId("kosten-kein-snapshot")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-forbidden")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-laedt")).toHaveCount(0);
+      await expect(seite.getByTestId("kosten-flaeche-laedt")).toHaveCount(0);
+
+      // Netz UND Dokument, aus einem gemessenen Grund BEIDE: (e) hat die
+      // Chunks in DIESEM Kontext bereits geladen — ein Browser mit Cache
+      // fordert eine referenzierte Datei unter Umstaenden gar nicht neu an,
+      // die Anfragenzaehlung allein koennte ein Leck also uebersehen. Die
+      // Dokumentpruefung traegt deshalb den Beweis (keine Referenz), die
+      // Zaehlung bleibt als zusaetzlicher Riegel stehen.
+      expect(kostenChunkAnfragen().length, "g: neue Kosten-Chunk-Anfragen").toBe(
+        anfragenVorManipulation,
+      );
+      const inhalt = await seite.content();
+      for (const datei of kostenChunks) {
+        expect(inhalt, `g: ${datei} steht im Dokument`).not.toContain(datei);
+      }
+      bericht["g_manipulation"] = {
+        cookie_wert: FREMDE_AUSWAHL,
+        oberflaeche: "kosten-org-auswahl",
+        chunk_anfragen_vorher: anfragenVorManipulation,
+        chunk_anfragen_nachher: kostenChunkAnfragen().length,
+      };
+    });
+  } catch (e) {
+    fehlerAusFall = [e];
+  }
+
+  // Die Rueckgabe laeuft UNBEDINGT und ist idempotent — Wortlaut und
+  // Rangfolge wie in 9c5/9g2. Eine ueberlebende Leihgabe machte Schritt 5
+  // der Hauptreise ("genau eine Organisation") im naechsten Lauf rot-falsch
+  // und ist damit der dringendere Befund.
+  let fehlerAusRueckgabe: [unknown] | null = null;
+  try {
+    const aus = psqlMitMarker(
+      verwaltung,
+      join(HIER, "eyt113-zweitorg-aus.sql"),
+      ["-v", `benutzer_a=${idA}`],
+      "[eyt113-zweitorg-aus]",
+    );
+    console.log(`  ${aus}`);
+    bericht["rueckgabe"] = aus;
+  } catch (e) {
+    fehlerAusRueckgabe = [e];
+  }
+
+  await kontext.close();
+
+  if (fehlerAusRueckgabe !== null && fehlerAusFall !== null) {
+    throw new AggregateError(
+      [fehlerAusRueckgabe[0], fehlerAusFall[0]],
+      "[auth-journey] EYT-113 I2: die Rueckgabe der geliehenen Zweitorganisation UND der " +
+        "Mehr-Org-Nachweis sind gescheitert. Beide Fehler stehen in `errors`; die " +
+        "ueberlebende Leihgabe ist der dringendere Befund.",
+    );
+  }
+  if (fehlerAusRueckgabe !== null) throw fehlerAusRueckgabe[0];
+  if (fehlerAusFall !== null) throw fehlerAusFall[0];
+});
