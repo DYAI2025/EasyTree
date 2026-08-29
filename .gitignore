@@ -40,3 +40,9 @@ _sprint2-transfer/
 .open-next/
 .wrangler/
 .wrangler-dry/
+
+# Claude-Code-Sitzungskonfiguration. Das Repo ist oeffentlich, und mit
+# .claude/rules/ ist .claude/ erstmals teilweise getrackt: ohne diesen Eintrag
+# veroeffentlicht ein `git add .claude` jeden spaeter in settings.local.json
+# abgelegten Token. Dieselbe Falle wie penpot/ weiter oben.
+/.claude/settings.local.json

@@ -133,6 +133,25 @@ before acting on it. Do **not** use local `master` as the reference — compare 
   plus one shared deterministic validator. **EYT-91** is the seed-UUID bug. Publish itself is
   explicitly deferred out of Sprint 4 ("Bewusst später" in EYT-50).
 
+## Sprint 7 — Binding UI/UX Acceptance Gate (temporary)
+
+Until Jira Sprint 7 (Sprint ID 579) is formally PO-accepted and closed,
+`.claude/rules/sprint-7-ui-ux-acceptance.md` is binding for all Sprint-7
+frontend/UI/UX/browser/accessibility/Playwright/visual-regression work. The
+rule file contains the full executable contract; it is loaded into every
+session via the import below.
+
+@.claude/rules/sprint-7-ui-ux-acceptance.md
+
+Key governance: acceptance journeys run the real Auth → API → PostgreSQL/RLS
+path — no mocks, clickdummies or placeholders as product acceptance; EYT-148
+is the final integrated UI/journey gate; Claude may report technical PASS but
+can never create human PO acceptance — the highest agent state is
+`READY_FOR_PO_VISUAL_REVIEW`; golden visual baselines require explicit PO
+approval (never an automatic `--update-snapshots`); re-read the current
+Jira/GitHub/Confluence state before acting. Guarded by
+`apps/api/test/sprint7-acceptance-rule-guardrails.test.ts`.
+
 ## Commands
 
 Node 22 (`.nvmrc`), pnpm 10.28.0 via corepack. **pnpm is the only permitted package manager.**

@@ -11,7 +11,14 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "../../.claude/rules/**",
+        "../../CLAUDE.md",
+        "../../docs/handoff/**",
+        "../../docs/evals/**"
+      ]
     }
   }
 }
