@@ -341,6 +341,15 @@ async function pruefeBarrierefreiheit(
  * - Die Kosten-Navigation unabhaengig von `costs.read` rendern (Schritt 6
  *   bliebe gruen, aber Schritt 11 nach dem Abmelden wuerde rot).
  * - Das Logout ohne loeschende Cookies (Schritt 12).
+ *   NACHTRAG EYT-113 Inkrement 2: `eyt_org` ist der bewusst SICHTBARE
+ *   Selector der Organisationsauswahl (nie Autorisierung, nie Geheimnis —
+ *   der Server prueft ihn gegen die echte Session). Schritt 11 prueft
+ *   seither die NAMENSMENGE der sichtbaren Cookies (Teilmenge von
+ *   { eyt_org }) und den Wert (exakt die Org-UUID, kein Punkt) statt Leere —
+ *   ein `eyt_access` ohne `HttpOnly` macht ihn also WEITERHIN rot, jeder
+ *   neue sichtbare Cookie ebenfalls. Und Schritt 12 sichert zusaetzlich zu,
+ *   dass das Abmelden den Selector loescht: Clear-Zweig
+ *   (`schreibeOrgAuswahl(null)`) in `app/providers.tsx` entfernen -> rot.
  * - `app.is_runtime_channel()` aus der Update-Policy von `plan_versions`
  *   entfernen (Migration 0015): Schritt 9c2 wird rot, weil PostgREST die
  *   Planversion dann tatsaechlich veroeffentlicht. Das ist der P1-Nachweis
@@ -2998,12 +3007,40 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     const speicher = await page.evaluate(() => ({
       local: Object.entries(localStorage).map(([k, v]) => `${k}=${String(v)}`),
       session: Object.entries(sessionStorage).map(([k, v]) => `${k}=${String(v)}`),
-      // Cookies, die JavaScript SEHEN kann — bei HttpOnly ist das keiner.
+      // Cookies, die JavaScript SEHEN kann — die Token-Cookies (HttpOnly)
+      // gehoeren NIE dazu.
       sichtbareCookies: document.cookie,
     }));
     expect(speicher.local).toEqual([]);
     expect(speicher.session).toEqual([]);
-    expect(speicher.sichtbareCookies).toBe("");
+
+    // Seit EYT-113 Inkrement 2 ist GENAU EIN sichtbares Cookie vorgesehen:
+    // `eyt_org`, der Selector der Organisationsauswahl (nie Autorisierung,
+    // nie Geheimnis — der Server prueft ihn gegen die real verifizierte
+    // Session, lib/kosten-freigabe.ts). Die Zusicherung prueft seither die
+    // NAMENSMENGE und den Wert statt Leere — jeder neue sichtbare Cookie
+    // macht sie rot: ein `eyt_access`/`eyt_refresh` ohne HttpOnly genauso
+    // wie jeder fremde Name, und ein Tokenwert im Selector faellt am
+    // Wertevergleich plus Punkt-Waechter.
+    const sichtbare = speicher.sichtbareCookies
+      .split(";")
+      .map((teil) => teil.trim())
+      .filter((teil) => teil !== "")
+      .map((teil) => {
+        const gleich = teil.indexOf("=");
+        return gleich === -1
+          ? { name: teil, wert: "" }
+          : { name: teil.slice(0, gleich), wert: teil.slice(gleich + 1) };
+      });
+    // Namensmenge: Teilmenge von { eyt_org } — strenger als die alte
+    // Leere-Zusicherung fuer alles, was nicht der Selector ist.
+    const fremdeNamen = sichtbare.map((c) => c.name).filter((name) => name !== "eyt_org");
+    expect(fremdeNamen).toEqual([]);
+    // Wert: exakt die Fixtur-Organisation — eine UUID, strukturell kein JWT.
+    const orgCookie = sichtbare.find((c) => c.name === "eyt_org");
+    expect(orgCookie?.wert).toBe(ORG_ID);
+    // Ein JWT traegt immer zwei Punkte, eine Org-UUID keinen einzigen.
+    expect(orgCookie?.wert).not.toContain(".");
 
     // `eyJ` ist der Anfang jedes base64url-kodierten JWT-Headers. Erscheint er
     // im gerenderten HTML, ist ein Token in den DOM geraten.
@@ -3013,7 +3050,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     schritte["11_browserspeicher"] = {
       localStorage: 0,
       sessionStorage: 0,
-      sichtbare_cookies: "",
+      sichtbare_cookies: speicher.sichtbareCookies,
       token_im_dom: false,
     };
   });
@@ -3025,6 +3062,16 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     const danach = await context.cookies();
     expect(danach.find((k) => k.name === "eyt_access")).toBeUndefined();
     expect(danach.find((k) => k.name === "eyt_refresh")).toBeUndefined();
+
+    // EYT-113: das Abmelden loescht auch den Selector `eyt_org`. Das ist der
+    // Clear-Zweig der Kompositionswurzel — onOrganisationChange(null) ->
+    // schreibeOrgAuswahl(null) in app/providers.tsx —, den sonst kein
+    // Nachweis ausuebt. Er feuert in einem React-Effekt NACH dem
+    // Abmelde-Commit, deshalb poll statt Einmal-Blick. Gegenmutation:
+    // Clear-Zweig in providers.tsx entfernen -> diese Zusicherung wird rot.
+    await expect
+      .poll(async () => (await context.cookies()).map((k) => k.name))
+      .not.toContain("eyt_org");
 
     // Nicht nur "das Cookie ist weg", sondern "der Server laesst nicht mehr
     // durch": ohne diese Zusicherung bewiese der Test nur, dass der Browser
@@ -3041,6 +3088,7 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
 
     schritte["12_abmeldung"] = {
       cookies_geloescht: true,
+      selector_geloescht: true,
       session_status: sitzung.status(),
       kosten_status: kosten.status(),
     };
