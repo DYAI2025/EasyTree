@@ -21,10 +21,12 @@
  * ## Gegenmutationen (je Zusicherung im Test benannt)
  *
  * Nach der Implementierung macht z. B. „das Gate aus `stundensaetze/page.tsx`
- * entfernen" die Stundensaetze-Haelfte rot, „`unbekannt` wie `abgemeldet`
- * behandeln" den Unterscheidungsfall, „Any-Org-Pruefung statt ausgewaehlter
- * Organisation" den `verboten`-Fall (die Flaeche naennte die falsche bzw.
- * keine Organisation).
+ * entfernen" die Stundensaetze-Haelfte rot (Mutation M1, ausgefuehrt) und „im
+ * `KostenGrenze`-Switch `unbekannt` wie `abgemeldet` rendern" den
+ * Unterscheidungsfall. WICHTIG: Mutationen in `lib/kosten-freigabe.ts` selbst
+ * (Any-Org-Rueckfall, unbekannt→abgemeldet im Gate) erreichen diese Suite
+ * NICHT — das Modul ist hier als Ganzes gemockt; sie werden von
+ * `kosten-freigabe.test.ts` gemessen (Mutationen M2/M3, ausgefuehrt).
  *
  * ## Warum die Freigabe als GANZES Modul gemockt ist
  *
@@ -152,8 +154,11 @@ describe.each(["/kosten", "/kosten/stundensaetze"] as const)(
 
     it("unbekannt: eigene Flaeche, NICHT der Abgemeldet-Banner", async () => {
       await seiteRendern(route, { art: "unbekannt" });
-      // Gegenmutation: `unbekannt` im Server-Gate wie `abgemeldet` behandeln —
-      // dann fehlt die erste Testid und die zweite erscheint.
+      // Gegenmutation: im `KostenGrenze`-Switch den `unbekannt`-Fall wie
+      // `abgemeldet` rendern — dann fehlt die erste Testid und die zweite
+      // erscheint. (Die Lib-Mutation `unbekannt→abgemeldet` im Gate misst
+      // diese Suite NICHT — das Freigabemodul ist gemockt; siehe M3 in
+      // `kosten-freigabe.test.ts`.)
       expect(screen.getByTestId("kosten-sitzung-unbekannt")).toBeTruthy();
       expect(screen.queryByTestId("kosten-unauthenticated")).toBeNull();
     });
