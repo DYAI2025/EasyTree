@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import AxeBuilder from "@axe-core/playwright";
@@ -396,6 +396,44 @@ async function pruefeBarrierefreiheit(
 // Playwright-Konfigurationen benutzen aus demselben Grund keine.
 const HIER = __dirname;
 const ARTEFAKTE = join(HIER, "..", "..", "test-results", "auth-journey");
+
+/**
+ * EYT-113 Inkrement 2 — die Kosten-Chunkmenge des LAUFENDEN Builds.
+ *
+ * Die serverseitige Ladegrenze verspricht: in einem Verweigerungszustand
+ * referenziert die Kostenroute KEINE Kosten-Client-Komponente — also weder
+ * eine Chunk-Anfrage noch eine Chunk-Referenz im Dokument. Welche Dateien
+ * das sind, wechselt mit jedem Build (die Namen tragen Hashes); abgeleitet
+ * wird die Menge deshalb zur LAUFZEIT aus `.next/static/chunks/*.js`, ueber
+ * drei Marker, die je genau EINE Quelldatei besitzt:
+ *
+ *   - `eyt-kosten-ansicht`  (components/kosten-ansicht.tsx)
+ *   - `kosten-laedt`        (components/kosten-zugang.tsx)
+ *   - `saetze-laedt`        (components/rate-management.tsx)
+ *
+ * Leere Menge => Wurf, nicht leere Rueckgabe: ein Waechter, der nichts findet,
+ * wachte sonst still ueber nichts (`guard-exists-but-never-visits-the-surface`).
+ * Gegenmutation: einen der drei Marker verschreiben — bei nur einem faellt die
+ * Menge auf eine Datei zusammen und die Positivkontrolle unten schrumpft, bei
+ * allen dreien wirft diese Funktion.
+ */
+function kostenChunkDateien(): string[] {
+  const chunkVerzeichnis = join(HIER, "..", "..", ".next", "static", "chunks");
+  const marker = ["eyt-kosten-ansicht", "kosten-laedt", "saetze-laedt"] as const;
+  const dateien = readdirSync(chunkVerzeichnis)
+    .filter((name) => name.endsWith(".js"))
+    .filter((name) => {
+      const inhalt = readFileSync(join(chunkVerzeichnis, name), "utf8");
+      return marker.some((m) => inhalt.includes(m));
+    });
+  if (dateien.length === 0) {
+    throw new Error(
+      "[auth-journey] EYT-113: kein Chunk unter .next/static/chunks traegt einen der drei " +
+        "Kosten-Marker — die Ladegrenzen-Zusicherungen waeren vakuos.",
+    );
+  }
+  return dateien;
+}
 
 const ORG_ID = "00000000-0000-4000-8000-00000000e201";
 const ORG_NAME = "E2E Reiseorganisation";
@@ -868,6 +906,17 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     if (pfad.startsWith("/api/")) apiAufrufe.push(`${anfrage.method()} ${pfad}`);
   });
 
+  /**
+   * EYT-113: jede angeforderte Chunk-Datei — die Positivkontrolle der
+   * Ladegrenze. VOR der ersten Navigation registriert, sonst fehlte genau
+   * die Anfrage, die beim Einstieg in `/kosten` faellt.
+   */
+  const chunkAnfragen: string[] = [];
+  page.on("request", (anfrage) => {
+    const pfad = new URL(anfrage.url()).pathname;
+    if (pfad.startsWith("/_next/static/chunks/")) chunkAnfragen.push(pfad);
+  });
+
   const bericht: Record<string, unknown> = {
     ticket: "EYT-106",
     paket: "B",
@@ -918,6 +967,30 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     // Schrittes bleibt dieselbe: angemeldet, berechtigt, und OHNE Zahlen.
     await expect(page.getByTestId("kosten-kein-snapshot")).toBeVisible();
     await expect(page.getByLabel("Von Woche")).toBeVisible();
+  });
+
+  await test.step("3b — EYT-113 Positivkontrolle: der Berechtigte laedt die Kosten-Chunks", async () => {
+    // Die Gegenseite des member-Nachweises in der Feld-Reise unten: nur wenn
+    // die abgeleitete Chunkmenge beim BERECHTIGTEN nachweislich angefordert
+    // wird, sagt ihr Ausbleiben beim Unberechtigten etwas aus. Gegenmutation:
+    // einen Marker in `kostenChunkDateien()` verschreiben — die Ableitung
+    // wirft, oder diese Schnittmenge wird leer.
+    const kostenChunks = kostenChunkDateien();
+    const geladeneKostenChunks = chunkAnfragen.filter((pfad) =>
+      kostenChunks.some((datei) => pfad.endsWith(`/${datei}`)),
+    );
+    expect(
+      geladeneKostenChunks.length,
+      `Kosten-Chunks [${kostenChunks.join(", ")}] — keiner wurde angefordert`,
+    ).toBeGreaterThan(0);
+    await page.screenshot({
+      path: test.info().outputPath("eyt113-kosten-positiv.png"),
+      fullPage: true,
+    });
+    schritte["3b_eyt113_positivkontrolle"] = {
+      kosten_chunks: kostenChunks,
+      angefordert: geladeneKostenChunks,
+    };
   });
 
   await test.step("4 — Sicherheitsnachweis: beide Sitzungscookies sind HttpOnly und Strict", async () => {
@@ -3352,6 +3425,68 @@ test("EYT-113: ein member erreicht die Feld-Shell, die Werkbank bleibt zu", asyn
         planung_fenster: fenster.status(),
         kosten_mitarbeiter: mitarbeiter.status(),
         erwartet: 403,
+      };
+    });
+
+    await test.step("EYT-113 Inkrement 2: die Kostenrouten liefern dem member keine Kosten-Chunks", async () => {
+      // Serverseitige LADEGRENZE, nicht nur Anzeige-Grenze: fuer einen member
+      // ohne `costs.read` darf die Kostenroute die Kosten-Client-Komponenten
+      // gar nicht erst referenzieren — kein Chunk-Abruf, keine Chunk-Referenz
+      // im Dokument, keine Wirtschaftsdaten. Die Positivkontrolle dazu steht
+      // in Schritt 3b der Hauptreise: dort fordert der BERECHTIGTE dieselbe
+      // abgeleitete Chunkmenge nachweislich an.
+      const kostenChunks = kostenChunkDateien();
+
+      // Sammler VOR der Navigation — sonst fehlte genau die erste Anfrage.
+      const chunkAnfragenB: string[] = [];
+      seite.on("request", (anfrage) => {
+        const pfad = new URL(anfrage.url()).pathname;
+        if (pfad.startsWith("/_next/static/chunks/")) chunkAnfragenB.push(pfad);
+      });
+
+      for (const route of ["/kosten", "/kosten/stundensaetze"] as const) {
+        await seite.goto(route);
+        // Der vorgesehene Endzustand als Anker: erst wenn die Forbidden-
+        // Flaeche steht, misst die Inhaltspruefung den fertigen Zustand und
+        // nicht einen Ladezwischenstand.
+        await expect(seite.getByTestId("kosten-forbidden"), `${route}: Forbidden`).toBeVisible();
+
+        // Netzseite der Ladegrenze. Gegenmutation: das Gate aus
+        // `kosten/page.tsx` bzw. `stundensaetze/page.tsx` entfernen — die
+        // Route fordert die Kosten-Chunks dann wieder an.
+        const geladeneKostenChunks = chunkAnfragenB.filter((pfad) =>
+          kostenChunks.some((datei) => pfad.includes(datei)),
+        );
+        expect(geladeneKostenChunks, `${route}: angeforderte Kosten-Chunks`).toEqual([]);
+
+        // Dokumentseite der Ladegrenze: schon die REFERENZ im HTML ist das
+        // Leck, nicht erst der erfolgreiche Abruf (ein Browser mit Cache
+        // fordert nichts an und truege die Referenz trotzdem). Gegenmutation:
+        // dieselbe wie oben.
+        const inhalt = await seite.content();
+        for (const datei of kostenChunks) {
+          expect(inhalt, `${route}: ${datei} steht im Dokument`).not.toContain(datei);
+        }
+
+        // Keine Wirtschaftsdaten im Dokument — Satzbetrag, Kostenanzeige,
+        // Minor Units, Mitarbeitername (dieselben Fixturkonstanten wie in
+        // 9g2). Gegenmutation: den Kosteninhalt serverseitig auch im
+        // Verweigerungszweig rendern und nur per CSS verbergen.
+        expect(inhalt, `${route}: Satzbetrag im Dokument`).not.toContain(ERWARTETER_BETRAG);
+        expect(inhalt, `${route}: Kostenanzeige im Dokument`).not.toContain(
+          ERWARTETE_KOSTEN_ANZEIGE,
+        );
+        expect(inhalt, `${route}: Minor Units im Dokument`).not.toContain(ERWARTETE_KOSTEN_MINOR);
+        expect(inhalt, `${route}: Mitarbeitername im Dokument`).not.toContain(MITARBEITER_NAME);
+      }
+
+      await seite.screenshot({
+        path: test.info().outputPath("eyt113-kosten-forbidden.png"),
+        fullPage: true,
+      });
+      bericht["eyt113_ladegrenze"] = {
+        kosten_chunks: kostenChunks,
+        chunk_anfragen_gesamt: chunkAnfragenB.length,
       };
     });
   } catch (fehler) {
