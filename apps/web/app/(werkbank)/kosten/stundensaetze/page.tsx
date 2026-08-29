@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 
 import { PageHeader } from "@easytree/ui";
 
 import { KostenGrenze } from "../../../../components/kosten-grenze";
-import { KostenZugang } from "../../../../components/kosten-zugang";
-import { RateManagement } from "../../../../components/rate-management";
+import { StundensaetzeFlaeche } from "../../../../components/stundensaetze-flaeche";
 import { leseKostenFreigabe } from "../../../../lib/kosten-freigabe";
 
 export const metadata: Metadata = { title: "Stundensätze — easyTree" };
@@ -24,19 +24,26 @@ export const metadata: Metadata = { title: "Stundensätze — easyTree" };
 export default async function StundensaetzePage() {
   const freigabe = await leseKostenFreigabe();
 
+  // Client-seitige Importgrenze (EYT-113 Inkrement 2, D4 Stufe 3): die Seite
+  // verweist statisch NUR auf die kostenfreie `StundensaetzeFlaeche`; deren
+  // `next/dynamic` laedt die Kosten-Client-Komponenten als Lazy-Chunks im
+  // CLIENT-Modulgraphen. Stufe 2 (`await import()` im gewaehrten Zweig)
+  // reichte nicht: Turbopack schreibt Route-Entry-Chunks unbedingt in den
+  // Dokumentkopf (Messung und Begruendung im Kommentar von `../page.tsx`).
+  let inhalt: ReactNode;
+  if (freigabe.art !== "gewaehrt") {
+    inhalt = <KostenGrenze freigabe={freigabe} />;
+  } else {
+    inhalt = <StundensaetzeFlaeche />;
+  }
+
   return (
     <>
       <PageHeader
         title="Stundensätze"
         description="Interne Netto-Stundensätze je Mitarbeiter — unveränderliche Versionen mit Gültigkeit, nie überschrieben."
       />
-      {freigabe.art !== "gewaehrt" ? (
-        <KostenGrenze freigabe={freigabe} />
-      ) : (
-        <KostenZugang>
-          <RateManagement />
-        </KostenZugang>
-      )}
+      {inhalt}
     </>
   );
 }

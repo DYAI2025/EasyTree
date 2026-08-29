@@ -192,6 +192,14 @@ describe.each(["/kosten", "/kosten/stundensaetze"] as const)(
         expect(screen.queryByTestId("kosten-laedt")).toBeNull();
         expect(screen.queryByTestId("saetze-laedt")).toBeNull();
         expect(document.querySelector(".eyt-kosten-ansicht")).toBeNull();
+        // Seit D4 Stufe 3 noch eine Stufe strenger: auch der kostenfreie
+        // LADER (`KostenFlaeche`/`StundensaetzeFlaeche`) darf im
+        // Verweigerungszustand nicht montiert sein — sonst forderte sein
+        // `next/dynamic` die Kosten-Chunks trotz Server-Gate an.
+        // Gegenmutation: den Verweigerungszweig einer Seite auf die Flaeche
+        // umstellen — dann steht deren Lade-Testid im Baum.
+        expect(screen.queryByTestId("kosten-flaeche-laedt")).toBeNull();
+        expect(screen.queryByTestId("saetze-flaeche-laedt")).toBeNull();
       },
     );
   },
@@ -200,6 +208,14 @@ describe.each(["/kosten", "/kosten/stundensaetze"] as const)(
 describe("/kosten — der gewaehrte Zweig bleibt der bestehende Client-Pfad", () => {
   it("rendert keine Verweigerungsflaeche, sondern den Client-Waechter", async () => {
     await seiteRendern("/kosten", { art: "gewaehrt", organisation: ORG_MIT_RECHT });
+    // Seit D4 Stufe 3 kommt `KostenZugang` per `next/dynamic` aus einem
+    // Lazy-Chunk: unmittelbar nach dem Rendern steht erst das
+    // `kosten-flaeche-laedt` des Laders im Baum, `findByTestId` wartet die
+    // Aufloesung ab. Die Sitzung der Attrappe antwortet dann NIE — der
+    // Client-Waechter bleibt in seinem Ladezustand stehen. Gegenmutation: den
+    // gewaehrten Zweig ebenfalls auf eine Server-Flaeche umstellen und
+    // `KostenZugang` ganz entfernen.
+    expect(await screen.findByTestId("kosten-laedt")).toBeTruthy();
     for (const testid of [
       "kosten-forbidden",
       "kosten-unauthenticated",
@@ -208,10 +224,6 @@ describe("/kosten — der gewaehrte Zweig bleibt der bestehende Client-Pfad", ()
     ]) {
       expect(screen.queryByTestId(testid)).toBeNull();
     }
-    // Die Sitzung der Attrappe antwortet nie — der Client-Waechter zeigt also
-    // seinen Ladezustand. Gegenmutation: den gewaehrten Zweig ebenfalls auf
-    // eine Server-Flaeche umstellen und `KostenZugang` ganz entfernen.
-    expect(screen.getByTestId("kosten-laedt")).toBeTruthy();
   });
 
   it("lehnt einen kaputten snapshot-Parameter AUCH im gewaehrten Zweig sichtbar ab", async () => {
