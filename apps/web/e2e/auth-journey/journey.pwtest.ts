@@ -1233,6 +1233,30 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
   // ---------------------------------------------------------------------
   await test.step("9c1 — /planung besteht axe inklusive Kontrast", async () => {
     await pruefeBarrierefreiheit(page, "/planung");
+
+    // EYT-113: benannte Werkbank-Nachweise auf den beiden Abnahmebreiten.
+    // axe und Reflow je Breite liefen bereits oben (ABNAHME_BREITEN); hier
+    // kommen sichtbarer Fokus und ein Screenshot der real angemeldeten
+    // Planungsflaeche JE Breite dazu — dasselbe Muster wie die Feld-Shell
+    // bei 320/375 px, damit die Bild-Evidenz nicht an der Standardbreite
+    // des Laufs haengt.
+    const werkbankBreiten = [
+      { width: 1440, height: 900 },
+      { width: 1920, height: 1080 },
+    ] as const;
+    const urspruenglich = page.viewportSize();
+    mkdirSync(ARTEFAKTE, { recursive: true });
+    for (const breite of werkbankBreiten) {
+      await page.setViewportSize({ width: breite.width, height: breite.height });
+      await pruefeTastaturUndFokus(page, `/planung bei ${breite.width} px`);
+      await page.screenshot({
+        path: join(ARTEFAKTE, `11-werkbank-planung-${breite.width}.png`),
+      });
+    }
+    if (urspruenglich !== null) {
+      await page.setViewportSize(urspruenglich);
+    }
+    schritte["9c1_werkbank_breiten"] = { breiten: werkbankBreiten.map((b) => b.width) };
   });
 
   // ---------------------------------------------------------------------
