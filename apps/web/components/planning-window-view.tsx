@@ -93,7 +93,7 @@ const FAILURE_TEXT: Record<GatewayFailure, string> = {
   UNAVAILABLE: "Der Server ist nicht erreichbar.",
   CONTRACT_VIOLATION: "Die Antwort des Servers entspricht nicht dem Vertrag.",
   UNAUTHENTICATED: "Nicht angemeldet.",
-  FORBIDDEN: "Keine Berechtigung fuer diese Organisation.",
+  FORBIDDEN: "Keine Berechtigung für diese Organisation.",
   STALE_VERSION: "Der Stand ist veraltet.",
   REJECTED: "Die Anfrage wurde abgelehnt.",
 };
@@ -135,19 +135,26 @@ const ZUSTANDSKLASSE: Record<GatewayFailure, Zustandsklasse> = {
  */
 type Stand = "ohne-version" | "entwurf" | "veroeffentlicht" | "entwurf-ueber-veroeffentlicht";
 
-const STAND_TEXT: Record<Stand, string> = {
+/**
+ * Erlaeuternder Zusatz NEBEN dem Abzeichen — nur dort, wo er etwas sagt, was
+ * das Abzeichen nicht schon sagt (PO-Review-Reparatur EYT-147). „Entwurf" mit
+ * dem Satz „Unveroeffentlichter Entwurf." daneben war dieselbe Aussage
+ * zweimal; `null` heisst: das Abzeichen ist die ganze Aussage.
+ */
+const STAND_TEXT: Record<Stand, string | null> = {
   "ohne-version": "Für diese Woche existiert noch keine Planversion.",
-  entwurf: "Unveroeffentlichter Entwurf.",
-  veroeffentlicht: "Veroeffentlichter Stand.",
+  entwurf: null,
+  veroeffentlicht: null,
   "entwurf-ueber-veroeffentlicht":
-    "Entwurf auf Basis einer bereits veroeffentlichten Version — die Anzeige zeigt den ENTWURF.",
+    "Entwurf auf Basis einer bereits veröffentlichten Version — angezeigt wird der Entwurf.",
 };
 
 /**
  * Kurzform des Standes als Abzeichen (EYT-140 M7, `AC-008`/`AC-018`).
  *
- * Der Satz in `STAND_TEXT` bleibt die Aussage; das Abzeichen traegt sie ein
- * zweites Mal ueber Form und Zeichen. `StatusBadge` setzt je Ton eine eigene
+ * Das Abzeichen ist seit der PO-Review-Reparatur die EINE primaere
+ * Statusanzeige der Werkbank (`werkbank-oberflaechenguards.test.tsx` zaehlt
+ * die `StatusBadge`-Elemente). `StatusBadge` setzt je Ton eine eigene
  * Glyphe (`●`, `◐`, `○`), sodass Entwurf und veroeffentlichter Stand auch ohne
  * Farbwahrnehmung unterscheidbar bleiben — Basisdesign v2.0 §7 verlangt genau
  * das, und eine reine CSS-Klasse erfuellt es nicht.
@@ -166,7 +173,7 @@ const STAND_TON: Record<Stand, StatusTone> = {
 const STAND_ABZEICHEN: Record<Stand, string> = {
   "ohne-version": "Keine Version",
   entwurf: "Entwurf",
-  veroeffentlicht: "Veroeffentlicht",
+  veroeffentlicht: "Veröffentlicht",
   "entwurf-ueber-veroeffentlicht": "Entwurf",
 };
 
@@ -450,9 +457,17 @@ export function PlanningWindowView({
           <p data-testid="planungsfenster-stand" data-stand={stand}>
             <StatusBadge data-testid="planungsfenster-stand-abzeichen" tone={STAND_TON[stand]}>
               {STAND_ABZEICHEN[stand]}
-            </StatusBadge>{" "}
-            {STAND_TEXT[stand]}
+            </StatusBadge>
+            {STAND_TEXT[stand] === null ? null : <> {STAND_TEXT[stand]}</>}
           </p>
+          {/*
+            Die serverseitigen Versions-Ids sind Serverwahrheit, kein
+            Planertext (PO-Review-Reparatur EYT-147): sie stehen NUR in den
+            `data-*`-Attributen, an denen `read-through.spec.ts`,
+            `auth-journey` und die Werkbank-Suiten haengen. Sichtbar bleibt
+            allein die eine Aussage, die das Abzeichen nicht traegt: dass
+            fuer diese Woche noch nichts veroeffentlicht ist.
+          */}
           <p
             className="werkbank-fenster__version"
             data-testid="planungsfenster-version"
@@ -460,9 +475,7 @@ export function PlanningWindowView({
             data-source-state={fenster.sourceVersion?.state ?? ""}
             data-published-version-id={fenster.publishedVersionId ?? ""}
           >
-            {fenster.publishedVersionId === null
-              ? "Noch nichts veroeffentlicht"
-              : `Zuletzt veroeffentlicht: ${fenster.publishedVersionId}`}
+            {fenster.publishedVersionId === null ? "Noch nichts veröffentlicht" : null}
           </p>
         </div>
       </div>
@@ -527,7 +540,7 @@ export function PlanningWindowView({
               // aber „kann nicht sein" ist kein Renderpfad: sichtbar statt
               // verschluckt (`lib/wochenraster.ts`).
               <div className="wochenraster__ausserhalb">
-                <h3>Ausserhalb dieser Woche</h3>
+                <h3>Außerhalb dieser Woche</h3>
                 <ul className="wochenraster__einsaetze">
                   {raster.ausserhalb.map((einsatz) => (
                     <Einsatzkarte key={einsatz.id} einsatz={einsatz} fenster={fenster} />

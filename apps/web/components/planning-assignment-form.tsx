@@ -250,69 +250,86 @@ export function AssignmentForm({ window: fenster, onSubmit }: AssignmentFormProp
   const feld = (name: string): string => `${idPrefix}-${name}`;
 
   return (
-    <section aria-labelledby={feld("titel")}>
+    // Die Klassen sind reine Darstellung (PO-Review-Reparatur EYT-147):
+    // native Semantik, `label`-Zuordnung, Testanker und die gesamte
+    // Validierungs- und Zeitzonenlogik bleiben unveraendert — gestylt wird
+    // ueber `globals.css` mit den Basisdesign-v2-Tokens.
+    <section className="einsatzformular-bereich" aria-labelledby={feld("titel")}>
       <h3 id={feld("titel")}>Einsatz planen</h3>
       <form
         data-testid="einsatzformular"
+        className="einsatzformular"
         onSubmit={absenden}
         aria-describedby={meldung === null ? undefined : feld("meldung")}
       >
-        <label htmlFor={feld("employee")}>Mitarbeitende</label>
-        <select
-          id={feld("employee")}
-          data-testid="feld-employee"
-          value={eingabe.employeeId}
-          onChange={(e) => aendern("employeeId")(e.target.value)}
-        >
-          <option value="">Bitte wählen …</option>
-          {beschaeftigte.map((person) => (
-            <option key={person.id} value={person.id}>
-              {person.label}
-            </option>
-          ))}
-        </select>
+        <div className="einsatzformular__feld">
+          <label htmlFor={feld("employee")}>Mitarbeitende</label>
+          <select
+            id={feld("employee")}
+            data-testid="feld-employee"
+            value={eingabe.employeeId}
+            onChange={(e) => aendern("employeeId")(e.target.value)}
+          >
+            <option value="">Bitte wählen …</option>
+            {beschaeftigte.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <label htmlFor={feld("worksite")}>Baustelle</label>
-        <select
-          id={feld("worksite")}
-          data-testid="feld-worksite"
-          value={eingabe.worksiteId}
-          onChange={(e) => aendern("worksiteId")(e.target.value)}
-        >
-          <option value="">Bitte wählen …</option>
-          {baustellen.map((ort) => (
-            <option key={ort.id} value={ort.id}>
-              {ort.label}
-            </option>
-          ))}
-        </select>
+        <div className="einsatzformular__feld">
+          <label htmlFor={feld("worksite")}>Baustelle</label>
+          <select
+            id={feld("worksite")}
+            data-testid="feld-worksite"
+            value={eingabe.worksiteId}
+            onChange={(e) => aendern("worksiteId")(e.target.value)}
+          >
+            <option value="">Bitte wählen …</option>
+            {baustellen.map((ort) => (
+              <option key={ort.id} value={ort.id}>
+                {ort.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <label htmlFor={feld("datum")}>Datum</label>
-        <input
-          id={feld("datum")}
-          data-testid="feld-datum"
-          type="date"
-          value={eingabe.datum}
-          onChange={(e) => aendern("datum")(e.target.value)}
-        />
+        <div className="einsatzformular__feld">
+          <label htmlFor={feld("datum")}>Datum</label>
+          <input
+            id={feld("datum")}
+            data-testid="feld-datum"
+            type="date"
+            value={eingabe.datum}
+            onChange={(e) => aendern("datum")(e.target.value)}
+          />
+        </div>
 
-        <label htmlFor={feld("beginn")}>Beginn ({fenster.timeZone})</label>
-        <input
-          id={feld("beginn")}
-          data-testid="feld-beginn"
-          type="time"
-          value={eingabe.beginn}
-          onChange={(e) => aendern("beginn")(e.target.value)}
-        />
+        <div className="einsatzformular__zeiten">
+          <div className="einsatzformular__feld">
+            <label htmlFor={feld("beginn")}>Beginn ({fenster.timeZone})</label>
+            <input
+              id={feld("beginn")}
+              data-testid="feld-beginn"
+              type="time"
+              value={eingabe.beginn}
+              onChange={(e) => aendern("beginn")(e.target.value)}
+            />
+          </div>
 
-        <label htmlFor={feld("ende")}>Ende ({fenster.timeZone})</label>
-        <input
-          id={feld("ende")}
-          data-testid="feld-ende"
-          type="time"
-          value={eingabe.ende}
-          onChange={(e) => aendern("ende")(e.target.value)}
-        />
+          <div className="einsatzformular__feld">
+            <label htmlFor={feld("ende")}>Ende ({fenster.timeZone})</label>
+            <input
+              id={feld("ende")}
+              data-testid="feld-ende"
+              type="time"
+              value={eingabe.ende}
+              onChange={(e) => aendern("ende")(e.target.value)}
+            />
+          </div>
+        </div>
 
         <Button type="submit" data-testid="einsatz-speichern" disabled={!vollstaendig || laeuft}>
           {laeuft ? "Wird gespeichert …" : "Entwurf speichern"}
@@ -322,6 +339,7 @@ export function AssignmentForm({ window: fenster, onSubmit }: AssignmentFormProp
       {meldung === null ? null : (
         <p
           id={feld("meldung")}
+          className="einsatzformular__meldung"
           data-testid="einsatzformular-meldung"
           data-state={meldung.art}
           role={meldung.art === "erfolg" ? "status" : "alert"}

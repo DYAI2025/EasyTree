@@ -28,7 +28,7 @@
  */
 import type { GatewayResult, PublishPlanCommand, PublishedPlanVersion } from "@easytree/contracts";
 import { newIdempotencyKey, type IdempotencyKey } from "@easytree/contracts";
-import { PrimaryAction, StateBanner, StatusBadge } from "@easytree/ui";
+import { PrimaryAction, StateBanner, VisuallyHidden } from "@easytree/ui";
 import { useCallback, useRef, useState } from "react";
 
 /** Die Publish-Faehigkeit des Gateways, ohne den ganzen Port zu verlangen. */
@@ -193,12 +193,17 @@ export function PlanningPublishAction({
         Information (EYT-147; die Wochenansicht sagt dort „Keine Version").
         Nach einem Erfolg bleibt sie stehen, auch wenn der Elternteil den
         Serverstand noch nachlaedt.
+
+        Seit der PO-Review-Reparatur ist sie ein UNSICHTBARER Seam: die eine
+        sichtbare Statusmarke der Werkbank ist das Abzeichen der Wochenansicht
+        (`planungsfenster-stand-abzeichen`), und zwei dominante „Entwurf"-
+        Marken nebeneinander waren genau der Befund. Testanker, `data-stand`
+        und der Screenreader-Text bleiben — nur das sichtbare Badge nicht
+        (`werkbank-oberflaechenguards.test.tsx` zaehlt die Badges).
       */}
       {sourceVersion !== null || ablauf.kind === "erfolg" ? (
-        <p data-testid="planung-stand-marke">
-          <StatusBadge tone={stand}>
-            {stand === "published" ? "Veröffentlicht" : "Entwurf"}
-          </StatusBadge>
+        <p data-testid="planung-stand-marke" data-stand={stand}>
+          <VisuallyHidden>{stand === "published" ? "Veröffentlicht" : "Entwurf"}</VisuallyHidden>
         </p>
       ) : null}
 
@@ -216,15 +221,21 @@ export function PlanningPublishAction({
         </p>
       ) : null}
 
+      {/*
+        Die Bestaetigung nennt weder Versions-Id noch rohen Zeitstempel im
+        Text — beides ist Serverwahrheit fuer Maschinen und liegt in den
+        `data-*`-Attributen (PO-Review-Reparatur EYT-147; `auth-journey` und
+        die Staging-Reise lesen `data-published-version-id`).
+      */}
       {ablauf.kind === "erfolg" ? (
         <StateBanner
           tone="success"
           title="Veröffentlicht"
           data-testid="planung-publish-erfolg"
           data-published-version-id={ablauf.version.versionId}
+          data-published-at-utc={ablauf.version.publishedAtUtc}
         >
-          Planversion {ablauf.version.versionId} ist seit {ablauf.version.publishedAtUtc}{" "}
-          verbindlich. Sie kann nicht mehr verändert werden.
+          Der Plan dieser Woche ist ab sofort verbindlich. Er kann nicht mehr verändert werden.
         </StateBanner>
       ) : null}
 

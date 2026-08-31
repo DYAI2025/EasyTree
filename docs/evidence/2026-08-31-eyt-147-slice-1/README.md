@@ -54,15 +54,15 @@ Projektgedächtnis `git-checkout-reverts-to-commit-not-worktree`).
 Alle PNGs stammen aus `apps/web/test-results/auth-journey/` des grünen Laufs — keine
 Mockups, keine statischen Designbilder.
 
-| Datei                                             | Zeigt                                                                                                                                                                                        |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `11-werkbank-planung-1440.png` / `…-1920.png`     | Dispositionswerkbank bei 1440/1920: Toolbar, Wochenachse Mo–So, Einsatzkarte am Montag, Entwurfszustand, genau ein primärer CTA                                                              |
-| `04-planung-entwurf.png`                          | Entwurfszustand (Badge + Text + gestrichelte Karten)                                                                                                                                         |
-| `12-werkbank-inspector-1440.png`                  | Erstellungs-Inspector offen, Fokus im ersten Formularfeld, versionslose Woche ehrlich als „Keine Version"                                                                                    |
-| `13-werkbank-einsatz-serverbestaetigt.png`        | Serverbestätigte Karte am Dienstag 18.08. nach realem `POST /planung/einsaetze` (201), Formular geleert, Erfolgsmeldung                                                                      |
-| `05-planung-veroeffentlicht.png`                  | Serverantwort der Veröffentlichung (Banner mit Versions-Id); der Kopf zeigt noch den Moment VOR dem Read-through — die Reload-Zusicherung direkt danach misst `data-stand="veroeffentlicht"` |
-| `06-planung-zweiter-kontext.png`                  | Zweiter Browserkontext, dieselbe veröffentlichte Versions-Id                                                                                                                                 |
-| `04-feld-shell-320.png` / `05-feld-shell-375.png` | Feld-Shell-Grenze unverändert                                                                                                                                                                |
+| Datei                                             | Zeigt                                                                                                                                                                                                                                              |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `11-werkbank-planung-1440.png` / `…-1920.png`     | Dispositionswerkbank bei 1440/1920: Toolbar, Wochenachse Mo–So, Einsatzkarte am Montag, Entwurfszustand, genau ein primärer CTA                                                                                                                    |
+| `04-planung-entwurf.png`                          | Entwurfszustand (Badge + Text + gestrichelte Karten)                                                                                                                                                                                               |
+| `12-werkbank-inspector-1440.png`                  | Erstellungs-Inspector offen, Fokus im ersten Formularfeld, versionslose Woche ehrlich als „Keine Version"                                                                                                                                          |
+| `13-werkbank-einsatz-serverbestaetigt.png`        | Serverbestätigte Karte am Dienstag 18.08. nach realem `POST /planung/einsaetze` (201), Formular geleert, Erfolgsmeldung                                                                                                                            |
+| `05-planung-veroeffentlicht.png`                  | Serverantwort der Veröffentlichung (Banner ohne Id im Text; die Versions-Id liegt in `data-published-version-id`); der Kopf zeigt noch den Moment VOR dem Read-through — die Reload-Zusicherung direkt danach misst `data-stand="veroeffentlicht"` |
+| `06-planung-zweiter-kontext.png`                  | Zweiter Browserkontext, dieselbe veröffentlichte Versions-Id                                                                                                                                                                                       |
+| `04-feld-shell-320.png` / `05-feld-shell-375.png` | Feld-Shell-Grenze unverändert                                                                                                                                                                                                                      |
 
 Barrierefreiheit im Lauf: axe (wcag2a/2aa/21a/21aa/best-practice) bei 1440×900,
 1920×1080 und 720×450 (200-%-Äquivalent) = 0 Verstöße; sichtbarer Fokus je tabbarem
@@ -81,3 +81,41 @@ Browserzoom; der menschliche 200-%-Check bleibt Reviewpunkt des PO.
 - Negativ: B ohne Mitgliedschaft → `planung-org-erforderlich` + Publish-POST 403;
   member ohne `planning.read` → `planung-forbidden` + `GET /planung/fenster` 403;
   ohne `costs.read` keine Kosten-Chunks; PostgREST-Angriffe unverändert abgeriegelt.
+
+## PO-Review-Reparatur (31.08.2026, zweiter Durchgang)
+
+Reparatur-Slice vor der erneuten visuellen PO-Abnahme. Vier UI-Findings, kein
+fachlicher Eingriff; alle Screenshots dieses Pakets wurden aus einem frischen
+gruenen `auth-journey`-Lauf NACH der Reparatur regeneriert.
+
+| Finding                                                                                                                   | Reparatur                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1 — Planversions-UUID sichtbar („Zuletzt veroeffentlicht: <UUID>") und roher ISO-Zeitstempel in der Publish-Bestaetigung | Sichtbarer Text traegt keine Id und keinen Instant mehr; die echten Server-Ids stehen unveraendert in `data-source-version-id` / `data-published-version-id`, der Publish-Instant neu in `data-published-at-utc` |
+| R2 — doppelte dominante Statusmarke (Abzeichen der Wochenansicht UND `StatusBadge` in `planung-stand-marke`)              | Genau EIN sichtbares `StatusBadge` (Wochenansicht); `planung-stand-marke` bleibt als unsichtbarer Seam (Testanker, Screenreader-Text, `data-stand`) erhalten                                                     |
+| R3 — Einsatzformular als ungestylte Browser-Defaults                                                                      | Formular traegt Basisdesign-v2-Tokens (Feldgruppen, Beginn/Ende nebeneinander, Meldungs-Toene); Semantik, Testanker, Validierung und Zeitzonenlogik unveraendert                                                 |
+| R4 — ASCII-Formen im sichtbaren Text (`Veroeffentlicht`, `Ausserhalb`, `fuer`)                                            | Sichtbare Texte auf korrektes Deutsch; technische Werte (`data-stand="veroeffentlicht"`, Testids, Dateinamen) unveraendert                                                                                       |
+
+Neuer Guard: `apps/web/test/werkbank-oberflaechenguards.test.tsx` (UUID-/Instant-
+Leck ueber `textContent` des gesamten Baums, Seam-Erhalt, Badge-Zaehlung).
+Gegenmutationen ausgefuehrt und byte-identisch zurueckgenommen
+(Sicherungskopie-Verfahren, Dateien waren uncommittet):
+
+| #   | Mutation                                                                           | Gemessen                           |
+| --- | ---------------------------------------------------------------------------------- | ---------------------------------- |
+| 1   | Sichtbare Zeile `Zuletzt veroeffentlicht: ${publishedVersionId}` wiederhergestellt | 2 failed / 3 passed (UUID-Guards)  |
+| 2   | Zweites sichtbares Badge in `planung-stand-marke` wiederhergestellt                | 2 failed / 3 passed (Badge-Guards) |
+
+Gemessene Laeufe dieses Durchgangs (dieselben Befehle wie oben): Format exit 0;
+`turbo run lint typecheck --force` = 16 successful / Cached: 0;
+`turbo run test --force --env-mode=loose` (Test-DB unerreichbar, `mode=local`-Skip
+wie im Pflichtjob `unit-tests`) = 10 successful / Cached: 0 — Web direkt:
+41 Dateien / 479 Tests; `turbo run build --force` (ohne `EASYTREE_API_PROXY_TARGET`)
+= 6 successful / Cached: 0; web-smoke Playwright = 29 passed; auth-journey lokal
+(frischer `db reset`, echte GoTrue-Identitaet) = 5 passed, Teardown `restzeilen=0`.
+`read-through` und `db-gates` sind lokal nicht CI-aequivalent reproduzierbar
+(UNVERIFIED_LOCAL) — der ausgefuehrte CI-Lauf am PR-Head ist dafuer die Evidenz.
+
+Hinweis Datums-/Zeitfelder: die nativen `date`/`time`-Eingaben folgen der
+Browsersprache; die `mm/dd/yyyy`-Platzhalter in den Screenshots stammen aus dem
+en-US-Chromium des Playwright-Laufs, ein deutscher Browser zeigt TT.MM.JJJJ.
+Massgeblich bleibt die Organisationszeitzone (`zuIntervall`, unveraendert).
