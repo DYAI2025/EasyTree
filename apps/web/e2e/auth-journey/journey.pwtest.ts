@@ -1260,6 +1260,87 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
   });
 
   // ---------------------------------------------------------------------
+  // 9c1b — EYT-147: ein Einsatz entsteht ueber den Inspector der Werkbank
+  // ---------------------------------------------------------------------
+  // Der EINZIGE UI-Schreibnachweis dieser Reise mit echter Identitaet: der
+  // read-through-Harness ersetzt `REQUEST_IDENTITY` und kann ueber die
+  // Identitaet nichts sagen. Bewusst in der EIGENEN Woche 2026-W34: W32
+  // tragen die abgenommenen EYT-144-Kostenzahlen, W33 der Baustellenfilter,
+  // W35–W37 die Angriffe — ein zusaetzlicher Einsatz dort veraenderte
+  // abgenommene Summen. Der Server legt fuer die versionslose W34 selbst
+  // einen Entwurf an (planning-write.repository.ts, „holen oder anlegen").
+  // 18.08. 07:00–09:00 Europe/Berlin = 05:00–07:00Z, Dienstag der W34.
+  await test.step("9c1b — EYT-147: Einsatz ueber den Inspector anlegen", async () => {
+    // Werkbankbreite fuer die Bild-Evidenz — die Dateinamen sagen 1440, also
+    // wird 1440 gemessen, nicht die Standardbreite des Laufs.
+    const breiteVorher = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/planung?weekKey=2026-W34");
+    const ausloeser = page.getByTestId("werkbank-einsatz-anlegen");
+    await expect(ausloeser).toBeVisible();
+    // Vor dem Oeffnen ist das Formular nicht im Baum — der Inspector ist der
+    // Erstellungskontext, kein Dauerformular.
+    await expect(page.getByTestId("einsatzformular")).toHaveCount(0);
+    await ausloeser.click();
+    await expect(page.getByTestId("einsatzformular")).toBeVisible();
+    await page.screenshot({
+      path: join(ARTEFAKTE, "12-werkbank-inspector-1440.png"),
+      fullPage: true,
+    });
+
+    await page.getByTestId("feld-employee").selectOption("00000000-0000-4000-8000-00000000e211");
+    await page.getByTestId("feld-worksite").selectOption("00000000-0000-4000-8000-00000000e241");
+    await page.getByTestId("feld-datum").fill("2026-08-18");
+    await page.getByTestId("feld-beginn").fill("07:00");
+    await page.getByTestId("feld-ende").fill("09:00");
+    const [schreibAntwort] = await Promise.all([
+      page.waitForResponse(
+        (antwort) =>
+          antwort.url().includes("/planung/einsaetze") && antwort.request().method() === "POST",
+      ),
+      page.getByTestId("einsatz-speichern").click(),
+    ]);
+    expect(schreibAntwort.status()).toBe(201);
+    const angelegt = (await schreibAntwort.json()) as { id: string };
+    expect(angelegt.id).toMatch(/^[0-9a-f-]{36}$/);
+
+    // Sichtbar wird der BESTAETIGTE Serverstand (Read-through), und die Karte
+    // steht am Kalendertag ihres Beginns — Dienstag, 18.08.
+    const karte = page.locator(`[data-assignment-id="${angelegt.id}"]`);
+    await expect(karte).toBeVisible();
+    await expect(page.locator('[data-tag="2026-08-18"] [data-assignment-id]')).toHaveCount(1);
+    await page.screenshot({
+      path: join(ARTEFAKTE, "13-werkbank-einsatz-serverbestaetigt.png"),
+      fullPage: true,
+    });
+
+    // Reload: dieselbe serverseitige Id, und die vorher versionslose Woche
+    // ist jetzt eindeutig als ENTWURF erkennbar.
+    await page.reload();
+    await expect(page.locator(`[data-assignment-id="${angelegt.id}"]`)).toBeVisible();
+    await expect(page.getByTestId("planungsfenster-stand")).toHaveAttribute(
+      "data-stand",
+      "entwurf",
+    );
+
+    // Zurueck in die Publish-Woche: 9d klickt das NAECHSTE
+    // `planung-veroeffentlichen` — bliebe die Seite auf W34 stehen, würde
+    // dieser Klick den frisch entstandenen W34-Entwurf veroeffentlichen und
+    // der Vergleich mit `entwurfsVersionId` (W32) ginge zu Recht rot
+    // (gemessen im ersten Lauf dieses Schritts).
+    await page.goto(`/planung?weekKey=${PLANWOCHE}`);
+    await expect(page.getByTestId("planungsfenster-stand")).toHaveAttribute(
+      "data-stand",
+      "entwurf",
+    );
+    if (breiteVorher !== null) {
+      await page.setViewportSize(breiteVorher);
+    }
+
+    schritte["9c1b_eyt147_inspector"] = { assignmentId: angelegt.id, woche: "2026-W34" };
+  });
+
+  // ---------------------------------------------------------------------
   // 9c2 — Der P1-Nachweis: die Data-API veroeffentlicht NICHT (EYT-107)
   // ---------------------------------------------------------------------
   // Der Befund vom 04.08.2026: `authenticated` besass aus Migration 0007 ein

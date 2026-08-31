@@ -132,6 +132,11 @@ async function einsatzAnlegen(
   page: Page,
   eingabe: { mitarbeiter: string; baustelle: string; datum: string },
 ): Promise<string> {
+  // EYT-147: das Formular steht im Inspector und ist erst nach „Einsatz
+  // anlegen" im Baum. Idempotent gegen einen bereits offenen Inspector.
+  if ((await page.getByTestId("einsatzformular").count()) === 0) {
+    await page.getByTestId("werkbank-einsatz-anlegen").click();
+  }
   await page.getByTestId("feld-employee").selectOption({ label: eingabe.mitarbeiter });
   await page.getByTestId("feld-worksite").selectOption({ label: eingabe.baustelle });
   await page.getByTestId("feld-datum").fill(eingabe.datum);
@@ -301,6 +306,17 @@ test.describe.serial("EYT-142 Staging-Kernreise", () => {
         await schnappschuss(seite, "06-fokus-publish-1440");
       }
       if (testid === "feld-employee") fokusEmployee = true;
+      // EYT-147: das Formular liegt im Inspector. Erreicht die Tastatur den
+      // Ausloeser, oeffnet Enter ihn, und der Fokus landet programmatisch im
+      // ersten Formularfeld — genau das wird hier mitgemessen.
+      if (testid === "werkbank-einsatz-anlegen" && !fokusEmployee) {
+        await seite.keyboard.press("Enter");
+        const nachOeffnen = await seite.evaluate(
+          () => document.activeElement?.getAttribute("data-testid") ?? "",
+        );
+        if (nachOeffnen !== "") erreicht.push(nachOeffnen);
+        if (nachOeffnen === "feld-employee") fokusEmployee = true;
+      }
     }
     expect(fokusEmployee, `Formularfeld per Tastatur in <=${budget} Tabs`).toBe(true);
     expect(fokusPublish, `Publish-Knopf per Tastatur in <=${budget} Tabs`).toBe(true);

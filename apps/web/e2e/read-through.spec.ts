@@ -490,9 +490,25 @@ const NEU_ENDE = "15:00";
  */
 async function wocheOeffnen(seite: import("@playwright/test").Page): Promise<string[]> {
   await seite.goto(SEITE);
-  await expect(seite.getByTestId("einsatzformular")).toBeVisible();
+  // Seit EYT-147 steht das Formular im geschlossenen Inspector; das fruehere
+  // Wartesignal `einsatzformular` existiert im Ruhezustand nicht mehr. Der
+  // Ausloeser erscheint wie das Formular erst mit verarbeiteten `resources`,
+  // die Liste erst mit den Zuweisungen — beide zusammen heissen weiterhin,
+  // dass die Antwort vollstaendig verarbeitet ist.
+  await expect(seite.getByTestId("werkbank-einsatz-anlegen")).toBeVisible();
   await expect(seite.getByTestId("planungsfenster-liste")).toBeVisible();
   return sichtbareZuweisungen(seite);
+}
+
+/**
+ * Den Erstellungs-Inspector oeffnen, falls er zu ist (EYT-147). Idempotent,
+ * damit Folgeschritte innerhalb eines Tests nicht doppelt klicken.
+ */
+async function inspectorOeffnen(seite: import("@playwright/test").Page): Promise<void> {
+  if ((await seite.getByTestId("einsatzformular").count()) === 0) {
+    await seite.getByTestId("werkbank-einsatz-anlegen").click();
+  }
+  await expect(seite.getByTestId("einsatzformular")).toBeVisible();
 }
 
 async function formularAusfuellen(
@@ -501,6 +517,7 @@ async function formularAusfuellen(
   ende: string,
   datum = NEU_DATUM,
 ): Promise<void> {
+  await inspectorOeffnen(seite);
   await seite.getByTestId("feld-employee").selectOption(A_PERSON);
   await seite.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
   await seite.getByTestId("feld-datum").fill(datum);
@@ -513,7 +530,8 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
     page,
   }) => {
     await page.goto(SEITE);
-    await expect(page.getByTestId("einsatzformular")).toBeVisible();
+    await expect(page.getByTestId("werkbank-einsatz-anlegen")).toBeVisible();
+    await inspectorOeffnen(page);
 
     // Die Namen stammen aus e2e/harness/seed.sql und existieren nirgends im
     // Clientcode — waeren sie eine Fixture, stuende hier ein anderer Text.
@@ -543,6 +561,7 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
     });
 
     await page.goto(SEITE);
+    await inspectorOeffnen(page);
     await page.getByTestId("feld-employee").selectOption(A_PERSON);
     await page.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
     // Datum, Beginn und Ende fehlen absichtlich.
@@ -717,6 +736,7 @@ test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () 
     }) => {
       await page.setViewportSize(fall.viewport);
       await wocheOeffnen(page);
+      await inspectorOeffnen(page);
 
       const employee = page.getByTestId("feld-employee");
       const worksite = page.getByTestId("feld-worksite");
