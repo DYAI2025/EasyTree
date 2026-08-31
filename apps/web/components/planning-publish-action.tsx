@@ -187,11 +187,20 @@ export function PlanningPublishAction({
 
   return (
     <div className="eyt-planung-publish">
-      <p data-testid="planung-stand-marke">
-        <StatusBadge tone={stand}>
-          {stand === "published" ? "Veröffentlicht" : "Entwurf"}
-        </StatusBadge>
-      </p>
+      {/*
+        Ohne Version gibt es keinen Stand, den diese Marke benennen koennte —
+        eine „Entwurf"-Marke ueber einer versionslosen Woche waere erfundene
+        Information (EYT-147; die Wochenansicht sagt dort „Keine Version").
+        Nach einem Erfolg bleibt sie stehen, auch wenn der Elternteil den
+        Serverstand noch nachlaedt.
+      */}
+      {sourceVersion !== null || ablauf.kind === "erfolg" ? (
+        <p data-testid="planung-stand-marke">
+          <StatusBadge tone={stand}>
+            {stand === "published" ? "Veröffentlicht" : "Entwurf"}
+          </StatusBadge>
+        </p>
+      ) : null}
 
       {/*
         Die Ehrlichkeitsgrenze steht NEBEN der Aktion, nicht in einem Runbook,

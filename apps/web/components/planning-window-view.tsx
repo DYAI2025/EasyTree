@@ -1,17 +1,25 @@
 "use client";
 
 /**
- * Read-only Planungsfenster (EYT-50).
+ * Wochenarbeitsflaeche der Dispositionswerkbank (EYT-50, umgebaut in EYT-147).
  *
- * Bewusst schmal: die kleinste Ansicht, die den SERVERSTAND zeigt. Kein
- * Planner, keine Bearbeitung, keine Wochennavigation — das ist EYT-72.
+ * ## Von der Liste zur Woche (EYT-147 Slice 1)
+ *
+ * Bis EYT-147 zeigte diese Ansicht die Einsaetze als flache Liste unter einer
+ * Ueberschrift — fachlich korrekt, aber als FORMULARSEITE lesbar, nicht als
+ * Planung. Jetzt ist die Woche die Flaeche: sieben Kalendertage als raeumliche
+ * Achse, jeder Einsatz als Karte am Tag seines Beginns. Die Zuordnung rechnet
+ * `lib/wochenraster.ts` ausschliesslich mit Domain-Helfern; diese Datei
+ * entscheidet weiterhin nichts Fachliches.
  *
  * ## Vier Zustaende, alle sichtbar
  *
  * laden, leer, Fehler, Erfolg. Der Fehlerzustand ist der wichtigste: er zeigt
  * den Grund aus dem Port (`GatewayFailure`) an, statt eine leere Woche zu
  * rendern. Eine leere Woche und eine fehlgeschlagene Abfrage sehen sonst
- * identisch aus, und der Ausfall wuerde als "nichts geplant" gelesen.
+ * identisch aus, und der Ausfall wuerde als "nichts geplant" gelesen. Neu seit
+ * EYT-147: auch die TAGESZUORDNUNG faellt sichtbar aus — ist Zone oder Woche
+ * unbestimmbar, steht die flache Liste mit Hinweis da, nie ein leeres Raster.
  *
  * ## Kein Fallback
  *
@@ -25,7 +33,28 @@
  * `data-assignment-id` und `data-published-version-id` stehen im Markup, weil
  * AK9 verlangt, dass Planer- und Mitarbeiteransicht DIESELBEN serverseitig
  * vergebenen Ids zeigen. Ohne sie liesse sich das nur ueber Text vergleichen,
- * und Text ist Darstellung.
+ * und Text ist Darstellung. Jede Zuweisung traegt ihre Id auf GENAU EINEM
+ * Element (`werkbank-serverwahrheit.test.tsx` zaehlt exakt), und jede Karte
+ * ist ein `li` — daran haengen `getAllByRole("listitem")`-Zusicherungen.
+ *
+ * ## Der Inspector ist ein Ort, kein zweiter Zustand
+ *
+ * Das Einsatzformular (`AssignmentForm`, unveraendert) steht seit EYT-147 in
+ * einem seitlichen, NICHTMODALEN Inspector, geoeffnet ueber „Einsatz anlegen".
+ * Der Inspector haelt keinen Fachzustand: Validierung, Idempotenz und
+ * Serverwahrheit bleiben, wo sie waren. Nach erfolgreichem Speichern bleibt er
+ * OFFEN — die Erfolgsmeldung des Formulars muss waehrend des Read-through
+ * sichtbar bleiben (`planning-window-view.test.tsx`), und der naechste Einsatz
+ * ist der haeufigste Folgeschritt. Kein Fokus-Trap: Escape schliesst, der
+ * Fokus kehrt zur ausloesenden Schaltflaeche zurueck.
+ *
+ * ## Genau eine primaere Aktion (Basisdesign §2.3, EYT-147 §8.8)
+ *
+ * Traegt die Woche einen veroeffentlichbaren Entwurf und die Rolle das Recht,
+ * ist „Plan veroeffentlichen" DIE primaere Aktion (sie kommt aus
+ * `PlanningPublishAction`). Nur dann ist „Einsatz anlegen" eine gewoehnliche
+ * Schaltflaeche; sonst ist es selbst die primaere. `auth-journey` zaehlt
+ * `.eyt-primary-action` auf /planung und erwartet hoechstens eine.
  */
 import {
   newIdempotencyKey,
@@ -35,17 +64,22 @@ import {
   type PlanningWindow,
 } from "@easytree/contracts";
 import {
+  Button,
   Card,
   EmptyState,
   ErrorState,
   LoadingState,
+  PrimaryAction,
   StateBanner,
   StatusBadge,
+  VisuallyHidden,
   type StatusTone,
 } from "@easytree/ui";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { usePlanningGateway } from "../lib/planning-gateway-provider";
+import { wochenraster, zeitText } from "../lib/wochenraster";
+import type { AssignmentDto } from "@easytree/contracts";
 import { AssignmentForm } from "./planning-assignment-form";
 import { PlanningPublishAction } from "./planning-publish-action";
 
@@ -156,6 +190,34 @@ function anzeigename(eintraege: readonly PlanningResource[], id: string): string
   return treffer.active ? treffer.label : `${treffer.label} (inaktiv)`;
 }
 
+/**
+ * Eine Einsatzkarte. Baustelle zuerst — sie ist die raeumliche Antwort der
+ * Disposition —, dann die Person, dann die Wanduhrzeit der Organisation.
+ * Die Id liegt auf GENAU diesem `li` und auf keinem zweiten Element.
+ */
+function Einsatzkarte({ einsatz, fenster }: { einsatz: AssignmentDto; fenster: PlanningWindow }) {
+  return (
+    <li
+      className="einsatzkarte"
+      data-assignment-id={einsatz.id}
+      data-employee-id={einsatz.employeeId}
+      data-worksite-id={einsatz.worksiteId}
+    >
+      <span className="einsatzkarte__zeit">
+        {zeitText(einsatz.interval.startUtc, fenster.timeZone)}
+        {"–"}
+        {zeitText(einsatz.interval.endUtc, fenster.timeZone)}
+      </span>
+      <strong className="einsatzkarte__baustelle">
+        {anzeigename(fenster.resources.worksites, einsatz.worksiteId)}
+      </strong>
+      <span className="einsatzkarte__person">
+        {anzeigename(fenster.resources.employees, einsatz.employeeId)}
+      </span>
+    </li>
+  );
+}
+
 export function PlanningWindowView({
   weekKey,
   darfVeroeffentlichen = false,
@@ -188,6 +250,11 @@ export function PlanningWindowView({
    */
   const vorgangsSchluessel = useRef<{ vorgang: string; key: IdempotencyKey } | null>(null);
 
+  /** Sichtbarkeit des Erstellungs-Inspectors. Reiner Darstellungszustand. */
+  const [inspectorOffen, setInspectorOffen] = useState(false);
+  const inspectorRef = useRef<HTMLDivElement | null>(null);
+  const inspectorId = useId();
+
   useEffect(() => {
     let abgebrochen = false;
     // Beim ersten Laden und beim Wochenwechsel ersetzt der Ladezustand den
@@ -212,6 +279,29 @@ export function PlanningWindowView({
       abgebrochen = true;
     };
   }, [gateway, weekKey, nachladen]);
+
+  // Beim Oeffnen wandert der Fokus auf das erste Bedienelement des
+  // Formulars — die Planerin hat die Oeffnung selbst ausgeloest, der Sprung
+  // ist ihre Absicht. Beim Schliessen setzt `schliessen` ihn zurueck.
+  useEffect(() => {
+    if (!inspectorOffen) return;
+    // Das erste FACHLICHE Bedienelement, nicht das erste fokussierbare — die
+    // Schliessen-Schaltflaeche steht davor. Ohne Formular (keine aktiven
+    // Stammdaten) faellt der Fokus auf den Inspector selbst, damit der
+    // Erklaertext im Lesefluss liegt.
+    const formularFeld = inspectorRef.current?.querySelector<HTMLElement>(
+      '[data-testid="einsatzformular"] select, [data-testid="einsatzformular"] input',
+    );
+    (formularFeld ?? inspectorRef.current)?.focus();
+  }, [inspectorOffen]);
+
+  const schliessen = useCallback(() => {
+    setInspectorOffen(false);
+    // Fokus zurueck auf den Ausloeser — ueber den Anker statt ueber eine Ref,
+    // weil die Primitives (`Button`, `PrimaryAction`) keine Refs durchreichen
+    // und der Ausloeser je nach Stand das eine oder das andere ist.
+    document.querySelector<HTMLElement>('[data-testid="werkbank-einsatz-anlegen"]')?.focus();
+  }, []);
 
   /**
    * Speichern und den SERVERSTAND neu lesen.
@@ -320,73 +410,182 @@ export function PlanningWindowView({
 
   const { window: fenster } = state;
   const stand = standKennung(fenster);
+  const raster = wochenraster(fenster);
+
+  // Genau eine primaere Aktion: veroeffentlichbarer Entwurf mit Recht macht
+  // „Plan veroeffentlichen" primaer (in `PlanningPublishAction`), sonst ist
+  // es „Einsatz anlegen". Beide Bedingungen speisen sich aus DEMSELBEN
+  // Serverstand — sie koennen nicht gleichzeitig wahr sein.
+  const publishIstPrimaer = fenster.sourceVersion?.state === "draft" && darfVeroeffentlichen;
+
+  const ausloeserProps = {
+    "data-testid": "werkbank-einsatz-anlegen",
+    "aria-expanded": inspectorOffen,
+    "aria-controls": inspectorId,
+    onClick: () => {
+      if (inspectorOffen) {
+        schliessen();
+      } else {
+        setInspectorOffen(true);
+      }
+    },
+  } as const;
 
   return (
-    <Card>
-      <h2 data-testid="planungsfenster-woche">Wochenplan {fenster.weekKey}</h2>
-      <p data-testid="planungsfenster-zone">Zeitzone: {fenster.timeZone}</p>
-      <p data-testid="planungsfenster-stand" data-stand={stand}>
-        <StatusBadge data-testid="planungsfenster-stand-abzeichen" tone={STAND_TON[stand]}>
-          {STAND_ABZEICHEN[stand]}
-        </StatusBadge>{" "}
-        {STAND_TEXT[stand]}
-      </p>
-      <p
-        data-testid="planungsfenster-version"
-        data-source-version-id={fenster.sourceVersion?.id ?? ""}
-        data-source-state={fenster.sourceVersion?.state ?? ""}
-        data-published-version-id={fenster.publishedVersionId ?? ""}
-      >
-        {fenster.publishedVersionId === null
-          ? "Noch nichts veroeffentlicht"
-          : `Zuletzt veroeffentlicht: ${fenster.publishedVersionId}`}
-      </p>
+    <Card
+      className="werkbank-fenster"
+      data-stand={stand}
+      data-inspector={inspectorOffen ? "offen" : "zu"}
+    >
+      <div className="werkbank-fenster__status">
+        <div className="werkbank-fenster__titel">
+          <h2 data-testid="planungsfenster-woche">
+            Wochenplan <VisuallyHidden>{fenster.weekKey}</VisuallyHidden>
+          </h2>
+          <p className="werkbank-fenster__zone" data-testid="planungsfenster-zone">
+            Zeitzone: {fenster.timeZone}
+          </p>
+        </div>
+        <div className="werkbank-fenster__stand">
+          <p data-testid="planungsfenster-stand" data-stand={stand}>
+            <StatusBadge data-testid="planungsfenster-stand-abzeichen" tone={STAND_TON[stand]}>
+              {STAND_ABZEICHEN[stand]}
+            </StatusBadge>{" "}
+            {STAND_TEXT[stand]}
+          </p>
+          <p
+            className="werkbank-fenster__version"
+            data-testid="planungsfenster-version"
+            data-source-version-id={fenster.sourceVersion?.id ?? ""}
+            data-source-state={fenster.sourceVersion?.state ?? ""}
+            data-published-version-id={fenster.publishedVersionId ?? ""}
+          >
+            {fenster.publishedVersionId === null
+              ? "Noch nichts veroeffentlicht"
+              : `Zuletzt veroeffentlicht: ${fenster.publishedVersionId}`}
+          </p>
+        </div>
+      </div>
 
-      {/*
-        Die Publish-Aktion (EYT-107). Sie bekommt den SERVERstand herein und
-        meldet die Serverantwort zurueck; die Woche wird danach neu gelesen.
-        Sie setzt selbst nichts — siehe Dateikopf von
-        `planning-publish-action.tsx`.
-      */}
-      <PlanningPublishAction
-        weekKey={fenster.weekKey}
-        sourceVersion={fenster.sourceVersion}
-        darfVeroeffentlichen={darfVeroeffentlichen}
-        publishPlan={(befehl, optionen) => gateway.publishPlan(befehl, optionen)}
-        onVeroeffentlicht={() => setNachladen((n) => n + 1)}
-      />
+      <div className="werkbank-fenster__aktionen">
+        {/*
+          Die Publish-Aktion (EYT-107). Sie bekommt den SERVERstand herein und
+          meldet die Serverantwort zurueck; die Woche wird danach neu gelesen.
+          Sie setzt selbst nichts — siehe Dateikopf von
+          `planning-publish-action.tsx`.
+        */}
+        <PlanningPublishAction
+          weekKey={fenster.weekKey}
+          sourceVersion={fenster.sourceVersion}
+          darfVeroeffentlichen={darfVeroeffentlichen}
+          publishPlan={(befehl, optionen) => gateway.publishPlan(befehl, optionen)}
+          onVeroeffentlicht={() => setNachladen((n) => n + 1)}
+        />
+        {publishIstPrimaer ? (
+          <Button type="button" variant="ghost" {...ausloeserProps}>
+            Einsatz anlegen
+          </Button>
+        ) : (
+          <PrimaryAction {...ausloeserProps}>Einsatz anlegen</PrimaryAction>
+        )}
+      </div>
 
       {fenster.assignments.length === 0 ? (
         <EmptyState
           data-testid="planungsfenster-leer"
           title="Für diese Woche ist nichts geplant."
-          description="Lege unten den ersten Einsatz an — Person, Baustelle und Zeitraum genügen."
+          description="Lege über „Einsatz anlegen“ den ersten Einsatz an — Person, Baustelle und Zeitraum genügen."
         />
-      ) : (
-        <ul data-testid="planungsfenster-liste">
-          {fenster.assignments.map((assignment) => (
-            <li
-              key={assignment.id}
-              data-assignment-id={assignment.id}
-              data-employee-id={assignment.employeeId}
-              data-worksite-id={assignment.worksiteId}
-            >
-              {/* Namen statt Uuids: eine Planerin erkennt "Anna Berg auf
-                  Baustelle Nord", nicht 22222222-…. Die Ids bleiben als
-                  data-Attribute im Markup, weil AK9 den Id-Vergleich zwischen
-                  Planer- und Mitarbeitersicht verlangt — der braucht die Id
-                  selbst, nicht ihre Darstellung. */}
-              <strong>{anzeigename(fenster.resources.employees, assignment.employeeId)}</strong>
-              {" auf "}
-              {anzeigename(fenster.resources.worksites, assignment.worksiteId)}
-              {": "}
-              {assignment.interval.startUtc} – {assignment.interval.endUtc}
-            </li>
-          ))}
-        </ul>
-      )}
+      ) : null}
 
-      <AssignmentForm window={fenster} onSubmit={speichern} />
+      <div className="werkbank-fenster__flaeche">
+        {raster.art === "raster" ? (
+          <div data-testid="planungsfenster-liste" className="wochenraster">
+            {raster.tage.map((tag) => (
+              <div key={tag.tagKey} className="wochenraster__tag" data-tag={tag.tagKey}>
+                <h3 className="wochenraster__tagkopf">
+                  {tag.wochentagsText}{" "}
+                  <span className="wochenraster__tagdatum">{tag.datumsText}</span>
+                </h3>
+                {tag.einsaetze.length === 0 ? (
+                  // Nur Zierde fuer Sehende: die Abwesenheit einer Liste sagt
+                  // dem Screenreader dasselbe, ein zweiter Text waere Rauschen.
+                  <p className="wochenraster__frei" aria-hidden="true">
+                    –
+                  </p>
+                ) : (
+                  <ul className="wochenraster__einsaetze">
+                    {tag.einsaetze.map((einsatz) => (
+                      <Einsatzkarte key={einsatz.id} einsatz={einsatz} fenster={fenster} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+            {raster.ausserhalb.length > 0 ? (
+              // Antworten, die der Server so eigentlich nicht liefern kann —
+              // aber „kann nicht sein" ist kein Renderpfad: sichtbar statt
+              // verschluckt (`lib/wochenraster.ts`).
+              <div className="wochenraster__ausserhalb">
+                <h3>Ausserhalb dieser Woche</h3>
+                <ul className="wochenraster__einsaetze">
+                  {raster.ausserhalb.map((einsatz) => (
+                    <Einsatzkarte key={einsatz.id} einsatz={einsatz} fenster={fenster} />
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          // Zone oder Woche unbestimmbar: die flache Liste ist die ehrliche
+          // Rueckfallebene — alle Daten sichtbar, nichts geraten.
+          <>
+            <StateBanner tone="warning" title="Tageszuordnung nicht möglich">
+              {raster.grund === "zone-unbekannt"
+                ? `Die Zeitzone „${fenster.timeZone}“ ist dieser Laufzeit unbekannt; die Einsätze stehen ungeordnet untereinander.`
+                : `Der Wochenschlüssel „${fenster.weekKey}“ ist nicht lesbar; die Einsätze stehen ungeordnet untereinander.`}
+            </StateBanner>
+            {fenster.assignments.length > 0 ? (
+              <ul data-testid="planungsfenster-liste" className="wochenraster__einsaetze">
+                {fenster.assignments.map((einsatz) => (
+                  <Einsatzkarte key={einsatz.id} einsatz={einsatz} fenster={fenster} />
+                ))}
+              </ul>
+            ) : null}
+          </>
+        )}
+
+        {inspectorOffen ? (
+          <div
+            id={inspectorId}
+            ref={inspectorRef}
+            tabIndex={-1}
+            className="werkbank-inspector"
+            data-testid="werkbank-inspector"
+            onKeyDown={(ereignis) => {
+              // Nichtmodal, aber mit Rueckweg: Escape schliesst und stellt
+              // den Fokus auf den Ausloeser zurueck. Kein Fokus-Trap — Tab
+              // verlaesst den Inspector wie jeden anderen Seitenbereich.
+              if (ereignis.key === "Escape") {
+                ereignis.stopPropagation();
+                schliessen();
+              }
+            }}
+          >
+            <div className="werkbank-inspector__kopf">
+              <Button
+                type="button"
+                variant="ghost"
+                data-testid="werkbank-inspector-schliessen"
+                onClick={schliessen}
+              >
+                Schließen
+              </Button>
+            </div>
+            <AssignmentForm window={fenster} onSubmit={speichern} />
+          </div>
+        ) : null}
+      </div>
     </Card>
   );
 }

@@ -75,6 +75,12 @@ vi.mock("next/navigation", async () => {
 const MITTWOCH_KW34 = new Date("2026-08-19T12:00:00.000Z");
 const RECHTE = ["planning.read", "planning.write"];
 
+// Sieben userEvent-Schritte je Reise (seit EYT-147 einer mehr: der Inspector
+// wird zuerst geoeffnet) liegen unter Volllast ueber dem 5-s-Standard —
+// gemessen 31.08.2026 (5133 ms, nur unter parallelem turbo-Lauf). Das Budget
+// ist Robustheit, keine Abschwaechung: es aendert keine Zusicherung.
+vi.setConfig({ testTimeout: 15_000 });
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(MITTWOCH_KW34);
@@ -185,6 +191,10 @@ describe("REQ-004 / AC-006, AC-007 — Schreiben in die angesehene Woche, danach
    * sie es auch.
    */
   async function einsatzAnlegen(datum: string): Promise<void> {
+    // Seit EYT-147 steht das Formular im Inspector: erst den Ausloeser
+    // druecken (er erscheint mit dem geladenen Fenster), dann warten die
+    // Feldzugriffe wie zuvor auf einen ZUSTAND, nicht auf eine Frist.
+    await userEvent.click(await screen.findByTestId("werkbank-einsatz-anlegen"));
     await userEvent.selectOptions(await screen.findByTestId("feld-employee"), PERSON_ID);
     await userEvent.selectOptions(screen.getByTestId("feld-worksite"), BAUSTELLE_ID);
     await userEvent.type(screen.getByTestId("feld-datum"), datum);

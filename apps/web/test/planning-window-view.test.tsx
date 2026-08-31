@@ -71,6 +71,16 @@ const PLANBARE_WOCHE: PlanningWindow = {
 // ein echter Befund aussieht.
 afterEach(cleanup);
 
+/**
+ * Seit EYT-147 steht das Einsatzformular im seitlichen Inspector und ist erst
+ * nach „Einsatz anlegen" im Baum. Der erste Zugriff WARTET auf den Ausloeser
+ * (der erscheint erst mit dem geladenen Fenster), der zweite auf das Formular.
+ */
+async function inspectorOeffnen(): Promise<void> {
+  await userEvent.click(await screen.findByTestId("werkbank-einsatz-anlegen"));
+  await screen.findByTestId("einsatzformular");
+}
+
 describe("PlanningWindowView", () => {
   it("zeigt zuerst den Ladezustand", () => {
     renderWith({ ok: true, value: LEERE_WOCHE });
@@ -239,7 +249,7 @@ describe("PlanningWindowView", () => {
         <PlanningWindowView weekKey="2026-W32" />
       </PlanningGatewayProvider>,
     );
-    await screen.findByTestId("einsatzformular");
+    await inspectorOeffnen();
 
     await userEvent.selectOptions(
       screen.getByTestId("feld-employee"),
@@ -309,7 +319,7 @@ describe("PlanningWindowView", () => {
         <PlanningWindowView weekKey="2026-W32" />
       </PlanningGatewayProvider>,
     );
-    await screen.findByTestId("einsatzformular");
+    await inspectorOeffnen();
 
     await userEvent.selectOptions(
       screen.getByTestId("feld-employee"),
@@ -404,7 +414,7 @@ describe("PlanningWindowView", () => {
         <PlanningWindowView weekKey="2026-W32" />
       </PlanningGatewayProvider>,
     );
-    await screen.findByTestId("einsatzformular");
+    await inspectorOeffnen();
 
     // Vor dem Speichern: genau EIN Lesevorgang, und noch keine Zuweisung.
     expect(leseversuch).toBe(1);
