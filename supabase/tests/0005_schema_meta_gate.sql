@@ -66,7 +66,13 @@ insert into expected_tables (table_name, tenant_owned, note) values
   -- EYT-109). Die Rechte-, Policy- und Kanalzusicherungen dazu stehen in
   -- supabase/tests/0013_cost_snapshots.sql.
   ('cost_snapshots', true, 'Unveraenderlicher Kopf eines Plan-Personalkosten-Snapshots (0018)'),
-  ('cost_snapshot_positions', true, 'Positionen eines Kosten-Snapshots, Reihenfolge per ordinal eingefroren (0018)');
+  ('cost_snapshot_positions', true, 'Positionen eines Kosten-Snapshots, Reihenfolge per ordinal eingefroren (0018)'),
+  -- Stabile Identitaet eines Baustellentages, versionsuebergreifend. Traegt
+  -- bewusst keine Zeiten und keinen Publish-Marker (0019, EYT-147); die
+  -- Struktur-, Rechte- und Invariantenzusicherungen stehen in
+  -- supabase/tests/0014_worksite_days.sql.
+  ('worksite_days', true, 'Stabile Identitaet eines Baustellentages je Organisation, Baustelle und lokalem Datum (0019)'),
+  ('worksite_day_configurations', true, 'Revisionsgebundener Planungsstand eines Baustellentages in genau einer Planversion (0019)');
 
 -- ---------------------------------------------------------------------------
 -- 1. Vollstaendigkeit in beide Richtungen
@@ -203,14 +209,39 @@ select is(
 -- Gegenprobe zu 4 und 5: ohne diese Zeile waeren die Verbote auch dann gruen,
 -- wenn ueberhaupt keine Rechte vergeben sind — und die Anwendung stuende vor
 -- lauter permission denied.
+--
+-- EINE benannte Ausnahme seit 0019 (EYT-147), sonst unveraendert.
+--
+-- 0019 entzieht auf `idempotency_records` das TABELLEN-select, um
+-- `result_payload` unlesbar zu machen (R5-1), und vergibt die uebrigen sieben
+-- Spalten einzeln neu. GEMESSEN (PostgreSQL 17.6, lokaler Stack nach db reset):
+--     has_table_privilege('authenticated','public.idempotency_records','select')      = false
+--     has_any_column_privilege('authenticated','public.idempotency_records','SELECT') = true
+-- Die urspruengliche Fassung ging deshalb rot, obwohl die AUSSAGE dieser Zeile —
+-- "die Anwendung laeuft nicht in permission denied" — weiterhin wahr ist: der
+-- einzige Bestandsleser liest `subject_id, request_fingerprint`, und beide
+-- stehen im Grant.
+--
+-- Die Ausnahme ist BEWUSST auf diese eine Tabelle eingegrenzt und nicht
+-- repo-weit gezogen. `has_any_column_privilege` ist wahr, sobald IRGENDEINE
+-- Spalte das Recht traegt, und schliesst das Tabellenrecht mit ein — als
+-- Ersatz fuer ALLE 18 Tabellen waere die Zusicherung damit fuer 17 von ihnen
+-- schwaecher als vorher, ohne dass irgendetwas das verlangt. Welche Spalten es
+-- bei `idempotency_records` genau sind, misst
+-- supabase/tests/0014_worksite_days.sql (B9/B10/E1/E2) exakt; diese Zeile
+-- beantwortet hier nur noch "die Anwendung kommt an ihre Daten".
 select is(
   (
     select coalesce(array_agg(e.table_name order by e.table_name), array[]::text[])
     from expected_tables e
-    where not has_table_privilege('authenticated', 'public.' || e.table_name, 'select')
+    where case
+      when e.table_name = 'idempotency_records'
+        then not has_any_column_privilege('authenticated', 'public.' || e.table_name, 'SELECT')
+      else not has_table_privilege('authenticated', 'public.' || e.table_name, 'select')
+    end
   ),
   array[]::text[],
-  'authenticated hat auf jeder erwarteten Tabelle select — sonst laeuft die Anwendung in permission denied'
+  'authenticated hat auf jeder erwarteten Tabelle select — bei idempotency_records seit 0019 spaltenweise, sonst auf Tabellenebene; sonst laeuft die Anwendung in permission denied'
 );
 
 -- ---------------------------------------------------------------------------
