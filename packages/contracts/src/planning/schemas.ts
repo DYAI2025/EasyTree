@@ -422,6 +422,10 @@ export const PlanningWindowSchema = z
       const einsaetze = new Map(fenster.assignments.map((einsatz) => [einsatz.id, einsatz]));
       /** Assignment-Id -> Index des Tages, dessen Team sie zuerst nannte. */
       const belegtVon = new Map<string, number>();
+      /** worksiteDayId -> Index der Zeile, die diese Identitaet zuerst fuehrte. */
+      const identitaeten = new Map<string, number>();
+      /** configurationId -> Index der Zeile, die diese Revision zuerst fuehrte. */
+      const revisionen = new Map<string, number>();
 
       tage.forEach((tag, tagIndex) => {
         if (!bekannteBaustellen.has(tag.worksiteId)) {
@@ -430,6 +434,40 @@ export const PlanningWindowSchema = z
             path: ["worksiteDays", tagIndex, "worksiteId"],
             message:
               "Baustellentag verweist auf eine Baustelle, die nicht in resources.worksites steht — nicht aufloesbar.",
+          });
+        }
+
+        // Eine Tagesidentitaet und eine Konfigurationsrevision erscheinen im
+        // Fenster je HOECHSTENS EINMAL als primaere Zeile. Beide Achsen einzeln,
+        // nicht als Paar: `(worksiteDayId, configurationId)` waere schon dann
+        // eindeutig, wenn derselbe Tag zweimal mit verschiedenen Revisionen
+        // stuende — und genau das ist die zweite Stale-Wahrheit je Tag, die
+        // Migration 0019 R-20 ausschliesst. Umgekehrt gilt `unique
+        // (plan_version_id, worksite_day_id)`: eine Revision gehoert zu genau
+        // einer Identitaet.
+        const identitaetZuerst = identitaeten.get(tag.worksiteDayId);
+        if (identitaetZuerst === undefined) {
+          identitaeten.set(tag.worksiteDayId, tagIndex);
+        } else {
+          ctx.addIssue({
+            code: "custom",
+            path: ["worksiteDays", tagIndex, "worksiteDayId"],
+            message:
+              `Dieselbe Tagesidentitaet steht bereits in worksiteDays[${identitaetZuerst}]. ` +
+              "Ein Baustellentag erscheint je Fenster einmal — sonst traegt er zwei lockVersion-Staende.",
+          });
+        }
+
+        const revisionZuerst = revisionen.get(tag.configurationId);
+        if (revisionZuerst === undefined) {
+          revisionen.set(tag.configurationId, tagIndex);
+        } else {
+          ctx.addIssue({
+            code: "custom",
+            path: ["worksiteDays", tagIndex, "configurationId"],
+            message:
+              `Dieselbe Konfigurationsrevision steht bereits in worksiteDays[${revisionZuerst}]. ` +
+              "Eine Tageskonfiguration gehoert zu genau einer Tagesidentitaet.",
           });
         }
 
@@ -466,6 +504,21 @@ export const PlanningWindowSchema = z
               code: "custom",
               path: [...pfad, "interval"],
               message: "Teammitglied und referenzierte Zuweisung nennen verschiedene Intervalle.",
+            });
+          }
+          // Dritte Achse derselben Aussage — und die einzige, die nicht aus dem
+          // Teameintrag selbst kommt: die Baustelle steht am TAG, nicht am
+          // Mitglied. Person und Intervall koennen vollstaendig uebereinstimmen,
+          // waehrend die Zuweisung auf einer anderen Baustelle gefuehrt wird;
+          // beide Ansichten saehen dann fuer sich richtig aus. Die
+          // Aufloesbarkeitspruefung oben faengt das nicht: sie fragt nur, ob die
+          // Baustelle BEKANNT ist, nicht ob es DIESELBE ist.
+          if (einsatz.worksiteId !== tag.worksiteId) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...pfad, "assignmentId"],
+              message:
+                "Teammitglied verweist auf eine Zuweisung einer ANDEREN Baustelle als der des Baustellentags.",
             });
           }
 
@@ -690,10 +743,25 @@ export type UpdateWorksiteDayTeamCommand = z.infer<typeof UpdateWorksiteDayTeamC
  * Businesslogik (M3/M4) — die dort diese Konstante IMPORTIERT, damit die URNs
  * nicht an zwei Stellen stehen.
  *
- * Damit diese Liste kein blosser Kommentar bleibt, wird sie in die
- * 409-Beschreibung der beiden Routen eingesetzt (`openapi/document.ts`) und ist
- * dadurch Teil des erzeugten `v1.json` — der Drift-Test schuetzt sie
- * byteweise mit.
+ * Damit diese Liste kein blosser Kommentar bleibt, werden die ERREICHBAREN
+ * 409-Werte in die 409-Beschreibung der beiden Routen eingesetzt
+ * (`openapi/document.ts`) und sind dadurch Teil des erzeugten `v1.json` — der
+ * Drift-Test schuetzt sie byteweise mit.
+ *
+ * ## `WORKSITE_DAY_TEAM_REQUIRED` ist KEIN 409 dieser Routen
+ *
+ * Die Konstante bleibt, der veroeffentlichte 409-Zweig nicht (PO-Review 15164).
+ * `WorksiteDayTeamCommandSchema.min(1)` lehnt ein leeres Team schon an der
+ * Request-Grenze ab, und der Planungscontroller beantwortet einen
+ * fehlgeschlagenen `safeParse` ausnahmslos mit **400** (`BadRequestException`,
+ * `planning.controller.ts`) — nach erfolgreicher Schemapruefung kann der Fall
+ * nicht mehr entstehen. Ein veroeffentlichter 409 dafuer waere ein Versprechen
+ * an Clients, das der Server nie einloest.
+ *
+ * Der Wert selbst bleibt benannt, weil M3/M4 ihn an der 400-Grenze als
+ * `problem.type` fuehren sollen: „Team fehlt" ist fachlich etwas anderes als
+ * `INVALID_INTERVAL`, und ein Client soll beides unterscheiden koennen, ohne
+ * den deutschen Meldungstext zu lesen.
  *
  * NICHT enthalten: `WORKSITE_DAY_INCOMPLETE`. Das ist ein
  * VEROEFFENTLICHUNGS-Problem und gehoert weder hierher noch in
@@ -709,7 +777,12 @@ export const WORKSITE_DAY_PROBLEM_TYPE = {
   DUPLICATE_WORKSITE_DAY: "urn:easytree:planning:duplicate-worksite-day",
   /** Ein Intervall liegt ausserhalb des lokalen Tages, den es besetzen soll. */
   INTERVAL_OUTSIDE_DAY: "urn:easytree:planning:interval-outside-day",
-  /** Das Kommando kam ohne Team an; ein leerer Tag entsteht nicht still. */
+  /**
+   * Das Kommando kam ohne Team an; ein leerer Tag entsteht nicht still.
+   *
+   * Request-Grenze, also **400** — nicht Teil der 409-Zweige der beiden Routen
+   * (siehe Kopfkommentar). `team.min(1)` faengt den Fall vorher ab.
+   */
   WORKSITE_DAY_TEAM_REQUIRED: "urn:easytree:planning:worksite-day-team-required",
 } as const;
 

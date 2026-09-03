@@ -35,6 +35,15 @@ import {
 const WORKSITE_DAY_ID = "00000000-0000-4000-8000-00000000d001";
 const CONFIGURATION_ID = "00000000-0000-4000-8000-00000000c001";
 const WORKSITE_ID = "00000000-0000-4000-8000-00000000a001";
+/**
+ * Eine ZWEITE, ebenfalls bekannte Baustelle.
+ *
+ * Nicht dasselbe wie {@link WORKSITE_FREMD}: die ist unbekannt und faellt schon
+ * an der Aufloesbarkeit. Fuer die Uebereinstimmungsregel braucht es zwei Namen,
+ * die beide in `resources.worksites` stehen — sonst misst der Fall die
+ * Aufloesbarkeit und nicht den Vergleich.
+ */
+const WORKSITE_ZWEI = "00000000-0000-4000-8000-00000000a002";
 const WORKSITE_FREMD = "00000000-0000-4000-8000-00000000a999";
 const PERSON_A = "00000000-0000-4000-8000-0000000000a1";
 const PERSON_B = "00000000-0000-4000-8000-0000000000b1";
@@ -495,6 +504,95 @@ describe("PlanningWindow.worksiteDays — additive Projektion", () => {
       fenster({ worksiteDays: [tagImFenster([MITGLIED_1]), zweiterTag] }),
     );
     expect(ergebnis.success).toBe(false);
+  });
+
+  /**
+   * Ein Fenster, in dem BEIDE Baustellen bekannt sind.
+   *
+   * `einsatzBaustelle` entscheidet, auf welcher Baustelle `EINSATZ_1` liegt.
+   * Der Baustellentag zeigt unveraendert auf {@link WORKSITE_ID} — damit ist
+   * die Uebereinstimmung die EINZIGE Groesse, die sich zwischen den beiden
+   * Richtungen dieses Falls unterscheidet.
+   */
+  function fensterMitZweiBaustellen(einsatzBaustelle: string): Record<string, unknown> {
+    return fenster({
+      assignments: [
+        { id: EINSATZ_1, employeeId: PERSON_A, worksiteId: einsatzBaustelle, interval: FRUEH },
+        { id: EINSATZ_2, employeeId: PERSON_B, worksiteId: WORKSITE_ID, interval: SPAET },
+      ],
+      resources: {
+        employees: [
+          { id: PERSON_A, label: "Anna", active: true },
+          { id: PERSON_B, label: "Bruno", active: true },
+        ],
+        worksites: [
+          { id: WORKSITE_ID, label: "Baustelle Nord", active: true },
+          { id: WORKSITE_ZWEI, label: "Baustelle Sued", active: true },
+        ],
+      },
+      worksiteDays: [tagImFenster([MITGLIED_1])],
+    });
+  }
+
+  it("lehnt ein Teammitglied ab, dessen Zuweisung auf einer ANDEREN Baustelle liegt", () => {
+    // PO-Review 15164, Important 1. Person, Intervall und Assignment-Id stimmen
+    // vollstaendig ueberein — nur die Baustelle nicht. Ohne diese Regel passiert
+    // ein fachlich widerspruechlicher Payload die Runtime-Validation: die
+    // Tageskarte zeigt die Person auf Baustelle Nord, die Einsatzliste auf
+    // Baustelle Sued, und beide Ansichten sehen fuer sich richtig aus.
+    const ergebnis = PlanningWindowSchema.safeParse(fensterMitZweiBaustellen(WORKSITE_ZWEI));
+    expect(ergebnis.success).toBe(false);
+  });
+
+  it("nimmt dasselbe Fenster an, sobald Zuweisung und Tag dieselbe Baustelle nennen", () => {
+    // Gegenprobe zur Zeile darueber. Ohne sie waere der negative Fall auch dann
+    // gruen, wenn die zweite Baustelle aus einem ganz anderen Grund durchfiele.
+    const ergebnis = PlanningWindowSchema.safeParse(fensterMitZweiBaustellen(WORKSITE_ID));
+    expect(ergebnis.success).toBe(true);
+  });
+
+  it("lehnt dieselbe worksiteDayId zweimal als primaere Tageszeile ab", () => {
+    // PO-Review 15164, Important 2 (A). Die Teams sind ABSICHTLICH verschieden,
+    // sonst schluege die bestehende Assignment-Einmaligkeit zu und der Fall
+    // maesse sie statt der Identitaet.
+    const zweiterTag = {
+      ...tagImFenster([MITGLIED_2]),
+      configurationId: "00000000-0000-4000-8000-00000000c002",
+      localDate: "2026-08-04",
+    };
+    const ergebnis = PlanningWindowSchema.safeParse(
+      fenster({ worksiteDays: [tagImFenster([MITGLIED_1]), zweiterTag] }),
+    );
+    expect(ergebnis.success).toBe(false);
+  });
+
+  it("lehnt dieselbe configurationId zweimal als primaere Tageszeile ab", () => {
+    // PO-Review 15164, Important 2 (B). Gleiche Bauart, andere Achse: die
+    // Identitaeten unterscheiden sich, die Revision nicht.
+    const zweiterTag = {
+      ...tagImFenster([MITGLIED_2]),
+      worksiteDayId: "00000000-0000-4000-8000-00000000d002",
+      localDate: "2026-08-04",
+    };
+    const ergebnis = PlanningWindowSchema.safeParse(
+      fenster({ worksiteDays: [tagImFenster([MITGLIED_1]), zweiterTag] }),
+    );
+    expect(ergebnis.success).toBe(false);
+  });
+
+  it("nimmt zwei Tageszeilen mit verschiedenen Ids an", () => {
+    // Gegenprobe zu den beiden Zeilen darueber: der Waechter darf nicht jede
+    // zweite Tageszeile ablehnen, sondern nur die doppelte.
+    const zweiterTag = {
+      ...tagImFenster([MITGLIED_2]),
+      worksiteDayId: "00000000-0000-4000-8000-00000000d002",
+      configurationId: "00000000-0000-4000-8000-00000000c002",
+      localDate: "2026-08-04",
+    };
+    const ergebnis = PlanningWindowSchema.safeParse(
+      fenster({ worksiteDays: [tagImFenster([MITGLIED_1]), zweiterTag] }),
+    );
+    expect(ergebnis.success).toBe(true);
   });
 
   it("lehnt Baustellentage ohne sourceVersion ab", () => {

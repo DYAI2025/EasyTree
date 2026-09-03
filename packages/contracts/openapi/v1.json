@@ -317,7 +317,7 @@
       "post": {
         "operationId": "planWorksiteDay",
         "summary": "Baustellentag anlegen",
-        "description": "Legt den Baustellentag fuer eine Baustelle an einem expliziten lokalen Kalendertag an und besetzt ihn. Adressiert wird Baustelle plus Tag, nicht eine Id: die stabile worksiteDayId entsteht erst hier. Der Server loest sie auf, haengt sie an die Konfiguration des Wochenentwurfs und antwortet mit dem angelegten Tag einschliesslich lockVersion und der vergebenen assignmentIds. Neu gegenueber den uebrigen Planungsrouten sind die problem.type-Werte urn:easytree:planning:duplicate-worksite-day, urn:easytree:planning:interval-outside-day und urn:easytree:planning:worksite-day-team-required.",
+        "description": "Legt den Baustellentag fuer eine Baustelle an einem expliziten lokalen Kalendertag an und besetzt ihn. Adressiert wird Baustelle plus Tag, nicht eine Id: die stabile worksiteDayId entsteht erst hier. Der Server loest sie auf, haengt sie an die Konfiguration des Wochenentwurfs und antwortet mit dem angelegten Tag einschliesslich lockVersion und der vergebenen assignmentIds. Neu gegenueber den uebrigen Planungsrouten sind die problem.type-Werte urn:easytree:planning:duplicate-worksite-day und urn:easytree:planning:interval-outside-day.",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -384,7 +384,7 @@
             }
           },
           "409": {
-            "description": "Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: urn:easytree:planning:duplicate-worksite-day, urn:easytree:planning:interval-outside-day, urn:easytree:planning:worksite-day-team-required. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier wiederverwendet und nicht neu erfunden.",
+            "description": "Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: urn:easytree:planning:duplicate-worksite-day, urn:easytree:planning:interval-outside-day. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier wiederverwendet und nicht neu erfunden.",
             "content": {
               "application/json": {
                 "schema": {
@@ -467,7 +467,7 @@
             }
           },
           "409": {
-            "description": "Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: urn:easytree:planning:stale-worksite-day, urn:easytree:planning:worksite-day-not-found, urn:easytree:planning:interval-outside-day, urn:easytree:planning:worksite-day-team-required. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier wiederverwendet und nicht neu erfunden.",
+            "description": "Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: urn:easytree:planning:stale-worksite-day, urn:easytree:planning:worksite-day-not-found, urn:easytree:planning:interval-outside-day. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier wiederverwendet und nicht neu erfunden.",
             "content": {
               "application/json": {
                 "schema": {

@@ -337,8 +337,17 @@ describe("Baustellentag-Routen (EYT-147 M2)", () => {
 
     // Gegenprobe: der Publish-Typ gehoert NICHT hierher. Er ist eine
     // Veroeffentlichungsbedingung, keine Konfliktantwort dieser Routen.
+    //
+    // Ebenso wenig `WORKSITE_DAY_TEAM_REQUIRED` (PO-Review 15164): `team.min(1)`
+    // lehnt das leere Team an der REQUEST-Grenze ab, und der Planungscontroller
+    // beantwortet jeden fehlgeschlagenen `safeParse` mit 400. Ein
+    // veroeffentlichter 409 dafuer waere unerreichbar — ein Versprechen, das
+    // kein Serverpfad einloest. Der Fall unten misst, dass `minItems: 1` genau
+    // deshalb weiterhin im Dokument steht: die Regel bleibt, nur ihr falscher
+    // Fehlerzweig faellt weg.
     for (const beschreibung of [anlegen?.["409"]?.description, team?.["409"]?.description]) {
       expect(beschreibung).not.toContain("worksite-day-incomplete");
+      expect(beschreibung).not.toContain(WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_TEAM_REQUIRED);
     }
   });
 

@@ -414,9 +414,8 @@ export function buildOpenApiDocument(): Record<string, unknown> {
             "Konfiguration des Wochenentwurfs und antwortet mit dem angelegten Tag einschliesslich " +
             "lockVersion und der vergebenen assignmentIds. Neu gegenueber den uebrigen " +
             "Planungsrouten sind die problem.type-Werte " +
-            `${WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY}, ` +
-            `${WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY} und ` +
-            `${WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_TEAM_REQUIRED}.`,
+            `${WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY} und ` +
+            `${WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY}.`,
           parameters: [idempotencyHeader],
           requestBody: jsonBody("PlanWorksiteDayCommand"),
           responses: {
@@ -425,7 +424,6 @@ export function buildOpenApiDocument(): Record<string, unknown> {
             "409": konfliktMit(
               WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY,
               WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY,
-              WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_TEAM_REQUIRED,
             ),
           },
         },
@@ -454,7 +452,6 @@ export function buildOpenApiDocument(): Record<string, unknown> {
               WORKSITE_DAY_PROBLEM_TYPE.STALE_WORKSITE_DAY,
               WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_NOT_FOUND,
               WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY,
-              WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_TEAM_REQUIRED,
             ),
           },
         },
