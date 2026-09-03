@@ -65,6 +65,14 @@ function gatewayMit(
   publishPlan?: PlanningGateway["publishPlan"],
 ): PlanningGateway {
   return {
+    // EYT-147 M2: neue Portmethoden. Diese Ansicht ruft sie nicht auf —
+    // ein Wurf faellt auf, eine stille Leerantwort nicht.
+    planWorksiteDay: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
+    updateWorksiteDayTeam: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
     getPlanningWindow: () => Promise.resolve(antwort()),
     validateDraft: () => {
       throw new Error("in dieser Suite nicht benutzt");

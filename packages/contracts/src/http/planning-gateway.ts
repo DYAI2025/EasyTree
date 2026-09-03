@@ -48,9 +48,12 @@ import {
   PlanValidationResultSchema,
   PlanningWindowSchema,
   PublishedPlanVersionSchema,
+  WorksiteDayDtoSchema,
   type CreateAssignmentCommand,
+  type PlanWorksiteDayCommand,
   type PlanningWindowQuery,
   type PublishPlanCommand,
+  type UpdateWorksiteDayTeamCommand,
   type ValidatePlanCommand,
 } from "../planning/schemas.js";
 
@@ -157,6 +160,42 @@ export class HttpPlanningGateway implements PlanningGateway {
       body: input,
       idempotencyKey: options.idempotencyKey,
       schema: PublishedPlanVersionSchema,
+      conflictAs: "STALE_VERSION",
+    });
+  }
+
+  planWorksiteDay(
+    input: PlanWorksiteDayCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<z.infer<typeof WorksiteDayDtoSchema>>> {
+    return this.send({
+      path: "/planung/baustellentage",
+      method: "POST",
+      body: input,
+      idempotencyKey: options.idempotencyKey,
+      schema: WorksiteDayDtoSchema,
+      // Ein 409 ist hier eine fachliche Ablehnung — der Tag existiert schon,
+      // oder ein Intervall passt nicht. Kein veralteter Stand: beim Anlegen
+      // gibt es noch keinen, auf dem der Client haette arbeiten koennen.
+      conflictAs: "REJECTED",
+    });
+  }
+
+  updateWorksiteDayTeam(
+    input: UpdateWorksiteDayTeamCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<z.infer<typeof WorksiteDayDtoSchema>>> {
+    return this.send({
+      path: "/planung/baustellentage/team",
+      method: "POST",
+      body: input,
+      idempotencyKey: options.idempotencyKey,
+      schema: WorksiteDayDtoSchema,
+      // Dieselbe Bedeutung wie beim Veroeffentlichen: `expectedLockVersion`
+      // passte nicht, jemand anders hat den Tag zwischenzeitlich umgeplant. Die
+      // Oberflaeche muss darauf neu laden — nicht die Eingabe der Planerin
+      // bemaengeln, an der nichts falsch war. Welcher der 409-Typen es genau
+      // war, steht in `problem.type` (WORKSITE_DAY_PROBLEM_TYPE).
       conflictAs: "STALE_VERSION",
     });
   }

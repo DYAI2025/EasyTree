@@ -12,6 +12,8 @@ import {
   serializeOpenApiDocument,
   weekKeyParam,
 } from "../src/openapi/document.js";
+import { WORKSITE_DAY_PROBLEM_TYPE } from "../src/planning/schemas.js";
+import { LocalDateSchema } from "../src/primitives.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const committedPath = resolve(packageRoot, "openapi/v1.json");
@@ -269,5 +271,120 @@ describe("Vertragsform", () => {
       .filter(([, schema]) => schema["additionalProperties"] !== false)
       .map(([name]) => name);
     expect(open).toEqual([]);
+  });
+});
+
+describe("Baustellentag-Routen (EYT-147 M2)", () => {
+  const doc = buildOpenApiDocument();
+  const paths = doc["paths"] as Record<string, Record<string, Record<string, unknown>>>;
+  const schemas = (doc["components"] as { schemas: Record<string, Record<string, unknown>> })
+    .schemas;
+
+  /** Pfad -> erwartete Operation. Tabelle statt vier Einzelfaelle. */
+  const ROUTEN = [
+    { pfad: "/planung/baustellentage", operationId: "planWorksiteDay", erfolg: "201" },
+    { pfad: "/planung/baustellentage/team", operationId: "updateWorksiteDayTeam", erfolg: "200" },
+  ] as const;
+
+  it.each(ROUTEN)("dokumentiert POST $pfad als $operationId", ({ pfad, operationId, erfolg }) => {
+    const eintrag = paths[pfad];
+    expect(eintrag, `Pfad ${pfad} fehlt im Vertrag`).toBeDefined();
+
+    // Vakanzschutz: ohne diese Zeile waeren die Zusicherungen unten auch dann
+    // gruen, wenn die Operation gar keine POST-Methode traegt.
+    const op = eintrag?.["post"];
+    expect(op, `${pfad} hat keine POST-Operation`).toBeDefined();
+    expect(op?.["operationId"]).toBe(operationId);
+
+    const responses = op?.["responses"] as Record<string, unknown> | undefined;
+    expect(Object.keys(responses ?? {})).toContain(erfolg);
+
+    // Und der Erfolgsfall traegt WIRKLICH den Baustellentag — nicht irgendein
+    // Objekt. Ohne diese Zeile bliebe der Fall gruen, wenn jemand die Antwort
+    // versehentlich auf `AssignmentDto` umhaengt.
+    const erfolgsantwort = responses?.[erfolg] as
+      { content: { "application/json": { schema: { $ref: string } } } } | undefined;
+    expect(erfolgsantwort?.content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/WorksiteDayDto",
+    );
+  });
+
+  it.each(ROUTEN)("verlangt bei $pfad den Idempotenzschluessel", ({ pfad }) => {
+    const params = (paths[pfad]?.["post"]?.["parameters"] ?? []) as Array<{
+      name: string;
+      required: boolean;
+    }>;
+    const header = params.find((p) => p.name === "Idempotency-Key");
+    expect(header, `${pfad} ohne Idempotency-Key`).toBeDefined();
+    expect(header?.required).toBe(true);
+  });
+
+  it("nennt die neuen Problem-Types im 409-Zweig, aus der Konstante abgeleitet", () => {
+    // Gemessen wird die KOPPLUNG an `WORKSITE_DAY_PROBLEM_TYPE`, nicht der
+    // Wortlaut. Schriebe jemand die URNs als Literale in `document.ts`, bliebe
+    // `v1.json` byteweise gleich und der Drift-Test gruen — die Konstante waere
+    // dann ein Kommentar, und eine Umbenennung liefe still auseinander.
+    const anlegen = paths["/planung/baustellentage"]?.["post"]?.["responses"] as
+      Record<string, { description: string }> | undefined;
+    expect(anlegen?.["409"]?.description).toContain(
+      WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY,
+    );
+
+    const team = paths["/planung/baustellentage/team"]?.["post"]?.["responses"] as
+      Record<string, { description: string }> | undefined;
+    expect(team?.["409"]?.description).toContain(WORKSITE_DAY_PROBLEM_TYPE.STALE_WORKSITE_DAY);
+    expect(team?.["409"]?.description).toContain(WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_NOT_FOUND);
+
+    // Gegenprobe: der Publish-Typ gehoert NICHT hierher. Er ist eine
+    // Veroeffentlichungsbedingung, keine Konfliktantwort dieser Routen.
+    for (const beschreibung of [anlegen?.["409"]?.description, team?.["409"]?.description]) {
+      expect(beschreibung).not.toContain("worksite-day-incomplete");
+    }
+  });
+
+  it("traegt im Dokument genau die Zod-Grenzen, die JSON Schema ausdruecken KANN", () => {
+    // ## Warum dieser Fall existiert
+    //
+    // Der Ehrlichkeitsabsatz an `NAMED_SCHEMAS` (document.ts) nennt vier Regeln,
+    // die bei der Erzeugung wegfallen, und drei, die ankommen. Bis hierher war
+    // beides Prosa. Dieser Fall misst die Haelfte, die ANKOMMEN muss — und
+    // damit haben die Gegenmutationen "eine Id entfernen" und "team.min(1)
+    // entfernen" neben dem Laufzeittest einen ZWEITEN, unabhaengigen Detektor.
+
+    // (1) Stabile Identitaet und Revision sind ZWEI Pflichtfelder — ein
+    // Generator sieht sie getrennt, keines ist optional oder abgeleitet.
+    const dto = schemas["WorksiteDayDto"];
+    expect(dto, "Komponente WorksiteDayDto fehlt — der Rest misst nichts").toBeDefined();
+    expect(dto?.["required"]).toEqual(
+      expect.arrayContaining(["worksiteDayId", "configurationId", "lockVersion"]),
+    );
+    expect(dto?.["additionalProperties"]).toBe(false);
+
+    // (2) `team.min(1)` kommt als `minItems: 1` an — in BEIDEN Kommandos.
+    for (const name of ["PlanWorksiteDayCommand", "UpdateWorksiteDayTeamCommand"] as const) {
+      const team = (
+        schemas[name]?.["properties"] as Record<string, Record<string, unknown>> | undefined
+      )?.["team"];
+      expect(team, `${name}.team fehlt`).toBeDefined();
+      expect(team?.["minItems"], `${name}.team ohne minItems — team.min(1) gefallen?`).toBe(1);
+    }
+
+    // (3) Additiv heisst: NICHT required. `.default([])` fuehrte das Feld unter
+    // `required` (gemessen zod 4.4.3) und behauptete ein Feld, das der heutige
+    // Server nie sendet.
+    const fenster = schemas["PlanningWindow"];
+    expect(Object.keys((fenster?.["properties"] ?? {}) as object)).toContain("worksiteDays");
+    expect(fenster?.["required"]).not.toContain("worksiteDays");
+
+    // (4) Und die Ehrlichkeit zur Kalenderregel: `localDate` traegt im Dokument
+    // nur das Muster — `2026-02-30` geht dort durch, zur Laufzeit nicht.
+    // Beide Haelften gemessen, wie beim Kostenschnappschuss.
+    const localDate = (
+      schemas["PlanWorksiteDayCommand"]?.["properties"] as Record<string, Record<string, unknown>>
+    )["localDate"];
+    expect(typeof localDate?.["pattern"]).toBe("string");
+    expect(new RegExp(String(localDate?.["pattern"])).test("2026-02-30")).toBe(true);
+    expect(localDate?.["format"]).toBeUndefined();
+    expect(LocalDateSchema.safeParse("2026-02-30").success).toBe(false);
   });
 });

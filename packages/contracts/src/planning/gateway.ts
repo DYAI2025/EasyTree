@@ -9,11 +9,14 @@ import type {
   AssignmentDto,
   CreateAssignmentCommand,
   PlanValidationResult,
+  PlanWorksiteDayCommand,
   PlanningWindow,
   PlanningWindowQuery,
   PublishPlanCommand,
   PublishedPlanVersion,
+  UpdateWorksiteDayTeamCommand,
   ValidatePlanCommand,
+  WorksiteDayDto,
 } from "./schemas.js";
 
 /**
@@ -46,4 +49,28 @@ export interface PlanningGateway {
     input: PublishPlanCommand,
     options: WriteOptions,
   ): Promise<GatewayResult<PublishedPlanVersion>>;
+  /**
+   * Einen Baustellentag anlegen (EYT-147 M2).
+   *
+   * Antwortet mit dem angelegten Tag, nicht mit einer nackten Id: der Aufrufer
+   * braucht `lockVersion` fuer die naechste Aenderung und `team` mit den
+   * vergebenen Assignment-Ids, um die Karte zu zeichnen. Ein zweiter Leseaufruf
+   * dafuer koennte bereits einen anderen Stand sehen.
+   */
+  planWorksiteDay(
+    input: PlanWorksiteDayCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<WorksiteDayDto>>;
+  /**
+   * Die Tagesbesetzung eines bestehenden Baustellentags ersetzen (EYT-147 M2).
+   *
+   * Gibt denselben Typ zurueck wie das Anlegen — mit der FORTGESCHRIEBENEN
+   * `lockVersion`. Ohne sie muesste der Client fuer jede zweite Aenderung neu
+   * laden, und genau in dieser Luecke entstuende der veraltete Stand, den
+   * `expectedLockVersion` verhindern soll.
+   */
+  updateWorksiteDayTeam(
+    input: UpdateWorksiteDayTeamCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<WorksiteDayDto>>;
 }

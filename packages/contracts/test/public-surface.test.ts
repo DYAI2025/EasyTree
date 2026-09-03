@@ -40,4 +40,21 @@ describe("oeffentliche Oberflaeche von @easytree/contracts", () => {
     expect(names).toContain("IDEMPOTENCY_HEADER");
     expect(names).toContain("ProblemDocumentSchema");
   });
+
+  it("fuehrt die WorksiteDay-Bausteine von EYT-147 M2 namentlich", () => {
+    // Ein vergessener Export fiele sonst erst in apps/web auf — als Typfehler in
+    // einem anderen Paket, weit weg von der Ursache.
+    for (const name of [
+      "LocalDateSchema",
+      "WorksiteDayTeamEntrySchema",
+      "WorksiteDayTeamCommandSchema",
+      "WorksiteDayTeamMemberSchema",
+      "WorksiteDayDtoSchema",
+      "PlanWorksiteDayCommandSchema",
+      "UpdateWorksiteDayTeamCommandSchema",
+      "WORKSITE_DAY_PROBLEM_TYPE",
+    ]) {
+      expect(names, `${name} fehlt in src/index.ts`).toContain(name);
+    }
+  });
 });

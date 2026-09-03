@@ -313,6 +313,172 @@
         }
       }
     },
+    "/planung/baustellentage": {
+      "post": {
+        "operationId": "planWorksiteDay",
+        "summary": "Baustellentag anlegen",
+        "description": "Legt den Baustellentag fuer eine Baustelle an einem expliziten lokalen Kalendertag an und besetzt ihn. Adressiert wird Baustelle plus Tag, nicht eine Id: die stabile worksiteDayId entsteht erst hier. Der Server loest sie auf, haengt sie an die Konfiguration des Wochenentwurfs und antwortet mit dem angelegten Tag einschliesslich lockVersion und der vergebenen assignmentIds. Neu gegenueber den uebrigen Planungsrouten sind die problem.type-Werte urn:easytree:planning:duplicate-worksite-day, urn:easytree:planning:interval-outside-day und urn:easytree:planning:worksite-day-team-required.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanWorksiteDayCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Angelegter Baustellentag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorksiteDayDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: urn:easytree:planning:duplicate-worksite-day, urn:easytree:planning:interval-outside-day, urn:easytree:planning:worksite-day-team-required. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier wiederverwendet und nicht neu erfunden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/planung/baustellentage/team": {
+      "post": {
+        "operationId": "updateWorksiteDayTeam",
+        "summary": "Tagesbesetzung eines Baustellentags ersetzen",
+        "description": "Ersetzt die Besetzung eines BESTEHENDEN Baustellentags. Adressiert wird die stabile worksiteDayId - nicht die configurationId, denn die Revision ist durch weekKey eindeutig (hoechstens ein Entwurf je Woche), und nicht der localDate, denn der haengt unveraenderlich an der Identitaet. expectedLockVersion ist die Stale-Erkennung gegen die Tagesidentitaet (lock_version wird beim Kopieren in den Folgedraft uebernommen); weicht sie vom Server ab, antwortet er mit urn:easytree:planning:stale-worksite-day, statt fremde Aenderungen zu ueberschreiben. Kennt er die Id nicht, mit urn:easytree:planning:worksite-day-not-found. Die Antwort traegt die fortgeschriebene lockVersion, damit die naechste Aenderung ohne Zwischenladen moeglich ist.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Mandantengebundener Idempotenzschluessel. Ein Wiederholungsaufruf liefert dieselbe Antwort, ohne den Effekt zu verdoppeln.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorksiteDayTeamCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Baustellentag mit ersetzter Besetzung",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorksiteDayDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ungueltige Anfrage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nicht angemeldet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Nicht berechtigt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: urn:easytree:planning:stale-worksite-day, urn:easytree:planning:worksite-day-not-found, urn:easytree:planning:interval-outside-day, urn:easytree:planning:worksite-day-team-required. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier wiederverwendet und nicht neu erfunden.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/einsatz/plan": {
       "get": {
         "operationId": "getMySchedule",
@@ -1715,6 +1881,97 @@
               "worksites"
             ],
             "additionalProperties": false
+          },
+          "worksiteDays": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "worksiteDayId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "configurationId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "worksiteId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "localDate": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+                },
+                "lockVersion": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "team": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "assignmentId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                        "description": "UUID"
+                      },
+                      "employeeId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                        "description": "UUID"
+                      },
+                      "interval": {
+                        "type": "object",
+                        "properties": {
+                          "startUtc": {
+                            "type": "string",
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                          },
+                          "endUtc": {
+                            "type": "string",
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                          }
+                        },
+                        "required": [
+                          "startUtc",
+                          "endUtc"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "assignmentId",
+                      "employeeId",
+                      "interval"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "worksiteDayId",
+                "configurationId",
+                "worksiteId",
+                "localDate",
+                "lockVersion",
+                "team"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -1932,6 +2189,309 @@
           "weekKey",
           "publishedAtUtc",
           "assignmentIds"
+        ],
+        "additionalProperties": false
+      },
+      "WorksiteDayTeamEntry": {
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "interval": {
+            "type": "object",
+            "properties": {
+              "startUtc": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+              },
+              "endUtc": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+              }
+            },
+            "required": [
+              "startUtc",
+              "endUtc"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "employeeId",
+          "interval"
+        ],
+        "additionalProperties": false
+      },
+      "WorksiteDayTeamMember": {
+        "type": "object",
+        "properties": {
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "employeeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "interval": {
+            "type": "object",
+            "properties": {
+              "startUtc": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+              },
+              "endUtc": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+              }
+            },
+            "required": [
+              "startUtc",
+              "endUtc"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "assignmentId",
+          "employeeId",
+          "interval"
+        ],
+        "additionalProperties": false
+      },
+      "WorksiteDayDto": {
+        "type": "object",
+        "properties": {
+          "worksiteDayId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "configurationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "worksiteId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "localDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+          },
+          "lockVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "team": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "assignmentId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "employeeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "interval": {
+                  "type": "object",
+                  "properties": {
+                    "startUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    },
+                    "endUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    }
+                  },
+                  "required": [
+                    "startUtc",
+                    "endUtc"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "assignmentId",
+                "employeeId",
+                "interval"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "worksiteDayId",
+          "configurationId",
+          "worksiteId",
+          "localDate",
+          "lockVersion",
+          "team"
+        ],
+        "additionalProperties": false
+      },
+      "PlanWorksiteDayCommand": {
+        "type": "object",
+        "properties": {
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$",
+            "description": "ISO-Woche im Format 2026-W32. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben."
+          },
+          "worksiteId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "localDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+          },
+          "team": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "employeeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "interval": {
+                  "type": "object",
+                  "properties": {
+                    "startUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    },
+                    "endUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    }
+                  },
+                  "required": [
+                    "startUtc",
+                    "endUtc"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "employeeId",
+                "interval"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "weekKey",
+          "worksiteId",
+          "localDate",
+          "team"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateWorksiteDayTeamCommand": {
+        "type": "object",
+        "properties": {
+          "weekKey": {
+            "type": "string",
+            "pattern": "^\\d{4}-W(0[1-9]|[1-4]\\d|5[0-3])$",
+            "description": "ISO-Woche im Format 2026-W32. Eine 53. Woche ist nur in ISO-Jahren gueltig, die tatsaechlich 53 Wochen haben."
+          },
+          "worksiteDayId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "UUID"
+          },
+          "expectedLockVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "team": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "employeeId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "description": "UUID"
+                },
+                "interval": {
+                  "type": "object",
+                  "properties": {
+                    "startUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    },
+                    "endUtc": {
+                      "type": "string",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+                      "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+                    }
+                  },
+                  "required": [
+                    "startUtc",
+                    "endUtc"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "employeeId",
+                "interval"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "weekKey",
+          "worksiteDayId",
+          "expectedLockVersion",
+          "team"
         ],
         "additionalProperties": false
       },

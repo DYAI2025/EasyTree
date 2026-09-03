@@ -327,3 +327,117 @@ describe("HttpPlanningGateway — Aufrufform", () => {
     );
   });
 });
+
+/**
+ * Die Baustellentag-Kommandos (EYT-147 M2).
+ *
+ * Ohne diese Faelle war an den beiden neuen Methoden NICHTS bewacht: Pfad,
+ * Methode, Idempotenzkopf und die 409-Deutung standen nur im Quelltext. Der
+ * Drift-Test prueft das erzeugte DOKUMENT, der Konformitaetstest Dokument gegen
+ * SERVERROUTEN — keiner von beiden sieht, wohin dieser Client tatsaechlich
+ * greift. Ein Tippfehler im Pfad waere durch alle Gates gelaufen und erst in
+ * einer Browserreise als 404 aufgefallen.
+ */
+const BAUSTELLENTAG = {
+  worksiteDayId: "44444444-4444-4444-8444-444444444444",
+  configurationId: "55555555-5555-4555-8555-555555555555",
+  worksiteId: "66666666-6666-4666-8666-666666666666",
+  localDate: "2026-08-03",
+  lockVersion: 0,
+  team: [],
+} as const;
+
+const ANLEGEN = {
+  weekKey: "2026-W32",
+  worksiteId: BAUSTELLENTAG.worksiteId,
+  localDate: "2026-08-03",
+  team: [
+    {
+      employeeId: "77777777-7777-4777-8777-777777777777",
+      interval: { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T10:00:00.000Z" },
+    },
+  ],
+};
+
+const TEAMWECHSEL = {
+  weekKey: "2026-W32",
+  worksiteDayId: BAUSTELLENTAG.worksiteDayId,
+  expectedLockVersion: 0,
+  team: ANLEGEN.team,
+};
+
+describe("HttpPlanningGateway — Baustellentag-Kommandos (EYT-147 M2)", () => {
+  it("greift beim Anlegen auf POST /planung/baustellentage", async () => {
+    const recorded: Recorded[] = [];
+    const result = await gatewayWith(stubFetch(201, BAUSTELLENTAG, recorded)).planWorksiteDay(
+      ANLEGEN,
+      { idempotencyKey: KEY_A },
+    );
+    expect(result.ok).toBe(true);
+    // Die Adresse ganz, nicht als Teilstring: `toContain` waere auch bei
+    // "/planung/baustellentage/team" gruen und truege damit genau die
+    // Verwechslung mit, gegen die dieser Fall existiert.
+    expect(recorded[0]?.url).toBe(`${BASE}/planung/baustellentage`);
+    expect(recorded[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(recorded[0]?.init?.body))).toEqual(ANLEGEN);
+  });
+
+  it("greift beim Teamwechsel auf POST /planung/baustellentage/team", async () => {
+    const recorded: Recorded[] = [];
+    const result = await gatewayWith(stubFetch(200, BAUSTELLENTAG, recorded)).updateWorksiteDayTeam(
+      TEAMWECHSEL,
+      { idempotencyKey: KEY_A },
+    );
+    expect(result.ok).toBe(true);
+    expect(recorded[0]?.url).toBe(`${BASE}/planung/baustellentage/team`);
+    expect(recorded[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(recorded[0]?.init?.body))).toEqual(TEAMWECHSEL);
+  });
+
+  it("sendet bei beiden Kommandos den Idempotenzschluessel", async () => {
+    for (const aufruf of ["planWorksiteDay", "updateWorksiteDayTeam"] as const) {
+      const recorded: Recorded[] = [];
+      const gateway = gatewayWith(
+        stubFetch(aufruf === "planWorksiteDay" ? 201 : 200, BAUSTELLENTAG, recorded),
+      );
+      await (aufruf === "planWorksiteDay"
+        ? gateway.planWorksiteDay(ANLEGEN, { idempotencyKey: KEY_A })
+        : gateway.updateWorksiteDayTeam(TEAMWECHSEL, { idempotencyKey: KEY_A }));
+      const headers = recorded[0]?.init?.headers as Record<string, string> | undefined;
+      expect(headers?.[IDEMPOTENCY_HEADER], `${aufruf} ohne Schluessel`).toBe(KEY_A);
+    }
+  });
+
+  it("deutet 409 je Kommando verschieden: Teamwechsel ist STALE_VERSION", async () => {
+    // Der Unterschied ist der ganze Punkt. Beim Anlegen gibt es keinen Stand,
+    // auf dem der Client haette arbeiten koennen — ein 409 ist dort eine
+    // fachliche Ablehnung. Beim Teamwechsel passte `expectedLockVersion` nicht,
+    // und die Oberflaeche muss neu laden statt die Eingabe zu bemaengeln.
+    const anlegen = await gatewayWith(stubFetch(409, null, [])).planWorksiteDay(ANLEGEN, {
+      idempotencyKey: KEY_A,
+    });
+    expect(anlegen.ok).toBe(false);
+    if (anlegen.ok) return;
+    expect(anlegen.failure).toBe("REJECTED");
+
+    const wechsel = await gatewayWith(stubFetch(409, null, [])).updateWorksiteDayTeam(TEAMWECHSEL, {
+      idempotencyKey: KEY_A,
+    });
+    expect(wechsel.ok).toBe(false);
+    if (wechsel.ok) return;
+    expect(wechsel.failure).toBe("STALE_VERSION");
+  });
+
+  it("vertraut einer formal falschen Erfolgsantwort NICHT", async () => {
+    // Dieselbe Zusicherung wie fuer das Fenster, jetzt fuer den Tagesvertrag:
+    // ein 200 mit fremdem Rumpf ist ein gebrochener Vertrag, keine Nutzlast.
+    const kaputt = { ...BAUSTELLENTAG, lockVersion: -1 };
+    const result = await gatewayWith(stubFetch(200, kaputt, [])).updateWorksiteDayTeam(
+      TEAMWECHSEL,
+      { idempotencyKey: KEY_A },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("CONTRACT_VIOLATION");
+  });
+});

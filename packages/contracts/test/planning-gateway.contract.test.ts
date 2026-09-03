@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MockPlanningGateway } from "../src/mock/planning.js";
+import { WorksiteDayDtoSchema } from "../src/planning/schemas.js";
 import {
   PLANNING_GATEWAY_CONTRACT_FIXTURE,
   PLANNING_VALIDATION_CODE,
@@ -87,6 +88,20 @@ function makeMock(): MockPlanningGateway {
           }
         : { conflicts: [], publishable: true },
     nextAssignmentId: "3f2504e0-4f89-41d3-9a0c-0305e82c3304",
+    // EYT-147 M2: Antwortform der Tagescommands. Die Ids stehen hier und nicht
+    // im Mock, damit keine Zusicherung gegen eine eingebaute Konstante prueft.
+    nextWorksiteDay: {
+      worksiteDayId: "3f2504e0-4f89-41d3-9a0c-0305e82c3305",
+      // Die Baustelle des Tages — bewusst die BEKANNTE aus `resources`, damit eine
+      // Antwort, die statt dessen eine der beiden anderen Ids traegt, auffliegt.
+      worksiteId: WORKSITE_ID,
+      localDate: "2026-08-03",
+      configurationId: "3f2504e0-4f89-41d3-9a0c-0305e82c3306",
+      assignmentIds: [
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3307",
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3308",
+      ],
+    },
   });
 }
 
@@ -185,5 +200,99 @@ describe("Planversion gilt pro Woche", () => {
     expect(unknown.ok).toBe(false);
     if (unknown.ok) return;
     expect(unknown.failure).toBe("REJECTED");
+  });
+});
+
+describe("Baustellentag-Kommandos des Mocks (EYT-147 M2)", () => {
+  const SCHLUESSEL = PLANNING_GATEWAY_CONTRACT_FIXTURE.idempotencyKey;
+  const TEAM = [
+    {
+      employeeId: EMPLOYEE_ID,
+      interval: { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T10:00:00.000Z" },
+    },
+  ];
+
+  it("liefert beim Anlegen eine vertragskonforme Antwort mit getrennten Ids", async () => {
+    const result = await makeMock().planWorksiteDay(
+      { weekKey: "2026-W32", worksiteId: WORKSITE_ID, localDate: "2026-08-03", team: TEAM },
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Gegen das VEROEFFENTLICHTE Schema geparst, nicht nur auf Felder geprueft:
+    // eine Attrappe, die etwas anderes liefert, faellt hier durch.
+    expect(() => WorksiteDayDtoSchema.parse(result.value)).not.toThrow();
+    expect(result.value.worksiteDayId).not.toBe(result.value.configurationId);
+    // Dieselbe Dreierprobe wie beim Aendern: die Baustelle stammt aus dem
+    // KOMMANDO, die beiden anderen Ids aus dem Fixture.
+    expect(result.value.worksiteId).toBe(WORKSITE_ID);
+    expect(result.value.worksiteDayId).toBe("3f2504e0-4f89-41d3-9a0c-0305e82c3305");
+    expect(result.value.configurationId).toBe("3f2504e0-4f89-41d3-9a0c-0305e82c3306");
+    expect(result.value.lockVersion).toBe(0);
+    expect(result.value.team).toHaveLength(1);
+    expect(result.value.team[0]?.employeeId).toBe(EMPLOYEE_ID);
+    // Die Assignment-Id kommt aus dem Fixture — der Mock erfindet keine.
+    expect(result.value.team[0]?.assignmentId).toBe("3f2504e0-4f89-41d3-9a0c-0305e82c3307");
+  });
+
+  it("schreibt beim Ersetzen der Besetzung die lockVersion fort", async () => {
+    const result = await makeMock().updateWorksiteDayTeam(
+      {
+        weekKey: "2026-W32",
+        worksiteDayId: "3f2504e0-4f89-41d3-9a0c-0305e82c3305",
+        expectedLockVersion: 3,
+        team: TEAM,
+      },
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(() => WorksiteDayDtoSchema.parse(result.value)).not.toThrow();
+    // Ohne Fortschreibung muesste der Client fuer jede zweite Aenderung neu
+    // laden — genau die Luecke, in der der veraltete Stand entsteht.
+    expect(result.value.lockVersion).toBe(4);
+
+    // ## Warum die drei Ids EINZELN zugesichert werden
+    //
+    // `WorksiteDayDtoSchema.parse` kann sie nicht auseinanderhalten: alle drei
+    // sind `IdSchema`, also bestaetigt ein Rundlauf jede Belegung. Drei getrennte
+    // Zusicherungen auf drei verschiedene Fixturewerte sind die einzige Form, die
+    // einen Tausch nicht ueberlebt.
+    expect(result.value.worksiteId).toBe(WORKSITE_ID);
+    expect(result.value.worksiteDayId).toBe("3f2504e0-4f89-41d3-9a0c-0305e82c3305");
+    expect(result.value.configurationId).toBe("3f2504e0-4f89-41d3-9a0c-0305e82c3306");
+    expect(
+      new Set([result.value.worksiteId, result.value.worksiteDayId, result.value.configurationId])
+        .size,
+    ).toBe(3);
+  });
+
+  it("lehnt ein leeres Team ab, statt einen leeren Tag anzulegen", async () => {
+    const result = await makeMock().planWorksiteDay(
+      { weekKey: "2026-W32", worksiteId: WORKSITE_ID, localDate: "2026-08-03", team: [] },
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("REJECTED");
+  });
+
+  it("erfindet keine Assignment-Id, wenn das Fixture nicht reicht", async () => {
+    // Der Mock haelt zwei Ids bereit. Ein drittes Teammitglied muss auffallen —
+    // eine still abgeschnittene Besetzung waere die schlimmere Antwort.
+    const zuGross = [0, 1, 2].map((tag) => ({
+      employeeId: EMPLOYEE_ID,
+      interval: {
+        startUtc: `2026-08-0${3 + tag}T06:00:00.000Z`,
+        endUtc: `2026-08-0${3 + tag}T10:00:00.000Z`,
+      },
+    }));
+    const result = await makeMock().planWorksiteDay(
+      { weekKey: "2026-W32", worksiteId: WORKSITE_ID, localDate: "2026-08-03", team: zuGross },
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.problem?.detail).toContain("Fixture erweitern");
   });
 });
