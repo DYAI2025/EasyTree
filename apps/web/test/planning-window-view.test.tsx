@@ -16,6 +16,14 @@ import { PlanningGatewayProvider } from "../lib/planning-gateway-provider";
 
 function gatewayReturning(result: GatewayResult<PlanningWindow>): PlanningGateway {
   return {
+    // EYT-147 M2: neue Portmethoden. Diese Ansicht ruft sie nicht auf —
+    // ein Wurf faellt auf, eine stille Leerantwort nicht.
+    planWorksiteDay: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
+    updateWorksiteDayTeam: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
     getPlanningWindow: () => Promise.resolve(result),
     validateDraft: () => {
       throw new Error("in dieser Ansicht nicht benutzt");
@@ -215,6 +223,14 @@ describe("PlanningWindowView", () => {
     const keys: string[] = [];
     let attempt = 0;
     const gateway: PlanningGateway = {
+      // EYT-147 M2: neue Portmethoden. Diese Ansicht ruft sie nicht auf —
+      // ein Wurf faellt auf, eine stille Leerantwort nicht.
+      planWorksiteDay: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+      updateWorksiteDayTeam: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
       getPlanningWindow: () => Promise.resolve({ ok: true, value: PLANBARE_WOCHE }),
       validateDraft: () => {
         throw new Error("in dieser Ansicht nicht benutzt");
@@ -287,6 +303,14 @@ describe("PlanningWindowView", () => {
     let leseversuch = 0;
     const offenerReadThrough = new Promise<GatewayResult<PlanningWindow>>(() => {});
     const gateway: PlanningGateway = {
+      // EYT-147 M2: neue Portmethoden. Diese Ansicht ruft sie nicht auf —
+      // ein Wurf faellt auf, eine stille Leerantwort nicht.
+      planWorksiteDay: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+      updateWorksiteDayTeam: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
       getPlanningWindow: () => {
         leseversuch += 1;
         return leseversuch === 1
@@ -370,6 +394,14 @@ describe("PlanningWindowView", () => {
 
     let leseversuch = 0;
     const gateway: PlanningGateway = {
+      // EYT-147 M2: neue Portmethoden. Diese Ansicht ruft sie nicht auf —
+      // ein Wurf faellt auf, eine stille Leerantwort nicht.
+      planWorksiteDay: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
+      updateWorksiteDayTeam: () => {
+        throw new Error("in dieser Ansicht nicht benutzt");
+      },
       getPlanningWindow: () => {
         leseversuch += 1;
         return Promise.resolve(

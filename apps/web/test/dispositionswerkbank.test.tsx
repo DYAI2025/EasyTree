@@ -45,6 +45,14 @@ function einsatz(id: string, startUtc: string, endUtc: string) {
 
 function gatewayMit(result: GatewayResult<PlanningWindow>): PlanningGateway {
   return {
+    // EYT-147 M2: neue Portmethoden. Diese Ansicht ruft sie nicht auf —
+    // ein Wurf faellt auf, eine stille Leerantwort nicht.
+    planWorksiteDay: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
+    updateWorksiteDayTeam: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
     getPlanningWindow: () => Promise.resolve(result),
     validateDraft: () => {
       throw new Error("in dieser Ansicht nicht benutzt");
