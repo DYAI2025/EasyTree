@@ -198,6 +198,46 @@ function runnerAuf(client: Client): TenantQueryRunner {
 }
 
 /**
+ * Synchronisiert zwei ECHTE Transaktionen direkt vor ihrem konkurrierenden
+ * `app.lock_week_draft`-Aufruf. Die Produktionsnaht bleibt der bestehende Runner;
+ * nur der Test beobachtet seine SQL-Grenze. Ein bloßes `Promise.all` könnte
+ * den zweiten Aufruf erst nach dem Commit des ersten starten lassen und würde
+ * die Konkurrenz dann nur behaupten.
+ */
+function synchronisierteWorksiteDayRunner(
+  client: Client,
+  barrier: { arrive(): Promise<void> },
+): TenantQueryRunner {
+  const base = runnerAuf(client);
+  return {
+    run: (kontext, work) =>
+      base.run(kontext, (tx) =>
+        work({
+          query: async <TRow>(sql: string, params?: readonly unknown[]) => {
+            if (sql.includes("select app.lock_week_draft")) await barrier.arrive();
+            return tx.query<TRow>(sql, params);
+          },
+        }),
+      ),
+  };
+}
+
+function barrierFuerZwei(): { arrive(): Promise<void> } {
+  let arrived = 0;
+  let release: (() => void) | null = null;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    async arrive(): Promise<void> {
+      arrived += 1;
+      if (arrived === 2) release?.();
+      await released;
+    },
+  };
+}
+
+/**
  * Die ECHTE Wochenregel, nicht ein Stub.
  *
  * Eine fruehere Fassung gab konstant `WOCHE` zurueck. Das war bequem und
@@ -937,11 +977,12 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
   );
 
   dbIt(
-    "parallel angelegte gleiche Baustellentage liefern Erfolg oder fachlichen Konflikt, nie SQL-Fehler",
+    "synchron konkurrierende Baustellentage liefern genau einen Gewinner ohne SQL-Fehler oder Teilzustand",
     async () => {
       const a = await neueVerbindung();
       const b = await neueVerbindung();
       await raeumeWoche(WOCHE_WORKSITE_DAY);
+      const barrier = barrierFuerZwei();
       const input = {
         weekKey: WOCHE_WORKSITE_DAY,
         worksiteId: WORKSITE_ALPHA,
@@ -954,26 +995,44 @@ describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
           },
         ],
       };
-      const [one, two] = await Promise.all([
+      const ergebnisse = await Promise.allSettled([
         new PlanningWriteRepository(
-          runnerAuf(a),
+          synchronisierteWorksiteDayRunner(a, barrier),
           USER_A,
           wochenschluessel,
           idempotenzSpeicher,
         ).planWorksiteDay({ ...input, idempotencyKey: "00000000-0000-4000-8000-000000e15204" }),
         new PlanningWriteRepository(
-          runnerAuf(b),
+          synchronisierteWorksiteDayRunner(b, barrier),
           USER_A,
           wochenschluessel,
           idempotenzSpeicher,
         ).planWorksiteDay({ ...input, idempotencyKey: "00000000-0000-4000-8000-000000e15205" }),
       ]);
-      expect([one, two].filter((result) => result.ok)).toHaveLength(1);
+      expect(ergebnisse.every((result) => result.status === "fulfilled")).toBe(true);
+      const antworten = ergebnisse.map((result) => {
+        if (result.status === "rejected") throw result.reason;
+        return result.value;
+      });
+      expect(antworten.filter((result) => result.ok)).toHaveLength(1);
       expect(
-        [one, two].filter(
+        antworten.filter(
           (result) => !result.ok && result.problem.kind === "DUPLICATE_WORKSITE_DAY",
         ),
       ).toHaveLength(1);
+
+      const bestand = await beobachte<{
+        days: string;
+        configurations: string;
+        assignments: string;
+      }>(
+        `select
+           (select count(*) from public.worksite_days where org_id = $1 and worksite_id = $2 and local_date = $3::date)::text as days,
+           (select count(*) from public.worksite_day_configurations c join public.plan_versions p on p.id = c.plan_version_id where p.week_key = $4)::text as configurations,
+           (select count(*) from public.assignments a join public.plan_versions p on p.id = a.plan_version_id where p.week_key = $4)::text as assignments`,
+        [ORG_ALPHA, WORKSITE_ALPHA, input.localDate, WOCHE_WORKSITE_DAY],
+      );
+      expect(bestand[0]).toEqual({ days: "1", configurations: "1", assignments: "1" });
     },
     30_000,
   );

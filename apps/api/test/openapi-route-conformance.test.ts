@@ -92,17 +92,6 @@ const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
     "Zeiterfassung. Es gibt keine time_entries-Tabelle — bewusst, siehe Migration 0010 Kopfkommentar (EYT-14).",
   ],
   ["POST /einsatz/zeiten/stopp", "Zeiterfassung. Gleiche Begruendung wie der Start."],
-  // EYT-147, vertragserster Slice: Meilenstein M2 (EYT-151) hat NUR den
-  // Transport gebaut — Schemata, Port, Gateway, Dokument. Die beiden Eintraege
-  // sind deshalb keine vergessene Zusage, sondern die benannte Reihenfolge.
-  // Entfernt werden sie von den Meilensteinen, die die Routen bauen; die
-  // `stale`-Zusicherung weiter unten meldet sie in genau dem Lauf rot, in dem
-  // das geschieht.
-  [
-    "POST /planung/baustellentage",
-    "Baustellentag anlegen. Braucht die Draft-Aufloesung (app.lock_week_draft), den " +
-      "Lock und die get-or-create-Logik auf worksite_days — EYT-147 M3.",
-  ],
   [
     "POST /planung/baustellentage/team",
     "Tagesbesetzung ersetzen. Braucht zusaetzlich die Lock-Version-Fortschreibung " +
