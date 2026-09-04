@@ -35,7 +35,10 @@
  */
 import {
   createTimeZone,
+  isoWeekOfLocalDate,
+  localBusinessDate,
   NO_CAPACITY_LIMIT,
+  planningWeekKey,
   TimeInterval,
   unsafeIdentifier,
   type AssignmentId,
@@ -48,6 +51,9 @@ import type {
   CreateAssignmentInput,
   CreateAssignmentResult,
   CreatedAssignmentRow,
+  CreatedWorksiteDayRow,
+  PlanWorksiteDayInput,
+  PlanWorksiteDayResult,
   PlanningWrites,
   PublishPlanInput,
   PublishPlanResult,
@@ -122,6 +128,22 @@ interface AssignmentInsertRow {
   readonly ends_at_utc: Date;
 }
 
+interface WorksiteDayRow {
+  readonly id: string;
+}
+
+interface WorksiteDayConfigurationRow {
+  readonly id: string;
+  readonly lock_version: number;
+}
+
+interface WorksiteDayAssignmentInsertRow {
+  readonly id: string;
+  readonly employee_id: string;
+  readonly starts_at_utc: Date;
+  readonly ends_at_utc: Date;
+}
+
 interface OverlapQueryRow {
   readonly id: string;
   readonly starts_at_utc: Date;
@@ -174,6 +196,9 @@ const OPERATION = "planning.create_assignment";
  */
 const PUBLISH_OPERATION = "planning.publish_plan";
 
+/** Eigener Idempotenzraum; das Ergebnis ist nur ueber 0019 lesbar. */
+const PLAN_WORKSITE_DAY_OPERATION = "planning.plan_worksite_day";
+
 /**
  * Fingerabdruck der Veroeffentlichungsanfrage.
  *
@@ -185,6 +210,130 @@ const PUBLISH_OPERATION = "planning.publish_plan";
  */
 function publishFingerprintOf(input: PublishPlanInput): string {
   return [input.weekKey, input.expectedVersionId ?? "null"].join("|");
+}
+
+function worksiteDayFingerprintOf(input: PlanWorksiteDayInput): string {
+  return [
+    input.weekKey,
+    input.worksiteId,
+    input.localDate,
+    ...input.team
+      .map((member) =>
+        [member.employeeId, member.startsAtUtc.toISOString(), member.endsAtUtc.toISOString()].join(
+          "|",
+        ),
+      )
+      .sort(),
+  ].join("|");
+}
+
+function localDateParts(localDate: string): { year: number; month: number; day: number } {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+  if (match === null)
+    throw new Error("EYT-152: ungueltiges lokales Datum erreichte das Repository.");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  ) {
+    throw new Error("EYT-152: nicht existentes lokales Datum erreichte das Repository.");
+  }
+  return { year, month, day };
+}
+
+function isSameLocalDate(
+  a: { year: number; month: number; day: number },
+  b: { year: number; month: number; day: number },
+): boolean {
+  return a.year === b.year && a.month === b.month && a.day === b.day;
+}
+
+function serialisiereWorksiteDay(tag: CreatedWorksiteDayRow): Record<string, unknown> {
+  return {
+    worksiteDayId: tag.worksiteDayId,
+    configurationId: tag.configurationId,
+    worksiteId: tag.worksiteId,
+    localDate: tag.localDate,
+    lockVersion: tag.lockVersion,
+    team: tag.team.map((member) => ({
+      assignmentId: member.assignmentId,
+      employeeId: member.employeeId,
+      interval: {
+        startUtc: member.startsAtUtc.toISOString(),
+        endUtc: member.endsAtUtc.toISOString(),
+      },
+    })),
+  };
+}
+
+function replayWorksiteDay(payload: unknown): CreatedWorksiteDayRow {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw new Error("EYT-152: Idempotenz-Payload eines Baustellentags ist unlesbar.");
+  }
+  const record = payload as Record<string, unknown>;
+  const requiredString = (field: string): string => {
+    const value = record[field];
+    if (typeof value !== "string") {
+      throw new Error(`EYT-152: Idempotenz-Payload ohne ${field}.`);
+    }
+    return value;
+  };
+  if (!Number.isInteger(record["lockVersion"]) || (record["lockVersion"] as number) < 0) {
+    throw new Error("EYT-152: Idempotenz-Payload ohne gueltige lockVersion.");
+  }
+  if (!Array.isArray(record["team"])) {
+    throw new Error("EYT-152: Idempotenz-Payload ohne Team.");
+  }
+  return {
+    worksiteDayId: requiredString("worksiteDayId"),
+    configurationId: requiredString("configurationId"),
+    worksiteId: requiredString("worksiteId"),
+    localDate: requiredString("localDate"),
+    lockVersion: record["lockVersion"] as number,
+    team: record["team"].map((raw) => {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new Error("EYT-152: Idempotenz-Payload mit unlesbarem Teammitglied.");
+      }
+      const member = raw as Record<string, unknown>;
+      const interval = member["interval"];
+      if (typeof interval !== "object" || interval === null || Array.isArray(interval)) {
+        throw new Error("EYT-152: Idempotenz-Payload mit unlesbarem Intervall.");
+      }
+      const values = interval as Record<string, unknown>;
+      if (
+        typeof member["assignmentId"] !== "string" ||
+        typeof member["employeeId"] !== "string" ||
+        typeof values["startUtc"] !== "string" ||
+        typeof values["endUtc"] !== "string"
+      ) {
+        throw new Error("EYT-152: Idempotenz-Payload mit unvollstaendigem Teammitglied.");
+      }
+      const startsAtUtc = new Date(values["startUtc"]);
+      const endsAtUtc = new Date(values["endUtc"]);
+      if (Number.isNaN(startsAtUtc.getTime()) || Number.isNaN(endsAtUtc.getTime())) {
+        throw new Error("EYT-152: Idempotenz-Payload mit ungueltigem Zeitstempel.");
+      }
+      return {
+        assignmentId: member["assignmentId"],
+        employeeId: member["employeeId"],
+        startsAtUtc,
+        endsAtUtc,
+      };
+    }),
+  };
+}
+
+/** Fachliche Ablehnung NACH einer Mutation: erzwingt den Transaktionsrollback. */
+class WorksiteDayRejectedError extends Error {
+  constructor(
+    readonly problem: import("../application/planning-writes.port").PlanningWriteProblem,
+  ) {
+    super(`EYT-152: ${problem.kind}`);
+  }
 }
 
 function zuAssignment(zeile: AssignmentInsertRow): CreatedAssignmentRow {
@@ -631,6 +780,263 @@ export class PlanningWriteRepository implements PlanningWrites {
 
       return { ok: true as const, assignment: zuAssignment(zeile), replayed: false };
     });
+  }
+
+  /**
+   * Plant einen Baustellentag als EINE atomare Wirkung (EYT-152).
+   *
+   * `worksite_days` ist die stabile Identitaet, die Konfiguration gehoert
+   * dagegen genau zu dem durch `app.lock_week_draft` ermittelten Entwurf. Die
+   * Funktion ist bewusst der einzige Erwerb des Klassen-2-Wochenlocks: ein
+   * eigener Select/Insert-Pfad wuerde die in Migration 0019 bewiesene
+   * Nebenlaeufigkeitsgrenze wieder auf Anwendungscode verteilen.
+   */
+  async planWorksiteDay(input: PlanWorksiteDayInput): Promise<PlanWorksiteDayResult> {
+    try {
+      return await this.runner.run({ userId: this.subjectUserId }, async (tx) => {
+        const fingerabdruck = worksiteDayFingerprintOf(input);
+
+        // Replay wird vor jeder veraenderlichen Beobachtung beantwortet. Der
+        // Ergebnislesepfad ist absichtlich die security-definer-Funktion aus
+        // 0019; `result_payload` besitzt kein Tabellen-SELECT-Grant.
+        await this.idempotenz.lock(tx, PLAN_WORKSITE_DAY_OPERATION, input.idempotencyKey);
+        const bekannt = await this.idempotenz.find(
+          tx,
+          PLAN_WORKSITE_DAY_OPERATION,
+          input.idempotencyKey,
+        );
+        if (bekannt !== null) {
+          if (bekannt.requestFingerprint !== fingerabdruck) {
+            return { ok: false as const, problem: { kind: "IDEMPOTENCY_KEY_REUSED" as const } };
+          }
+          const payload = await this.idempotenz.readResultPayload(
+            tx,
+            PLAN_WORKSITE_DAY_OPERATION,
+            input.idempotencyKey,
+          );
+          if (payload === null) {
+            throw new Error("EYT-152: Idempotenzschluessel ohne Replay-Ergebnis.");
+          }
+          return { ok: true as const, worksiteDay: replayWorksiteDay(payload), replayed: true };
+        }
+
+        const orgs = await tx.query<OrgRow>("select id, time_zone from public.organizations");
+        if (orgs.rows.length === 0)
+          return { ok: false as const, problem: { kind: "NO_ORGANISATION" as const } };
+        if (orgs.rows.length > 1)
+          return { ok: false as const, problem: { kind: "AMBIGUOUS_ORGANISATION" as const } };
+        const org = orgs.rows[0];
+        if (org === undefined)
+          return { ok: false as const, problem: { kind: "NO_ORGANISATION" as const } };
+
+        const zone = createTimeZone(org.time_zone);
+        if (!zone.ok) {
+          throw new Error(`EYT-152: unbekannte Zeitzone "${org.time_zone}" in organizations.`);
+        }
+        const requestedDay = localDateParts(input.localDate);
+        const requestedWeek = planningWeekKey(isoWeekOfLocalDate(requestedDay));
+        if (requestedWeek !== input.weekKey) {
+          return {
+            ok: false as const,
+            problem: { kind: "OUTSIDE_WEEK" as const, tatsaechlicheWoche: requestedWeek },
+          };
+        }
+
+        for (const member of input.team) {
+          const interval = TimeInterval.create(member.startsAtUtc, member.endsAtUtc);
+          if (!interval.ok) {
+            throw new Error(
+              `EYT-152: ungueltiges Intervall erreichte die Domain (${interval.error}).`,
+            );
+          }
+          // Halb-offen: ein Ende exakt am Folgetag um 00:00 gehoert noch zum
+          // angefragten lokalen Tag. Ein Anfang oder ein letztes enthaltenes
+          // Millisekundenfragment ausserhalb dagegen nicht.
+          const startsOnRequestedDay = localBusinessDate(member.startsAtUtc, zone.timeZone);
+          const endsOnRequestedDay = localBusinessDate(
+            new Date(member.endsAtUtc.getTime() - 1),
+            zone.timeZone,
+          );
+          if (
+            !isSameLocalDate(startsOnRequestedDay, requestedDay) ||
+            !isSameLocalDate(endsOnRequestedDay, requestedDay)
+          ) {
+            return { ok: false as const, problem: { kind: "INTERVAL_OUTSIDE_DAY" as const } };
+          }
+        }
+
+        const worksite = await tx.query<ActiveRow>(
+          "select active from public.worksites where id = $1",
+          [input.worksiteId],
+        );
+        if (worksite.rows[0] === undefined || !worksite.rows[0].active) {
+          return {
+            ok: false as const,
+            problem: { kind: "RESOURCE_NOT_SELECTABLE" as const, feld: "worksiteId" as const },
+          };
+        }
+        for (const employeeId of [
+          ...new Set(input.team.map((member) => member.employeeId)),
+        ].sort()) {
+          const employee = await tx.query<ActiveRow>(
+            "select active from public.employees where id = $1",
+            [employeeId],
+          );
+          if (employee.rows[0] === undefined || !employee.rows[0].active) {
+            return {
+              ok: false as const,
+              problem: { kind: "RESOURCE_NOT_SELECTABLE" as const, feld: "employeeId" as const },
+            };
+          }
+        }
+
+        // Der Datenbankvertrag erwirbt/erstellt den Draft und haelt ihn bis zum
+        // Commit. Kein zweiter Draft-Aufloesungspfad ist hier zulaessig.
+        const draft = await tx.query<IdRow>("select app.lock_week_draft($1) as id", [
+          input.weekKey,
+        ]);
+        const draftId = draft.rows[0]?.id;
+        if (draftId === undefined) throw new Error("EYT-152: Wochenentwurf lieferte keine Id.");
+
+        const insertedDay = await tx.query<WorksiteDayRow>(
+          `insert into public.worksite_days (org_id, worksite_id, local_date)
+         values ($1, $2, $3::date)
+         on conflict (org_id, worksite_id, local_date) do nothing
+         returning id`,
+          [org.id, input.worksiteId, input.localDate],
+        );
+        const worksiteDayId =
+          insertedDay.rows[0]?.id ??
+          (
+            await tx.query<WorksiteDayRow>(
+              `select id from public.worksite_days
+              where worksite_id = $1 and local_date = $2::date`,
+              [input.worksiteId, input.localDate],
+            )
+          ).rows[0]?.id;
+        if (worksiteDayId === undefined) {
+          throw new Error("EYT-152: stabile Baustellentag-Identitaet nicht lesbar.");
+        }
+
+        const configuration = await tx.query<WorksiteDayConfigurationRow>(
+          `insert into public.worksite_day_configurations (org_id, worksite_day_id, plan_version_id)
+         values ($1, $2, $3)
+         on conflict (plan_version_id, worksite_day_id) do nothing
+         returning id, lock_version`,
+          [org.id, worksiteDayId, draftId],
+        );
+        const config = configuration.rows[0];
+        if (config === undefined) {
+          throw new WorksiteDayRejectedError({ kind: "DUPLICATE_WORKSITE_DAY" });
+        }
+
+        // Globale Reihenfolge der Mitarbeiterlocks verhindert A->B / B->A-
+        // Deadlocks. Die Konfiguration liegt bereits in der Transaktion und
+        // verschwindet bei jedem Konflikt oder Fehler wieder mit ihr.
+        for (const employeeId of [
+          ...new Set(input.team.map((member) => member.employeeId)),
+        ].sort()) {
+          await tx.query("select app.lock_employee_planning($1)", [employeeId]);
+        }
+
+        const team: Array<CreatedWorksiteDayRow["team"][number]> = [];
+        for (const member of [...input.team].sort((a, b) => {
+          const byEmployee = a.employeeId.localeCompare(b.employeeId);
+          if (byEmployee !== 0) return byEmployee;
+          return a.startsAtUtc.getTime() - b.startsAtUtc.getTime();
+        })) {
+          const kollision = await tx.query<OverlapQueryRow>(
+            `select id, starts_at_utc, ends_at_utc
+             from public.assignments
+            where plan_version_id = $1
+              and employee_id = $2
+              and during && tstzrange($3::timestamptz, $4::timestamptz, '[)')
+            order by starts_at_utc asc, id asc
+            limit 1`,
+            [draftId, member.employeeId, member.startsAtUtc, member.endsAtUtc],
+          );
+          const overlap = kollision.rows[0];
+          if (overlap !== undefined) {
+            throw new WorksiteDayRejectedError({
+              kind: "OVERLAPPING_ASSIGNMENT",
+              overlap: {
+                assignmentId: overlap.id,
+                startsAtUtc: overlap.starts_at_utc,
+                endsAtUtc: overlap.ends_at_utc,
+              },
+            });
+          }
+
+          const assignment = await tx.query<WorksiteDayAssignmentInsertRow>(
+            `insert into public.assignments
+             (org_id, plan_version_id, worksite_day_configuration_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
+           select pv.org_id, pv.id, $2, $3, $4, $5, $6
+             from public.plan_versions pv
+            where pv.id = $1
+           returning id, employee_id, starts_at_utc, ends_at_utc`,
+            [
+              draftId,
+              config.id,
+              member.employeeId,
+              input.worksiteId,
+              member.startsAtUtc,
+              member.endsAtUtc,
+            ],
+          );
+          const inserted = assignment.rows[0];
+          if (inserted === undefined)
+            throw new Error("EYT-152: Teamzuweisung wurde nicht angelegt.");
+          team.push({
+            assignmentId: inserted.id,
+            employeeId: inserted.employee_id,
+            startsAtUtc: inserted.starts_at_utc,
+            endsAtUtc: inserted.ends_at_utc,
+          });
+        }
+
+        const worksiteDay: CreatedWorksiteDayRow = {
+          worksiteDayId,
+          configurationId: config.id,
+          worksiteId: input.worksiteId,
+          localDate: input.localDate,
+          lockVersion: config.lock_version,
+          team,
+        };
+
+        await tx.query(
+          `insert into public.audit_events
+           (org_id, actor_user_id, event_type, subject_type, subject_id, context)
+         values ($1, app.current_user_id(), 'planning.worksite_day_planned', 'worksite_day', $2, $3::jsonb)`,
+          [
+            org.id,
+            worksiteDayId,
+            JSON.stringify({
+              weekKey: input.weekKey,
+              configurationId: config.id,
+              worksiteId: input.worksiteId,
+              localDate: input.localDate,
+              assignmentIds: team.map((member) => member.assignmentId),
+            }),
+          ],
+        );
+
+        await this.idempotenz.rememberWithResultPayload(
+          tx,
+          org.id,
+          PLAN_WORKSITE_DAY_OPERATION,
+          input.idempotencyKey,
+          worksiteDayId,
+          fingerabdruck,
+          serialisiereWorksiteDay(worksiteDay),
+        );
+        return { ok: true as const, worksiteDay, replayed: false };
+      });
+    } catch (error) {
+      if (error instanceof WorksiteDayRejectedError) {
+        return { ok: false, problem: error.problem };
+      }
+      throw error;
+    }
   }
 
   /**

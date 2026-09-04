@@ -22,6 +22,24 @@ export interface CreatedAssignmentRow {
   readonly endsAtUtc: Date;
 }
 
+/** Eine angelegte Zeile des Einsatzteams eines Baustellentags. */
+export interface WorksiteDayTeamMemberRow {
+  readonly assignmentId: string;
+  readonly employeeId: string;
+  readonly startsAtUtc: Date;
+  readonly endsAtUtc: Date;
+}
+
+/** Baustellentag-Identitaet und ihre Konfiguration in genau einem Entwurf. */
+export interface CreatedWorksiteDayRow {
+  readonly worksiteDayId: string;
+  readonly configurationId: string;
+  readonly worksiteId: string;
+  readonly localDate: string;
+  readonly lockVersion: number;
+  readonly team: readonly WorksiteDayTeamMemberRow[];
+}
+
 /** Eine kollidierende Zuweisung, benannt, damit die Meldung konkret werden kann. */
 export interface OverlapRow {
   readonly assignmentId: string;
@@ -61,6 +79,10 @@ export type PlanningWriteProblem =
    * "angelegt" fuer etwas, das er nie geschickt hat.
    */
   | { readonly kind: "IDEMPOTENCY_KEY_REUSED" }
+  /** Die stabile Tagesidentitaet hat in diesem Entwurf bereits eine Konfiguration. */
+  | { readonly kind: "DUPLICATE_WORKSITE_DAY" }
+  /** Mindestens ein Teamintervall verlaesst den angefragten lokalen Baustellentag. */
+  | { readonly kind: "INTERVAL_OUTSIDE_DAY" }
   /**
    * Der Client arbeitete auf einem anderen Stand als dem, der jetzt gilt
    * (EYT-107). `aktuelleVersionId` ist `null`, wenn es fuer die Woche
@@ -125,6 +147,23 @@ export interface CreateAssignmentInput {
   readonly idempotencyKey: string;
 }
 
+export interface PlanWorksiteDayInput {
+  readonly weekKey: string;
+  readonly worksiteId: string;
+  /** ISO-Kalendertag, ausgelegt in der Zeitzone der Organisation. */
+  readonly localDate: string;
+  readonly team: readonly {
+    readonly employeeId: string;
+    readonly startsAtUtc: Date;
+    readonly endsAtUtc: Date;
+  }[];
+  readonly idempotencyKey: string;
+}
+
+export type PlanWorksiteDayResult =
+  | { readonly ok: true; readonly worksiteDay: CreatedWorksiteDayRow; readonly replayed: boolean }
+  | { readonly ok: false; readonly problem: PlanningWriteProblem };
+
 export interface PlanningWrites {
   /**
    * Prueft einen Entwurf gegen den Bestand — OHNE Schreibwirkung.
@@ -144,6 +183,12 @@ export interface PlanningWrites {
    * niemand angefordert hat.
    */
   createAssignment(input: CreateAssignmentInput): Promise<CreateAssignmentResult>;
+
+  /**
+   * Legt einen Baustellentag mit seiner revisionsgebundenen Konfiguration und
+   * dem vollständigen Einsatzteam in einer Transaktion an (EYT-152).
+   */
+  planWorksiteDay(input: PlanWorksiteDayInput): Promise<PlanWorksiteDayResult>;
 
   /**
    * Veroeffentlicht den Entwurf einer Woche — atomar oder gar nicht (EYT-107).

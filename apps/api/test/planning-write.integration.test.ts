@@ -142,6 +142,7 @@ const WOCHE_RECHT_VERSION = "2026-W49";
 const WOCHE_RECHT_ZUWEISUNG = "2026-W50";
 /** Eigene Woche fuer den Definer-Nachweis mit entzogenem planning.publish (EYT-136). */
 const WOCHE_DEFINER_OHNE_PUBLISH = "2026-W51";
+const WOCHE_WORKSITE_DAY = "2026-W52";
 const START = new Date("2026-11-03T07:00:00Z");
 const ENDE = new Date("2026-11-03T15:00:00Z");
 
@@ -414,6 +415,10 @@ async function raeumeWoche(woche: string = WOCHE): Promise<void> {
   await client.query("delete from public.audit_events where org_id = $1 and event_type = $2", [
     ORG_ALPHA,
     "planning.assignment_created",
+  ]);
+  await client.query("delete from public.audit_events where org_id = $1 and event_type = $2", [
+    ORG_ALPHA,
+    "planning.worksite_day_planned",
   ]);
   await client.query(
     `insert into public.employees (id, org_id, user_id, display_name, active)
@@ -749,6 +754,7 @@ afterAll(async () => {
       WOCHE_RECHT_VERSION,
       WOCHE_RECHT_ZUWEISUNG,
       WOCHE_DEFINER_OHNE_PUBLISH,
+      WOCHE_WORKSITE_DAY,
     ]) {
       await raeumeWoche(woche);
     }
@@ -776,6 +782,202 @@ afterAll(async () => {
 });
 
 describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
+  dbIt(
+    "legt einen Baustellentag, seine Revision und die Personzuordnung atomar an (EYT-152 RED)",
+    async () => {
+      const weekKey = "2026-W52";
+      await raeumeWoche(weekKey);
+      const client = await neueVerbindung();
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+
+      const result = await repo.planWorksiteDay({
+        weekKey,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: "2026-12-21",
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-21T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-21T15:00:00.000Z"),
+          },
+        ],
+        idempotencyKey: "00000000-0000-4000-8000-000000e15201",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("Der Baustellentag wurde unerwartet abgelehnt.");
+      expect(result.worksiteDay.team).toHaveLength(1);
+
+      const persisted = await beobachte<{
+        day_count: string;
+        configuration_count: string;
+        assignment_count: string;
+      }>(
+        `select
+           (select count(*) from public.worksite_days where org_id = $1 and worksite_id = $2 and local_date = $3)::text as day_count,
+           (select count(*) from public.worksite_day_configurations c join public.plan_versions p on p.id = c.plan_version_id where p.org_id = $1 and p.week_key = $4)::text as configuration_count,
+           (select count(*) from public.assignments a join public.plan_versions p on p.id = a.plan_version_id where p.org_id = $1 and p.week_key = $4 and a.worksite_day_configuration_id is not null)::text as assignment_count`,
+        [ORG_ALPHA, WORKSITE_ALPHA, "2026-12-21", weekKey],
+      );
+      expect(persisted[0]).toEqual({
+        day_count: "1",
+        configuration_count: "1",
+        assignment_count: "1",
+      });
+    },
+    30_000,
+  );
+
+  dbIt(
+    "speichert mehrere Teammitglieder atomar und replayt exakt den ersten Baustellentag",
+    async () => {
+      const client = await neueVerbindung();
+      await raeumeWoche(WOCHE_WORKSITE_DAY);
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+      const input = {
+        weekKey: WOCHE_WORKSITE_DAY,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: "2026-12-22",
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-22T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-22T15:00:00.000Z"),
+          },
+          {
+            employeeId: EMPLOYEE_ALPHA_2,
+            startsAtUtc: new Date("2026-12-22T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-22T15:00:00.000Z"),
+          },
+        ],
+        idempotencyKey: "00000000-0000-4000-8000-000000e15202",
+      };
+
+      const first = await repo.planWorksiteDay(input);
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      expect(first.replayed).toBe(false);
+      expect(first.worksiteDay.team).toHaveLength(2);
+
+      const replay = await repo.planWorksiteDay(input);
+      expect(replay).toEqual({ ok: true, replayed: true, worksiteDay: first.worksiteDay });
+
+      const stored = await beobachte<{ assignments: string; audits: string; records: string }>(
+        `select
+         (select count(*) from public.assignments a join public.plan_versions p on p.id = a.plan_version_id where p.week_key = $1 and a.worksite_day_configuration_id = $2)::text as assignments,
+         (select count(*) from public.audit_events where org_id = $3 and event_type = 'planning.worksite_day_planned')::text as audits,
+         (select count(*) from public.idempotency_records where org_id = $3 and operation = 'planning.plan_worksite_day')::text as records`,
+        [WOCHE_WORKSITE_DAY, first.worksiteDay.configurationId, ORG_ALPHA],
+      );
+      expect(stored[0]).toEqual({ assignments: "2", audits: "1", records: "1" });
+
+      const reused = await repo.planWorksiteDay({ ...input, localDate: "2026-12-23" });
+      expect(reused).toEqual({ ok: false, problem: { kind: "IDEMPOTENCY_KEY_REUSED" } });
+    },
+  );
+
+  dbIt(
+    "rollt Identitaet, Konfiguration und Team bei einer Überschneidung vollständig zurück",
+    async () => {
+      const client = await neueVerbindung();
+      await raeumeWoche(WOCHE_WORKSITE_DAY);
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+      const day = "2026-12-23";
+      const result = await repo.planWorksiteDay({
+        weekKey: WOCHE_WORKSITE_DAY,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: day,
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-23T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-23T15:00:00.000Z"),
+          },
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-23T14:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-23T18:00:00.000Z"),
+          },
+        ],
+        idempotencyKey: "00000000-0000-4000-8000-000000e15203",
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.problem.kind).toBe("OVERLAPPING_ASSIGNMENT");
+      const residue = await beobachte<{
+        versions: string;
+        configs: string;
+        assignments: string;
+        records: string;
+      }>(
+        `select
+         (select count(*) from public.plan_versions where week_key = $1 and published_at is null)::text as versions,
+         (select count(*) from public.worksite_day_configurations c join public.plan_versions p on p.id = c.plan_version_id where p.week_key = $1)::text as configs,
+         (select count(*) from public.assignments a join public.plan_versions p on p.id = a.plan_version_id where p.week_key = $1)::text as assignments,
+         (select count(*) from public.idempotency_records where org_id = $2 and operation = 'planning.plan_worksite_day')::text as records`,
+        [WOCHE_WORKSITE_DAY, ORG_ALPHA],
+      );
+      expect(residue[0]).toEqual({ versions: "0", configs: "0", assignments: "0", records: "0" });
+    },
+  );
+
+  dbIt(
+    "parallel angelegte gleiche Baustellentage liefern Erfolg oder fachlichen Konflikt, nie SQL-Fehler",
+    async () => {
+      const a = await neueVerbindung();
+      const b = await neueVerbindung();
+      await raeumeWoche(WOCHE_WORKSITE_DAY);
+      const input = {
+        weekKey: WOCHE_WORKSITE_DAY,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: "2026-12-24",
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-24T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-24T15:00:00.000Z"),
+          },
+        ],
+      };
+      const [one, two] = await Promise.all([
+        new PlanningWriteRepository(
+          runnerAuf(a),
+          USER_A,
+          wochenschluessel,
+          idempotenzSpeicher,
+        ).planWorksiteDay({ ...input, idempotencyKey: "00000000-0000-4000-8000-000000e15204" }),
+        new PlanningWriteRepository(
+          runnerAuf(b),
+          USER_A,
+          wochenschluessel,
+          idempotenzSpeicher,
+        ).planWorksiteDay({ ...input, idempotencyKey: "00000000-0000-4000-8000-000000e15205" }),
+      ]);
+      expect([one, two].filter((result) => result.ok)).toHaveLength(1);
+      expect(
+        [one, two].filter(
+          (result) => !result.ok && result.problem.kind === "DUPLICATE_WORKSITE_DAY",
+        ),
+      ).toHaveLength(1);
+    },
+    30_000,
+  );
+
   dbIt(
     "derselbe Idempotenzschluessel liefert dieselbe Id und schreibt kein zweites Mal",
     async () => {

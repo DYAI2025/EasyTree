@@ -159,6 +159,8 @@ async function httpGatewayHarness(): Promise<PlanningGatewayContractHarness> {
       });
       return Promise.resolve({ ok: true, replayed: false, assignment });
     },
+    planWorksiteDay: () =>
+      Promise.reject(new Error("planWorksiteDay wird von der Vertragsparitaet nicht abgedeckt")),
     // Die geteilte Vertragssuite deckt `publishPlan` nicht ab (ihre sieben
     // Faelle betreffen Fenster und Anlegen). Ein stiller Erfolg hier waere
     // die schlechteste Attrappe: sie liesse einen kuenftigen Publish-Fall

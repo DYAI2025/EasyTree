@@ -80,6 +80,7 @@ async function boot(options: BootOptions = {}): Promise<INestApplication> {
     ({
       validateDraft: () => Promise.reject(new Error("in dieser Suite nicht benutzt")),
       createAssignment: () => Promise.reject(new Error("in dieser Suite nicht benutzt")),
+      planWorksiteDay: () => Promise.reject(new Error("in dieser Suite nicht benutzt")),
       publishPlan: (eingabe) => {
         options.gesehen?.push(eingabe);
         return Promise.resolve(
