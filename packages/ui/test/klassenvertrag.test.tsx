@@ -74,6 +74,8 @@ describe("Klassenvertrag — die Emitter-Seite (EYT-160)", () => {
           `eyt-state-banner--${tone}`,
           "eyt-state-banner__text",
           "eyt-state-banner__title",
+          "eyt-state-banner__mark",
+          "eyt-state-banner__title-text",
           "eyt-state-banner__detail",
           "eyt-state-banner__action",
         ],
