@@ -1,4 +1,4 @@
-import { useId, type HTMLAttributes, type ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 
 export interface CardProps extends HTMLAttributes<HTMLElement> {
   /** Optionale sichtbare Überschrift der Karte. */
@@ -9,28 +9,16 @@ export interface CardProps extends HTMLAttributes<HTMLElement> {
 }
 
 /**
- * Domänenfreier Inhaltscontainer. Rendert als `section`; mit Titel wird sie
- * ueber `aria-labelledby` zur BENANNTEN Region — erst damit taucht eine Karte
- * in der Landmark-Navigation auf (aria-query macht aus `section` nur mit
- * Namen eine `region`; gemessen 05.09.2026). Ohne Titel bleibt sie namenlos,
- * damit keine leere Region entsteht. Die id der Ueberschrift kommt aus
- * `useId`, nicht aus dem `id` der Karte: das gehoert dem Aufrufer.
+ * Domänenfreier Inhaltscontainer. Rendert als `section`, damit Karten
+ * mit Titel als benannte Region in der Landmark-/Outline-Struktur
+ * auftauchen können.
  */
 export function Card({ title, headingLevel = "h2", className, children, ...rest }: CardProps) {
   const Heading = headingLevel;
-  const titelId = useId();
   const classes = ["eyt-card", className].filter(Boolean).join(" ");
   return (
-    <section
-      className={classes}
-      {...(title === undefined ? {} : { "aria-labelledby": titelId })}
-      {...rest}
-    >
-      {title !== undefined && (
-        <Heading id={titelId} className="eyt-card__title">
-          {title}
-        </Heading>
-      )}
+    <section className={classes} {...rest}>
+      {title !== undefined && <Heading className="eyt-card__title">{title}</Heading>}
       {children}
     </section>
   );
