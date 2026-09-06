@@ -274,7 +274,7 @@ describe("Vertragsform", () => {
   });
 });
 
-describe("Baustellentag-Routen (EYT-147 M2)", () => {
+describe("Schreibrouten der Planung (EYT-147 M2, EYT-120)", () => {
   const doc = buildOpenApiDocument();
   const paths = doc["paths"] as Record<string, Record<string, Record<string, unknown>>>;
   const schemas = (doc["components"] as { schemas: Record<string, Record<string, unknown>> })

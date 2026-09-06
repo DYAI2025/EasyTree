@@ -27,7 +27,11 @@ const basis = {
 
 describe("CreateEngagementCommandSchema (EYT-120)", () => {
   it("1 verlangt startAt als lokales Datum+Zeit", () => {
-    const { startAt: _weg, ...ohne } = basis;
+    // Rest-Destrukturierung entfernt den Schluessel; das abgetrennte Feld wird
+    // nicht gebraucht. `void` statt `_`-Praefix, weil die ESLint-Konfiguration
+    // kein `varsIgnorePattern` kennt (Muster wie in planning-facts.adapter.test.ts).
+    const { startAt, ...ohne } = basis;
+    void startAt;
     expect(CreateEngagementCommandSchema.safeParse(ohne).success).toBe(false);
     expect(
       CreateEngagementCommandSchema.safeParse({ ...basis, startAt: { date: "2031-01-06" } })
