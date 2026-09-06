@@ -26,6 +26,7 @@ import { Catch, HttpException, HttpStatus } from "@nestjs/common";
 import type { ArgumentsHost, ExceptionFilter } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { STATUS_CODES } from "node:http";
+import { WORKSITE_DAY_PROBLEM_TYPE } from "@easytree/contracts";
 
 /**
  * Die stabilen Fehlercodes des Planungs-Schreibpfads.
@@ -63,7 +64,10 @@ export const PLANNING_ERROR_TYPE = {
 
 export type PlanningErrorType = (typeof PLANNING_ERROR_TYPE)[keyof typeof PLANNING_ERROR_TYPE];
 
-const BEKANNTE_TYPEN = new Set<string>(Object.values(PLANNING_ERROR_TYPE));
+const BEKANNTE_TYPEN = new Set<string>([
+  ...Object.values(PLANNING_ERROR_TYPE),
+  ...Object.values(WORKSITE_DAY_PROBLEM_TYPE),
+]);
 
 const GENERIC_DETAIL = "An unexpected error occurred.";
 

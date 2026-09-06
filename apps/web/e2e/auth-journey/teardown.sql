@@ -51,10 +51,22 @@ begin;
 
 alter table public.plan_versions disable trigger plan_versions_published_immutable;
 alter table public.assignments disable trigger assignments_published_immutable;
+-- Seit EYT-158 legt die Reise einen Baustellentag an (Migration 0019); auch
+-- dessen Konfigurationsrevision traegt einen Unveraenderlichkeitstrigger.
+alter table public.worksite_day_configurations
+  disable trigger worksite_day_configurations_immutable_when_published;
 
 -- Zuweisungen VOR den Mitarbeitern: `assignments.employee_id` zeigt mit
 -- `on delete restrict` auf `employees`.
 delete from public.assignments
+  where org_id = '00000000-0000-4000-8000-00000000e201';
+-- Baustellentage VOR den Baustellen: `worksite_days.worksite_id` zeigt mit
+-- `on delete restrict` auf `worksites`, und die Konfigurationsrevision auf den
+-- Tag. Gemessen 06.09.2026: ohne diese beiden Zeilen brach der Teardown mit
+-- `worksite_days_worksite_id_org_id_fkey` ab — der erste Lauf nach EYT-158.
+delete from public.worksite_day_configurations
+  where org_id = '00000000-0000-4000-8000-00000000e201';
+delete from public.worksite_days
   where org_id = '00000000-0000-4000-8000-00000000e201';
 delete from public.plan_versions
   where org_id = '00000000-0000-4000-8000-00000000e201';
@@ -93,6 +105,8 @@ delete from public.users
 delete from auth.users
   where email in (:'reisender_a', :'reisender_b');
 
+alter table public.worksite_day_configurations
+  enable trigger worksite_day_configurations_immutable_when_published;
 alter table public.assignments enable trigger assignments_published_immutable;
 alter table public.plan_versions enable trigger plan_versions_published_immutable;
 
@@ -146,6 +160,11 @@ begin
     select 1 from public.assignments where org_id = '00000000-0000-4000-8000-00000000e201'
     union all
     select 1 from public.worksites where org_id = '00000000-0000-4000-8000-00000000e201'
+    union all
+    select 1 from public.worksite_days where org_id = '00000000-0000-4000-8000-00000000e201'
+    union all
+    select 1 from public.worksite_day_configurations
+      where org_id = '00000000-0000-4000-8000-00000000e201'
   ) as planung;
 
   -- Seit EYT-144 erzeugt die Reise einen Kosten-Snapshot. Ohne diese Zaehlung
@@ -172,18 +191,19 @@ begin
   -- abgebrochener Lauf sie stillschweigend abgeschaltet zuruecklassen, und
   -- jede spaetere Suite haette eine Invariante weniger — gruen, aber blind.
   select count(*) into n_trigger from pg_trigger
-    where tgname in ('plan_versions_published_immutable', 'assignments_published_immutable')
+    where tgname in ('plan_versions_published_immutable', 'assignments_published_immutable',
+                     'worksite_day_configurations_immutable_when_published')
       and tgenabled = 'O';
 
   rest := n_auth + n_projektion + n_org + n_mitglied + n_mitarbeiter + n_satz
         + n_planung + n_kosten + n_wirkung;
-  if rest <> 0 or n_trigger <> 2 then
+  if rest <> 0 or n_trigger <> 3 then
     raise exception
-      'E2E-Teardown unvollstaendig: auth=% projektion=% org=% membership=% mitarbeiter=% satz=% planung=% kosten=% wirkung=% aktive_trigger=% (erwartet 2)',
+      'E2E-Teardown unvollstaendig: auth=% projektion=% org=% membership=% mitarbeiter=% satz=% planung=% kosten=% wirkung=% aktive_trigger=% (erwartet 3)',
       n_auth, n_projektion, n_org, n_mitglied, n_mitarbeiter, n_satz,
       n_planung, n_kosten, n_wirkung, n_trigger;
   end if;
   raise notice
-    '[auth-journey-teardown] restzeilen=0 auth=0 projektion=0 org=0 membership=0 mitarbeiter=0 satz=0 planung=0 kosten=0 wirkung=0 trigger=2';
+    '[auth-journey-teardown] restzeilen=0 auth=0 projektion=0 org=0 membership=0 mitarbeiter=0 satz=0 planung=0 kosten=0 wirkung=0 trigger=3';
 end
 $$;

@@ -31,8 +31,10 @@
  */
 import {
   createTimeZone,
+  dayAfter,
   isoWeekOfLocalDate,
   localBusinessDate,
+  planningWeekDateRange,
   planningWeekKey,
 } from "@easytree/domain";
 import { Client } from "pg";
@@ -46,7 +48,7 @@ import {
   probeDatabase,
   USER_A,
 } from "./tenant-context.helper";
-import { PlanningWriteRepository } from "../src/modules/planning";
+import { PlanningWindowRepository, PlanningWriteRepository } from "../src/modules/planning";
 import { PgIdempotencyStore } from "../src/platform/idempotency/pg-idempotency-store";
 import type { TenantQuery, TenantQueryRunner } from "../src/platform/database/tenant-query-runner";
 
@@ -142,6 +144,7 @@ const WOCHE_RECHT_VERSION = "2026-W49";
 const WOCHE_RECHT_ZUWEISUNG = "2026-W50";
 /** Eigene Woche fuer den Definer-Nachweis mit entzogenem planning.publish (EYT-136). */
 const WOCHE_DEFINER_OHNE_PUBLISH = "2026-W51";
+const WOCHE_WORKSITE_DAY = "2026-W52";
 const START = new Date("2026-11-03T07:00:00Z");
 const ENDE = new Date("2026-11-03T15:00:00Z");
 
@@ -192,6 +195,46 @@ function runnerAuf(client: Client): TenantQueryRunner {
         await client.query("rollback");
         throw fehler;
       }
+    },
+  };
+}
+
+/**
+ * Synchronisiert zwei ECHTE Transaktionen direkt vor ihrem konkurrierenden
+ * `app.lock_week_draft`-Aufruf. Die Produktionsnaht bleibt der bestehende Runner;
+ * nur der Test beobachtet seine SQL-Grenze. Ein bloßes `Promise.all` könnte
+ * den zweiten Aufruf erst nach dem Commit des ersten starten lassen und würde
+ * die Konkurrenz dann nur behaupten.
+ */
+function synchronisierteWorksiteDayRunner(
+  client: Client,
+  barrier: { arrive(): Promise<void> },
+): TenantQueryRunner {
+  const base = runnerAuf(client);
+  return {
+    run: (kontext, work) =>
+      base.run(kontext, (tx) =>
+        work({
+          query: async <TRow>(sql: string, params?: readonly unknown[]) => {
+            if (sql.includes("select app.lock_week_draft")) await barrier.arrive();
+            return tx.query<TRow>(sql, params);
+          },
+        }),
+      ),
+  };
+}
+
+function barrierFuerZwei(): { arrive(): Promise<void> } {
+  let arrived = 0;
+  let release: (() => void) | null = null;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    async arrive(): Promise<void> {
+      arrived += 1;
+      if (arrived === 2) release?.();
+      await released;
     },
   };
 }
@@ -414,6 +457,10 @@ async function raeumeWoche(woche: string = WOCHE): Promise<void> {
   await client.query("delete from public.audit_events where org_id = $1 and event_type = $2", [
     ORG_ALPHA,
     "planning.assignment_created",
+  ]);
+  await client.query("delete from public.audit_events where org_id = $1 and event_type = $2", [
+    ORG_ALPHA,
+    "planning.worksite_day_planned",
   ]);
   await client.query(
     `insert into public.employees (id, org_id, user_id, display_name, active)
@@ -749,6 +796,7 @@ afterAll(async () => {
       WOCHE_RECHT_VERSION,
       WOCHE_RECHT_ZUWEISUNG,
       WOCHE_DEFINER_OHNE_PUBLISH,
+      WOCHE_WORKSITE_DAY,
     ]) {
       await raeumeWoche(woche);
     }
@@ -776,6 +824,600 @@ afterAll(async () => {
 });
 
 describe("Schreibpfad gegen echtes PostgreSQL (EYT-92)", () => {
+  dbIt(
+    "EYT-158: PlanningWindow liest drei reale Teammitglieder mit identischen Write-IDs zurück",
+    async () => {
+      const weekKey = "2028-W02";
+      const employee3 = "00000000-0000-4000-8000-000000e15803";
+      await raeumeWoche(weekKey);
+      // Idempotent: ein abgebrochener Lauf (Timeout, Cancel) laesst die Zeile
+      // stehen, und ein nackter INSERT machte jeden spaeteren Lauf mit 23505 rot.
+      await verwalte(
+        `insert into public.employees (id, org_id, display_name, active)
+         values ($1, $2, 'Clara Baum (Test EYT-158)', true)
+         on conflict (id) do update set active = true, display_name = excluded.display_name`,
+        [employee3, ORG_ALPHA],
+      );
+      const client = await neueVerbindung();
+      const runner = runnerAuf(client);
+      try {
+        const write = await new PlanningWriteRepository(
+          runner,
+          USER_A,
+          wochenschluessel,
+          idempotenzSpeicher,
+        ).planWorksiteDay({
+          weekKey,
+          worksiteId: WORKSITE_ALPHA,
+          localDate: "2028-01-10",
+          team: [EMPLOYEE_ALPHA, EMPLOYEE_ALPHA_2, employee3].map((employeeId) => ({
+            employeeId,
+            startsAtUtc: new Date("2028-01-10T07:00:00.000Z"),
+            endsAtUtc: new Date("2028-01-10T17:00:00.000Z"),
+          })),
+          idempotencyKey: crypto.randomUUID(),
+        });
+        if (!write.ok) throw new Error("Drei-Personen-Write abgelehnt.");
+        const read = await new PlanningWindowRepository(runner, USER_A).planningWindow(weekKey);
+        if (!read.ok) throw new Error("Readback abgelehnt.");
+        // RED-Phase vor EYT-158: die WorksiteDay-Projektion fehlte vollständig.
+        expect(read.window).toMatchObject({ worksiteDays: [write.worksiteDay] });
+        expect(read.window.assignments.map((a) => a.id).sort()).toEqual(
+          write.worksiteDay.team.map((a) => a.assignmentId).sort(),
+        );
+        const foreign = await new PlanningWindowRepository(runner, USER_B).planningWindow(weekKey);
+        if (!foreign.ok) throw new Error("Eigener Beta-Read abgelehnt.");
+        expect(foreign.window).toMatchObject({ worksiteDays: [], assignments: [] });
+      } finally {
+        await raeumeWoche(weekKey);
+        await verwalte("delete from public.employees where id = $1", [employee3]);
+      }
+    },
+  );
+
+  dbIt(
+    "EYT-158: Folgedraft übernimmt Tagesrevision und Legacy-Einplanung ohne Historienmutation",
+    async () => {
+      // Veröffentlichte Historie bleibt stehen. Jeder Lauf reserviert deshalb
+      // eine bisher unbenutzte Testwoche; kein Löschen/Entsperren der Historie.
+      const [frei] = await beobachte<{ jahr: number }>(
+        `select jahr from generate_series(2100, 9998) jahr
+       where not exists (select 1 from public.plan_versions where week_key = jahr::text || '-W01')
+       order by jahr limit 1`,
+      );
+      if (frei === undefined) throw new Error("Keine freie Testwoche.");
+      const weekKey = `${frei.jahr}-W01`;
+      const montag = planningWeekDateRange({ isoYear: frei.jahr, isoWeek: 1 }).monday;
+      const datum = (tag: typeof montag) =>
+        `${tag.year}-${String(tag.month).padStart(2, "0")}-${String(tag.day).padStart(2, "0")}`;
+      const ersterTag = datum(montag);
+      const zweiterTag = datum(dayAfter(montag));
+      const client = await neueVerbindung();
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+      const command = (tag: string) => ({
+        weekKey,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: tag,
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date(`${tag}T07:00:00.000Z`),
+            endsAtUtc: new Date(`${tag}T11:00:00.000Z`),
+          },
+        ],
+        idempotencyKey: crypto.randomUUID(),
+      });
+      const original = await repo.planWorksiteDay(command(ersterTag));
+      if (!original.ok) throw new Error("Baseline-Command abgelehnt.");
+      const legacy = await repo.createAssignment({
+        weekKey,
+        worksiteId: WORKSITE_ALPHA,
+        employeeId: EMPLOYEE_ALPHA,
+        startsAtUtc: new Date(`${ersterTag}T12:00:00.000Z`),
+        endsAtUtc: new Date(`${ersterTag}T13:00:00.000Z`),
+        idempotencyKey: crypto.randomUUID(),
+      });
+      if (!legacy.ok) throw new Error("Legacy-Baseline abgelehnt.");
+      await verwalte(
+        "update public.worksite_day_configurations set lock_version = 7 where id = $1",
+        [original.worksiteDay.configurationId],
+      );
+      const published = await repo.publishPlan({
+        weekKey,
+        expectedVersionId: legacy.assignment.planVersionId,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      expect(published.ok).toBe(true);
+      const snapshot = () =>
+        beobachte(
+          `select to_jsonb(p) as version,
+       (select jsonb_agg(to_jsonb(c) order by c.id) from public.worksite_day_configurations c where c.plan_version_id = p.id) as configurations,
+       (select jsonb_agg(to_jsonb(a) order by a.id) from public.assignments a where a.plan_version_id = p.id) as assignments
+       from public.plan_versions p where p.id = $1`,
+          [legacy.assignment.planVersionId],
+        );
+      const vorher = await snapshot();
+      try {
+        const drafts = () =>
+          beobachte(
+            "select id from public.plan_versions where week_key = $1 and org_id = $2 and published_at is null",
+            [weekKey, ORG_ALPHA],
+          );
+        // Ablehnung beim ersten Write nach Publish darf auch die inzwischen
+        // kopierten Konfigurationen und den Folgedraft nicht zurücklassen.
+        expect(await repo.planWorksiteDay(command(ersterTag))).toEqual({
+          ok: false,
+          problem: { kind: "DUPLICATE_WORKSITE_DAY" },
+        });
+        expect(await drafts()).toEqual([]);
+        expect(await snapshot()).toEqual(vorher);
+
+        const base = runnerAuf(client);
+        let copyInserted = false;
+        const failing: TenantQueryRunner = {
+          run: (context, work) =>
+            base.run(context, (tx) =>
+              work({
+                query: async <TRow>(sql: string, params?: readonly unknown[]) => {
+                  const result = await tx.query<TRow>(sql, params);
+                  if (sql.includes("insert into public.assignments")) {
+                    copyInserted = true;
+                    throw new Error("EYT-158: Fehler nach Baseline-Insert");
+                  }
+                  return result;
+                },
+              }),
+            ),
+        };
+        const failedInput = command(zweiterTag);
+        await expect(
+          new PlanningWriteRepository(
+            failing,
+            USER_A,
+            wochenschluessel,
+            idempotenzSpeicher,
+          ).planWorksiteDay(failedInput),
+        ).rejects.toThrow("EYT-158: Fehler nach Baseline-Insert");
+        expect(copyInserted).toBe(true);
+        expect(await drafts()).toEqual([]);
+        expect(await snapshot()).toEqual(vorher);
+        expect(
+          await beobachte(
+            "select id from public.worksite_days where org_id = $1 and worksite_id = $2 and local_date = $3::date",
+            [ORG_ALPHA, WORKSITE_ALPHA, zweiterTag],
+          ),
+        ).toEqual([]);
+
+        // Zwei echte Transaktionen konkurrieren am bestehenden Draft-Helfer.
+        // Auch beim Folgedraft genau ein Gewinner, keine SQL-/500-Fehler.
+        const other = await neueVerbindung();
+        await client.query("set statement_timeout = '5s'");
+        await other.query("set statement_timeout = '5s'");
+        const barrier = barrierFuerZwei();
+        const inputs = [failedInput, command(zweiterTag)];
+        const results = await Promise.allSettled(
+          [client, other].map((connection, index) => {
+            const input = inputs[index];
+            if (input === undefined) throw new Error("Testinput fehlt.");
+            return new PlanningWriteRepository(
+              synchronisierteWorksiteDayRunner(connection, barrier),
+              USER_A,
+              wochenschluessel,
+              idempotenzSpeicher,
+            ).planWorksiteDay(input);
+          }),
+        );
+        const outcomes = results.map((result) => {
+          if (result.status === "rejected") throw result.reason;
+          return result.value;
+        });
+        expect(outcomes.filter((result) => result.ok)).toHaveLength(1);
+        expect(outcomes.filter((result) => !result.ok)).toEqual([
+          { ok: false, problem: { kind: "DUPLICATE_WORKSITE_DAY" } },
+        ]);
+        const winner = outcomes.findIndex((result) => result.ok);
+        const input = inputs[winner];
+        const created = outcomes[winner];
+        if (input === undefined || created === undefined) throw new Error("Kein Gewinner.");
+        expect(created.ok).toBe(true);
+        if (!created.ok) throw new Error("Folgedraft-Command abgelehnt.");
+        const configs = await beobachte<{
+          id: string;
+          worksite_day_id: string;
+          lock_version: number;
+        }>(
+          `select c.id, c.worksite_day_id, c.lock_version from public.worksite_day_configurations c
+         join public.plan_versions p on p.id = c.plan_version_id
+         where p.week_key = $1 and p.org_id = $2 and p.published_at is null`,
+          [weekKey, ORG_ALPHA],
+        );
+        // RED-Phase vor EYT-158: nur die neu angelegte Konfiguration existierte.
+        expect(configs, "neuer Tag UND übernommener Vorgängertag").toHaveLength(2);
+        const copy = configs.find((c) => c.worksite_day_id === original.worksiteDay.worksiteDayId);
+        expect(copy?.id).toBeDefined();
+        expect(copy?.id).not.toBe(original.worksiteDay.configurationId);
+        expect(copy?.lock_version).toBe(7);
+        const assignments = await beobachte<{
+          id: string;
+          worksite_day_configuration_id: string | null;
+          employee_id: string;
+          starts_at_utc: Date;
+          ends_at_utc: Date;
+          published_at: Date | null;
+        }>(
+          `select a.id, a.worksite_day_configuration_id, a.employee_id, a.starts_at_utc, a.ends_at_utc, a.published_at
+         from public.assignments a join public.plan_versions p on p.id = a.plan_version_id
+         where p.week_key = $1 and p.org_id = $2 and p.published_at is null`,
+          [weekKey, ORG_ALPHA],
+        );
+        expect(assignments).toHaveLength(3);
+        expect(assignments.find((a) => a.worksite_day_configuration_id === copy?.id)).toMatchObject(
+          {
+            employee_id: EMPLOYEE_ALPHA,
+            starts_at_utc: new Date(`${ersterTag}T07:00:00.000Z`),
+            ends_at_utc: new Date(`${ersterTag}T11:00:00.000Z`),
+            published_at: null,
+          },
+        );
+        expect(assignments.filter((a) => a.worksite_day_configuration_id === null)).toHaveLength(1);
+        expect(assignments.map((a) => a.id)).not.toContain(
+          original.worksiteDay.team[0]?.assignmentId,
+        );
+        expect(assignments.map((a) => a.id)).not.toContain(legacy.assignment.id);
+        expect(await repo.planWorksiteDay(input)).toEqual({ ...created, replayed: true });
+        expect(await repo.planWorksiteDay(command(ersterTag))).toEqual({
+          ok: false,
+          problem: { kind: "DUPLICATE_WORKSITE_DAY" },
+        });
+        expect(await snapshot()).toEqual(vorher);
+      } finally {
+        await raeumeWoche(weekKey);
+      }
+    },
+    30_000,
+  );
+
+  dbIt(
+    "EYT-158: auch ein Folgedraft aus dem Einzel-Einsatzpfad uebernimmt die Tagesrevision — der Baustellentag bleibt EINE Karte",
+    async () => {
+      // Zwei Pfade legen den Folgedraft ueber einer veroeffentlichten Woche an:
+      // planWorksiteDay und createAssignment. Welcher zuerst kommt, entscheidet
+      // ein Klick — die Uebernahme der Tagesrevision darf davon nicht abhaengen,
+      // sonst verschwindet die Karte und ihr Team faellt auf Legacy-Zeilen zurueck.
+      const [frei] = await beobachte<{ jahr: number }>(
+        `select jahr from generate_series(2100, 9998) jahr
+       where not exists (select 1 from public.plan_versions where week_key = jahr::text || '-W01')
+       order by jahr limit 1`,
+      );
+      if (frei === undefined) throw new Error("Keine freie Testwoche.");
+      const weekKey = `${frei.jahr}-W01`;
+      const montag = planningWeekDateRange({ isoYear: frei.jahr, isoWeek: 1 }).monday;
+      const datum = (tag: typeof montag) =>
+        `${tag.year}-${String(tag.month).padStart(2, "0")}-${String(tag.day).padStart(2, "0")}`;
+      const ersterTag = datum(montag);
+      const zweiterTag = datum(dayAfter(montag));
+      const client = await neueVerbindung();
+      const runner = runnerAuf(client);
+      const repo = new PlanningWriteRepository(
+        runner,
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+      const lesen = new PlanningWindowRepository(runner, USER_A);
+
+      const original = await repo.planWorksiteDay({
+        weekKey,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: ersterTag,
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date(`${ersterTag}T07:00:00.000Z`),
+            endsAtUtc: new Date(`${ersterTag}T11:00:00.000Z`),
+          },
+        ],
+        idempotencyKey: crypto.randomUUID(),
+      });
+      if (!original.ok) throw new Error("Baseline-Command abgelehnt.");
+      await verwalte(
+        "update public.worksite_day_configurations set lock_version = 5 where id = $1",
+        [original.worksiteDay.configurationId],
+      );
+      const [entwurf] = await beobachte<{ id: string }>(
+        "select id from public.plan_versions where week_key = $1 and org_id = $2 and published_at is null",
+        [weekKey, ORG_ALPHA],
+      );
+      if (entwurf === undefined) throw new Error("Kein Entwurf zum Veroeffentlichen.");
+      const published = await repo.publishPlan({
+        weekKey,
+        expectedVersionId: entwurf.id,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      expect(published.ok).toBe(true);
+
+      try {
+        // Der ERSTE Schreibvorgang nach dem Publish kommt ueber den
+        // Einzel-Einsatzpfad — er legt den Folgedraft an.
+        const legacy = await repo.createAssignment({
+          weekKey,
+          worksiteId: WORKSITE_ALPHA,
+          employeeId: EMPLOYEE_ALPHA_2,
+          startsAtUtc: new Date(`${zweiterTag}T07:00:00.000Z`),
+          endsAtUtc: new Date(`${zweiterTag}T09:00:00.000Z`),
+          idempotencyKey: crypto.randomUUID(),
+        });
+        if (!legacy.ok) throw new Error("Einzel-Einsatz nach Publish abgelehnt.");
+
+        const gelesen = await lesen.planningWindow(weekKey);
+        if (!gelesen.ok) throw new Error("Readback abgelehnt.");
+        expect(gelesen.window.sourceVersion).toEqual({
+          id: legacy.assignment.planVersionId,
+          state: "draft",
+        });
+        // RED-Phase: der Folgedraft aus createAssignment trug keine Tageskonfiguration.
+        expect(gelesen.window.worksiteDays).toHaveLength(1);
+        const kopie = gelesen.window.worksiteDays?.[0];
+        expect(kopie).toMatchObject({
+          worksiteDayId: original.worksiteDay.worksiteDayId,
+          worksiteId: WORKSITE_ALPHA,
+          localDate: ersterTag,
+          lockVersion: 5,
+        });
+        expect(kopie?.configurationId).not.toBe(original.worksiteDay.configurationId);
+        expect(kopie?.team.map((m) => m.employeeId)).toEqual([EMPLOYEE_ALPHA]);
+        expect(kopie?.team[0]?.assignmentId).not.toBe(original.worksiteDay.team[0]?.assignmentId);
+        expect(kopie?.team[0]).toMatchObject({
+          startsAtUtc: new Date(`${ersterTag}T07:00:00.000Z`),
+          endsAtUtc: new Date(`${ersterTag}T11:00:00.000Z`),
+        });
+        // Die Kopie und die neue Legacy-Einplanung — nichts doppelt.
+        expect(gelesen.window.assignments).toHaveLength(2);
+        expect(gelesen.window.assignments.map((a) => a.id)).toContain(legacy.assignment.id);
+
+        // Im Folgedraft ist derselbe Tag ein Duplikat, keine zweite Karte.
+        expect(
+          await repo.planWorksiteDay({
+            weekKey,
+            worksiteId: WORKSITE_ALPHA,
+            localDate: ersterTag,
+            team: [
+              {
+                employeeId: EMPLOYEE_ALPHA_2,
+                startsAtUtc: new Date(`${ersterTag}T12:00:00.000Z`),
+                endsAtUtc: new Date(`${ersterTag}T13:00:00.000Z`),
+              },
+            ],
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        ).toEqual({ ok: false, problem: { kind: "DUPLICATE_WORKSITE_DAY" } });
+      } finally {
+        await raeumeWoche(weekKey);
+      }
+    },
+    30_000,
+  );
+
+  dbIt(
+    "legt einen Baustellentag, seine Revision und die Personzuordnung atomar an (EYT-152 RED)",
+    async () => {
+      const weekKey = "2026-W52";
+      await raeumeWoche(weekKey);
+      const client = await neueVerbindung();
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+
+      const result = await repo.planWorksiteDay({
+        weekKey,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: "2026-12-21",
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-21T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-21T15:00:00.000Z"),
+          },
+        ],
+        idempotencyKey: "00000000-0000-4000-8000-000000e15201",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("Der Baustellentag wurde unerwartet abgelehnt.");
+      expect(result.worksiteDay.team).toHaveLength(1);
+
+      const persisted = await beobachte<{
+        day_count: string;
+        configuration_count: string;
+        assignment_count: string;
+      }>(
+        `select
+           (select count(*) from public.worksite_days where org_id = $1 and worksite_id = $2 and local_date = $3)::text as day_count,
+           (select count(*) from public.worksite_day_configurations c join public.plan_versions p on p.id = c.plan_version_id where p.org_id = $1 and p.week_key = $4)::text as configuration_count,
+           (select count(*) from public.assignments a join public.plan_versions p on p.id = a.plan_version_id where p.org_id = $1 and p.week_key = $4 and a.worksite_day_configuration_id is not null)::text as assignment_count`,
+        [ORG_ALPHA, WORKSITE_ALPHA, "2026-12-21", weekKey],
+      );
+      expect(persisted[0]).toEqual({
+        day_count: "1",
+        configuration_count: "1",
+        assignment_count: "1",
+      });
+    },
+    30_000,
+  );
+
+  dbIt(
+    "speichert mehrere Teammitglieder atomar und replayt exakt den ersten Baustellentag",
+    async () => {
+      const client = await neueVerbindung();
+      await raeumeWoche(WOCHE_WORKSITE_DAY);
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+      const input = {
+        weekKey: WOCHE_WORKSITE_DAY,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: "2026-12-22",
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-22T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-22T15:00:00.000Z"),
+          },
+          {
+            employeeId: EMPLOYEE_ALPHA_2,
+            startsAtUtc: new Date("2026-12-22T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-22T15:00:00.000Z"),
+          },
+        ],
+        idempotencyKey: "00000000-0000-4000-8000-000000e15202",
+      };
+
+      const first = await repo.planWorksiteDay(input);
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      expect(first.replayed).toBe(false);
+      expect(first.worksiteDay.team).toHaveLength(2);
+
+      const replay = await repo.planWorksiteDay(input);
+      expect(replay).toEqual({ ok: true, replayed: true, worksiteDay: first.worksiteDay });
+
+      const stored = await beobachte<{ assignments: string; audits: string; records: string }>(
+        `select
+         (select count(*) from public.assignments a join public.plan_versions p on p.id = a.plan_version_id where p.week_key = $1 and a.worksite_day_configuration_id = $2)::text as assignments,
+         (select count(*) from public.audit_events where org_id = $3 and event_type = 'planning.worksite_day_planned')::text as audits,
+         (select count(*) from public.idempotency_records where org_id = $3 and operation = 'planning.plan_worksite_day')::text as records`,
+        [WOCHE_WORKSITE_DAY, first.worksiteDay.configurationId, ORG_ALPHA],
+      );
+      expect(stored[0]).toEqual({ assignments: "2", audits: "1", records: "1" });
+
+      const reused = await repo.planWorksiteDay({ ...input, localDate: "2026-12-23" });
+      expect(reused).toEqual({ ok: false, problem: { kind: "IDEMPOTENCY_KEY_REUSED" } });
+    },
+  );
+
+  dbIt(
+    "rollt Identitaet, Konfiguration und Team bei einer Überschneidung vollständig zurück",
+    async () => {
+      const client = await neueVerbindung();
+      await raeumeWoche(WOCHE_WORKSITE_DAY);
+      const repo = new PlanningWriteRepository(
+        runnerAuf(client),
+        USER_A,
+        wochenschluessel,
+        idempotenzSpeicher,
+      );
+      const day = "2026-12-23";
+      const result = await repo.planWorksiteDay({
+        weekKey: WOCHE_WORKSITE_DAY,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: day,
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-23T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-23T15:00:00.000Z"),
+          },
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-23T14:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-23T18:00:00.000Z"),
+          },
+        ],
+        idempotencyKey: "00000000-0000-4000-8000-000000e15203",
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.problem.kind).toBe("OVERLAPPING_ASSIGNMENT");
+      const residue = await beobachte<{
+        versions: string;
+        configs: string;
+        assignments: string;
+        records: string;
+      }>(
+        `select
+         (select count(*) from public.plan_versions where week_key = $1 and published_at is null)::text as versions,
+         (select count(*) from public.worksite_day_configurations c join public.plan_versions p on p.id = c.plan_version_id where p.week_key = $1)::text as configs,
+         (select count(*) from public.assignments a join public.plan_versions p on p.id = a.plan_version_id where p.week_key = $1)::text as assignments,
+         (select count(*) from public.idempotency_records where org_id = $2 and operation = 'planning.plan_worksite_day')::text as records`,
+        [WOCHE_WORKSITE_DAY, ORG_ALPHA],
+      );
+      expect(residue[0]).toEqual({ versions: "0", configs: "0", assignments: "0", records: "0" });
+    },
+  );
+
+  dbIt(
+    "synchron konkurrierende Baustellentage liefern genau einen Gewinner ohne SQL-Fehler oder Teilzustand",
+    async () => {
+      const a = await neueVerbindung();
+      const b = await neueVerbindung();
+      await raeumeWoche(WOCHE_WORKSITE_DAY);
+      const barrier = barrierFuerZwei();
+      const input = {
+        weekKey: WOCHE_WORKSITE_DAY,
+        worksiteId: WORKSITE_ALPHA,
+        localDate: "2026-12-24",
+        team: [
+          {
+            employeeId: EMPLOYEE_ALPHA,
+            startsAtUtc: new Date("2026-12-24T07:00:00.000Z"),
+            endsAtUtc: new Date("2026-12-24T15:00:00.000Z"),
+          },
+        ],
+      };
+      const ergebnisse = await Promise.allSettled([
+        new PlanningWriteRepository(
+          synchronisierteWorksiteDayRunner(a, barrier),
+          USER_A,
+          wochenschluessel,
+          idempotenzSpeicher,
+        ).planWorksiteDay({ ...input, idempotencyKey: "00000000-0000-4000-8000-000000e15204" }),
+        new PlanningWriteRepository(
+          synchronisierteWorksiteDayRunner(b, barrier),
+          USER_A,
+          wochenschluessel,
+          idempotenzSpeicher,
+        ).planWorksiteDay({ ...input, idempotencyKey: "00000000-0000-4000-8000-000000e15205" }),
+      ]);
+      expect(ergebnisse.every((result) => result.status === "fulfilled")).toBe(true);
+      const antworten = ergebnisse.map((result) => {
+        if (result.status === "rejected") throw result.reason;
+        return result.value;
+      });
+      expect(antworten.filter((result) => result.ok)).toHaveLength(1);
+      expect(
+        antworten.filter(
+          (result) => !result.ok && result.problem.kind === "DUPLICATE_WORKSITE_DAY",
+        ),
+      ).toHaveLength(1);
+
+      const bestand = await beobachte<{
+        days: string;
+        configurations: string;
+        assignments: string;
+      }>(
+        `select
+           (select count(*) from public.worksite_days where org_id = $1 and worksite_id = $2 and local_date = $3::date)::text as days,
+           (select count(*) from public.worksite_day_configurations c join public.plan_versions p on p.id = c.plan_version_id where p.week_key = $4)::text as configurations,
+           (select count(*) from public.assignments a join public.plan_versions p on p.id = a.plan_version_id where p.week_key = $4)::text as assignments`,
+        [ORG_ALPHA, WORKSITE_ALPHA, input.localDate, WOCHE_WORKSITE_DAY],
+      );
+      expect(bestand[0]).toEqual({ days: "1", configurations: "1", assignments: "1" });
+    },
+    30_000,
+  );
+
   dbIt(
     "derselbe Idempotenzschluessel liefert dieselbe Id und schreibt kein zweites Mal",
     async () => {

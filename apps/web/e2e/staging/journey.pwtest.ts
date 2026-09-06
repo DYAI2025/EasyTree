@@ -127,26 +127,51 @@ async function axeUndReflow(page: Page, flaeche: string): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
-/** Legt einen Einsatz ueber das Formular an und liefert die Server-Id. */
+/**
+ * Legt einen Baustellentag mit EINER Person ueber das Formular an und liefert
+ * die Server-Id der entstandenen Einplanung.
+ *
+ * Seit EYT-158 ist der Create-Flow worksite-first: Baustelle, Tag, Arbeitszeit,
+ * dann das Einsatzteam; der Command geht an `POST /planung/baustellentage` und
+ * antwortet mit dem Baustellentag, nicht mit einer Einzelzuweisung. Die
+ * Kernreise braucht weiterhin genau eine Person je Tag (Satz-fehlt-Reise,
+ * Snapshot-Summen), deshalb bleibt das Team hier einelementig.
+ */
 async function einsatzAnlegen(
   page: Page,
   eingabe: { mitarbeiter: string; baustelle: string; datum: string },
 ): Promise<string> {
-  await page.getByTestId("feld-employee").selectOption({ label: eingabe.mitarbeiter });
+  // EYT-147: das Formular steht im Inspector und ist erst nach „Baustellentag
+  // anlegen" im Baum. Idempotent gegen einen bereits offenen Inspector.
+  if ((await page.getByTestId("einsatzformular").count()) === 0) {
+    await page.getByTestId("werkbank-einsatz-anlegen").click();
+  }
   await page.getByTestId("feld-worksite").selectOption({ label: eingabe.baustelle });
   await page.getByTestId("feld-datum").fill(eingabe.datum);
   await page.getByTestId("feld-beginn").fill("08:00");
   await page.getByTestId("feld-ende").fill("12:00");
+  await page.getByTestId("feld-employee").selectOption({ label: eingabe.mitarbeiter });
   const antwort = page.waitForResponse(
     (r) =>
-      new URL(r.url()).pathname === "/api/v1/planung/einsaetze" && r.request().method() === "POST",
+      new URL(r.url()).pathname === "/api/v1/planung/baustellentage" &&
+      r.request().method() === "POST",
   );
   await page.getByTestId("einsatz-speichern").click();
   const post = await antwort;
-  expect(post.status(), "Einsatz anlegen").toBe(201);
-  const einsatz = (await post.json()) as { id: string };
-  expect(einsatz.id).not.toBe("");
-  return einsatz.id;
+  expect(post.status(), "Baustellentag anlegen").toBe(201);
+  const tag = (await post.json()) as {
+    worksiteDayId: string;
+    team: { assignmentId: string }[];
+  };
+  expect(tag.worksiteDayId).not.toBe("");
+  expect(tag.team, "genau eine Person im Team dieser Kernreise").toHaveLength(1);
+  const einplanung = tag.team[0]?.assignmentId ?? "";
+  expect(einplanung).not.toBe("");
+  // Sichtbar wird der bestaetigte Serverstand: genau EINE Karte fuer den Tag.
+  await expect(
+    page.locator(`.einsatzkarte[data-worksite-day-id="${tag.worksiteDayId}"]`),
+  ).toBeVisible();
+  return einplanung;
 }
 
 test.describe.serial("EYT-142 Staging-Kernreise", () => {
@@ -288,8 +313,8 @@ test.describe.serial("EYT-142 Staging-Kernreise", () => {
     const budget = 120;
     const erreicht: string[] = [];
     let fokusPublish = false;
-    let fokusEmployee = false;
-    for (let i = 0; i < budget && !(fokusPublish && fokusEmployee); i += 1) {
+    let fokusFormular = false;
+    for (let i = 0; i < budget && !(fokusPublish && fokusFormular); i += 1) {
       await seite.keyboard.press("Tab");
       const testid = await seite.evaluate(
         () => document.activeElement?.getAttribute("data-testid") ?? "",
@@ -300,9 +325,21 @@ test.describe.serial("EYT-142 Staging-Kernreise", () => {
         // Screenshot MIT sichtbarem Fokusring auf der tragenden Aktion.
         await schnappschuss(seite, "06-fokus-publish-1440");
       }
-      if (testid === "feld-employee") fokusEmployee = true;
+      if (testid === "feld-worksite") fokusFormular = true;
+      // EYT-147: das Formular liegt im Inspector. Erreicht die Tastatur den
+      // Ausloeser, oeffnet Enter ihn, und der Fokus landet programmatisch im
+      // ersten Formularfeld — seit EYT-158 die Baustelle (worksite-first),
+      // nicht mehr eine Person. Genau das wird hier mitgemessen.
+      if (testid === "werkbank-einsatz-anlegen" && !fokusFormular) {
+        await seite.keyboard.press("Enter");
+        const nachOeffnen = await seite.evaluate(
+          () => document.activeElement?.getAttribute("data-testid") ?? "",
+        );
+        if (nachOeffnen !== "") erreicht.push(nachOeffnen);
+        if (nachOeffnen === "feld-worksite") fokusFormular = true;
+      }
     }
-    expect(fokusEmployee, `Formularfeld per Tastatur in <=${budget} Tabs`).toBe(true);
+    expect(fokusFormular, `Baustellenfeld per Tastatur in <=${budget} Tabs`).toBe(true);
     expect(fokusPublish, `Publish-Knopf per Tastatur in <=${budget} Tabs`).toBe(true);
     halte("tastatur_erreichte_testids", erreicht);
   });

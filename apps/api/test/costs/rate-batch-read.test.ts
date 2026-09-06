@@ -137,8 +137,14 @@ const idempotenzWaechter: IdempotencyStore = {
   find: () => {
     throw new Error("Eine Lesung fragt keine Wiederholung ab.");
   },
+  readResultPayload: () => {
+    throw new Error("Eine Lesung liest kein Wiederholungsergebnis.");
+  },
   remember: () => {
     throw new Error("Eine Lesung merkt sich nichts.");
+  },
+  rememberWithResultPayload: () => {
+    throw new Error("Eine Lesung merkt sich kein Wiederholungsergebnis.");
   },
 };
 

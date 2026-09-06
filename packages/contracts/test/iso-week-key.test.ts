@@ -114,10 +114,12 @@ import { fileURLToPath } from "node:url";
 
 import {
   CreateAssignmentCommandSchema,
+  PlanWorksiteDayCommandSchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
   PublishPlanCommandSchema,
   PublishedPlanVersionSchema,
+  UpdateWorksiteDayTeamCommandSchema,
   ValidatePlanCommandSchema,
 } from "../src/planning/schemas.js";
 
@@ -130,6 +132,7 @@ const EMPLOYEE_ID = "00000000-0000-4000-8000-0000004010a1";
 const WORKSITE_ID = "00000000-0000-4000-8000-0000005010a1";
 const SNAPSHOT_ID = "00000000-0000-4000-8000-0000007010a1";
 const USER_ID = "00000000-0000-4000-8000-0000008010a1";
+const WORKSITE_DAY_ID = "00000000-0000-4000-8000-0000009010a1";
 
 /** Je Schema ein minimal gueltiger Rumpf, in den der Wochenschluessel eingesetzt wird. */
 const STELLEN: ReadonlyArray<{
@@ -214,6 +217,31 @@ const STELLEN: ReadonlyArray<{
     name: "SelectablePlanVersionSchema",
     schema: SelectablePlanVersionSchema,
     baue: (weekKey) => ({ id: VERSION_ID, weekKey, publishedAt: INSTANT }),
+  },
+  {
+    // EYT-147 M2. Beide Tagescommands tragen die Woche aus demselben Grund wie
+    // `CreateAssignmentCommandSchema`: sie ist die Woche, die die Planerin
+    // GEOEFFNET hat, und der Server vergleicht sie mit der, die er selbst aus
+    // dem Tag ausrechnet.
+    name: "PlanWorksiteDayCommandSchema",
+    schema: PlanWorksiteDayCommandSchema,
+    baue: (weekKey) => ({
+      weekKey,
+      worksiteId: WORKSITE_ID,
+      localDate: "2026-08-03",
+      // Mindestens ein Eintrag: ein Baustellentag ohne Team wird nicht angelegt.
+      team: [{ employeeId: EMPLOYEE_ID, interval: { startUtc: INSTANT, endUtc: INSTANT_SPAETER } }],
+    }),
+  },
+  {
+    name: "UpdateWorksiteDayTeamCommandSchema",
+    schema: UpdateWorksiteDayTeamCommandSchema,
+    baue: (weekKey) => ({
+      weekKey,
+      worksiteDayId: WORKSITE_DAY_ID,
+      expectedLockVersion: 0,
+      team: [{ employeeId: EMPLOYEE_ID, interval: { startUtc: INSTANT, endUtc: INSTANT_SPAETER } }],
+    }),
   },
 ];
 

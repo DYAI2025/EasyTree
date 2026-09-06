@@ -208,6 +208,10 @@ class AufzeichnendeIdempotenz implements IdempotencyStore {
     return this.optionen.bekannt ?? null;
   }
 
+  async readResultPayload(): Promise<unknown | null> {
+    throw new Error("Dieser Kostentest liest keine Payload-Wiederholung.");
+  }
+
   async remember(
     _tx: TenantQuery,
     _organisationId: string,
@@ -218,6 +222,10 @@ class AufzeichnendeIdempotenz implements IdempotencyStore {
   ): Promise<void> {
     this.rufe.push("remember");
     this.gemerkt.push({ subjectId, fingerprint: requestFingerprint });
+  }
+
+  async rememberWithResultPayload(): Promise<void> {
+    throw new Error("Dieser Kostentest schreibt keine Payload-Wiederholung.");
   }
 }
 

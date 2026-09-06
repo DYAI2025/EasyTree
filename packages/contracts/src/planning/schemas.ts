@@ -22,7 +22,7 @@ import { z } from "zod";
 
 import { isValidIsoWeekKey } from "./iso-week.js";
 
-import { IdSchema, InstantSchema } from "../primitives.js";
+import { IdSchema, InstantSchema, LocalDateSchema } from "../primitives.js";
 
 /**
  * Halb-offenes Intervall als Transportform. Entspricht `TimeInterval` der Domain.
@@ -192,6 +192,149 @@ export const PlanningResourcesSchema = z.strictObject({
 
 export type PlanningResources = z.infer<typeof PlanningResourcesSchema>;
 
+/**
+ * Ein Teameintrag, wie ihn ein KOMMANDO traegt — Person und Intervall.
+ *
+ * Ohne Assignment-Id, und das ist kein Versehen: beim Anlegen existiert sie noch
+ * nicht, der Server vergibt sie. Die Antwort fuehrt sie dann mit (siehe
+ * {@link WorksiteDayTeamMemberSchema}). Ein gemeinsames Schema fuer beide
+ * Richtungen brauchte ein optionales Feld — und ein optionales Feld heisst,
+ * dass niemand mehr sagen kann, ob eine fehlende Id ein neuer Eintrag oder ein
+ * Datenverlust ist.
+ */
+export const WorksiteDayTeamEntrySchema = z.strictObject({
+  employeeId: IdSchema,
+  interval: TimeIntervalDtoSchema,
+});
+
+export type WorksiteDayTeamEntry = z.infer<typeof WorksiteDayTeamEntrySchema>;
+
+/**
+ * Die zwei Teamregeln — einmal geschrieben, von beiden Kommandos benutzt.
+ *
+ * 1. Dasselbe `(employeeId, interval)`-Paar darf nicht zweimal vorkommen.
+ * 2. Zwei Intervalle DERSELBEN Person duerfen sich nicht ueberlappen.
+ *
+ * Getrennte, nicht ueberlappende Intervalle derselben Person bleiben ausdruecklich
+ * erlaubt: jemand steht vormittags und nachmittags auf derselben Baustelle, und
+ * das ist ein normaler Tag, kein Konflikt (Confluence 41484289 §2 Nr. 4).
+ *
+ * ## Warum das Duplikat VOR der Ueberlappung geprueft wird
+ *
+ * Ein identisches Paar ueberlappt sich selbst. Ohne Vorrang traege der
+ * Doppeleintrag die Ueberlappungsmeldung, und die Planerin suchte nach einer
+ * Zeitkollision, wo sie in Wahrheit zweimal dieselbe Zeile abgeschickt hat.
+ *
+ * ## Warum Zeichenketten verglichen werden und nicht `Date`
+ *
+ * `InstantSchema` laesst genau EINE Schreibweise zu: UTC, drei Nachkommastellen,
+ * `Z`. Damit haben alle Werte dieselbe Laenge und dieselbe Stellenordnung, und
+ * die lexikografische Reihenfolge IST die zeitliche. Ein `Date.parse` waere ein
+ * zweiter Weg zur selben Aussage — und einer, der bei einem kaputten Wert still
+ * `NaN` liefert, womit jeder Vergleich `false` ergaebe und die Regel schwiege.
+ */
+function pruefeTeamregeln(eintraege: readonly WorksiteDayTeamEntry[], ctx: z.RefinementCtx): void {
+  for (let i = 0; i < eintraege.length; i += 1) {
+    for (let j = i + 1; j < eintraege.length; j += 1) {
+      const a = eintraege[i];
+      const b = eintraege[j];
+      if (a === undefined || b === undefined) continue;
+      if (a.employeeId !== b.employeeId) continue;
+
+      if (a.interval.startUtc === b.interval.startUtc && a.interval.endUtc === b.interval.endUtc) {
+        ctx.addIssue({
+          code: "custom",
+          path: [j],
+          message:
+            "Derselbe Eintrag steht zweimal im Team: gleiche Person, gleiches Intervall. " +
+            "Gemeint ist vermutlich ein zweites, anderes Intervall.",
+        });
+        continue;
+      }
+
+      if (a.interval.startUtc < b.interval.endUtc && b.interval.startUtc < a.interval.endUtc) {
+        ctx.addIssue({
+          code: "custom",
+          path: [j],
+          message:
+            "Zwei Intervalle derselben Person ueberlappen sich. Getrennte Intervalle am " +
+            "selben Tag sind erlaubt, sich ueberschneidende nicht.",
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Das Team eines Kommandos: mindestens EINE Person, und die Regeln oben.
+ *
+ * `min(1)` ist eine Produktentscheidung, keine Vorsicht: Confluence 41484289
+ * §2 Nr. 8 verlangt, dass ein leerer Baustellentag nicht still entsteht. Die
+ * ANTWORT darf `[]` trotzdem tragen — siehe {@link WorksiteDayDtoSchema}.
+ *
+ * Die Regeln sitzen am Array und nicht am umgebenden Kommando. Das ist kein
+ * Stil: `z.toJSONSchema` gibt fuer ein Objekt mit `superRefine` weiterhin
+ * `additionalProperties: false` aus, aber die Regel gehoert fachlich zur Liste,
+ * und so tragen beide Kommandos sie ohne eine zweite Ableitung.
+ */
+export const WorksiteDayTeamCommandSchema = z
+  .array(WorksiteDayTeamEntrySchema)
+  .min(1, "Ein Baustellentag wird nicht ohne Team angelegt oder geleert")
+  .superRefine(pruefeTeamregeln);
+
+/**
+ * Ein Teammitglied, wie es die ANTWORT traegt — mit der Assignment-Id.
+ *
+ * Sie ist die Bruecke zur bestehenden Assignment-Projektion: dieselbe Zuweisung
+ * erscheint einmal unter `assignments` und einmal hier. Das Fenster prueft, dass
+ * beide Seiten dasselbe sagen (siehe {@link PlanningWindowSchema}).
+ */
+export const WorksiteDayTeamMemberSchema = z.strictObject({
+  assignmentId: IdSchema,
+  employeeId: IdSchema,
+  interval: TimeIntervalDtoSchema,
+});
+
+export type WorksiteDayTeamMember = z.infer<typeof WorksiteDayTeamMemberSchema>;
+
+/**
+ * Ein Baustellentag, wie ihn die Antwort zeigt.
+ *
+ * ## Zwei Ids, zwei Lebensdauern — und keine ist ein Alias der anderen
+ *
+ * `worksiteDayId` ist die IDENTITAET: eine Zeile je (Organisation, Baustelle,
+ * lokaler Tag), versionsuebergreifend stabil (Migration `0019`). Sie ueberlebt
+ * jede Veroeffentlichung. `configurationId` ist die REVISION: der Planungsstand
+ * genau dieses Tages in genau einer Planversion. Wird eine Version kopiert,
+ * entsteht eine NEUE Konfiguration auf DERSELBEN Identitaet.
+ *
+ * Wer die beiden zusammenlegt, verliert genau die Faehigkeit, um derentwillen
+ * es sie gibt: denselben Tag ueber Draft -> Publish -> Folgedraft
+ * wiederzuerkennen. `UpdateWorksiteDayTeamCommandSchema` adressiert deshalb die
+ * IDENTITAET und nennt die Revision gar nicht.
+ *
+ * ## Warum `team` hier leer sein darf
+ *
+ * Die Kommandos verbieten `[]`, dieser Vertrag erlaubt es — die Asymmetrie ist
+ * Absicht. Ein Antwortschema, das den leeren Tag ablehnt, macht aus EINER
+ * unvollstaendigen Zeile eine unlesbare GESAMTE Planungsantwort: der Client
+ * verwirft dann das ganze Fenster und die Planerin sieht nichts mehr. Die
+ * Vollstaendigkeit eines Tages ist eine Publish-Bedingung, keine Lesebedingung.
+ */
+export const WorksiteDayDtoSchema = z.strictObject({
+  /** Stabile Identitaet des Baustellentags. Ueberlebt jede Planversion. */
+  worksiteDayId: IdSchema,
+  /** Die konkrete revisionsgebundene Konfiguration in EINER Planversion. */
+  configurationId: IdSchema,
+  worksiteId: IdSchema,
+  localDate: LocalDateSchema,
+  /** Fortschreibungszaehler der Konfiguration; `expectedLockVersion` vergleicht dagegen. */
+  lockVersion: z.number().int().min(0),
+  team: z.array(WorksiteDayTeamMemberSchema),
+});
+
+export type WorksiteDayDto = z.infer<typeof WorksiteDayDtoSchema>;
+
 export const PlanningWindowSchema = z
   .strictObject({
     weekKey: IsoWeekKeySchema,
@@ -215,6 +358,25 @@ export const PlanningWindowSchema = z
      * {@link PlanningResourcesSchema} — mitgeliefert, nicht nachgeladen.
      */
     resources: PlanningResourcesSchema,
+    /**
+     * Die Baustellentage dieser Woche (EYT-147 M2) — ADDITIV, deshalb optional.
+     *
+     * Fehlt das Feld, ist die Antwort ein Bestandsfenster ohne Baustellentage
+     * und bleibt gueltig. Das ist keine Nachlaessigkeit, sondern die Bedingung
+     * dafuer, dass diese Erweiterung additiv IST: der heutige Server sendet das
+     * Feld nicht, und ein Pflichtfeld haette seine Antwort ab sofort als
+     * Vertragsbruch verworfen — die Planung waere leer, ohne dass sich am
+     * Server etwas geaendert haette.
+     *
+     * `.default([])` waere hier die falsche Abkuerzung: gemessen mit zod 4.4.3
+     * fuehrt `z.toJSONSchema` ein Feld mit Vorgabewert unter `required`. Das
+     * veroeffentlichte Dokument behauptete dann ein Feld, das nie mitkommt.
+     *
+     * Die bestehende `assignments`-Projektion bleibt unberuehrt: Zuweisungen
+     * ohne Baustellentag sind weiterhin gueltig (Migration `0019` legt die
+     * Referenz ausdruecklich NULLABLE an, ohne Backfill).
+     */
+    worksiteDays: z.array(WorksiteDayDtoSchema).optional(),
   })
   .superRefine((fenster, ctx) => {
     // Feldweise Gueltigkeit genuegt hier nicht: die AUSSAGE steckt in der
@@ -247,6 +409,147 @@ export const PlanningWindowSchema = z
         });
       }
     });
+
+    // Baustellentage (EYT-147 M2). Bewusst HIER und nicht am Ende dieser
+    // Funktion: die Zweige unten enden jeweils mit `return`, und angehaengte
+    // Regeln liefen bei `sourceVersion === null` oder `"published"` nie —
+    // ausgerechnet der Fall, den Regel (6) pruefen soll.
+    const tage = fenster.worksiteDays;
+    if (tage !== undefined) {
+      // Jede Zuweisung EINMAL nachschlagbar machen. Ein lineares Suchen je
+      // Teammitglied waere nicht nur quadratisch, es verleitete auch dazu, den
+      // Treffer als Beweis zu nehmen — geprueft werden muss er trotzdem.
+      const einsaetze = new Map(fenster.assignments.map((einsatz) => [einsatz.id, einsatz]));
+      /** Assignment-Id -> Index des Tages, dessen Team sie zuerst nannte. */
+      const belegtVon = new Map<string, number>();
+      /** worksiteDayId -> Index der Zeile, die diese Identitaet zuerst fuehrte. */
+      const identitaeten = new Map<string, number>();
+      /** configurationId -> Index der Zeile, die diese Revision zuerst fuehrte. */
+      const revisionen = new Map<string, number>();
+
+      tage.forEach((tag, tagIndex) => {
+        if (!bekannteBaustellen.has(tag.worksiteId)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["worksiteDays", tagIndex, "worksiteId"],
+            message:
+              "Baustellentag verweist auf eine Baustelle, die nicht in resources.worksites steht — nicht aufloesbar.",
+          });
+        }
+
+        // Eine Tagesidentitaet und eine Konfigurationsrevision erscheinen im
+        // Fenster je HOECHSTENS EINMAL als primaere Zeile. Beide Achsen einzeln,
+        // nicht als Paar: `(worksiteDayId, configurationId)` waere schon dann
+        // eindeutig, wenn derselbe Tag zweimal mit verschiedenen Revisionen
+        // stuende — und genau das ist die zweite Stale-Wahrheit je Tag, die
+        // Migration 0019 R-20 ausschliesst. Umgekehrt gilt `unique
+        // (plan_version_id, worksite_day_id)`: eine Revision gehoert zu genau
+        // einer Identitaet.
+        const identitaetZuerst = identitaeten.get(tag.worksiteDayId);
+        if (identitaetZuerst === undefined) {
+          identitaeten.set(tag.worksiteDayId, tagIndex);
+        } else {
+          ctx.addIssue({
+            code: "custom",
+            path: ["worksiteDays", tagIndex, "worksiteDayId"],
+            message:
+              `Dieselbe Tagesidentitaet steht bereits in worksiteDays[${identitaetZuerst}]. ` +
+              "Ein Baustellentag erscheint je Fenster einmal — sonst traegt er zwei lockVersion-Staende.",
+          });
+        }
+
+        const revisionZuerst = revisionen.get(tag.configurationId);
+        if (revisionZuerst === undefined) {
+          revisionen.set(tag.configurationId, tagIndex);
+        } else {
+          ctx.addIssue({
+            code: "custom",
+            path: ["worksiteDays", tagIndex, "configurationId"],
+            message:
+              `Dieselbe Konfigurationsrevision steht bereits in worksiteDays[${revisionZuerst}]. ` +
+              "Eine Tageskonfiguration gehoert zu genau einer Tagesidentitaet.",
+          });
+        }
+
+        tag.team.forEach((mitglied, mitgliedIndex) => {
+          const pfad: (string | number)[] = ["worksiteDays", tagIndex, "team", mitgliedIndex];
+          const einsatz = einsaetze.get(mitglied.assignmentId);
+
+          if (einsatz === undefined) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...pfad, "assignmentId"],
+              message:
+                "Teammitglied verweist auf eine Zuweisung, die nicht unter assignments steht. " +
+                "Die Tageskarte zeigte damit eine Besetzung, die das Fenster selbst nicht kennt.",
+            });
+            return;
+          }
+
+          // Die Tageskarte und die Zuweisungsliste sind ZWEI Sichten auf
+          // dieselbe Tatsache. Weichen sie ab, zeigt die Oberflaeche je nach
+          // Ansicht etwas anderes an — und beide Male sieht es richtig aus.
+          if (einsatz.employeeId !== mitglied.employeeId) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...pfad, "employeeId"],
+              message: "Teammitglied und referenzierte Zuweisung nennen verschiedene Personen.",
+            });
+          }
+          if (
+            einsatz.interval.startUtc !== mitglied.interval.startUtc ||
+            einsatz.interval.endUtc !== mitglied.interval.endUtc
+          ) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...pfad, "interval"],
+              message: "Teammitglied und referenzierte Zuweisung nennen verschiedene Intervalle.",
+            });
+          }
+          // Dritte Achse derselben Aussage — und die einzige, die nicht aus dem
+          // Teameintrag selbst kommt: die Baustelle steht am TAG, nicht am
+          // Mitglied. Person und Intervall koennen vollstaendig uebereinstimmen,
+          // waehrend die Zuweisung auf einer anderen Baustelle gefuehrt wird;
+          // beide Ansichten saehen dann fuer sich richtig aus. Die
+          // Aufloesbarkeitspruefung oben faengt das nicht: sie fragt nur, ob die
+          // Baustelle BEKANNT ist, nicht ob es DIESELBE ist.
+          if (einsatz.worksiteId !== tag.worksiteId) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...pfad, "assignmentId"],
+              message:
+                "Teammitglied verweist auf eine Zuweisung einer ANDEREN Baustelle als der des Baustellentags.",
+            });
+          }
+
+          const zuerst = belegtVon.get(mitglied.assignmentId);
+          if (zuerst === undefined) {
+            belegtVon.set(mitglied.assignmentId, tagIndex);
+          } else {
+            // Eine Zuweisung gehoert zu genau EINER Tageskonfiguration
+            // (Migration `0019`: `assignments.worksite_day_configuration_id` ist
+            // eine einzelne Spalte). Zweimal genannt hiesse, dieselbe Person
+            // waere zur selben Zeit auf zwei Karten verplant.
+            ctx.addIssue({
+              code: "custom",
+              path: [...pfad, "assignmentId"],
+              message:
+                `Dieselbe Zuweisung steht bereits im Team von worksiteDays[${zuerst}]. ` +
+                "Eine Zuweisung gehoert zu genau einem Baustellentag.",
+            });
+          }
+        });
+      });
+
+      if (tage.length > 0 && fenster.sourceVersion === null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["worksiteDays"],
+          message:
+            "Ohne sourceVersion kann es keine Baustellentage geben — sie haetten keine Herkunft.",
+        });
+      }
+    }
 
     if (fenster.sourceVersion === null) {
       if (fenster.assignments.length > 0) {
@@ -368,3 +671,120 @@ export const PublishedPlanVersionSchema = z.strictObject({
 });
 
 export type PublishedPlanVersion = z.infer<typeof PublishedPlanVersionSchema>;
+
+/**
+ * Einen Baustellentag anlegen (EYT-147 M2).
+ *
+ * Adressiert wird die Baustelle und der lokale Tag — nicht eine Id, denn die
+ * gibt es noch nicht. Der Server loest daraus die Identitaet auf (anlegen oder
+ * finden) und haengt sie an die Konfiguration des Wochenentwurfs. Welche
+ * Planversion das ist, entscheidet ausschliesslich er ueber
+ * `app.lock_week_draft(weekKey)` (Confluence 41484289 §5); ein Kommando, das
+ * die Revision mitbraechte, koennte ihr widersprechen.
+ *
+ * `weekKey` ist dieselbe Redundanz wie bei {@link CreateAssignmentCommandSchema}:
+ * die Woche, die die Planerin GEOEFFNET hat. Der Server rechnet sie aus
+ * `localDate` in der Zone der Organisation selbst aus und vergleicht. Ohne das
+ * Feld landete ein Tag am Wochenrand still in einer Woche, die niemand ansieht.
+ */
+export const PlanWorksiteDayCommandSchema = z.strictObject({
+  weekKey: IsoWeekKeySchema,
+  worksiteId: IdSchema,
+  localDate: LocalDateSchema,
+  team: WorksiteDayTeamCommandSchema,
+});
+
+export type PlanWorksiteDayCommand = z.infer<typeof PlanWorksiteDayCommandSchema>;
+
+/**
+ * Die Tagesbesetzung eines bestehenden Baustellentags ersetzen (EYT-147 M2).
+ *
+ * ## Was hier bewusst FEHLT
+ *
+ * Kein `configurationId` und kein `localDate`. Beide waeren stille
+ * Zweitwahrheiten: die Revision ist durch `weekKey` eindeutig — hoechstens ein
+ * unveroeffentlichter Entwurf je Woche (Confluence 41484289 §4) —, und der Tag
+ * haengt unveraenderlich an der Identitaet. Ein Kommando, das sie mitschickte,
+ * koennte ihnen widersprechen — und dann muesste jemand entscheiden, welche
+ * Angabe gewinnt. Diese Entscheidung gibt es hier nicht, weil die Frage nicht
+ * gestellt werden kann.
+ *
+ * Adressiert wird deshalb die STABILE `worksiteDayId`. Sie ueberlebt
+ * Draft -> Publish -> Folgedraft; eine Konfigurations-Id waere nach der
+ * naechsten Veroeffentlichung ins Leere gelaufen, obwohl sich am Tag nichts
+ * geaendert hat.
+ *
+ * `expectedLockVersion` ist die Stale-Erkennung, dieselbe Bauart wie
+ * `expectedVersionId` beim Veroeffentlichen: der Client sagt, auf welchem Stand
+ * er arbeitet. `lock_version` ist das Nebenlaeufigkeits-Token der
+ * TAGESIDENTITAET, wird beim Kopieren in den Folgedraft uebernommen und nur
+ * durch eine reale Tagesmutation erhoeht (Migration 0019, R-20: "genau EINE
+ * Stale-Wahrheit je Tag"). Weicht der Server ab, hat jemand anders den Tag
+ * zwischenzeitlich umgeplant, und das Kommando wird abgelehnt, statt fremde
+ * Arbeit zu ueberschreiben.
+ */
+export const UpdateWorksiteDayTeamCommandSchema = z.strictObject({
+  weekKey: IsoWeekKeySchema,
+  worksiteDayId: IdSchema,
+  expectedLockVersion: z.number().int().min(0),
+  team: WorksiteDayTeamCommandSchema,
+});
+
+export type UpdateWorksiteDayTeamCommand = z.infer<typeof UpdateWorksiteDayTeamCommandSchema>;
+
+/**
+ * Die Problem-Types der Tagescommands — das VOKABULAR, nicht die Implementierung.
+ *
+ * Sie stehen hier, weil sie Teil des Transportvertrags sind: ein Client
+ * unterscheidet daran, ob er neu laden (`STALE_WORKSITE_DAY`), den Tag suchen
+ * (`WORKSITE_DAY_NOT_FOUND`) oder die Eingabe korrigieren muss. Die
+ * Zuordnung Domainfehler -> URN gehoert dagegen an die HTTP-Naht in `apps/api`
+ * (`PLANNING_ERROR_TYPE` in `planning-problem.filter.ts`) und entsteht mit der
+ * Businesslogik (M3/M4) — die dort diese Konstante IMPORTIERT, damit die URNs
+ * nicht an zwei Stellen stehen.
+ *
+ * Damit diese Liste kein blosser Kommentar bleibt, werden die ERREICHBAREN
+ * 409-Werte in die 409-Beschreibung der beiden Routen eingesetzt
+ * (`openapi/document.ts`) und sind dadurch Teil des erzeugten `v1.json` — der
+ * Drift-Test schuetzt sie byteweise mit.
+ *
+ * ## `WORKSITE_DAY_TEAM_REQUIRED` ist KEIN 409 dieser Routen
+ *
+ * Die Konstante bleibt, der veroeffentlichte 409-Zweig nicht (PO-Review 15164).
+ * `WorksiteDayTeamCommandSchema.min(1)` lehnt ein leeres Team schon an der
+ * Request-Grenze ab, und der Planungscontroller beantwortet einen
+ * fehlgeschlagenen `safeParse` ausnahmslos mit **400** (`BadRequestException`,
+ * `planning.controller.ts`) — nach erfolgreicher Schemapruefung kann der Fall
+ * nicht mehr entstehen. Ein veroeffentlichter 409 dafuer waere ein Versprechen
+ * an Clients, das der Server nie einloest.
+ *
+ * Der Wert selbst bleibt benannt, weil M3/M4 ihn an der 400-Grenze als
+ * `problem.type` fuehren sollen: „Team fehlt" ist fachlich etwas anderes als
+ * `INVALID_INTERVAL`, und ein Client soll beides unterscheiden koennen, ohne
+ * den deutschen Meldungstext zu lesen.
+ *
+ * NICHT enthalten: `WORKSITE_DAY_INCOMPLETE`. Das ist ein
+ * VEROEFFENTLICHUNGS-Problem und gehoert weder hierher noch in
+ * {@link CONFLICT_CODE_VALUES} — ein unvollstaendiger Tag ist beim Lesen und
+ * Bearbeiten voellig in Ordnung und wird erst beim Publish zum Hindernis (M5).
+ */
+export const WORKSITE_DAY_PROBLEM_TYPE = {
+  /** Die genannte `worksiteDayId` gibt es in dieser Organisation nicht. */
+  WORKSITE_DAY_NOT_FOUND: "urn:easytree:planning:worksite-day-not-found",
+  /** `expectedLockVersion` passt nicht: der Tag wurde zwischenzeitlich umgeplant. */
+  STALE_WORKSITE_DAY: "urn:easytree:planning:stale-worksite-day",
+  /** Fuer diese Baustelle und diesen Tag existiert bereits ein Baustellentag. */
+  DUPLICATE_WORKSITE_DAY: "urn:easytree:planning:duplicate-worksite-day",
+  /** Ein Intervall liegt ausserhalb des lokalen Tages, den es besetzen soll. */
+  INTERVAL_OUTSIDE_DAY: "urn:easytree:planning:interval-outside-day",
+  /**
+   * Das Kommando kam ohne Team an; ein leerer Tag entsteht nicht still.
+   *
+   * Request-Grenze, also **400** — nicht Teil der 409-Zweige der beiden Routen
+   * (siehe Kopfkommentar). `team.min(1)` faengt den Fall vorher ab.
+   */
+  WORKSITE_DAY_TEAM_REQUIRED: "urn:easytree:planning:worksite-day-team-required",
+} as const;
+
+export type WorksiteDayProblemType =
+  (typeof WORKSITE_DAY_PROBLEM_TYPE)[keyof typeof WORKSITE_DAY_PROBLEM_TYPE];

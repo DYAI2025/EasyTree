@@ -36,13 +36,19 @@ import {
   AssignmentDtoSchema,
   CreateAssignmentCommandSchema,
   PlanValidationResultSchema,
+  PlanWorksiteDayCommandSchema,
   PlanningConflictDtoSchema,
   PlanningResourceSchema,
   PlanningWindowSchema,
   PublishPlanCommandSchema,
   PublishedPlanVersionSchema,
   TimeIntervalDtoSchema,
+  UpdateWorksiteDayTeamCommandSchema,
   ValidatePlanCommandSchema,
+  WORKSITE_DAY_PROBLEM_TYPE,
+  WorksiteDayDtoSchema,
+  WorksiteDayTeamEntrySchema,
+  WorksiteDayTeamMemberSchema,
 } from "../planning/schemas.js";
 import { LoginCommandSchema, SessionDtoSchema } from "../auth/schemas.js";
 import {
@@ -86,6 +92,38 @@ const NAMED_SCHEMAS = {
   PlanValidationResult: PlanValidationResultSchema,
   PublishPlanCommand: PublishPlanCommandSchema,
   PublishedPlanVersion: PublishedPlanVersionSchema,
+  // EYT-147 M2: die baustellenzentrierte Planung. Zwei Ids mit verschiedener
+  // Lebensdauer — `worksiteDayId` ist versionsuebergreifend stabil,
+  // `configurationId` gilt in genau einer Planversion. Ein Generator soll
+  // beide als getrennte Felder sehen und nicht als denselben Begriff.
+  //
+  // ## Ehrlichkeitshinweis: VIER Regeln fallen bei der Erzeugung weg
+  //
+  // 1. `WorksiteDayTeamCommandSchema.superRefine` verbietet doppelte
+  //    `(employeeId, interval)`-Paare und ueberlappende Intervalle derselben
+  //    Person. Beides sind Beziehungen zwischen ARRAYELEMENTEN; JSON Schema
+  //    kann sie nicht ausdruecken.
+  // 2. `LocalDateSchema` verlangt zusaetzlich zum Muster einen realen
+  //    Kalendertag. Im Dokument steht nur `pattern` — `2026-02-30` geht dort
+  //    durch.
+  // 3. Die Querbezuege von `PlanningWindow.worksiteDays` auf `assignments`
+  //    und `resources.worksites` sind Feldbeziehungen und erscheinen ebenfalls
+  //    nicht.
+  // 4. Ebenso wenig die Regel "worksiteDays nicht leer => sourceVersion nicht
+  //    null".
+  //
+  // Was dagegen ANKOMMT und in `openapi-drift.test.ts` gemessen wird:
+  // `minItems: 1` fuer `team`, beide Ids unter `required`, `worksiteDays` NICHT
+  // unter `required` (additiv), `additionalProperties: false`.
+  //
+  // Ein generierter Client kann die vier Regeln oben also verletzen. Abgelehnt
+  // wird es trotzdem — zur Laufzeit, von diesen Schemata. Dieselbe
+  // Grenzziehung wie bei `weekKeyParam` und `TimeIntervalDtoSchema`.
+  WorksiteDayTeamEntry: WorksiteDayTeamEntrySchema,
+  WorksiteDayTeamMember: WorksiteDayTeamMemberSchema,
+  WorksiteDayDto: WorksiteDayDtoSchema,
+  PlanWorksiteDayCommand: PlanWorksiteDayCommandSchema,
+  UpdateWorksiteDayTeamCommand: UpdateWorksiteDayTeamCommandSchema,
   EmployeeSchedule: EmployeeScheduleSchema,
   ConfirmPlanCommand: ConfirmPlanCommandSchema,
   Confirmation: ConfirmationSchema,
@@ -276,6 +314,34 @@ function jsonOk(name: NamedSchema, description: string): unknown {
   return { description, content: { "application/json": { schema: ref(name) } } };
 }
 
+/**
+ * Die 409-Antwort EINER Route, samt der `problem.type`-Werte, die dort vorkommen.
+ *
+ * `problemResponses["409"]` sagt nur "Konflikt oder veralteter Planstand" und
+ * laesst offen, WELCHER. Fuer die Tagescommands ist das zu wenig: der Client
+ * muss `STALE_WORKSITE_DAY` (neu laden) von `DUPLICATE_WORKSITE_DAY` (Eingabe
+ * korrigieren) unterscheiden koennen, und ohne die Liste im Vertrag bliebe ihm
+ * nur, die Zeichenketten aus dem Servercode abzuschreiben.
+ *
+ * Die Werte kommen aus {@link WORKSITE_DAY_PROBLEM_TYPE} und nicht als Literale
+ * hierher: sonst stuenden dieselben URNs an zwei Stellen, und die Kopie im
+ * veroeffentlichten Dokument koennte der Konstante widersprechen.
+ *
+ * Der Rest des Fehlerobjekts bleibt unangetastet — es ist dasselbe
+ * `ProblemDocument` wie ueberall, nur mit einer genaueren Beschreibung.
+ */
+function konfliktMit(...typen: readonly string[]): unknown {
+  return {
+    ...problemResponses["409"],
+    description:
+      `Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: ` +
+      `${typen.join(", ")}. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen ` +
+      `Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende ` +
+      `Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier ` +
+      `wiederverwendet und nicht neu erfunden.`,
+  };
+}
+
 /** Erzeugt das vollstaendige Dokument. Rein, synchron, ohne Dateizugriff. */
 export function buildOpenApiDocument(): Record<string, unknown> {
   const schemas: Record<string, unknown> = {};
@@ -334,6 +400,59 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           responses: {
             "201": jsonOk("PublishedPlanVersion", "Veroeffentlichte Version"),
             ...problemResponses,
+          },
+        },
+      },
+      "/planung/baustellentage": {
+        post: {
+          operationId: "planWorksiteDay",
+          summary: "Baustellentag anlegen",
+          description:
+            "Legt den Baustellentag fuer eine Baustelle an einem expliziten lokalen Kalendertag an " +
+            "und besetzt ihn. Adressiert wird Baustelle plus Tag, nicht eine Id: die stabile " +
+            "worksiteDayId entsteht erst hier. Der Server loest sie auf, haengt sie an die " +
+            "Konfiguration des Wochenentwurfs und antwortet mit dem angelegten Tag einschliesslich " +
+            "lockVersion und der vergebenen assignmentIds. Neu gegenueber den uebrigen " +
+            "Planungsrouten sind die problem.type-Werte " +
+            `${WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY} und ` +
+            `${WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY}.`,
+          parameters: [idempotencyHeader],
+          requestBody: jsonBody("PlanWorksiteDayCommand"),
+          responses: {
+            "201": jsonOk("WorksiteDayDto", "Angelegter Baustellentag"),
+            ...problemResponses,
+            "409": konfliktMit(
+              WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY,
+              WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY,
+            ),
+          },
+        },
+      },
+      "/planung/baustellentage/team": {
+        post: {
+          operationId: "updateWorksiteDayTeam",
+          summary: "Tagesbesetzung eines Baustellentags ersetzen",
+          description:
+            "Ersetzt die Besetzung eines BESTEHENDEN Baustellentags. Adressiert wird die stabile " +
+            "worksiteDayId - nicht die configurationId, denn die Revision ist durch weekKey " +
+            "eindeutig (hoechstens ein Entwurf je Woche), und nicht der localDate, denn der " +
+            "haengt unveraenderlich an der Identitaet. expectedLockVersion ist die " +
+            "Stale-Erkennung gegen die Tagesidentitaet (lock_version wird beim Kopieren in den " +
+            "Folgedraft uebernommen); weicht sie vom Server ab, " +
+            `antwortet er mit ${WORKSITE_DAY_PROBLEM_TYPE.STALE_WORKSITE_DAY}, statt fremde ` +
+            "Aenderungen zu ueberschreiben. Kennt er die Id nicht, mit " +
+            `${WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_NOT_FOUND}. Die Antwort traegt die ` +
+            "fortgeschriebene lockVersion, damit die naechste Aenderung ohne Zwischenladen moeglich ist.",
+          parameters: [idempotencyHeader],
+          requestBody: jsonBody("UpdateWorksiteDayTeamCommand"),
+          responses: {
+            "200": jsonOk("WorksiteDayDto", "Baustellentag mit ersetzter Besetzung"),
+            ...problemResponses,
+            "409": konfliktMit(
+              WORKSITE_DAY_PROBLEM_TYPE.STALE_WORKSITE_DAY,
+              WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_NOT_FOUND,
+              WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY,
+            ),
           },
         },
       },

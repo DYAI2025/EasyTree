@@ -16,6 +16,14 @@ import { PlanningGatewayProvider } from "../lib/planning-gateway-provider";
 
 function gatewayReturning(result: GatewayResult<PlanningWindow>): PlanningGateway {
   return {
+    // EYT-147 M2: neue Portmethoden. Diese Ansicht ruft sie nicht auf —
+    // ein Wurf faellt auf, eine stille Leerantwort nicht.
+    planWorksiteDay: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
+    updateWorksiteDayTeam: () => {
+      throw new Error("in dieser Ansicht nicht benutzt");
+    },
     getPlanningWindow: () => Promise.resolve(result),
     validateDraft: () => {
       throw new Error("in dieser Ansicht nicht benutzt");
@@ -70,6 +78,16 @@ const PLANBARE_WOCHE: PlanningWindow = {
 // naechste Test findet die Elemente des vorigen — ein Fehlalarm, der wie
 // ein echter Befund aussieht.
 afterEach(cleanup);
+
+/**
+ * Seit EYT-147 steht das Einsatzformular im seitlichen Inspector und ist erst
+ * nach „Einsatz anlegen" im Baum. Der erste Zugriff WARTET auf den Ausloeser
+ * (der erscheint erst mit dem geladenen Fenster), der zweite auf das Formular.
+ */
+async function inspectorOeffnen(): Promise<void> {
+  await userEvent.click(await screen.findByTestId("werkbank-einsatz-anlegen"));
+  await screen.findByTestId("einsatzformular");
+}
 
 describe("PlanningWindowView", () => {
   it("zeigt zuerst den Ladezustand", () => {
@@ -201,62 +219,65 @@ describe("PlanningWindowView", () => {
     }
   });
 
-  it("behält den Idempotenzschlüssel bei einem unklaren Fehler für den Retry", async () => {
-    const keys: string[] = [];
-    let attempt = 0;
-    const gateway: PlanningGateway = {
-      getPlanningWindow: () => Promise.resolve({ ok: true, value: PLANBARE_WOCHE }),
-      validateDraft: () => {
-        throw new Error("in dieser Ansicht nicht benutzt");
+  // EYT-158: dieselben Sicherheitszusicherungen am WorksiteDay-Port.
+  const geschrieben = {
+    worksiteDayId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    configurationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    worksiteId: PLANBARE_WOCHE.resources.worksites[0]!.id,
+    localDate: "2026-08-03",
+    lockVersion: 0,
+    team: [
+      {
+        assignmentId: "11111111-1111-4111-8111-111111111111",
+        employeeId: PLANBARE_WOCHE.resources.employees[0]!.id,
+        interval: { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T16:00:00.000Z" },
       },
-      createAssignment: (_input, options) => {
-        keys.push(options.idempotencyKey);
-        attempt += 1;
-        return Promise.resolve(
-          attempt === 1
-            ? { ok: false, failure: "UNAVAILABLE" as const, problem: null }
-            : {
-                ok: true,
-                value: {
-                  id: "11111111-1111-4111-8111-111111111111",
-                  employeeId: PLANBARE_WOCHE.resources.employees[0]?.id ?? "",
-                  worksiteId: PLANBARE_WOCHE.resources.worksites[0]?.id ?? "",
-                  interval: {
-                    startUtc: "2026-08-03T06:00:00.000Z",
-                    endUtc: "2026-08-03T14:00:00.000Z",
-                  },
-                },
-              },
-        );
-      },
-      publishPlan: () => {
-        throw new Error("in dieser Ansicht nicht benutzt");
-      },
-    };
-
+    ],
+  };
+  const gelesen: PlanningWindow = {
+    ...PLANBARE_WOCHE,
+    worksiteDays: [geschrieben],
+    assignments: geschrieben.team.map((m) => ({
+      id: m.assignmentId,
+      employeeId: m.employeeId,
+      worksiteId: geschrieben.worksiteId,
+      interval: m.interval,
+    })),
+  };
+  async function ausfuellen(gateway: PlanningGateway) {
     render(
       <PlanningGatewayProvider gateway={gateway}>
         <PlanningWindowView weekKey="2026-W32" />
       </PlanningGatewayProvider>,
     );
-    await screen.findByTestId("einsatzformular");
-
+    await inspectorOeffnen();
+    await userEvent.selectOptions(screen.getByTestId("feld-worksite"), geschrieben.worksiteId);
+    await userEvent.type(screen.getByTestId("feld-datum"), geschrieben.localDate);
     await userEvent.selectOptions(
       screen.getByTestId("feld-employee"),
-      PLANBARE_WOCHE.resources.employees[0]?.id ?? "",
+      geschrieben.team[0]!.employeeId,
     );
-    await userEvent.selectOptions(
-      screen.getByTestId("feld-worksite"),
-      PLANBARE_WOCHE.resources.worksites[0]?.id ?? "",
-    );
-    await userEvent.type(screen.getByTestId("feld-datum"), "2026-08-03");
-    await userEvent.type(screen.getByTestId("feld-beginn"), "08:00");
-    await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
+  }
 
+  it("behält den Idempotenzschlüssel bei einem unklaren Fehler für den Retry", async () => {
+    const keys: string[] = [];
+    let attempt = 0;
+    const gateway: PlanningGateway = {
+      ...gatewayReturning({ ok: true, value: PLANBARE_WOCHE }),
+      planWorksiteDay: (_input, options) => {
+        keys.push(options.idempotencyKey);
+        attempt += 1;
+        return Promise.resolve(
+          attempt === 1
+            ? { ok: false, failure: "UNAVAILABLE", problem: null }
+            : { ok: true, value: geschrieben },
+        );
+      },
+      getPlanningWindow: () =>
+        Promise.resolve({ ok: true, value: attempt > 1 ? gelesen : PLANBARE_WOCHE }),
+    };
+    await ausfuellen(gateway);
     await userEvent.click(screen.getByTestId("einsatz-speichern"));
-    // Genau die Meldung DES FORMULARS, nicht "irgendein Statusbereich":
-    // seit EYT-141 traegt auch der Leerzustand `role="status"`, und ein
-    // Rollenzugriff faende beide.
     await waitFor(() =>
       expect(screen.getByTestId("einsatzformular-meldung").getAttribute("data-state")).toBe(
         "fehler",
@@ -268,166 +289,65 @@ describe("PlanningWindowView", () => {
         "erfolg",
       ),
     );
-
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
   });
 
-  it("behält die Erfolgsmeldung während des serverseitigen Read-through sichtbar", async () => {
+  it("bestätigt Erfolg erst nach serverseitigem Read-through und hält das Formular sichtbar", async () => {
     let leseversuch = 0;
-    const offenerReadThrough = new Promise<GatewayResult<PlanningWindow>>(() => {});
+    let abschliessen!: (r: GatewayResult<PlanningWindow>) => void;
+    const offen = new Promise<GatewayResult<PlanningWindow>>((resolve) => {
+      abschliessen = resolve;
+    });
     const gateway: PlanningGateway = {
-      getPlanningWindow: () => {
-        leseversuch += 1;
-        return leseversuch === 1
-          ? Promise.resolve({ ok: true, value: PLANBARE_WOCHE })
-          : offenerReadThrough;
-      },
-      validateDraft: () => {
-        throw new Error("in dieser Ansicht nicht benutzt");
-      },
-      createAssignment: () =>
-        Promise.resolve({
-          ok: true,
-          value: {
-            id: "11111111-1111-4111-8111-111111111111",
-            employeeId: PLANBARE_WOCHE.resources.employees[0]?.id ?? "",
-            worksiteId: PLANBARE_WOCHE.resources.worksites[0]?.id ?? "",
-            interval: {
-              startUtc: "2026-08-03T06:00:00.000Z",
-              endUtc: "2026-08-03T14:00:00.000Z",
-            },
-          },
-        }),
-      publishPlan: () => {
-        throw new Error("in dieser Ansicht nicht benutzt");
-      },
+      ...gatewayReturning({ ok: true, value: PLANBARE_WOCHE }),
+      planWorksiteDay: () => Promise.resolve({ ok: true, value: geschrieben }),
+      getPlanningWindow: () =>
+        ++leseversuch === 1 ? Promise.resolve({ ok: true, value: PLANBARE_WOCHE }) : offen,
     };
-
-    render(
-      <PlanningGatewayProvider gateway={gateway}>
-        <PlanningWindowView weekKey="2026-W32" />
-      </PlanningGatewayProvider>,
-    );
-    await screen.findByTestId("einsatzformular");
-
-    await userEvent.selectOptions(
-      screen.getByTestId("feld-employee"),
-      PLANBARE_WOCHE.resources.employees[0]?.id ?? "",
-    );
-    await userEvent.selectOptions(
-      screen.getByTestId("feld-worksite"),
-      PLANBARE_WOCHE.resources.worksites[0]?.id ?? "",
-    );
-    await userEvent.type(screen.getByTestId("feld-datum"), "2026-08-03");
-    await userEvent.type(screen.getByTestId("feld-beginn"), "08:00");
-    await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
+    await ausfuellen(gateway);
     await userEvent.click(screen.getByTestId("einsatz-speichern"));
-
-    const meldung = await screen.findByTestId("einsatzformular-meldung");
-    await waitFor(() => expect(meldung.getAttribute("data-state")).toBe("erfolg"));
-    expect(meldung.textContent).toContain("Der Entwurf wurde gespeichert.");
-    expect(leseversuch).toBe(2);
+    await waitFor(() => expect(leseversuch).toBe(2));
+    expect(screen.queryByTestId("einsatzformular-meldung")).toBeNull();
     expect(screen.queryByTestId("planungsfenster-laedt")).toBeNull();
+    expect(screen.getByTestId("einsatzformular")).toBeTruthy();
+    abschliessen({ ok: true, value: gelesen });
+    await waitFor(() =>
+      expect(screen.getByTestId("einsatzformular-meldung").getAttribute("data-state")).toBe(
+        "erfolg",
+      ),
+    );
   });
 
-  /**
-   * EYT-140 M7 — `AC-007` (`REQ-004`).
-   *
-   * Der Rundlauf allein bewiese nichts: ein optimistisch eingefuegter
-   * Clientzustand saehe genauso aus. Deshalb tragen die drei Quellen hier
-   * DREI verschiedene Ids —
-   *
-   * - `GESENDETE_ID` schickt der Client nie mit (er sendet nur Person,
-   *   Baustelle und Intervall), steht aber als Kontrollwert im Baum,
-   * - `SCHREIBANTWORT_ID` liefert `createAssignment` zurueck,
-   * - `SERVERSTAND_ID` liefert erst der ZWEITE `getPlanningWindow`.
-   *
-   * Im Markup darf nur `SERVERSTAND_ID` stehen. Stuende dort
-   * `SCHREIBANTWORT_ID`, zeigte die Ansicht die Schreibantwort statt des neu
-   * gelesenen Serverstands — und ein Schreibvorgang, dessen Antwort unterwegs
-   * verloren ging, saehe aus wie ein gelungener.
-   */
-  it("zeigt nach dem Speichern den neu gelesenen Serverstand, nicht die Schreibantwort", async () => {
-    const SCHREIBANTWORT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  it("zeigt nach dem Speichern auch den ausschließlich im Readback vorhandenen Serverstand", async () => {
     const SERVERSTAND_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    const mitarbeiterId = PLANBARE_WOCHE.resources.employees[0]?.id ?? "";
-    const baustellenId = PLANBARE_WOCHE.resources.worksites[0]?.id ?? "";
-    const intervall = {
-      startUtc: "2026-08-03T06:00:00.000Z",
-      endUtc: "2026-08-03T14:00:00.000Z",
+    const read: PlanningWindow = {
+      ...gelesen,
+      assignments: [...gelesen.assignments, { ...gelesen.assignments[0]!, id: SERVERSTAND_ID }],
     };
-
     let leseversuch = 0;
     const gateway: PlanningGateway = {
-      getPlanningWindow: () => {
-        leseversuch += 1;
-        return Promise.resolve(
-          leseversuch === 1
-            ? { ok: true, value: PLANBARE_WOCHE }
-            : {
-                ok: true,
-                value: {
-                  ...PLANBARE_WOCHE,
-                  assignments: [
-                    {
-                      id: SERVERSTAND_ID,
-                      employeeId: mitarbeiterId,
-                      worksiteId: baustellenId,
-                      interval: intervall,
-                    },
-                  ],
-                },
-              },
-        );
-      },
-      validateDraft: () => {
-        throw new Error("in dieser Ansicht nicht benutzt");
-      },
-      createAssignment: () =>
-        Promise.resolve({
-          ok: true,
-          value: {
-            id: SCHREIBANTWORT_ID,
-            employeeId: mitarbeiterId,
-            worksiteId: baustellenId,
-            interval: intervall,
-          },
-        }),
-      publishPlan: () => {
-        throw new Error("in dieser Ansicht nicht benutzt");
-      },
+      ...gatewayReturning({ ok: true, value: PLANBARE_WOCHE }),
+      planWorksiteDay: () => Promise.resolve({ ok: true, value: geschrieben }),
+      getPlanningWindow: () =>
+        Promise.resolve({ ok: true, value: ++leseversuch === 1 ? PLANBARE_WOCHE : read }),
     };
-
-    render(
-      <PlanningGatewayProvider gateway={gateway}>
-        <PlanningWindowView weekKey="2026-W32" />
-      </PlanningGatewayProvider>,
-    );
-    await screen.findByTestId("einsatzformular");
-
-    // Vor dem Speichern: genau EIN Lesevorgang, und noch keine Zuweisung.
+    await ausfuellen(gateway);
     expect(leseversuch).toBe(1);
-    expect(screen.getByTestId("planungsfenster-leer")).toBeTruthy();
-
-    await userEvent.selectOptions(screen.getByTestId("feld-employee"), mitarbeiterId);
-    await userEvent.selectOptions(screen.getByTestId("feld-worksite"), baustellenId);
-    await userEvent.type(screen.getByTestId("feld-datum"), "2026-08-03");
-    await userEvent.type(screen.getByTestId("feld-beginn"), "08:00");
-    await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
     await userEvent.click(screen.getByTestId("einsatz-speichern"));
-
-    const liste = await screen.findByTestId("planungsfenster-liste");
-
-    // Nach dem Speichern: genau ZWEI Lesevorgaenge.
+    await waitFor(() =>
+      expect(screen.getByTestId("einsatzformular-meldung").getAttribute("data-state")).toBe(
+        "erfolg",
+      ),
+    );
     expect(leseversuch).toBe(2);
-
-    const zeilen = liste.querySelectorAll("li[data-assignment-id]");
-    expect(zeilen).toHaveLength(1);
-    expect(zeilen[0]?.getAttribute("data-assignment-id")).toBe(SERVERSTAND_ID);
-
-    // Und die Schreibantwort taucht nirgends im ausgelieferten Markup auf.
-    expect(document.body.innerHTML).not.toContain(SCHREIBANTWORT_ID);
+    const ids = [
+      ...screen.getByTestId("planungsfenster-liste").querySelectorAll("[data-assignment-id]"),
+    ].map((e) => e.getAttribute("data-assignment-id"));
+    expect(ids).toEqual(
+      expect.arrayContaining([geschrieben.team[0]!.assignmentId, SERVERSTAND_ID]),
+    );
+    expect(ids).toHaveLength(2);
   });
 
   /**

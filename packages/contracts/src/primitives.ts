@@ -49,6 +49,45 @@ export type Instant = z.infer<typeof InstantSchema>;
 export const IdSchema = z.uuid().describe("UUID");
 
 /**
+ * Lokaler Kalendertag ohne Uhrzeit und ohne Zone — `2026-08-03`.
+ *
+ * ## Warum das Muster allein nicht genuegt
+ *
+ * `^\d{4}-\d{2}-\d{2}$` nimmt `2026-02-30` an. Diesen Tag gibt es nicht, und ein
+ * Baustellentag darauf koennte nie aus `worksite_days.local_date` (Typ `date`)
+ * stammen — die Datenbank haette die Zeile abgelehnt. Ein Vertrag, der
+ * nachsichtiger ist als der Speicher, verschiebt den Fehler nur nach hinten.
+ *
+ * Geprueft wird ueber den Rueckweg, dieselbe Bauart wie bei {@link InstantSchema}:
+ * `Date` normalisiert `2026-02-30` still zum 2. Maerz, und der Vergleich mit der
+ * Eingabe faellt dann auseinander (gemessen: `2026-02-30` -> `2026-03-02`,
+ * `2026-04-31` -> `2026-05-01`, `2025-02-29` -> `2025-03-01`; `2026-13-01` und
+ * `2026-00-10` ergeben gar kein Datum). Das angehaengte `T00:00:00.000Z` gehoert
+ * dazu: ohne Zeitanteil duerfte eine Laufzeit den Wert als LOKALE Zeit lesen, und
+ * eine westliche Zone verschoebe den Rueckweg um einen Tag.
+ *
+ * ## Abgrenzung zu `BusinessDateSchema`
+ *
+ * `costs/schemas.ts` fuehrt fuer denselben Begriff ein SCHWAECHERES Schema: nur
+ * das Muster, ohne Kalenderregel. Das ist bekannt und bleibt hier absichtlich
+ * unberuehrt — es zu verschaerfen aenderte die Laufzeitsemantik von
+ * Satzversionen und Kostenpositionen, und das ist keine additive
+ * Vertragserweiterung. Bis die beiden jemand mit eigenen Kostentests
+ * zusammenfuehrt, ist DIES die strengere Seite, und neue Felder nehmen dieses
+ * Schema, nicht das andere.
+ */
+export const LocalDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Lokales Datum im Format JJJJ-MM-TT")
+  .refine((wert) => {
+    const parsed = new Date(`${wert}T00:00:00.000Z`);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === wert;
+  }, "Kein realer Kalendertag im gregorianischen Kalender")
+  .describe("Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone");
+
+export type LocalDate = z.infer<typeof LocalDateSchema>;
+
+/**
  * Fehlerantwort.
  *
  * Bewusst kein zweites Fehlerformat: die Felder spiegeln exakt das, was

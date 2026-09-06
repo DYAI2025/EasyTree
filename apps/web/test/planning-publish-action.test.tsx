@@ -112,6 +112,13 @@ describe("Zustandsdarstellung", () => {
     expect(marke.textContent).toContain("Entwurf");
   });
 
+  it("zeigt ohne Version KEINE Standmarke — es gibt keinen Stand zu benennen (EYT-147)", () => {
+    // Eine „Entwurf"-Marke ueber einer versionslosen Woche waere erfundene
+    // Information; die Wochenansicht sagt dort bereits „Keine Version".
+    zeichne({ sourceVersionId: null });
+    expect(screen.queryByTestId("planung-stand-marke")).toBeNull();
+  });
+
   it("zeigt nach Erfolg den veroeffentlichten Stand mit Textmarke", async () => {
     zeichne();
     fireEvent.click(aktion() as HTMLElement);

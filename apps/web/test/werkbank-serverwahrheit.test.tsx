@@ -38,9 +38,11 @@
  *
  * ## Gegenmutationen (Phase 1)
  *
- * 1. `apps/web/components/planning-window-view.tsx:205` — `setNachladen((n) => n + 1)`
- *    im Erfolgszweig von `speichern` entfernen → „zeigt nach dem Speichern den
- *    erneut gelesenen Serverstand" geht rot, weil `EINSATZ_FREMD` nie erscheint.
+ * 1. In `speichern` (`apps/web/components/planning-window-view.tsx`) den
+ *    Readback ueberspringen: vor `gateway.getPlanningWindow` mit `{ ok: true }`
+ *    zurueckkehren und den Schluessel verwerfen → „zeigt nach dem Speichern den
+ *    erneut gelesenen Serverstand" geht rot, weil `EINSATZ_FREMD` nie erscheint
+ *    (seit EYT-158 ersetzt der gepruefte Readback das fruehere `setNachladen`).
  * 2. In `speichern` (`:188-191`) `weekKey` durch eine Konstante ersetzen →
  *    „schreibt in die Woche, die auf dem Schirm steht" geht rot.
  * 3. `apps/web/components/planning-window-view.tsx:143-147` — bei `!result.ok`
@@ -50,8 +52,12 @@
  * Alle drei sind heute nicht ausfuehrbar, weil der parameterlose Einstieg fehlt
  * und die Tests schon davor rot sind.
  */
-import { IDEMPOTENCY_HEADER, type CreateAssignmentCommand } from "@easytree/contracts";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import {
+  IDEMPOTENCY_HEADER,
+  type PlanWorksiteDayCommand,
+  type WorksiteDayDto,
+} from "@easytree/contracts";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -74,6 +80,12 @@ vi.mock("next/navigation", async () => {
 
 const MITTWOCH_KW34 = new Date("2026-08-19T12:00:00.000Z");
 const RECHTE = ["planning.read", "planning.write"];
+
+// Sieben userEvent-Schritte je Reise (seit EYT-147 einer mehr: der Inspector
+// wird zuerst geoeffnet) liegen unter Volllast ueber dem 5-s-Standard —
+// gemessen 31.08.2026 (5133 ms, nur unter parallelem turbo-Lauf). Das Budget
+// ist Robustheit, keine Abschwaechung: es aendert keine Zusicherung.
+vi.setConfig({ testTimeout: 15_000 });
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -185,53 +197,68 @@ describe("REQ-004 / AC-006, AC-007 — Schreiben in die angesehene Woche, danach
    * sie es auch.
    */
   async function einsatzAnlegen(datum: string): Promise<void> {
-    await userEvent.selectOptions(await screen.findByTestId("feld-employee"), PERSON_ID);
-    await userEvent.selectOptions(screen.getByTestId("feld-worksite"), BAUSTELLE_ID);
+    // Seit EYT-147 steht das Formular im Inspector: erst den Ausloeser
+    // druecken (er erscheint mit dem geladenen Fenster), dann warten die
+    // Feldzugriffe wie zuvor auf einen ZUSTAND, nicht auf eine Frist.
+    await userEvent.click(await screen.findByTestId("werkbank-einsatz-anlegen"));
+    await userEvent.selectOptions(await screen.findByTestId("feld-worksite"), BAUSTELLE_ID);
     await userEvent.type(screen.getByTestId("feld-datum"), datum);
-    await userEvent.type(screen.getByTestId("feld-beginn"), "08:00");
+    await userEvent.clear(screen.getByTestId("feld-ende"));
     await userEvent.type(screen.getByTestId("feld-ende"), "16:00");
+    await userEvent.selectOptions(screen.getByTestId("feld-employee"), PERSON_ID);
     await userEvent.click(screen.getByTestId("einsatz-speichern"));
   }
 
   function werkbankMitSchreibpfad(): {
     netz: Netzprotokoll;
-    gesendet: CreateAssignmentCommand[];
+    gesendet: PlanWorksiteDayCommand[];
   } {
-    const gesendet: CreateAssignmentCommand[] = [];
-    let geschrieben = false;
+    const gesendet: PlanWorksiteDayCommand[] = [];
+    let geschrieben: WorksiteDayDto | null = null;
     const netz = werkbankRendern({
       sitzung: sitzungMit(RECHTE),
-      fenster: (weekKey) =>
-        fensterMitEntwurf(
+      fenster: (weekKey) => {
+        const window = fensterMitEntwurf(
           weekKey,
-          geschrieben
-            ? [
+          geschrieben === null
+            ? [VORHANDEN]
+            : [
                 VORHANDEN,
-                {
-                  id: EINSATZ_NEU_VOM_SERVER,
-                  startUtc: "2026-08-25T06:00:00.000Z",
-                  endUtc: "2026-08-25T14:00:00.000Z",
-                },
-                // Diese Zuweisung entstand waehrend des Schreibvorgangs an
-                // anderer Stelle. Sie kann NUR ueber ein erneutes Lesen
-                // sichtbar werden.
+                // Nur der Readback kennt diese parallele Einplanung.
                 {
                   id: EINSATZ_FREMD,
                   startUtc: "2026-08-26T06:00:00.000Z",
                   endUtc: "2026-08-26T14:00:00.000Z",
                 },
-              ]
-            : [VORHANDEN],
-        ),
-      einsatzAnlegen: (befehl) => {
+              ],
+        );
+        return geschrieben === null
+          ? window
+          : {
+              ...window,
+              worksiteDays: [geschrieben],
+              assignments: [
+                ...window.assignments,
+                ...geschrieben.team.map((m) => ({
+                  id: m.assignmentId,
+                  employeeId: m.employeeId,
+                  worksiteId: geschrieben!.worksiteId,
+                  interval: m.interval,
+                })),
+              ],
+            };
+      },
+      baustellentagAnlegen: (befehl) => {
         gesendet.push(befehl);
-        geschrieben = true;
-        return {
-          id: EINSATZ_NEU_VOM_SERVER,
-          employeeId: befehl.employeeId,
+        geschrieben = {
+          worksiteDayId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          configurationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           worksiteId: befehl.worksiteId,
-          interval: befehl.interval,
+          localDate: befehl.localDate,
+          lockVersion: 0,
+          team: befehl.team.map((m) => ({ ...m, assignmentId: EINSATZ_NEU_VOM_SERVER })),
         };
+        return geschrieben;
       },
     });
     return { netz, gesendet };
@@ -249,7 +276,7 @@ describe("REQ-004 / AC-006, AC-007 — Schreiben in die angesehene Woche, danach
 
     await waitFor(() => expect(gesendet).toHaveLength(1));
     expect(gesendet[0]?.weekKey).toBe("2026-W35");
-    expect(gesendet[0]?.interval.startUtc.startsWith("2026-08-25")).toBe(true);
+    expect(gesendet[0]?.team[0]?.interval.startUtc.startsWith("2026-08-25")).toBe(true);
   });
 
   it("schickt den Schreibaufruf mit Idempotenzschluessel ueber den Vertragsclient", async () => {
@@ -258,8 +285,8 @@ describe("REQ-004 / AC-006, AC-007 — Schreiben in die angesehene Woche, danach
 
     await einsatzAnlegen("2026-08-19");
 
-    await waitFor(() => expect(netz.aufrufeAn("/api/v1/planung/einsaetze")).toHaveLength(1));
-    const schreiben = netz.aufrufeAn("/api/v1/planung/einsaetze")[0];
+    await waitFor(() => expect(netz.aufrufeAn("/api/v1/planung/baustellentage")).toHaveLength(1));
+    const schreiben = netz.aufrufeAn("/api/v1/planung/baustellentage")[0];
     expect(schreiben?.methode).toBe("POST");
     expect(schreiben?.kopf[IDEMPOTENCY_HEADER] ?? "").not.toBe("");
   });
@@ -284,7 +311,7 @@ describe("REQ-004 / AC-006, AC-007 — Schreiben in die angesehene Woche, danach
 
     // Und die Reihenfolge stimmt: erst schreiben, dann lesen.
     const reihenfolge = netz.aufrufe.map((a) => `${a.methode} ${a.pfad}`);
-    const schreibIndex = reihenfolge.indexOf("POST /api/v1/planung/einsaetze");
+    const schreibIndex = reihenfolge.indexOf("POST /api/v1/planung/baustellentage");
     const leseIndexDanach = reihenfolge.indexOf("GET /api/v1/planung/fenster", schreibIndex + 1);
     expect(schreibIndex).toBeGreaterThanOrEqual(0);
     expect(leseIndexDanach).toBeGreaterThan(schreibIndex);
@@ -299,11 +326,13 @@ describe("REQ-004 / AC-006, AC-007 — Schreiben in die angesehene Woche, danach
       expect(screen.getByTestId("planungsfenster-liste").textContent ?? "").not.toBe(""),
     );
 
-    const schluessel = netz.aufrufeAn("/api/v1/planung/einsaetze")[0]?.kopf[IDEMPOTENCY_HEADER];
-    const liste = within(screen.getByTestId("planungsfenster-liste"));
-    const ids = liste
-      .getAllByRole("listitem")
-      .map((zeile) => zeile.getAttribute("data-assignment-id"));
+    const schluessel = netz.aufrufeAn("/api/v1/planung/baustellentage")[0]?.kopf[
+      IDEMPOTENCY_HEADER
+    ];
+    expect(schluessel).toBeTruthy();
+    const ids = [
+      ...screen.getByTestId("planungsfenster-liste").querySelectorAll("[data-assignment-id]"),
+    ].map((zeile) => zeile.getAttribute("data-assignment-id"));
     expect(ids).not.toContain(schluessel);
     expect(ids.every((id) => id !== null && id !== "")).toBe(true);
   });

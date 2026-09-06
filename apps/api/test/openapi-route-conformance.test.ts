@@ -92,6 +92,11 @@ const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
     "Zeiterfassung. Es gibt keine time_entries-Tabelle — bewusst, siehe Migration 0010 Kopfkommentar (EYT-14).",
   ],
   ["POST /einsatz/zeiten/stopp", "Zeiterfassung. Gleiche Begruendung wie der Start."],
+  [
+    "POST /planung/baustellentage/team",
+    "Tagesbesetzung ersetzen. Braucht zusaetzlich die Lock-Version-Fortschreibung " +
+      "und das atomare Ersetzen der Zuweisungen — EYT-147 M4.",
+  ],
   // `GET /kosten/planversionen` stand hier bis EYT-144. Die Route ist am
   // `CostsController` registriert; die `stale`-Zusicherung weiter unten hat den
   // Eintrag in genau dem Lauf rot gemeldet, in dem die Route entstand.

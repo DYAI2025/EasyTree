@@ -33,6 +33,18 @@ export class PgIdempotencyStore implements IdempotencyStore {
     return { subjectId: zeile.subject_id, requestFingerprint: zeile.request_fingerprint };
   }
 
+  async readResultPayload(
+    tx: TenantQuery,
+    operation: string,
+    key: string,
+  ): Promise<unknown | null> {
+    const ergebnis = await tx.query<{ payload: unknown | null }>(
+      `select app.read_idempotency_result($1, $2) as payload`,
+      [operation, key],
+    );
+    return ergebnis.rows[0]?.payload ?? null;
+  }
+
   async remember(
     tx: TenantQuery,
     organisationId: string,
@@ -46,6 +58,30 @@ export class PgIdempotencyStore implements IdempotencyStore {
          (org_id, operation, idempotency_key, subject_id, request_fingerprint)
        values ($1::uuid, $2, $3, $4::uuid, $5)`,
       [organisationId, operation, key, subjectId, requestFingerprint],
+    );
+  }
+
+  async rememberWithResultPayload(
+    tx: TenantQuery,
+    organisationId: string,
+    operation: string,
+    key: string,
+    subjectId: string,
+    requestFingerprint: string,
+    resultPayload: unknown,
+  ): Promise<void> {
+    await tx.query(
+      `insert into public.idempotency_records
+         (org_id, operation, idempotency_key, subject_id, request_fingerprint, result_payload)
+       values ($1::uuid, $2, $3, $4::uuid, $5, $6::jsonb)`,
+      [
+        organisationId,
+        operation,
+        key,
+        subjectId,
+        requestFingerprint,
+        JSON.stringify(resultPayload),
+      ],
     );
   }
 }

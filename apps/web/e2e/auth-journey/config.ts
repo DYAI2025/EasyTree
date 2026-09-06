@@ -92,7 +92,14 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,
-  timeout: 60_000,
+  // Die Kernreise ist EIN Test mit Dutzenden Schritten. Gemessen 06.09.2026
+  // (colima, M-Serie, drei Laeufe): 43 s vor EYT-158, 60–84 s mit den
+  // zusaetzlichen axe-, Tastatur- und Zweitkontext-Nachweisen des
+  // Baustellentag-Schritts — bei 60 s fiel der Lauf am LETZTEN Schritt
+  // (ungueltige Sitzung) ins Timeout, obwohl jeder Nachweis bestanden hatte.
+  // Ein Deckel ist kein Ziel: grosszuegig, weil Ubuntu-Runner nicht schneller
+  // sind und ein Timeout hier stets den falschen Schritt beschuldigt.
+  timeout: 180_000,
   outputDir: join(ARTEFAKTE, "artefakte"),
   reporter: [
     ["list"],

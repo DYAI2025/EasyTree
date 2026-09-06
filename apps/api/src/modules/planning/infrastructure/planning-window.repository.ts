@@ -44,6 +44,7 @@ import type {
   PublishedVersionsResult,
   ResourceRow,
   ResourcesRow,
+  WorksiteDayReadRow,
 } from "../application/planning-queries.port";
 import type {
   QueryResult,
@@ -60,14 +61,6 @@ interface VersionRow {
   readonly id: string;
   readonly published_at: Date | null;
   readonly created_at: Date;
-}
-
-interface RawAssignmentRow {
-  readonly id: string;
-  readonly employee_id: string;
-  readonly worksite_id: string;
-  readonly starts_at_utc: Date;
-  readonly ends_at_utc: Date;
 }
 
 /**
@@ -139,8 +132,14 @@ export class PlanningWindowRepository implements PlanningQueries {
       // sonst nichts (Entscheidungsnotiz, Punkt 2).
       const source = draft ?? latestPublished;
 
-      const assignments =
-        source === null || source === undefined ? [] : await this.assignmentsOf(tx, source.id);
+      // Zuweisungen UND Baustellentage aus EINEM Statement — ein Snapshot.
+      // Der Runner faehrt READ COMMITTED; zwei Statements saehen zwei
+      // Zeitpunkte, und ein dazwischen committeter Baustellentag lieferte ein
+      // Team, dessen Zuweisungen der Vertrag im Fenster nicht findet (EYT-158).
+      const { assignments, worksiteDays } =
+        source === null || source === undefined
+          ? { assignments: [], worksiteDays: [] }
+          : await this.planstandOf(tx, source.id, org.id);
 
       // Stammdaten im SELBEN Transaktionsblock wie Woche, Versionen und
       // Zuweisungen. Nicht aus Bequemlichkeit: eine zweite Route oder ein
@@ -162,6 +161,7 @@ export class PlanningWindowRepository implements PlanningQueries {
           weekKey,
           timeZone: org.time_zone,
           assignments,
+          worksiteDays,
           resources,
           sourceVersion:
             source === null || source === undefined
@@ -299,7 +299,10 @@ export class PlanningWindowRepository implements PlanningQueries {
         return { ok: false as const, problem: "PLAN_NOT_PUBLISHED" as const };
       }
 
-      const assignments = await this.assignmentsOf(tx, version.id);
+      // Derselbe Ein-Snapshot-Lesepfad wie im Fenster; dieser Vertrag traegt
+      // (noch) keine Baustellentage, die Zuweisungen kommen aber aus demselben
+      // Statement wie dort.
+      const { assignments } = await this.planstandOf(tx, version.id, organisation.org.id);
       const resources = await this.resourcesOf(tx, organisation.org.id);
 
       return {
@@ -413,7 +416,19 @@ export class PlanningWindowRepository implements PlanningQueries {
   }
 
   /**
-   * Die Zuweisungen EINER Planversion — als einzige Abfrage ohne `org_id`.
+   * Zuweisungen und Baustellentage EINER Planversion — ein Statement, ein
+   * Snapshot (EYT-158).
+   *
+   * ## Warum ein einziges Statement
+   *
+   * `PgTenantQueryRunner` oeffnet die Transaktion mit einem nackten `begin`,
+   * also READ COMMITTED: jedes Statement sieht seinen eigenen Snapshot. Zwei
+   * Statements koennten einen Baustellentag liefern, dessen Teammitglieder in
+   * der Zuweisungsliste noch fehlen — `PlanningWindowSchema` verwirft genau
+   * das, und aus einem gueltigen Serverstand wuerde ein 500. Der statische
+   * Waechter `planning-window-single-snapshot.test.ts` zaehlt die Statements.
+   *
+   * ## Warum die Zuweisungen KEINEN `org_id`-Filter tragen
    *
    * Das ist kein Vergessen. `assignments` traegt den tenantgebundenen
    * Fremdschluessel `(plan_version_id, org_id) references plan_versions (id,
@@ -422,22 +437,131 @@ export class PlanningWindowRepository implements PlanningQueries {
    * gefunden hat. Ein zusaetzliches `and org_id = $2` waere damit eine
    * Bedingung, die keine Datenlage je verletzt — also keine Pruefung, sondern
    * Dekoration. Dieselbe Begruendung wie beim weggelassenen
-   * `published_at`-Filter oben.
+   * `published_at`-Filter oben. Die Tageskonfigurationen werden dagegen ueber
+   * `org_id` UND Version gelesen, weil ihr Tag (`worksite_days`) mandantenweit
+   * und versionslos ist.
+   *
+   * ## Reihenfolge
+   *
+   * Zuweisungen wie bisher nach `starts_at_utc, id`; Tage nach `local_date,
+   * worksite_day_id`; Teams nach `employee_id, starts_at_utc, id`. Sortiert
+   * wird hier, nicht in SQL: ein FULL OUTER JOIN hat keine Sortierung, die fuer
+   * beide Seiten zugleich richtig waere.
    */
-  private async assignmentsOf(tx: TenantQuery, planVersionId: string): Promise<AssignmentRow[]> {
-    const rows = await tx.query<RawAssignmentRow>(
-      `select id, employee_id, worksite_id, starts_at_utc, ends_at_utc
-         from public.assignments
-        where plan_version_id = $1
-        order by starts_at_utc asc, id asc`,
-      [planVersionId],
+  private async planstandOf(
+    tx: TenantQuery,
+    planVersionId: string,
+    orgId: string,
+  ): Promise<{ assignments: AssignmentRow[]; worksiteDays: WorksiteDayReadRow[] }> {
+    const rows = await tx.query<{
+      configuration_id: string | null;
+      lock_version: number | null;
+      worksite_day_id: string | null;
+      day_worksite_id: string | null;
+      local_date: string | null;
+      assignment_id: string | null;
+      employee_id: string | null;
+      worksite_id: string | null;
+      starts_at_utc: Date | null;
+      ends_at_utc: Date | null;
+    }>(
+      `with tage as (
+         select c.id as configuration_id, c.lock_version,
+                d.id as worksite_day_id, d.worksite_id as day_worksite_id,
+                to_char(d.local_date, 'YYYY-MM-DD') as local_date
+           from public.worksite_day_configurations c
+           join public.worksite_days d on d.id = c.worksite_day_id and d.org_id = c.org_id
+          where c.plan_version_id = $1 and c.org_id = $2
+       ), zuweisungen as (
+         select id as assignment_id, employee_id, worksite_id, starts_at_utc, ends_at_utc,
+                worksite_day_configuration_id
+           from public.assignments
+          where plan_version_id = $1
+       )
+       select t.configuration_id, t.lock_version, t.worksite_day_id, t.day_worksite_id, t.local_date,
+              z.assignment_id, z.employee_id, z.worksite_id, z.starts_at_utc, z.ends_at_utc
+         from tage t
+         full outer join zuweisungen z on z.worksite_day_configuration_id = t.configuration_id`,
+      [planVersionId, orgId],
     );
-    return rows.rows.map((row) => ({
-      id: row.id,
-      employeeId: row.employee_id,
-      worksiteId: row.worksite_id,
-      startsAtUtc: row.starts_at_utc,
-      endsAtUtc: row.ends_at_utc,
-    }));
+
+    const assignments: AssignmentRow[] = [];
+    const days = new Map<
+      string,
+      Omit<WorksiteDayReadRow, "team"> & { team: WorksiteDayReadRow["team"][number][] }
+    >();
+    for (const row of rows.rows) {
+      if (
+        row.assignment_id !== null &&
+        row.employee_id !== null &&
+        row.worksite_id !== null &&
+        row.starts_at_utc !== null &&
+        row.ends_at_utc !== null
+      ) {
+        assignments.push({
+          id: row.assignment_id,
+          employeeId: row.employee_id,
+          worksiteId: row.worksite_id,
+          startsAtUtc: row.starts_at_utc,
+          endsAtUtc: row.ends_at_utc,
+        });
+      }
+      if (
+        row.configuration_id === null ||
+        row.lock_version === null ||
+        row.worksite_day_id === null ||
+        row.day_worksite_id === null ||
+        row.local_date === null
+      ) {
+        continue;
+      }
+      let day = days.get(row.configuration_id);
+      if (day === undefined) {
+        day = {
+          worksiteDayId: row.worksite_day_id,
+          configurationId: row.configuration_id,
+          worksiteId: row.day_worksite_id,
+          localDate: row.local_date,
+          lockVersion: row.lock_version,
+          team: [],
+        };
+        days.set(row.configuration_id, day);
+      }
+      if (
+        row.assignment_id !== null &&
+        row.employee_id !== null &&
+        row.starts_at_utc !== null &&
+        row.ends_at_utc !== null
+      ) {
+        day.team.push({
+          assignmentId: row.assignment_id,
+          employeeId: row.employee_id,
+          startsAtUtc: row.starts_at_utc,
+          endsAtUtc: row.ends_at_utc,
+        });
+      }
+    }
+
+    assignments.sort(
+      (a, b) =>
+        a.startsAtUtc.getTime() - b.startsAtUtc.getTime() ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+    const worksiteDays = [...days.values()]
+      .map((day) => ({
+        ...day,
+        team: [...day.team].sort(
+          (a, b) =>
+            (a.employeeId < b.employeeId ? -1 : a.employeeId > b.employeeId ? 1 : 0) ||
+            a.startsAtUtc.getTime() - b.startsAtUtc.getTime() ||
+            (a.assignmentId < b.assignmentId ? -1 : a.assignmentId > b.assignmentId ? 1 : 0),
+        ),
+      }))
+      .sort(
+        (a, b) =>
+          (a.localDate < b.localDate ? -1 : a.localDate > b.localDate ? 1 : 0) ||
+          (a.worksiteDayId < b.worksiteDayId ? -1 : a.worksiteDayId > b.worksiteDayId ? 1 : 0),
+      );
+    return { assignments, worksiteDays };
   }
 }

@@ -49,11 +49,14 @@ import {
   IDEMPOTENCY_HEADER,
   IdempotencyKeySchema,
   PlanValidationResultSchema,
+  PlanWorksiteDayCommandSchema,
   PlanningWindowQuerySchema,
   PlanningWindowSchema,
   PublishPlanCommandSchema,
   PublishedPlanVersionSchema,
   ValidatePlanCommandSchema,
+  WORKSITE_DAY_PROBLEM_TYPE,
+  WorksiteDayDtoSchema,
 } from "@easytree/contracts";
 import {
   BadRequestException,
@@ -149,6 +152,19 @@ function problemFor(problem: PlanningWriteProblem): Error {
         title: "Idempotenzschlüssel bereits für eine andere Anfrage verwendet",
         detail:
           "Dieser Idempotenzschlüssel gehört zu einem anderen Einsatz. Für einen neuen Einsatz einen neuen Schlüssel verwenden; für einen Wiederholungsversuch dieselbe Anfrage senden.",
+      });
+    case "DUPLICATE_WORKSITE_DAY":
+      return new ConflictException({
+        type: WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY,
+        title: "Baustellentag besteht bereits",
+        detail:
+          "Für diese Baustelle und diesen lokalen Tag existiert im aktuellen Entwurf bereits ein Baustellentag.",
+      });
+    case "INTERVAL_OUTSIDE_DAY":
+      return new ConflictException({
+        type: WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY,
+        title: "Arbeitszeit liegt außerhalb des Baustellentags",
+        detail: "Jedes Teamintervall muss vollständig im angefragten lokalen Baustellentag liegen.",
       });
     case "OUTSIDE_WEEK":
       return new BadRequestException({
@@ -314,6 +330,21 @@ export class PlanningController {
     const body = {
       weekKey: result.window.weekKey,
       timeZone: result.window.timeZone,
+      worksiteDays: result.window.worksiteDays?.map((day) => ({
+        worksiteDayId: day.worksiteDayId,
+        configurationId: day.configurationId,
+        worksiteId: day.worksiteId,
+        localDate: day.localDate,
+        lockVersion: day.lockVersion,
+        team: day.team.map((member) => ({
+          assignmentId: member.assignmentId,
+          employeeId: member.employeeId,
+          interval: {
+            startUtc: member.startsAtUtc.toISOString(),
+            endUtc: member.endsAtUtc.toISOString(),
+          },
+        })),
+      })),
       assignments: result.window.assignments.map((assignment) => ({
         id: assignment.id,
         employeeId: assignment.employeeId,
@@ -463,6 +494,79 @@ export class PlanningController {
       throw new InternalServerErrorException("Antwort entspricht nicht dem Vertrag.");
     }
     return validated.data;
+  }
+
+  @Post("baustellentage")
+  @HttpCode(201)
+  async planWorksiteDay(
+    @Req() request: Request,
+    @Body() body: unknown,
+    @Headers(IDEMPOTENCY_HEADER) idempotencyKey?: string,
+  ): Promise<unknown> {
+    const { subjectUserId: subject } = await this.zugang(request, "planning.write");
+
+    const schluessel = IdempotencyKeySchema.safeParse(idempotencyKey);
+    if (!schluessel.success) {
+      throw new BadRequestException({
+        type: PLANNING_ERROR_TYPE.MISSING_IDEMPOTENCY_KEY,
+        title: "Idempotenzschlüssel fehlt oder ist unbrauchbar",
+        detail: `Der Header ${IDEMPOTENCY_HEADER} fehlt oder entspricht nicht dem Vertrag.`,
+      });
+    }
+
+    const command = PlanWorksiteDayCommandSchema.safeParse(body);
+    if (!command.success) {
+      const teamIsEmpty =
+        typeof body === "object" &&
+        body !== null &&
+        "team" in body &&
+        Array.isArray((body as { team?: unknown }).team) &&
+        (body as { team: unknown[] }).team.length === 0;
+      throw new BadRequestException({
+        type: teamIsEmpty
+          ? WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_TEAM_REQUIRED
+          : PLANNING_ERROR_TYPE.INVALID_INTERVAL,
+        title: teamIsEmpty
+          ? "Baustellentag benötigt ein Team"
+          : "Baustellentag unvollständig oder ungültig",
+        detail: teamIsEmpty
+          ? "Ein Baustellentag wird nicht ohne Team angelegt."
+          : "Woche, Baustelle, lokales Datum oder Teamintervall entsprechen nicht dem Vertrag.",
+      });
+    }
+
+    const result = await this.writesFor(subject).planWorksiteDay({
+      weekKey: command.data.weekKey,
+      worksiteId: command.data.worksiteId,
+      localDate: command.data.localDate,
+      team: command.data.team.map((member) => ({
+        employeeId: member.employeeId,
+        startsAtUtc: new Date(member.interval.startUtc),
+        endsAtUtc: new Date(member.interval.endUtc),
+      })),
+      idempotencyKey: schluessel.data,
+    });
+    if (!result.ok) throw problemFor(result.problem);
+
+    const response = WorksiteDayDtoSchema.safeParse({
+      worksiteDayId: result.worksiteDay.worksiteDayId,
+      configurationId: result.worksiteDay.configurationId,
+      worksiteId: result.worksiteDay.worksiteId,
+      localDate: result.worksiteDay.localDate,
+      lockVersion: result.worksiteDay.lockVersion,
+      team: result.worksiteDay.team.map((member) => ({
+        assignmentId: member.assignmentId,
+        employeeId: member.employeeId,
+        interval: {
+          startUtc: member.startsAtUtc.toISOString(),
+          endUtc: member.endsAtUtc.toISOString(),
+        },
+      })),
+    });
+    if (!response.success) {
+      throw new InternalServerErrorException("Antwort entspricht nicht dem Vertrag.");
+    }
+    return response.data;
   }
 
   /**

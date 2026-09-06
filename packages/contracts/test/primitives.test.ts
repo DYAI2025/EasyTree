@@ -5,7 +5,12 @@ import {
   PlanningWindowSchema,
   TimeIntervalDtoSchema,
 } from "../src/planning/schemas.js";
-import { IdempotencyKeySchema, InstantSchema, ProblemDocumentSchema } from "../src/primitives.js";
+import {
+  IdempotencyKeySchema,
+  InstantSchema,
+  LocalDateSchema,
+  ProblemDocumentSchema,
+} from "../src/primitives.js";
 
 describe("InstantSchema — genau eine Schreibweise", () => {
   it("nimmt die kanonische Form an", () => {
@@ -118,4 +123,24 @@ describe("TimeIntervalDto erzwingt die Reihenfolge", () => {
     const ok = { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T14:00:00.000Z" };
     expect(TimeIntervalDtoSchema.safeParse(ok).success).toBe(true);
   });
+});
+
+describe("LocalDateSchema — ein realer Kalendertag, keine Uhrzeit, keine Zone", () => {
+  it.each(["2026-08-03", "2024-02-29", "2026-12-31"])("nimmt %s an", (tag) => {
+    expect(LocalDateSchema.safeParse(tag).success).toBe(true);
+  });
+
+  it("lehnt einen syntaktisch gueltigen, kalendarisch unmoeglichen Tag ab", () => {
+    // Der Pflichtfall. Ein reines Muster laesst ihn durch — genau die Luecke,
+    // die `BusinessDateSchema` im Kostenbereich bis heute hat. `worksite_days.local_date`
+    // ist vom Typ `date`; die Datenbank haette die Zeile abgelehnt.
+    expect(LocalDateSchema.safeParse("2026-02-30").success).toBe(false);
+  });
+
+  it.each(["2025-02-29", "2026-13-01", "2026-00-10", "2026-04-31", "2026-8-3", "03.08.2026", ""])(
+    "lehnt %s ab",
+    (tag) => {
+      expect(LocalDateSchema.safeParse(tag).success).toBe(false);
+    },
+  );
 });

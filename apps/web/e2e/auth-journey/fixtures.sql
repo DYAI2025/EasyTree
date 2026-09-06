@@ -91,6 +91,22 @@ on conflict (id) do update
   set display_name = excluded.display_name, active = excluded.active;
 
 -- ---------------------------------------------------------------------------
+-- Der dritte Mitarbeiter fuer das Einsatzteam (EYT-158)
+-- ---------------------------------------------------------------------------
+-- Die Reise legt einen Baustellentag worksite-first mit DREI Personen in EINEM
+-- Command an (Akzeptanzkriterium „mindestens drei Testmitarbeiter"). e211 und
+-- e212 allein waeren zwei. Bewusst OHNE Stundensatz und ohne Einplanung in
+-- W32/W33: er beruehrt weder die abgenommenen Kostensummen noch die
+-- Satz-fehlt-Reise — e212 bleibt der kanonische Satz-fehlt-Mitarbeiter, und
+-- `satz_ohne` unten zaehlt weiterhin ausschliesslich ihn.
+insert into public.employees (id, org_id, user_id, display_name, active)
+values ('00000000-0000-4000-8000-00000000e214',
+        '00000000-0000-4000-8000-00000000e201',
+        null, 'E2E-Mitarbeiter Team Drei', true)
+on conflict (id) do update
+  set display_name = excluded.display_name, active = excluded.active;
+
+-- ---------------------------------------------------------------------------
 -- Planungsdaten fuer die Publish-Reise (EYT-107)
 -- ---------------------------------------------------------------------------
 -- Ohne sie zeigte `/planung` eine leere Woche, und der Publish-Nachweis haette
@@ -226,17 +242,19 @@ begin
   --
   -- Seit EYT-146 zwei Baustellen, zwei Planversionen (beide Entwurf) und drei
   -- Zuweisungen: eine in W32 fuer die Reise, zwei in W33 fuer den
-  -- Baustellenfilter. Seit EYT-142 ZWEI Mitarbeiter: e211 mit genau einer
+  -- Baustellenfilter. Seit EYT-142 zwei Mitarbeiter: e211 mit genau einer
   -- Satzversion, e212 mit exakt NULL — `satz_ohne=0` ist die definierende
   -- Eigenschaft der Satz-fehlt-Reise und wird hier fail-closed nachgerechnet.
+  -- Seit EYT-158 DREI: e214 ohne Satz und ohne Einplanung, nur als drittes
+  -- Teammitglied des Baustellentag-Nachweises.
   -- Die Zahlen stehen ausgeschrieben und nicht als „>= 1",
   -- damit eine versehentlich doppelt eingespielte Fixtur auffaellt statt den
   -- Betrag eines Snapshots still zu verdoppeln.
-  if n_mitglied <> 1 or n_mitarbeiter <> 2 or n_satz <> 1 or n_satz_ohne <> 0
+  if n_mitglied <> 1 or n_mitarbeiter <> 3 or n_satz <> 1 or n_satz_ohne <> 0
      or n_projektion <> 2
      or n_baustelle <> 2 or n_version <> 2 or n_entwurf <> 2 or n_zuweisung <> 3 then
     raise exception
-      'E2E-Fixture unvollstaendig: membership=% mitarbeiter=% satz=% satz_ohne=% projektionen=% baustelle=% version=% entwurf=% zuweisung=% (erwartet 1/2/1/0/2/2/2/2/3)',
+      'E2E-Fixture unvollstaendig: membership=% mitarbeiter=% satz=% satz_ohne=% projektionen=% baustelle=% version=% entwurf=% zuweisung=% (erwartet 1/3/1/0/2/2/2/2/3)',
       n_mitglied, n_mitarbeiter, n_satz, n_satz_ohne, n_projektion,
       n_baustelle, n_version, n_entwurf, n_zuweisung;
   end if;

@@ -469,11 +469,53 @@ test.describe("Standardseed-Abgrenzung (EYT-91)", () => {
  */
 const A_PERSON = "e11a0001-0001-4001-8001-000000000001";
 const A_BAUSTELLE = "5117a001-0001-4001-8001-000000000001";
+/**
+ * EYT-158: drei aktive Alpha-Mitarbeitende aus `e2e/harness/seed.sql` als EIN
+ * Einsatzteam. Weniger als drei bewiese das Akzeptanzkriterium „mindestens drei
+ * Personen in einem Command" nicht; `verify-seed.sql` zaehlt sie fail-closed.
+ */
+const A_TEAM = [
+  A_PERSON,
+  "e11a0002-0002-4002-8002-000000000002",
+  "e11a0003-0003-4003-8003-000000000003",
+] as const;
+const A_TEAM_NAMEN = [
+  "Harness Planerin Alpha",
+  "Harness Kletterer Alpha",
+  "Harness Bodenkraft Alpha",
+] as const;
+const UUID = /^[0-9a-f-]{36}$/;
+
+/** Antwort von `POST /planung/baustellentage` — nur die hier gepruefte Teilmenge. */
+interface BaustellentagAntwort {
+  readonly worksiteDayId: string;
+  readonly configurationId: string;
+  readonly team: ReadonlyArray<{ readonly assignmentId: string; readonly employeeId: string }>;
+}
 
 /** Ein Slot in W40, der die geseedete Zuweisung (30.09. 06:00–10:00 UTC) NICHT beruehrt. */
 const NEU_DATUM = "2026-10-01";
 const NEU_BEGINN = "07:00";
 const NEU_ENDE = "15:00";
+/** Der Tag der geseedeten Entwurfszuweisung von Person A — fuer den echten Personenkonflikt. */
+const KONFLIKT_DATUM = "2026-09-30";
+
+/** Die im DOM gerenderten Baustellentag-Ids, sortiert (EYT-158). */
+async function sichtbareBaustellentage(seite: import("@playwright/test").Page): Promise<string[]> {
+  const ids = await seite
+    .locator("[data-worksite-day-id]")
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-worksite-day-id") ?? ""));
+  return [...ids].sort();
+}
+
+/** Auf die ANTWORT des Baustellentag-Commands warten, nicht auf das Absenden. */
+function baustellentagAntwort(
+  seite: import("@playwright/test").Page,
+): Promise<import("@playwright/test").Response> {
+  return seite.waitForResponse(
+    (r) => r.url().includes("/planung/baustellentage") && r.request().method() === "POST",
+  );
+}
 
 /**
  * Woche oeffnen und warten, bis der SERVERSTAND wirklich da ist.
@@ -490,22 +532,73 @@ const NEU_ENDE = "15:00";
  */
 async function wocheOeffnen(seite: import("@playwright/test").Page): Promise<string[]> {
   await seite.goto(SEITE);
-  await expect(seite.getByTestId("einsatzformular")).toBeVisible();
+  // Seit EYT-147 steht das Formular im geschlossenen Inspector; das fruehere
+  // Wartesignal `einsatzformular` existiert im Ruhezustand nicht mehr. Der
+  // Ausloeser erscheint wie das Formular erst mit verarbeiteten `resources`,
+  // die Liste erst mit den Zuweisungen — beide zusammen heissen weiterhin,
+  // dass die Antwort vollstaendig verarbeitet ist.
+  await expect(seite.getByTestId("werkbank-einsatz-anlegen")).toBeVisible();
   await expect(seite.getByTestId("planungsfenster-liste")).toBeVisible();
   return sichtbareZuweisungen(seite);
 }
 
+/**
+ * Den Erstellungs-Inspector oeffnen, falls er zu ist (EYT-147). Idempotent,
+ * damit Folgeschritte innerhalb eines Tests nicht doppelt klicken.
+ */
+async function inspectorOeffnen(seite: import("@playwright/test").Page): Promise<void> {
+  if ((await seite.getByTestId("einsatzformular").count()) === 0) {
+    await seite.getByTestId("werkbank-einsatz-anlegen").click();
+  }
+  await expect(seite.getByTestId("einsatzformular")).toBeVisible();
+}
+
+/**
+ * Worksite-first (EYT-158): Baustelle, lokaler Tag, Arbeitszeit, DANN das
+ * Einsatzteam. Beginn und Ende stehen mit 08:00–18:00 vorbelegt; `fill`
+ * ersetzt den Wert eines time-Inputs vollstaendig.
+ */
 async function formularAusfuellen(
   seite: import("@playwright/test").Page,
   beginn: string,
   ende: string,
   datum = NEU_DATUM,
+  team: readonly string[] = A_TEAM,
 ): Promise<void> {
-  await seite.getByTestId("feld-employee").selectOption(A_PERSON);
+  await inspectorOeffnen(seite);
   await seite.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
   await seite.getByTestId("feld-datum").fill(datum);
   await seite.getByTestId("feld-beginn").fill(beginn);
   await seite.getByTestId("feld-ende").fill(ende);
+  await seite.getByTestId("feld-employee").selectOption([...team]);
+}
+
+/**
+ * Die EINE Baustellentag-Karte zu einer Serverantwort pruefen: genau eine
+ * Karte am Tag, das Team untergeordnet, Namen statt Ids sichtbar.
+ */
+async function karteGeprueft(
+  seite: import("@playwright/test").Page,
+  angelegt: BaustellentagAntwort,
+  datum: string,
+  zeit: string,
+): Promise<void> {
+  const karte = seite.locator(`.einsatzkarte[data-worksite-day-id="${angelegt.worksiteDayId}"]`);
+  await expect(karte).toBeVisible();
+  await expect(seite.locator(`[data-tag="${datum}"] .einsatzkarte`)).toHaveCount(1);
+  await expect(karte).toHaveAttribute("data-configuration-id", angelegt.configurationId);
+  await expect(karte.locator("[data-assignment-id]")).toHaveCount(angelegt.team.length);
+  for (const mitglied of angelegt.team) {
+    await expect(karte.locator(`[data-assignment-id="${mitglied.assignmentId}"]`)).toBeVisible();
+  }
+  await expect(karte).toContainText("Harness Baustelle Alpha");
+  await expect(karte).toContainText(zeit);
+  for (const name of A_TEAM_NAMEN) await expect(karte).toContainText(name);
+  // Technische Ids sind keine sichtbare Identitaet (EYT-158).
+  const text = await karte.innerText();
+  expect(text).not.toContain(angelegt.worksiteDayId);
+  expect(text).not.toContain(angelegt.configurationId);
+  for (const mitglied of angelegt.team) expect(text).not.toContain(mitglied.assignmentId);
 }
 
 test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
@@ -513,19 +606,27 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
     page,
   }) => {
     await page.goto(SEITE);
-    await expect(page.getByTestId("einsatzformular")).toBeVisible();
+    await expect(page.getByTestId("werkbank-einsatz-anlegen")).toBeVisible();
+    await inspectorOeffnen(page);
+
+    // Worksite-first: der Fokus landet auf der Baustelle, nicht auf einer
+    // Person, und die Arbeitszeit ist mit 08:00–18:00 vorbelegt (EYT-158).
+    await expect(page.getByTestId("feld-worksite")).toBeFocused();
+    await expect(page.getByTestId("feld-beginn")).toHaveValue("08:00");
+    await expect(page.getByTestId("feld-ende")).toHaveValue("18:00");
 
     // Die Namen stammen aus e2e/harness/seed.sql und existieren nirgends im
     // Clientcode — waeren sie eine Fixture, stuende hier ein anderer Text.
     const personen = page.getByTestId("feld-employee");
-    await expect(personen).toContainText("Harness Planerin Alpha");
+    await expect(personen).toHaveAttribute("multiple", "");
+    for (const name of A_TEAM_NAMEN) await expect(personen).toContainText(name);
     await expect(page.getByTestId("feld-worksite")).toContainText("Harness Baustelle Alpha");
 
     // Werte sind die SERVERSEITIGEN Ids, nicht die Namen.
     const werte = await personen
       .locator("option")
       .evaluateAll((els) => els.map((e) => e.getAttribute("value") ?? ""));
-    expect(werte).toContain(A_PERSON);
+    for (const id of A_TEAM) expect(werte).toContain(id);
 
     // Und kein Byte aus Organisation B — weder Id noch Name.
     const markup = (await page.content()).toLowerCase();
@@ -537,71 +638,113 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
   test("Schritt 2: unvollstaendige Eingabe loest keinen Schreibaufruf aus", async ({ page }) => {
     const schreibaufrufe: string[] = [];
     page.on("request", (req) => {
-      if (req.method() === "POST" && req.url().includes("/planung/einsaetze")) {
+      if (req.method() === "POST" && req.url().includes("/planung/")) {
         schreibaufrufe.push(req.url());
       }
     });
 
     await page.goto(SEITE);
-    await page.getByTestId("feld-employee").selectOption(A_PERSON);
+    await inspectorOeffnen(page);
     await page.getByTestId("feld-worksite").selectOption(A_BAUSTELLE);
-    // Datum, Beginn und Ende fehlen absichtlich.
+    await page.getByTestId("feld-employee").selectOption([...A_TEAM]);
+    // Das Datum fehlt absichtlich; Beginn und Ende sind vorbelegt.
     await page.getByTestId("einsatz-speichern").click({ force: true });
     await page.waitForTimeout(500);
 
     expect(schreibaufrufe).toEqual([]);
   });
 
-  test("Schritt 3: ein gueltiger Entwurf wird serverseitig gespeichert und sichtbar", async ({
+  test("Schritt 3: ein Baustellentag mit drei Personen wird serverseitig gespeichert und als EINE Karte sichtbar", async ({
     page,
   }) => {
     const vorher = await wocheOeffnen(page);
+    const tageVorher = await sichtbareBaustellentage(page);
 
     await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE);
     const [antwort] = await Promise.all([
-      page.waitForResponse(
-        (r) => r.url().includes("/planung/einsaetze") && r.request().method() === "POST",
-      ),
+      baustellentagAntwort(page),
       page.getByTestId("einsatz-speichern").click(),
     ]);
     expect(antwort.status()).toBe(201);
 
-    // Die Id kommt vom SERVER, nicht aus dem Browser.
-    const angelegt = (await antwort.json()) as { id: string };
-    expect(angelegt.id).toMatch(/^[0-9a-f-]{36}$/);
+    // Die Ids kommen vom SERVER, nicht aus dem Browser — und es ist EIN Command
+    // fuer drei Personen, nicht drei Commands.
+    const angelegt = (await antwort.json()) as BaustellentagAntwort;
+    expect(angelegt.worksiteDayId).toMatch(UUID);
+    expect(angelegt.configurationId).toMatch(UUID);
+    expect(angelegt.team.map((m) => m.employeeId).sort()).toEqual([...A_TEAM].sort());
+    for (const mitglied of angelegt.team) expect(mitglied.assignmentId).toMatch(UUID);
 
-    // Und sie steht anschliessend im DOM — ueber einen NEUEN Lesevorgang,
-    // nicht durch optimistisches Einfuegen.
-    await expect(page.locator(`[data-assignment-id="${angelegt.id}"]`)).toBeVisible();
+    // Sichtbar wird der NEU GELESENE Serverstand, nicht die Schreibantwort:
+    // genau eine Karte am Tag, das Team untergeordnet.
+    await karteGeprueft(page, angelegt, NEU_DATUM, `${NEU_BEGINN}–${NEU_ENDE}`);
+
+    // Erfolg heisst Write UND passender Readback (EYT-158).
+    const meldung = page.getByTestId("einsatzformular-meldung");
+    await expect(meldung).toHaveAttribute("data-state", "erfolg");
+    await expect(meldung).toContainText(/Serverstand/i);
+
     const nachher = await sichtbareZuweisungen(page);
-    expect(nachher).toHaveLength(vorher.length + 1);
-    expect(nachher).toContain(angelegt.id);
+    expect(nachher).toHaveLength(vorher.length + 3);
+    for (const mitglied of angelegt.team) expect(nachher).toContain(mitglied.assignmentId);
+    expect(await sichtbareBaustellentage(page)).toEqual(
+      [...tageVorher, angelegt.worksiteDayId].sort(),
+    );
   });
 
-  test("Schritt 4: ein ueberlappender Entwurf wird mit verstaendlichem Grund abgelehnt", async ({
+  test("Schritt 4: ein zweiter Baustellentag fuer dieselbe Baustelle und denselben Tag wird mit verstaendlichem Grund abgelehnt", async ({
     page,
   }) => {
     const vorher = await wocheOeffnen(page);
+    const tageVorher = await sichtbareBaustellentage(page);
 
-    // Genau derselbe Slot wie im vorigen Test — die Ueberlappung ist echt.
+    // Genau dieselbe Baustelle und derselbe Tag wie im vorigen Test — der
+    // Konflikt (DUPLICATE_WORKSITE_DAY) ist echt, nicht vorbereitet.
     await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE);
     const [antwort] = await Promise.all([
-      page.waitForResponse(
-        (r) => r.url().includes("/planung/einsaetze") && r.request().method() === "POST",
-      ),
+      baustellentagAntwort(page),
       page.getByTestId("einsatz-speichern").click(),
     ]);
     expect(antwort.status()).toBe(409);
 
-    // Verstaendlicher Grund, nicht nur ein Statuscode.
+    // Verstaendlicher Grund, nicht nur ein Statuscode — und keine erfundene
+    // Karte aus einer Ablehnung.
     const meldung = page.getByTestId("einsatzformular-meldung");
     await expect(meldung).toBeVisible();
-    await expect(meldung).toContainText(/bereits eingeplant/i);
+    await expect(meldung).toHaveAttribute("data-state", "fehler");
+    await expect(meldung).toContainText(/bereits ein Baustellentag/i);
+    expect(await sichtbareBaustellentage(page)).toEqual(tageVorher);
 
     // Keine Teilwirkung: nach dem Reload steht die Liste unveraendert.
     // `wocheOeffnen` statt `reload`, damit hier dieselbe Wartebedingung gilt
     // wie oben — sonst vergliche der Test den Ladezustand mit dem Endzustand.
     expect(await wocheOeffnen(page)).toEqual(vorher);
+    expect(await sichtbareBaustellentage(page)).toEqual(tageVorher);
+  });
+
+  test("Schritt 4: eine bereits eingeplante Person macht den ganzen Baustellentag atomar ungueltig", async ({
+    page,
+  }) => {
+    const vorher = await wocheOeffnen(page);
+    const tageVorher = await sichtbareBaustellentage(page);
+
+    // Person A traegt am 30.09. die geseedete Entwurfszuweisung 06:00–10:00Z.
+    // 07:00–15:00 Europe/Berlin ueberlappt sie; die beiden anderen Personen
+    // sind frei. Ein Team ist EIN Command: keine zwei duerfen stehen bleiben.
+    await formularAusfuellen(page, NEU_BEGINN, NEU_ENDE, KONFLIKT_DATUM);
+    const [antwort] = await Promise.all([
+      baustellentagAntwort(page),
+      page.getByTestId("einsatz-speichern").click(),
+    ]);
+    expect(antwort.status()).toBe(409);
+
+    const meldung = page.getByTestId("einsatzformular-meldung");
+    await expect(meldung).toHaveAttribute("data-state", "fehler");
+    await expect(meldung).toContainText(/bereits eingeplant/i);
+
+    // Weder Karte noch Teilteam: derselbe Serverstand wie vorher.
+    expect(await wocheOeffnen(page)).toEqual(vorher);
+    expect(await sichtbareBaustellentage(page)).toEqual(tageVorher);
   });
 
   test("Schritt 4: ein ungueltiges Intervall erreicht den Server gar nicht erst", async ({
@@ -609,7 +752,7 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
   }) => {
     const schreibaufrufe: string[] = [];
     page.on("request", (req) => {
-      if (req.method() === "POST" && req.url().includes("/planung/einsaetze")) {
+      if (req.method() === "POST" && req.url().includes("/planung/")) {
         schreibaufrufe.push(req.url());
       }
     });
@@ -630,12 +773,15 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
     browser,
   }) => {
     const nachSpeichern = await wocheOeffnen(page);
+    const tage = await sichtbareBaustellentage(page);
     const provenienzVorher = await provenienz(page);
-    // Der Speichertest hat genau eine Zeile ergaenzt; steht sie nicht mehr da,
-    // war sie nie in PostgreSQL.
-    expect(nachSpeichern.length).toBeGreaterThan(1);
+    // Der Speichertest hat drei Zeilen und genau einen Baustellentag ergaenzt;
+    // stehen sie nicht mehr da, waren sie nie in PostgreSQL.
+    expect(nachSpeichern.length).toBeGreaterThan(3);
+    expect(tage.length).toBeGreaterThan(0);
 
     expect(await wocheOeffnen(page)).toEqual(nachSpeichern);
+    expect(await sichtbareBaustellentage(page)).toEqual(tage);
     expect(await provenienz(page)).toEqual(provenienzVorher);
 
     const origin = new URL(page.url()).origin;
@@ -643,6 +789,7 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
     try {
       const zweiteSeite = await zweiter.newPage();
       expect(await wocheOeffnen(zweiteSeite)).toEqual(nachSpeichern);
+      expect(await sichtbareBaustellentage(zweiteSeite)).toEqual(tage);
       expect(await provenienz(zweiteSeite)).toEqual(provenienzVorher);
     } finally {
       await zweiter.close();
@@ -650,6 +797,11 @@ test.describe.serial("Schreibpfad: Browser bis PostgreSQL", () => {
   });
 });
 
+/**
+ * Zwei Faelle, zwei TAGE: dieselbe Baustelle am selben Tag waere seit EYT-158
+ * kein zweiter Einsatz mehr, sondern ein Duplikat des Baustellentags — der
+ * zweite Viewport saehe nur den Konflikt des ersten.
+ */
 const RESPONSIVE_CASES = [
   {
     name: "1440px",
@@ -661,7 +813,7 @@ const RESPONSIVE_CASES = [
   {
     name: "375px",
     viewport: { width: 375, height: 812 },
-    datum: "2026-10-02",
+    datum: "2026-10-03",
     beginn: "10:00",
     ende: "12:00",
   },
@@ -707,7 +859,7 @@ async function tabZumNaechstenFormfeld(
  * EYT-104: dieselbe reale Kernreise in Desktop- und mobiler Kernbreite.
  *
  * Kein zweites Mock-E2E: beide Fälle schreiben über Web-Origin, NestJS, RLS
- * und PostgreSQL. Unterschiedliche Slots verhindern, dass der zweite Viewport
+ * und PostgreSQL. Unterschiedliche Tage verhindern, dass der zweite Viewport
  * nur den Konflikt des ersten sieht.
  */
 test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () => {
@@ -717,28 +869,30 @@ test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () 
     }) => {
       await page.setViewportSize(fall.viewport);
       await wocheOeffnen(page);
+      await inspectorOeffnen(page);
 
-      const employee = page.getByTestId("feld-employee");
       const worksite = page.getByTestId("feld-worksite");
       const datum = page.getByTestId("feld-datum");
       const beginn = page.getByTestId("feld-beginn");
       const ende = page.getByTestId("feld-ende");
+      const employee = page.getByTestId("feld-employee");
       const speichern = page.getByTestId("einsatz-speichern");
 
-      await expect(employee).toHaveAccessibleName("Mitarbeitende");
       await expect(worksite).toHaveAccessibleName("Baustelle");
       await expect(datum).toHaveAccessibleName("Datum");
       await expect(beginn).toHaveAccessibleName(/Beginn/);
       await expect(ende).toHaveAccessibleName(/Ende/);
-      await expect(speichern).toHaveAccessibleName("Entwurf speichern");
+      await expect(employee).toHaveAccessibleName(/Einsatzteam.*Mitarbeitende/);
+      await expect(speichern).toHaveAccessibleName("Baustellentag speichern");
 
       await formularAusfuellen(page, fall.beginn, fall.ende, fall.datum);
 
-      // Fokusreihenfolge innerhalb des Formulars, jeweils mit sichtbarem
-      // Indikator. Ein programmatischer Start am ersten Feld vermeidet, dass
-      // Headernavigation mit der fachlichen Reihenfolge verwechselt wird.
-      await employee.focus();
-      const fokusziele = [employee, worksite, datum, beginn, ende, speichern];
+      // Fokusreihenfolge innerhalb des Formulars — worksite-first (EYT-158) —,
+      // jeweils mit sichtbarem Indikator. Ein programmatischer Start am ersten
+      // Feld vermeidet, dass Headernavigation mit der fachlichen Reihenfolge
+      // verwechselt wird.
+      await worksite.focus();
+      const fokusziele = [worksite, datum, beginn, ende, employee, speichern];
       for (const [index, ziel] of fokusziele.entries()) {
         await expect(ziel).toBeFocused();
         const focus = await ziel.evaluate((element) => {
@@ -765,16 +919,11 @@ test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () 
       });
       expect(overflowBefore).toBeLessThanOrEqual(0);
 
-      const [createdResponse] = await Promise.all([
-        page.waitForResponse(
-          (response) =>
-            response.url().includes("/planung/einsaetze") && response.request().method() === "POST",
-        ),
-        speichern.click(),
-      ]);
+      const [createdResponse] = await Promise.all([baustellentagAntwort(page), speichern.click()]);
       expect(createdResponse.status()).toBe(201);
-      const created = (await createdResponse.json()) as { id: string };
-      await expect(page.locator(`[data-assignment-id="${created.id}"]`)).toBeVisible();
+      const created = (await createdResponse.json()) as BaustellentagAntwort;
+      expect(created.team).toHaveLength(3);
+      await karteGeprueft(page, created, fall.datum, `${fall.beginn}–${fall.ende}`);
 
       const success = page.getByTestId("einsatzformular-meldung");
       await expect(success).toHaveAttribute("role", "status");
@@ -782,14 +931,11 @@ test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () 
       await expect(success).toContainText(/gespeichert/i);
 
       await wocheOeffnen(page);
-      await expect(page.locator(`[data-assignment-id="${created.id}"]`)).toBeVisible();
+      await karteGeprueft(page, created, fall.datum, `${fall.beginn}–${fall.ende}`);
 
       await formularAusfuellen(page, fall.beginn, fall.ende, fall.datum);
       const [conflictResponse] = await Promise.all([
-        page.waitForResponse(
-          (response) =>
-            response.url().includes("/planung/einsaetze") && response.request().method() === "POST",
-        ),
+        baustellentagAntwort(page),
         page.getByTestId("einsatz-speichern").click(),
       ]);
       expect(conflictResponse.status()).toBe(409);
@@ -797,11 +943,13 @@ test.describe.serial("Planungsroute: Responsive- und Accessibility-Abnahme", () 
       const alert = page.getByTestId("einsatzformular-meldung");
       await expect(alert).toHaveAttribute("role", "alert");
       await expect(alert).toHaveAttribute("data-state", "fehler");
-      await expect(alert).toContainText(/bereits eingeplant/i);
+      await expect(alert).toContainText(/bereits ein Baustellentag/i);
       const describedBy = await page
         .getByTestId("einsatzformular")
         .getAttribute("aria-describedby");
       expect(describedBy).toBe(await alert.getAttribute("id"));
+      // Die Ablehnung erfindet keine zweite Karte.
+      await expect(page.locator(`[data-tag="${fall.datum}"] .einsatzkarte`)).toHaveCount(1);
 
       const overflowAfter = await page.evaluate(() => {
         const root = document.scrollingElement ?? document.documentElement;

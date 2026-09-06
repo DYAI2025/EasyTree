@@ -48,6 +48,12 @@ export interface IdempotencyStore {
   /** Das Ergebnis eines frueheren Aufrufs, oder `null`. */
   find(tx: TenantQuery, operation: string, key: string): Promise<IdempotencyRecord | null>;
 
+  /**
+   * Liest einen historischen Antwortkoerper ausschliesslich ueber die
+   * operation-gebundene Datenbankfunktion. Nicht jeder Vorgang hat ein Payload.
+   */
+  readResultPayload(tx: TenantQuery, operation: string, key: string): Promise<unknown | null>;
+
   /** Haelt das Ergebnis des ERSTEN Aufrufs fest. */
   remember(
     tx: TenantQuery,
@@ -56,6 +62,17 @@ export interface IdempotencyStore {
     key: string,
     subjectId: string,
     requestFingerprint: string,
+  ): Promise<void>;
+
+  /** Speichert ein unveraenderliches Erstantwort-Payload im selben Commit. */
+  rememberWithResultPayload(
+    tx: TenantQuery,
+    organisationId: string,
+    operation: string,
+    key: string,
+    subjectId: string,
+    requestFingerprint: string,
+    resultPayload: unknown,
   ): Promise<void>;
 }
 
