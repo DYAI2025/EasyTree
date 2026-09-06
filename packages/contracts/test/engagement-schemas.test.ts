@@ -62,17 +62,30 @@ describe("CreateEngagementCommandSchema (EYT-120)", () => {
   });
 
   it("3 bekanntes Ende liegt nach dem Beginn (lexikografisch auf Datum+Zeit)", () => {
+    // Nur EIN Tag, und zwar der Starttag: mit `basis.days` (enthaelt 2031-01-07) wuerde
+    // die Zeitraumregel den Befehl ohnehin ablehnen und diese Regel verdecken —
+    // Gegenmutation `if (false)` auf der Regel blieb so gruen. Ein frueheres Datum
+    // liesse zusaetzlich "Horizont liegt vor dem Beginn" feuern; deshalb dasselbe Datum.
+    const einTag = [{ localDate: "2031-01-06" }];
     expect(
       CreateEngagementCommandSchema.safeParse({
         ...basis,
         endAt: { date: "2031-01-06", time: "07:00" },
+        days: einTag,
+      }).success,
+    ).toBe(false);
+    expect(
+      CreateEngagementCommandSchema.safeParse({
+        ...basis,
+        endAt: { date: "2031-01-06", time: "06:59" },
+        days: einTag,
       }).success,
     ).toBe(false);
     expect(
       CreateEngagementCommandSchema.safeParse({
         ...basis,
         endAt: { date: "2031-01-06", time: "07:01" },
-        days: [{ localDate: "2031-01-06" }],
+        days: einTag,
       }).success,
     ).toBe(true);
   });
