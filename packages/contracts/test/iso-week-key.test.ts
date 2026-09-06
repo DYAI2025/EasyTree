@@ -124,6 +124,7 @@ import {
 } from "../src/planning/schemas.js";
 
 import { CostSnapshotSchema, SelectablePlanVersionSchema } from "../src/costs/schemas.js";
+import { isoWeekKeyOf } from "../src/planning/iso-week.js";
 
 const VERSION_ID = "00000000-0000-4000-8000-0000006010a1";
 const INSTANT = "2026-08-03T06:00:00.000Z";
@@ -303,4 +304,50 @@ describe("alle oeffentlichen weekKey-Stellen tragen dieselbe Regel", () => {
       });
     }
   }
+});
+
+/**
+ * `isoWeekKeyOf` (EYT-120): Wochenschluessel eines lokalen Kalendertags.
+ *
+ * Bis hierher war die Funktion nur MITTELBAR gemessen — ueber den Mock, der
+ * `2026-08-03` zu `2026-W32` macht. Ein Montag mitten im Jahr unterscheidet
+ * aber keine Kalenderregel von einer anderen: eine Rechnung, die um einen Tag
+ * daneben liegt oder das Kalenderjahr statt des ISO-Jahres nimmt, waere dort
+ * ebenso gruen. Die Vektoren unten sitzen deshalb auf Wochen- und
+ * Jahresgrenzen (Sonntag/Montag-Paare), und die beiden `RangeError`-Zweige
+ * werden ueber ihre Meldung getrennt — sonst deckte ein `TypeError` aus
+ * `null[1]` den fehlenden Formatzweig zu.
+ */
+describe("isoWeekKeyOf: Wochenschluessel eines lokalen Kalendertags", () => {
+  it("traegt den Tag in die ISO-Woche ein, auch ueber die Jahresgrenze", () => {
+    const vektoren = [
+      // 2026 hat 53 ISO-Wochen; die reicht bis in den Januar 2027 hinein.
+      { tag: "2026-12-31", woche: "2026-W53", warum: "Donnerstag, letzte Woche 2026" },
+      { tag: "2027-01-01", woche: "2026-W53", warum: "Freitag, gehoert noch zu 2026" },
+      { tag: "2027-01-03", woche: "2026-W53", warum: "Sonntag, letzter Tag der Woche" },
+      { tag: "2027-01-04", woche: "2027-W01", warum: "Montag, erste Woche 2027" },
+      // Umgekehrte Richtung: der Dezember-Montag gehoert schon zum Folgejahr.
+      { tag: "2024-12-29", woche: "2024-W52", warum: "Sonntag, letzte Woche 2024" },
+      { tag: "2024-12-30", woche: "2025-W01", warum: "Montag, erste Woche 2025" },
+      // Der Vektor des Mocks, hier unmittelbar.
+      { tag: "2026-08-03", woche: "2026-W32", warum: "regulaerer Montag" },
+    ] as const;
+    for (const vektor of vektoren) {
+      expect(isoWeekKeyOf(vektor.tag), `${vektor.tag} (${vektor.warum})`).toBe(vektor.woche);
+    }
+  });
+
+  it("lehnt einen nicht existenten Kalendertag benannt ab statt ihn zu normalisieren", () => {
+    // `setUTCFullYear(2026, 1, 30)` wuerde still zum 2. Maerz — und damit zu W10.
+    expect(() => isoWeekKeyOf("2026-02-30")).toThrow(RangeError);
+    expect(() => isoWeekKeyOf("2026-02-30")).toThrow(/kein realer Kalendertag/);
+    expect(() => isoWeekKeyOf("2026-13-01")).toThrow(/kein realer Kalendertag/);
+  });
+
+  it("lehnt formfremde Werte ab, bevor gerechnet wird", () => {
+    for (const wert of ["abc", "", "2026-8-3", "2026-08-03T00:00", "2026-W32"]) {
+      expect(() => isoWeekKeyOf(wert), wert).toThrow(RangeError);
+      expect(() => isoWeekKeyOf(wert), wert).toThrow(/kein lokales Datum im Format JJJJ-MM-TT/);
+    }
+  });
 });
