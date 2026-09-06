@@ -137,7 +137,7 @@ export class HttpPlanningGateway implements PlanningGateway {
     options: WriteOptions,
   ): Promise<GatewayResult<z.infer<typeof AssignmentDtoSchema>>> {
     return this.send({
-      path: "/planung/einsaetze",
+      path: "/planung/einplanungen",
       method: "POST",
       body: input,
       idempotencyKey: options.idempotencyKey,

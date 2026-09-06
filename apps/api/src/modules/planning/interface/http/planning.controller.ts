@@ -436,7 +436,7 @@ export class PlanningController {
     return validated.data;
   }
 
-  @Post("einsaetze")
+  @Post("einplanungen")
   @HttpCode(201)
   async createAssignment(
     @Req() request: Request,

@@ -56,7 +56,7 @@ const CONTRACT = JSON.parse(
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
-/** `POST /planung/einsaetze` — Methode und Pfad, so wie beide Seiten sie kennen. */
+/** `POST /planung/einplanungen` — Methode und Pfad, so wie beide Seiten sie kennen. */
 function contractOperations(): string[] {
   const operations: string[] = [];
   for (const [path, item] of Object.entries(CONTRACT.paths)) {

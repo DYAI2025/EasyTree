@@ -156,7 +156,7 @@ export function netzSetzen(plan: NetzPlan): Netzprotokoll {
         : alsResponse(201, ergebnis);
     }
 
-    if (url.pathname === "/api/v1/planung/einsaetze" && methode === "POST") {
+    if (url.pathname === "/api/v1/planung/einplanungen" && methode === "POST") {
       const ergebnis = plan.einsatzAnlegen?.(koerper as CreateAssignmentCommand);
       if (ergebnis === undefined) return alsResponse(501, {});
       return istRoheAntwort(ergebnis)

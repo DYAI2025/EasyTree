@@ -382,13 +382,20 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           },
         },
       },
-      "/planung/einsaetze": {
+      "/planung/einplanungen": {
         post: {
           operationId: "createAssignment",
-          summary: "Einsatz anlegen",
+          summary: "Einplanung anlegen",
+          description:
+            "Fachlich eine EINPLANUNG (Glossar 46727169), keine Einsatz-Anlage: bis EYT-120 lag " +
+            "dieser Vorgang unter dem Pfad des Einsatzes, den seither createEngagement traegt. " +
+            "operationId createAssignment bleibt als technischer Kompatibilitaetsname.",
           parameters: [idempotencyHeader],
           requestBody: jsonBody("CreateAssignmentCommand"),
-          responses: { "201": jsonOk("AssignmentDto", "Angelegter Einsatz"), ...problemResponses },
+          responses: {
+            "201": jsonOk("AssignmentDto", "Angelegte Einplanung"),
+            ...problemResponses,
+          },
         },
       },
       "/planung/versionen": {

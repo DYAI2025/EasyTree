@@ -149,10 +149,11 @@
         }
       }
     },
-    "/planung/einsaetze": {
+    "/planung/einplanungen": {
       "post": {
         "operationId": "createAssignment",
-        "summary": "Einsatz anlegen",
+        "summary": "Einplanung anlegen",
+        "description": "Fachlich eine EINPLANUNG (Glossar 46727169), keine Einsatz-Anlage: bis EYT-120 lag dieser Vorgang unter dem Pfad des Einsatzes, den seither createEngagement traegt. operationId createAssignment bleibt als technischer Kompatibilitaetsname.",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -179,7 +180,7 @@
         },
         "responses": {
           "201": {
-            "description": "Angelegter Einsatz",
+            "description": "Angelegte Einplanung",
             "content": {
               "application/json": {
                 "schema": {

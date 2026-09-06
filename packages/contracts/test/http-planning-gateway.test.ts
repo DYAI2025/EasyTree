@@ -326,6 +326,29 @@ describe("HttpPlanningGateway — Aufrufform", () => {
       "authorization",
     );
   });
+
+  it("greift beim Anlegen einer Einplanung auf POST /planung/einplanungen (T-004)", async () => {
+    // Fachlich ist dieses Kommando eine EINPLANUNG (Glossar 46727169), keine
+    // Einsatz-Anlage: bis EYT-120 lag es unter dem Pfad des Einsatzes, den
+    // seither createEngagement traegt. Die Adresse ganz und nicht als
+    // Teilstring, wie bei den Baustellentag-Kommandos: nur so faellt ein
+    // Rueckfall auf den alten Pfad hier auf und nicht erst als 404 in einer
+    // Browserreise.
+    const angelegt = {
+      id: "33333333-3333-4333-8333-333333333333",
+      employeeId: "88888888-8888-4888-8888-888888888888",
+      worksiteId: "99999999-9999-4999-8999-999999999999",
+      interval: DRAFT.interval,
+    };
+    const recorded: Recorded[] = [];
+    const result = await gatewayWith(stubFetch(201, angelegt, recorded)).createAssignment(DRAFT, {
+      idempotencyKey: KEY_A,
+    });
+    expect(result.ok).toBe(true);
+    expect(recorded[0]?.url).toBe(`${BASE}/planung/einplanungen`);
+    expect(recorded[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(recorded[0]?.init?.body))).toEqual(DRAFT);
+  });
 });
 
 /**
