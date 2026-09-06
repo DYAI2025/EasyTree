@@ -158,7 +158,7 @@ describe("EYT-147 — der Erstellungs-Inspector", () => {
     rendern(fenster({}));
     await userEvent.click(await screen.findByTestId("werkbank-einsatz-anlegen"));
     await screen.findByTestId("einsatzformular");
-    expect(document.activeElement).toBe(screen.getByTestId("feld-employee"));
+    expect(document.activeElement).toBe(screen.getByTestId("feld-worksite"));
   });
 
   it("schliesst mit Escape und stellt den Fokus auf den Ausloeser zurueck", async () => {

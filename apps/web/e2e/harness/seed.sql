@@ -56,6 +56,12 @@ insert into public.employees (id, org_id, user_id, display_name, active)
 values
   ('e11a0001-0001-4001-8001-000000000001', '00000000-0000-4000-8000-0000000000a1',
    null, 'Harness Planerin Alpha', true),
+  -- EYT-158: zwei weitere aktive Alpha-Mitarbeitende, damit der Browsernachweis
+  -- ein Einsatzteam aus DREI Personen in EINEM Baustellentag-Command anlegt.
+  ('e11a0002-0002-4002-8002-000000000002', '00000000-0000-4000-8000-0000000000a1',
+   null, 'Harness Kletterer Alpha', true),
+  ('e11a0003-0003-4003-8003-000000000003', '00000000-0000-4000-8000-0000000000a1',
+   null, 'Harness Bodenkraft Alpha', true),
   ('e11b0001-0001-4001-8001-000000000001', '00000000-0000-4000-8000-0000000000b2',
    null, 'Harness Planer Beta', true);
 

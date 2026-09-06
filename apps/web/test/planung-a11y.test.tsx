@@ -31,13 +31,15 @@
  * „genau EINE main-Landmark im ganzen Dokument" muss rot werden und dabei
  * `2` gegen `1` melden.
  */
+import type { PlanningWindow } from "@easytree/contracts";
 import { cleanup, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { navigationZuruecksetzen } from "./helpers/navigation-attrappe";
 import { netzLoesen, werkbankRendern } from "./helpers/werkbank";
-import { fensterMitEntwurf, sitzungMit } from "./helpers/werkbank-daten";
+import { BAUSTELLE_ID, fensterMitEntwurf, PERSON_ID, sitzungMit } from "./helpers/werkbank-daten";
 
 vi.mock("next/navigation", async () => {
   const modul = await import("./helpers/navigation-attrappe");
@@ -127,5 +129,107 @@ describe("EYT-141 — Barrierefreiheit der Planungsflaeche", () => {
     const abzeichen = screen.getByTestId("planungsfenster-stand-abzeichen");
     expect(abzeichen.querySelector('[aria-hidden="true"]')?.textContent ?? "").not.toBe("");
     expect((abzeichen.textContent ?? "").trim()).not.toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EYT-158 — die Baustellentag-Karte ist Teil der gepruefen Flaeche
+// ---------------------------------------------------------------------------
+// `fensterMitEntwurf` traegt keine `worksiteDays`; die Faelle oben sahen die
+// neue Karte deshalb nie. Hier ein Fenster mit genau EINER Karte (drei
+// Personen, Mittwoch der KW34), der bestehenden Legacy-Zeile vom Dienstag und
+// dem offenen Inspector mit Mehrfachauswahl — die integrierte Flaeche, nicht
+// eine Komponentendemo.
+const KLETTERER_ID = "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1";
+const BODEN_ID = "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2";
+const TAG_ID = "d4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4";
+const REVISION_ID = "e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5";
+
+function fensterMitBaustellentag(weekKey: string): PlanningWindow {
+  const basis = fensterMitEntwurf(weekKey);
+  const team = [PERSON_ID, KLETTERER_ID, BODEN_ID].map((employeeId, index) => ({
+    assignmentId: `c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c${index}`,
+    employeeId,
+    interval: { startUtc: "2026-08-19T06:00:00.000Z", endUtc: "2026-08-19T16:00:00.000Z" },
+  }));
+  return {
+    ...basis,
+    resources: {
+      employees: [
+        ...basis.resources.employees,
+        { id: KLETTERER_ID, label: "Kai Kletterer", active: true },
+        { id: BODEN_ID, label: "Bea Boden", active: true },
+      ],
+      worksites: basis.resources.worksites,
+    },
+    assignments: [
+      ...basis.assignments,
+      ...team.map((mitglied) => ({
+        id: mitglied.assignmentId,
+        employeeId: mitglied.employeeId,
+        worksiteId: BAUSTELLE_ID,
+        interval: mitglied.interval,
+      })),
+    ],
+    worksiteDays: [
+      {
+        worksiteDayId: TAG_ID,
+        configurationId: REVISION_ID,
+        worksiteId: BAUSTELLE_ID,
+        localDate: "2026-08-19",
+        lockVersion: 0,
+        team,
+      },
+    ],
+  };
+}
+
+const AXE_OPTIONEN = {
+  runOnly: {
+    type: "tag" as const,
+    values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"],
+  },
+  rules: { "color-contrast": { enabled: false } },
+};
+
+async function werkbankGeladenMit(fenster: (weekKey: string) => PlanningWindow): Promise<void> {
+  werkbankRendern({
+    sitzung: sitzungMit(["planning.read", "planning.write", "costs.read"]),
+    fenster,
+  });
+  await screen.findByTestId("werkbank-woche-iso");
+  await waitFor(() => expect(screen.queryByTestId("planungsfenster-laedt")).toBeNull());
+}
+
+describe("EYT-158 — Barrierefreiheit der Baustellentag-Karte", () => {
+  it("hat mit Karte, Legacy-Zeile und offenem Inspector null axe-Verstoesse", async () => {
+    await werkbankGeladenMit(fensterMitBaustellentag);
+    // Vakuumschutz: die Karte und die Legacy-Zeile sind wirklich im Baum.
+    expect(document.querySelectorAll(".einsatzkarte")).toHaveLength(1);
+    expect(document.querySelectorAll(".legacy-einplanung")).toHaveLength(1);
+    expect(document.querySelectorAll(".einsatzkarte [data-assignment-id]")).toHaveLength(3);
+
+    const geschlossen = await axe.run(document.body, AXE_OPTIONEN);
+    expect(geschlossen.violations.map((v) => `${v.id}: ${v.nodes.length}`)).toEqual([]);
+
+    await userEvent.click(screen.getByTestId("werkbank-einsatz-anlegen"));
+    await screen.findByTestId("einsatzformular");
+    expect((screen.getByTestId("feld-employee") as HTMLSelectElement).multiple).toBe(true);
+    const offen = await axe.run(document.body, AXE_OPTIONEN);
+    expect(offen.violations.map((v) => `${v.id}: ${v.nodes.length}`)).toEqual([]);
+  });
+
+  it("haelt die Ueberschriftenfolge auch in der Rueckfallliste einer unbekannten Zeitzone", async () => {
+    // Der Server nennt eine Zone, die diese Laufzeit nicht kennt: die Ansicht
+    // faellt auf die ungeordnete Liste zurueck. Auch dort duerfen die
+    // Ueberschriften keine Stufe ueberspringen (axe `heading-order`).
+    await werkbankGeladenMit((weekKey) => ({
+      ...fensterMitBaustellentag(weekKey),
+      timeZone: "Mars/Olympus",
+    }));
+    await screen.findByTestId("planungsfenster-liste");
+    expect(document.querySelectorAll(".legacy-einplanung")).toHaveLength(1);
+    const ergebnis = await axe.run(document.body, AXE_OPTIONEN);
+    expect(ergebnis.violations.map((v) => `${v.id}: ${v.nodes.length}`)).toEqual([]);
   });
 });

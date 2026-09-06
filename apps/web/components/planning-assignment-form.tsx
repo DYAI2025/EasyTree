@@ -112,7 +112,10 @@ export type IntervallErgebnis =
  * Exportiert, weil dies die einzige Stelle ist, an der Wanduhrzeit zu einem
  * Instant wird — sie gehoert einzeln pruefbar, nicht nur ueber die Oberflaeche.
  */
-export function zuIntervall(eingabe: EntwurfEingabe, zone: string): IntervallErgebnis {
+export function zuIntervall<T extends Pick<EntwurfEingabe, "datum" | "beginn" | "ende">>(
+  eingabe: T,
+  zone: string,
+): IntervallErgebnis {
   const tag = kalendertag(eingabe.datum);
   if (tag === null) return { ok: false, fehler: "DATUM_UNGUELTIG" };
   const von = uhrzeit(eingabe.beginn);

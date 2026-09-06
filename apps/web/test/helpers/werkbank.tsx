@@ -31,6 +31,8 @@
 import type {
   AssignmentDto,
   CreateAssignmentCommand,
+  PlanWorksiteDayCommand,
+  WorksiteDayDto,
   PlanningWindow,
   PublishPlanCommand,
   PublishedPlanVersion,
@@ -76,6 +78,7 @@ export interface NetzPlan {
   /** Antwort auf `GET /planung/fenster?weekKey=…`, je Woche. */
   readonly fenster: (weekKey: string) => PlanningWindow | RoheAntwort;
   readonly einsatzAnlegen?: (befehl: CreateAssignmentCommand) => AssignmentDto | RoheAntwort;
+  readonly baustellentagAnlegen?: (befehl: PlanWorksiteDayCommand) => WorksiteDayDto | RoheAntwort;
   readonly veroeffentlichen?: (befehl: PublishPlanCommand) => PublishedPlanVersion | RoheAntwort;
 }
 
@@ -143,6 +146,14 @@ export function netzSetzen(plan: NetzPlan): Netzprotokoll {
       return istRoheAntwort(ergebnis)
         ? alsResponse(ergebnis.status, ergebnis.koerper)
         : alsResponse(200, ergebnis);
+    }
+
+    if (url.pathname === "/api/v1/planung/baustellentage" && methode === "POST") {
+      const ergebnis = plan.baustellentagAnlegen?.(koerper as PlanWorksiteDayCommand);
+      if (ergebnis === undefined) return alsResponse(501, {});
+      return istRoheAntwort(ergebnis)
+        ? alsResponse(ergebnis.status, ergebnis.koerper)
+        : alsResponse(201, ergebnis);
     }
 
     if (url.pathname === "/api/v1/planung/einsaetze" && methode === "POST") {

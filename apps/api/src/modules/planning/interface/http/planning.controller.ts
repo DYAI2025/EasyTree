@@ -330,6 +330,21 @@ export class PlanningController {
     const body = {
       weekKey: result.window.weekKey,
       timeZone: result.window.timeZone,
+      worksiteDays: result.window.worksiteDays?.map((day) => ({
+        worksiteDayId: day.worksiteDayId,
+        configurationId: day.configurationId,
+        worksiteId: day.worksiteId,
+        localDate: day.localDate,
+        lockVersion: day.lockVersion,
+        team: day.team.map((member) => ({
+          assignmentId: member.assignmentId,
+          employeeId: member.employeeId,
+          interval: {
+            startUtc: member.startsAtUtc.toISOString(),
+            endUtc: member.endsAtUtc.toISOString(),
+          },
+        })),
+      })),
       assignments: result.window.assignments.map((assignment) => ({
         id: assignment.id,
         employeeId: assignment.employeeId,

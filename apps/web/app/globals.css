@@ -910,6 +910,49 @@ body {
   color: var(--eyt-text-secondary);
 }
 
+/* EYT-158: die Karte ist der Baustellentag; das Einsatzteam steht untergeordnet
+   darunter. Datum als stille Zweitangabe — der Tag ist bereits die Spalte. */
+.einsatzkarte__datum {
+  font-size: 0.75rem;
+  color: var(--eyt-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.einsatzkarte__teamtitel {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--eyt-text-secondary);
+}
+
+.einsatzkarte__team {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.125rem;
+  font-size: 0.8125rem;
+}
+
+/* Legacy-Einplanungen ohne Baustellentag (EYT-158): sichtbar, aber untergeordnet —
+   keine Karte, keine erfundene Tagesidentitaet. */
+.wochenraster__legacy > h4 {
+  margin: 0.375rem 0 0.125rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--eyt-text-secondary);
+}
+
+.legacy-einplanung {
+  display: grid;
+  gap: 0.125rem;
+  padding: 0.25rem 0.625rem;
+  border-inline-start: 2px solid var(--eyt-border-default);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Planstand als Form, nicht nur als Farbe: Entwurfskarten gestrichelt,
    veroeffentlichte mit durchgehender linker Kante (Basisdesign §3.1). */
 .werkbank-fenster[data-stand="entwurf"] .einsatzkarte,

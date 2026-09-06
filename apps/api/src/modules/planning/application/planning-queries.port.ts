@@ -61,6 +61,8 @@ export interface SourceVersionRow {
 }
 
 export interface PlanningWindowRow {
+  /** Additive Tagesprojektion; Legacy-Einplanungen werden nicht adoptiert. */
+  readonly worksiteDays?: readonly WorksiteDayReadRow[];
   readonly weekKey: string;
   /** IANA-Zone der Organisation aus `organizations.time_zone` (Migration 0004). */
   readonly timeZone: string;
@@ -84,6 +86,21 @@ export interface PlanningWindowRow {
    * Portmethode: zwei Aufrufe koennten zwei Zeitpunkte sehen.
    */
   readonly resources: ResourcesRow;
+}
+
+/** Persistierter Baustellentag mit der Konfiguration des gelesenen Stands. */
+export interface WorksiteDayReadRow {
+  readonly worksiteDayId: string;
+  readonly configurationId: string;
+  readonly worksiteId: string;
+  readonly localDate: string;
+  readonly lockVersion: number;
+  readonly team: readonly {
+    readonly assignmentId: string;
+    readonly employeeId: string;
+    readonly startsAtUtc: Date;
+    readonly endsAtUtc: Date;
+  }[];
 }
 
 /** Warum eine Leseanfrage nicht beantwortbar ist. */

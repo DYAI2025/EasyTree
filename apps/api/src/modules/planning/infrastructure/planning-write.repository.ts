@@ -653,26 +653,18 @@ export class PlanningWriteRepository implements PlanningWrites {
       // Version. `published_at` bleibt dabei NULL: die Kopien sind Entwurf,
       // nicht veroeffentlicht, und die Exclusion-Constraint aus 0010 greift
       // fuer sie bewusst nicht.
+      //
+      // Seit EYT-158 ist die Kopie fuer BEIDE Schreibpfade dieselbe: erst die
+      // Tageskonfigurationen (stabile Tagesidentitaet, lock_version bleibt),
+      // dann die Zuweisungen, an die kopierte Revision gehaengt. Sonst hinge
+      // es vom ersten Klick nach dem Publish ab, ob ein Baustellentag im
+      // Folgedraft eine Karte bleibt oder in Legacy-Zeilen zerfaellt.
       if (selbstAngelegt !== undefined) {
-        await tx.query(
-          `insert into public.assignments
-             (org_id, plan_version_id, employee_id, worksite_id, starts_at_utc, ends_at_utc)
-           select a.org_id, $1, a.employee_id, a.worksite_id, a.starts_at_utc, a.ends_at_utc
-             from public.assignments a
-             join public.plan_versions pv on pv.id = a.plan_version_id
-            where pv.week_key = $2
-              and pv.published_at is not null
-              and pv.id = (
-                select pv2.id from public.plan_versions pv2
-                 where pv2.week_key = $2 and pv2.published_at is not null
-                 order by pv2.published_at asc, pv2.created_at asc, pv2.id asc
-                 limit 1 offset (
-                   select greatest(count(*) - 1, 0) from public.plan_versions pv3
-                    where pv3.week_key = $2 and pv3.published_at is not null
-                 )
-              )`,
-          [entwurf.id, input.weekKey],
-        );
+        const predecessorId = await this.zuletztVeroeffentlichte(tx, org.id, input.weekKey);
+        if (predecessorId !== undefined) {
+          await this.kopiereTageskonfigurationen(tx, entwurf.id, predecessorId, org.id);
+          await this.kopiereZuweisungen(tx, entwurf.id, predecessorId, org.id);
+        }
       }
 
       const kollisionen = await tx.query<OverlapQueryRow>(
@@ -898,6 +890,21 @@ export class PlanningWriteRepository implements PlanningWrites {
         const draftId = draft.rows[0]?.id;
         if (draftId === undefined) throw new Error("EYT-152: Wochenentwurf lieferte keine Id.");
 
+        // Nur der INSERT-Gewinner übernimmt die veröffentlichte Baseline.
+        // Der Helfer gibt bewusst nur die ID zurück. xmin benennt die
+        // erzeugende Transaktion, ohne einen zweiten Draft-Auflösungspfad
+        // oder einen racy Vorab-Existenztest einzuführen. Der Runner benutzt
+        // eine Top-Level-Transaktion, keine Savepoints/Subtransaktionen.
+        const selbstAngelegt = await tx.query<IdRow>(
+          `select d.id from public.plan_versions d
+           where d.id = $1 and d.org_id = $2 and d.xmin = pg_current_xact_id()::xid`,
+          [draftId, org.id],
+        );
+        const predecessorId =
+          selbstAngelegt.rows[0] === undefined
+            ? undefined
+            : await this.zuletztVeroeffentlichte(tx, org.id, input.weekKey);
+
         const insertedDay = await tx.query<WorksiteDayRow>(
           `insert into public.worksite_days (org_id, worksite_id, local_date)
          values ($1, $2, $3::date)
@@ -918,6 +925,13 @@ export class PlanningWriteRepository implements PlanningWrites {
           throw new Error("EYT-152: stabile Baustellentag-Identitaet nicht lesbar.");
         }
 
+        // Klasse (3) ist abgeschlossen, bevor Konfigurationen (4) entstehen.
+        // Stabile Tagesidentität und lock_version bleiben erhalten; die
+        // Default-ID erzeugt eine NEUE Konfigurationsrevision (EYT-158).
+        if (predecessorId !== undefined) {
+          await this.kopiereTageskonfigurationen(tx, draftId, predecessorId, org.id);
+        }
+
         const configuration = await tx.query<WorksiteDayConfigurationRow>(
           `insert into public.worksite_day_configurations (org_id, worksite_day_id, plan_version_id)
          values ($1, $2, $3)
@@ -933,10 +947,26 @@ export class PlanningWriteRepository implements PlanningWrites {
         // Globale Reihenfolge der Mitarbeiterlocks verhindert A->B / B->A-
         // Deadlocks. Die Konfiguration liegt bereits in der Transaktion und
         // verschwindet bei jedem Konflikt oder Fehler wieder mit ihr.
+        const inheritedEmployees =
+          predecessorId === undefined
+            ? []
+            : (
+                await tx.query<{ employee_id: string }>(
+                  `select distinct employee_id from public.assignments
+             where plan_version_id = $1 and org_id = $2`,
+                  [predecessorId, org.id],
+                )
+              ).rows.map((row) => row.employee_id);
         for (const employeeId of [
-          ...new Set(input.team.map((member) => member.employeeId)),
+          ...new Set([...inheritedEmployees, ...input.team.map((member) => member.employeeId)]),
         ].sort()) {
           await tx.query("select app.lock_employee_planning($1)", [employeeId]);
+        }
+
+        // Erst NACH allen sortierten Employee-Locks (5) folgen Inserts (6).
+        // Legacy-Einplanungen behalten NULL; keine Tag-Adoption/Backfills.
+        if (predecessorId !== undefined) {
+          await this.kopiereZuweisungen(tx, draftId, predecessorId, org.id);
         }
 
         const team: Array<CreatedWorksiteDayRow["team"][number]> = [];
@@ -1080,6 +1110,82 @@ export class PlanningWriteRepository implements PlanningWrites {
    * 5. Ein `update`.
    * 6. Audit, Outbox, Idempotenzergebnis — dieselbe Transaktion.
    */
+  /**
+   * Die zuletzt veroeffentlichte Version einer Woche — die Baseline, die ein
+   * frisch angelegter Folgedraft uebernimmt. Dieselbe Ordnung wie in der
+   * Leseroute (`published_at, created_at, id`), damit Schreib- und Lesepfad
+   * denselben Vorgaenger meinen.
+   */
+  private async zuletztVeroeffentlichte(
+    tx: TenantQuery,
+    orgId: string,
+    weekKey: string,
+  ): Promise<string | undefined> {
+    const zeilen = await tx.query<IdRow>(
+      `select id from public.plan_versions
+        where org_id = $1 and week_key = $2 and published_at is not null
+        order by published_at desc, created_at desc, id desc
+        limit 1`,
+      [orgId, weekKey],
+    );
+    return zeilen.rows[0]?.id;
+  }
+
+  /**
+   * Baseline-Kopie, Teil 1 (EYT-158): die Tageskonfigurationen des Vorgaengers
+   * als NEUE Revisionen im Folgedraft. Die stabile Tagesidentitaet
+   * (`worksite_day_id`) und `lock_version` bleiben; die Default-Id erzeugt die
+   * neue Revision. Laeuft VOR dem Anlegen eigener Konfigurationen, damit ein im
+   * Vorgaenger vorhandener Tag im Folgedraft als Duplikat erkannt wird.
+   */
+  private async kopiereTageskonfigurationen(
+    tx: TenantQuery,
+    draftId: string,
+    predecessorId: string,
+    orgId: string,
+  ): Promise<void> {
+    await tx.query(
+      `insert into public.worksite_day_configurations
+         (org_id, plan_version_id, worksite_day_id, lock_version)
+       select org_id, $1, worksite_day_id, lock_version
+         from public.worksite_day_configurations
+        where plan_version_id = $2 and org_id = $3
+        order by worksite_day_id`,
+      [draftId, predecessorId, orgId],
+    );
+  }
+
+  /**
+   * Baseline-Kopie, Teil 2: die Zuweisungen des Vorgaengers, an die kopierte
+   * Revision desselben Tages gehaengt. Legacy-Einplanungen (ohne Tag) behalten
+   * NULL — keine Tag-Adoption, kein Backfill. `published_at` bleibt NULL: die
+   * Kopien sind Entwurf, und die Exclusion-Constraint aus 0010 greift fuer sie
+   * bewusst nicht. Muss NACH den Personensperren laufen, wo es welche gibt.
+   */
+  private async kopiereZuweisungen(
+    tx: TenantQuery,
+    draftId: string,
+    predecessorId: string,
+    orgId: string,
+  ): Promise<void> {
+    await tx.query(
+      `insert into public.assignments
+         (org_id, plan_version_id, worksite_day_configuration_id,
+          employee_id, worksite_id, starts_at_utc, ends_at_utc)
+       select a.org_id, $1, copied.id, a.employee_id, a.worksite_id,
+              a.starts_at_utc, a.ends_at_utc
+         from public.assignments a
+         left join public.worksite_day_configurations original
+           on original.id = a.worksite_day_configuration_id and original.org_id = a.org_id
+         left join public.worksite_day_configurations copied
+           on copied.worksite_day_id = original.worksite_day_id
+          and copied.org_id = a.org_id and copied.plan_version_id = $1
+        where a.plan_version_id = $2 and a.org_id = $3
+        order by a.employee_id, a.starts_at_utc, a.id`,
+      [draftId, predecessorId, orgId],
+    );
+  }
+
   async publishPlan(input: PublishPlanInput): Promise<PublishPlanResult> {
     const fingerabdruck = publishFingerprintOf(input);
     try {

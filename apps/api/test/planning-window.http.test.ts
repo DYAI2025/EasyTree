@@ -103,6 +103,70 @@ afterEach(async () => {
 });
 
 describe("GET /planung/fenster", () => {
+  it("EYT-158: bildet Baustellentag und drei Teammitglieder auf den bestehenden Vertrag ab", async () => {
+    const worksiteId = crypto.randomUUID();
+    const assignments = Array.from({ length: 3 }, () => ({
+      id: crypto.randomUUID(),
+      employeeId: crypto.randomUUID(),
+      worksiteId,
+      startsAtUtc: new Date("2028-01-10T07:00:00.000Z"),
+      endsAtUtc: new Date("2028-01-10T17:00:00.000Z"),
+    }));
+    const day = {
+      worksiteDayId: crypto.randomUUID(),
+      configurationId: crypto.randomUUID(),
+      worksiteId,
+      localDate: "2028-01-10",
+      lockVersion: 7,
+      team: assignments.map((a) => ({
+        assignmentId: a.id,
+        employeeId: a.employeeId,
+        startsAtUtc: a.startsAtUtc,
+        endsAtUtc: a.endsAtUtc,
+      })),
+    };
+    const server = (
+      await boot({
+        subject: SUBJECT,
+        result: {
+          ok: true,
+          window: {
+            weekKey: "2028-W02",
+            timeZone: "Europe/Berlin",
+            assignments,
+            worksiteDays: [day],
+            sourceVersion: { id: crypto.randomUUID(), state: "draft" },
+            publishedVersionId: null,
+            resources: {
+              worksites: [{ id: worksiteId, label: "Allee", active: true }],
+              employees: assignments.map((a, index) => ({
+                id: a.employeeId,
+                label: `Team ${index}`,
+                active: true,
+              })),
+            },
+          },
+        },
+      })
+    ).getHttpServer();
+    const response = await request(server).get(url).query({ weekKey: "2028-W02" }).expect(200);
+    // RED-Phase vor EYT-158: das HTTP-Mapping liess worksiteDays weg.
+    expect(response.body.worksiteDays).toEqual([
+      {
+        ...day,
+        team: day.team.map((member) => ({
+          assignmentId: member.assignmentId,
+          employeeId: member.employeeId,
+          interval: {
+            startUtc: member.startsAtUtc.toISOString(),
+            endUtc: member.endsAtUtc.toISOString(),
+          },
+        })),
+      },
+    ]);
+    expect(PlanningWindowSchema.safeParse(response.body).success).toBe(true);
+  });
+
   it("antwortet ohne verifiziertes Subjekt mit 401", async () => {
     const server = (await boot({ subject: null })).getHttpServer();
     await request(server).get(url).query({ weekKey: "2026-W32" }).expect(401);

@@ -19,7 +19,22 @@ declare
   beta_zuweisungen int;
   gleichstand int;
   beta_bekannt int;
+  alpha_mitarbeitende int;
 begin
+  -- EYT-158: der Schreibpfad plant DREI Harness-Mitarbeitende als ein Team.
+  -- Gezaehlt werden die drei NAMENTLICHEN Ids, nicht "alle in Alpha": der
+  -- Standardseed (supabase/seed.sql) legt in derselben Organisation eigene
+  -- Mitarbeitende an — gemessen 06.09.2026, ein org-weiter Zaehler fand 4.
+  select count(*) into alpha_mitarbeitende
+  from public.employees
+  where org_id = '00000000-0000-4000-8000-0000000000a1' and active
+    and id in ('e11a0001-0001-4001-8001-000000000001',
+               'e11a0002-0002-4002-8002-000000000002',
+               'e11a0003-0003-4003-8003-000000000003');
+  if alpha_mitarbeitende <> 3 then
+    raise exception 'Fixture kaputt: erwartet die 3 aktiven Harness-Mitarbeitenden von Alpha, gefunden %', alpha_mitarbeitende;
+  end if;
+
   select
     count(*) filter (where org_id = '00000000-0000-4000-8000-0000000000a1'),
     count(*) filter (where org_id = '00000000-0000-4000-8000-0000000000b2')
@@ -61,6 +76,6 @@ begin
     raise exception 'Fixture kaputt: Beta-Zuweisung b5510001 fehlt';
   end if;
 
-  raise notice 'Fixture OK: 3 Alpha, 1 Beta, 2 Versionen im Gleichstand';
+  raise notice 'Fixture OK: 3 Alpha-Zuweisungen, 3 Alpha-Mitarbeitende, 1 Beta, 2 Versionen im Gleichstand';
 end
 $$;

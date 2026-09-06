@@ -1260,7 +1260,8 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
   });
 
   // ---------------------------------------------------------------------
-  // 9c1b — EYT-147: ein Einsatz entsteht ueber den Inspector der Werkbank
+  // 9c1b — EYT-158: ein Baustellentag entsteht worksite-first ueber den
+  // Inspector der Werkbank, mit DREI Personen als Einsatzteam
   // ---------------------------------------------------------------------
   // Der EINZIGE UI-Schreibnachweis dieser Reise mit echter Identitaet: der
   // read-through-Harness ersetzt `REQUEST_IDENTITY` und kann ueber die
@@ -1270,7 +1271,54 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
   // abgenommene Summen. Der Server legt fuer die versionslose W34 selbst
   // einen Entwurf an (planning-write.repository.ts, „holen oder anlegen").
   // 18.08. 07:00–09:00 Europe/Berlin = 05:00–07:00Z, Dienstag der W34.
-  await test.step("9c1b — EYT-147: Einsatz ueber den Inspector anlegen", async () => {
+  //
+  // Seit EYT-158 ist der Create-Flow worksite-first und der Command EIN
+  // Baustellentag (`POST /planung/baustellentage`), nicht drei
+  // Einzelzuweisungen: Baustelle -> Tag -> Arbeitszeit -> Einsatzteam. Sichtbar
+  // wird GENAU EINE Karte mit dem Team darunter, und Erfolg gibt es erst nach
+  // bestaetigtem Readback. e214 existiert nur fuer diesen Nachweis
+  // (fixtures.sql); e212 bleibt der Satz-fehlt-Mitarbeiter und traegt in W34
+  // keine Kostenwirkung.
+  await test.step("9c1b — EYT-158: Baustellentag worksite-first mit drei Personen anlegen", async () => {
+    const BAUSTELLE = "00000000-0000-4000-8000-00000000e241";
+    const TAG = "2026-08-18";
+    const EINSATZTEAM = [
+      "00000000-0000-4000-8000-00000000e211",
+      "00000000-0000-4000-8000-00000000e212",
+      "00000000-0000-4000-8000-00000000e214",
+    ];
+    const TEAM_NAMEN = [
+      "E2E-Mitarbeiter Reise",
+      "E2E-Mitarbeiter Ohne Satz",
+      "E2E-Mitarbeiter Team Drei",
+    ];
+    interface Baustellentag {
+      readonly worksiteDayId: string;
+      readonly configurationId: string;
+      readonly team: ReadonlyArray<{ readonly assignmentId: string; readonly employeeId: string }>;
+    }
+    /** Genau EINE Karte am Tag, das Team untergeordnet, Namen statt Ids. */
+    const karteGeprueft = async (seite: Page, tag: Baustellentag): Promise<void> => {
+      const karte = seite.locator(`.einsatzkarte[data-worksite-day-id="${tag.worksiteDayId}"]`);
+      await expect(karte).toBeVisible();
+      await expect(seite.locator(`[data-tag="${TAG}"] .einsatzkarte`)).toHaveCount(1);
+      await expect(karte).toHaveAttribute("data-configuration-id", tag.configurationId);
+      await expect(seite.locator(`[data-tag="${TAG}"] [data-assignment-id]`)).toHaveCount(3);
+      for (const mitglied of tag.team) {
+        await expect(
+          karte.locator(`[data-assignment-id="${mitglied.assignmentId}"]`),
+        ).toBeVisible();
+      }
+      await expect(karte).toContainText("E2E-Baustelle Reise");
+      await expect(karte).toContainText("07:00–09:00");
+      for (const name of TEAM_NAMEN) await expect(karte).toContainText(name);
+      // Technische Ids sind keine sichtbare Identitaet.
+      const text = await karte.innerText();
+      expect(text).not.toContain(tag.worksiteDayId);
+      expect(text).not.toContain(tag.configurationId);
+      for (const mitglied of tag.team) expect(text).not.toContain(mitglied.assignmentId);
+    };
+
     // Werkbankbreite fuer die Bild-Evidenz — die Dateinamen sagen 1440, also
     // wird 1440 gemessen, nicht die Standardbreite des Laufs.
     const breiteVorher = page.viewportSize();
@@ -1283,45 +1331,86 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
     await expect(page.getByTestId("einsatzformular")).toHaveCount(0);
     await ausloeser.click();
     await expect(page.getByTestId("einsatzformular")).toBeVisible();
+    // Worksite-first: der Fokus landet auf der Baustelle, nicht auf einer
+    // Person; die Arbeitszeit ist mit 08:00–18:00 vorbelegt und wird gleich
+    // bearbeitet.
+    await expect(page.getByTestId("feld-worksite")).toBeFocused();
+    await expect(page.getByTestId("feld-beginn")).toHaveValue("08:00");
+    await expect(page.getByTestId("feld-ende")).toHaveValue("18:00");
     await page.screenshot({
       path: join(ARTEFAKTE, "12-werkbank-inspector-1440.png"),
       fullPage: true,
     });
 
-    await page.getByTestId("feld-employee").selectOption("00000000-0000-4000-8000-00000000e211");
-    await page.getByTestId("feld-worksite").selectOption("00000000-0000-4000-8000-00000000e241");
-    await page.getByTestId("feld-datum").fill("2026-08-18");
+    await page.getByTestId("feld-worksite").selectOption(BAUSTELLE);
+    await page.getByTestId("feld-datum").fill(TAG);
     await page.getByTestId("feld-beginn").fill("07:00");
     await page.getByTestId("feld-ende").fill("09:00");
+    await page.getByTestId("feld-employee").selectOption(EINSATZTEAM);
     const [schreibAntwort] = await Promise.all([
       page.waitForResponse(
         (antwort) =>
-          antwort.url().includes("/planung/einsaetze") && antwort.request().method() === "POST",
+          antwort.url().includes("/planung/baustellentage") &&
+          antwort.request().method() === "POST",
       ),
       page.getByTestId("einsatz-speichern").click(),
     ]);
     expect(schreibAntwort.status()).toBe(201);
-    const angelegt = (await schreibAntwort.json()) as { id: string };
-    expect(angelegt.id).toMatch(/^[0-9a-f-]{36}$/);
+    const angelegt = (await schreibAntwort.json()) as Baustellentag;
+    expect(angelegt.worksiteDayId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(angelegt.configurationId).toMatch(/^[0-9a-f-]{36}$/);
+    // EIN Command, drei Personen.
+    expect(angelegt.team.map((m) => m.employeeId).sort()).toEqual([...EINSATZTEAM].sort());
 
-    // Sichtbar wird der BESTAETIGTE Serverstand (Read-through), und die Karte
-    // steht am Kalendertag ihres Beginns — Dienstag, 18.08.
-    const karte = page.locator(`[data-assignment-id="${angelegt.id}"]`);
-    await expect(karte).toBeVisible();
-    await expect(page.locator('[data-tag="2026-08-18"] [data-assignment-id]')).toHaveCount(1);
+    // Sichtbar wird der BESTAETIGTE Serverstand (Read-through): genau eine
+    // Baustellentag-Karte am Dienstag, 18.08., das Team untergeordnet — und
+    // die Erfolgsmeldung erst NACH dem passenden Readback.
+    await karteGeprueft(page, angelegt);
+    await expect(page.getByTestId("einsatzformular-meldung")).toHaveAttribute(
+      "data-state",
+      "erfolg",
+    );
     await page.screenshot({
-      path: join(ARTEFAKTE, "13-werkbank-einsatz-serverbestaetigt.png"),
+      path: join(ARTEFAKTE, "13-werkbank-baustellentag-serverbestaetigt-1440.png"),
       fullPage: true,
     });
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.screenshot({
+      path: join(ARTEFAKTE, "13-werkbank-baustellentag-serverbestaetigt-1920.png"),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
 
-    // Reload: dieselbe serverseitige Id, und die vorher versionslose Woche
+    // Barrierefreiheit der INTEGRIERTEN Flaeche — Karte plus offener Inspector
+    // mit Mehrfachauswahl: axe und Reflow bei 1440/1920/200 %, Tastatur ohne
+    // Falle, sichtbarer Fokus, hoechstens eine primaere Aktion.
+    await pruefeBarrierefreiheit(page, "/planung W34 mit Baustellentag-Karte und Inspector");
+
+    // Reload: dieselben serverseitigen Ids, und die vorher versionslose Woche
     // ist jetzt eindeutig als ENTWURF erkennbar.
     await page.reload();
-    await expect(page.locator(`[data-assignment-id="${angelegt.id}"]`)).toBeVisible();
+    await karteGeprueft(page, angelegt);
     await expect(page.getByTestId("planungsfenster-stand")).toHaveAttribute(
       "data-stand",
       "entwurf",
     );
+
+    // Zweiter Browserkontext mit eigener Anmeldung: der Zustand liegt im
+    // Server, nicht im Browser des Bearbeiters.
+    const zweiter = await page.context().browser()?.newContext();
+    if (zweiter === undefined) throw new Error("[auth-journey] kein zweiter Browserkontext.");
+    try {
+      const seite2 = await zweiter.newPage();
+      await seite2.goto("/anmelden");
+      await seite2.getByLabel("E-Mail").fill(email);
+      await seite2.getByLabel("Passwort").fill(passwort);
+      await seite2.getByRole("button", { name: "Anmelden" }).click();
+      await seite2.waitForURL((u) => !u.pathname.startsWith("/anmelden"));
+      await seite2.goto("/planung?weekKey=2026-W34");
+      await karteGeprueft(seite2, angelegt);
+    } finally {
+      await zweiter.close();
+    }
 
     // Zurueck in die Publish-Woche: 9d klickt das NAECHSTE
     // `planung-veroeffentlichen` — bliebe die Seite auf W34 stehen, würde
@@ -1337,7 +1426,12 @@ test("Reale Auth-Kostenreise vom Login bis zur ungueltigen Sitzung", async ({
       await page.setViewportSize(breiteVorher);
     }
 
-    schritte["9c1b_eyt147_inspector"] = { assignmentId: angelegt.id, woche: "2026-W34" };
+    schritte["9c1b_eyt158_baustellentag"] = {
+      worksiteDayId: angelegt.worksiteDayId,
+      configurationId: angelegt.configurationId,
+      assignmentIds: angelegt.team.map((m) => m.assignmentId),
+      woche: "2026-W34",
+    };
   });
 
   // ---------------------------------------------------------------------

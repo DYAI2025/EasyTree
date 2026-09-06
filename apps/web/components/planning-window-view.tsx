@@ -8,9 +8,10 @@
  * Bis EYT-147 zeigte diese Ansicht die Einsaetze als flache Liste unter einer
  * Ueberschrift — fachlich korrekt, aber als FORMULARSEITE lesbar, nicht als
  * Planung. Jetzt ist die Woche die Flaeche: sieben Kalendertage als raeumliche
- * Achse, jeder Einsatz als Karte am Tag seines Beginns. Die Zuordnung rechnet
- * `lib/wochenraster.ts` ausschliesslich mit Domain-Helfern; diese Datei
- * entscheidet weiterhin nichts Fachliches.
+ * Achse. Seit EYT-158 ist jeder serverseitige Baustellentag genau eine Karte;
+ * sein Einsatzteam steht darunter. Legacy-Einplanungen bleiben getrennt
+ * sichtbar, ohne daraus eine Tagesidentität zu erfinden. `lib/wochenraster.ts`
+ * ordnet diese Legacy-Zeiten ausschliesslich mit Domain-Helfern zu.
  *
  * ## Vier Zustaende, alle sichtbar
  *
@@ -39,20 +40,17 @@
  *
  * ## Der Inspector ist ein Ort, kein zweiter Zustand
  *
- * Das Einsatzformular (`AssignmentForm`, unveraendert) steht seit EYT-147 in
- * einem seitlichen, NICHTMODALEN Inspector, geoeffnet ueber „Einsatz anlegen".
- * Der Inspector haelt keinen Fachzustand: Validierung, Idempotenz und
- * Serverwahrheit bleiben, wo sie waren. Nach erfolgreichem Speichern bleibt er
- * OFFEN — die Erfolgsmeldung des Formulars muss waehrend des Read-through
- * sichtbar bleiben (`planning-window-view.test.tsx`), und der naechste Einsatz
- * ist der haeufigste Folgeschritt. Kein Fokus-Trap: Escape schliesst, der
+ * `WorksiteDayForm` steht in einem seitlichen, NICHTMODALEN Inspector,
+ * geoeffnet ueber „Baustellentag anlegen". Erfolg setzt sowohl den Write
+ * als auch den passenden Readback voraus. Währenddessen bleibt das Formular
+ * sichtbar, ohne einen Erfolg vorwegzunehmen. Kein Fokus-Trap: Escape schliesst, der
  * Fokus kehrt zur ausloesenden Schaltflaeche zurueck.
  *
  * ## Genau eine primaere Aktion (Basisdesign §2.3, EYT-147 §8.8)
  *
  * Traegt die Woche einen veroeffentlichbaren Entwurf und die Rolle das Recht,
  * ist „Plan veroeffentlichen" DIE primaere Aktion (sie kommt aus
- * `PlanningPublishAction`). Nur dann ist „Einsatz anlegen" eine gewoehnliche
+ * `PlanningPublishAction`). Nur dann ist „Baustellentag anlegen" eine gewoehnliche
  * Schaltflaeche; sonst ist es selbst die primaere. `auth-journey` zaehlt
  * `.eyt-primary-action` auf /planung und erwartet hoechstens eine.
  */
@@ -79,8 +77,8 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { usePlanningGateway } from "../lib/planning-gateway-provider";
 import { wochenraster, zeitText } from "../lib/wochenraster";
-import type { AssignmentDto } from "@easytree/contracts";
-import { AssignmentForm } from "./planning-assignment-form";
+import type { AssignmentDto, WorksiteDayDto } from "@easytree/contracts";
+import { WorksiteDayForm, type WorksiteDayInput } from "./planning-worksite-day-form";
 import { PlanningPublishAction } from "./planning-publish-action";
 
 type ViewState =
@@ -198,14 +196,13 @@ function anzeigename(eintraege: readonly PlanningResource[], id: string): string
 }
 
 /**
- * Eine Einsatzkarte. Baustelle zuerst — sie ist die raeumliche Antwort der
- * Disposition —, dann die Person, dann die Wanduhrzeit der Organisation.
- * Die Id liegt auf GENAU diesem `li` und auf keinem zweiten Element.
+ * Untergeordnete Legacy-Zeile ohne WorksiteDay-Identität. Die technische Id
+ * liegt auf GENAU diesem `li`, nicht als sichtbarer Produktname vor.
  */
 function Einsatzkarte({ einsatz, fenster }: { einsatz: AssignmentDto; fenster: PlanningWindow }) {
   return (
     <li
-      className="einsatzkarte"
+      className="legacy-einplanung"
       data-assignment-id={einsatz.id}
       data-employee-id={einsatz.employeeId}
       data-worksite-id={einsatz.worksiteId}
@@ -222,6 +219,130 @@ function Einsatzkarte({ einsatz, fenster }: { einsatz: AssignmentDto; fenster: P
         {anzeigename(fenster.resources.employees, einsatz.employeeId)}
       </span>
     </li>
+  );
+}
+
+/**
+ * Der lokale Tag als deutsches Datum („Mo., 10.01.2028"), nicht als ISO-String:
+ * die Spalte nennt den Wochentag schon, die Karte muss auch „Außerhalb dieser
+ * Woche" lesbar bleiben. `dateTime` traegt weiter den maschinenlesbaren Wert.
+ */
+function datumsText(localDate: string): string {
+  const [jahr, monat, tag] = localDate.split("-").map(Number);
+  if (jahr === undefined || monat === undefined || tag === undefined) return localDate;
+  if (!Number.isInteger(jahr) || !Number.isInteger(monat) || !Number.isInteger(tag)) {
+    return localDate;
+  }
+  try {
+    return new Intl.DateTimeFormat("de-DE", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(Date.UTC(jahr, monat - 1, tag)));
+  } catch {
+    return localDate;
+  }
+}
+
+/** Die Tagesidentität kommt ausschließlich aus dem Server-Readmodel. */
+function WorksiteDayCard({ day, fenster }: { day: WorksiteDayDto; fenster: PlanningWindow }) {
+  const teamTitelId = useId();
+  const times = [
+    ...new Set(
+      day.team.map(
+        (member) =>
+          `${zeitText(member.interval.startUtc, fenster.timeZone)}–${zeitText(member.interval.endUtc, fenster.timeZone)}`,
+      ),
+    ),
+  ];
+  return (
+    <li
+      className="einsatzkarte"
+      data-worksite-day-id={day.worksiteDayId}
+      data-configuration-id={day.configurationId}
+      data-worksite-id={day.worksiteId}
+    >
+      <strong className="einsatzkarte__baustelle">
+        {anzeigename(fenster.resources.worksites, day.worksiteId)}
+      </strong>
+      <time className="einsatzkarte__datum" dateTime={day.localDate}>
+        {datumsText(day.localDate)}
+      </time>
+      {day.team.length === 0 ? (
+        // Ein Tag ohne Besetzung ist ein Tag ohne Team — nicht „ohne
+        // Arbeitszeit": die Zeit haengt an den Personen.
+        <span className="einsatzkarte__zeit">Noch kein Einsatzteam</span>
+      ) : (
+        <>
+          <span className="einsatzkarte__zeit">{times.join(", ")}</span>
+          <span id={teamTitelId} className="einsatzkarte__teamtitel">
+            Einsatzteam
+          </span>
+        </>
+      )}
+      <ul
+        className="einsatzkarte__team"
+        aria-labelledby={day.team.length === 0 ? undefined : teamTitelId}
+      >
+        {day.team.map((member) => (
+          <li
+            key={member.assignmentId}
+            data-assignment-id={member.assignmentId}
+            data-employee-id={member.employeeId}
+            data-worksite-id={day.worksiteId}
+          >
+            {anzeigename(fenster.resources.employees, member.employeeId)}
+          </li>
+        ))}
+      </ul>
+    </li>
+  );
+}
+
+function Tagesplanung({
+  days,
+  assignments,
+  fenster,
+  ueberschrift: Ueberschrift = "h4",
+}: {
+  days: readonly WorksiteDayDto[];
+  assignments: readonly AssignmentDto[];
+  fenster: PlanningWindow;
+  /**
+   * Ebene der Legacy-Ueberschrift. In der Tageszelle (h3) ist es h4; in der
+   * Rueckfallliste ohne Tageszellen haengt sie direkt unter der h2 und muss
+   * h3 sein — axe `heading-order` laesst keine Stufe ueberspringen.
+   */
+  ueberschrift?: "h3" | "h4";
+}) {
+  const teamIds = new Set(
+    fenster.worksiteDays?.flatMap((day) => day.team.map((member) => member.assignmentId)),
+  );
+  const legacy = assignments.filter((assignment) => !teamIds.has(assignment.id));
+  return (
+    <>
+      {days.length > 0 ? (
+        <ul className="wochenraster__einsaetze">
+          {days.map((day) => (
+            <WorksiteDayCard key={day.worksiteDayId} day={day} fenster={fenster} />
+          ))}
+        </ul>
+      ) : null}
+      {legacy.length > 0 ? (
+        // Bewusst KEIN aria-label: mit Namen waere jede Tageszelle eine
+        // gleichnamige Region-Landmark; die Ueberschrift traegt die Struktur.
+        <section className="wochenraster__legacy">
+          <Ueberschrift>Einplanungen ohne Baustellentag</Ueberschrift>
+          <ul className="wochenraster__einsaetze">
+            {legacy.map((einsatz) => (
+              <Einsatzkarte key={einsatz.id} einsatz={einsatz} fenster={fenster} />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
   );
 }
 
@@ -256,6 +377,17 @@ export function PlanningWindowView({
    * ausloesen. Er ueberlebt bewusst mehrere Absendeversuche derselben Eingabe.
    */
   const vorgangsSchluessel = useRef<{ vorgang: string; key: IdempotencyKey } | null>(null);
+  /**
+   * Die Woche, die GERADE auf dem Schirm steht. `speichern` schliesst ueber
+   * `weekKey` — wechselt die Planerin waehrend des offenen Readbacks die
+   * Woche, gehoert dessen Ergebnis zur alten und darf die neue nicht
+   * ueberschreiben (EYT-158). Der Lade-Effekt hat dafuer sein `abgebrochen`;
+   * der Speicherpfad braucht denselben Riegel.
+   */
+  const aktuelleWoche = useRef(weekKey);
+  useEffect(() => {
+    aktuelleWoche.current = weekKey;
+  }, [weekKey]);
 
   /** Sichtbarkeit des Erstellungs-Inspectors. Reiner Darstellungszustand. */
   const [inspectorOffen, setInspectorOffen] = useState(false);
@@ -319,11 +451,9 @@ export function PlanningWindowView({
    * Antwort verloren ging, aus wie ein gelungenes.
    */
   const speichern = useCallback(
-    async (befehl: {
-      employeeId: string;
-      worksiteId: string;
-      interval: { startUtc: string; endUtc: string };
-    }): Promise<{ ok: boolean; failure?: GatewayFailure; detail?: string }> => {
+    async (
+      befehl: WorksiteDayInput,
+    ): Promise<{ ok: boolean; failure?: GatewayFailure; detail?: string }> => {
       // Ein Schluessel je VORGANG, nicht je Absendeklick.
       //
       // Hier stand `newIdempotencyKey()` direkt im Aufruf, und das war der
@@ -344,7 +474,7 @@ export function PlanningWindowView({
         vorgangsSchluessel.current = schluessel;
       }
 
-      const ergebnis = await gateway.createAssignment(
+      const ergebnis = await gateway.planWorksiteDay(
         { weekKey, ...befehl },
         { idempotencyKey: schluessel.key },
       );
@@ -356,12 +486,54 @@ export function PlanningWindowView({
           ...(detail === undefined ? {} : { detail }),
         };
       }
-      // Erst nach Erfolg verwerfen: der Vorgang ist abgeschlossen, der
+      const readback = await gateway.getPlanningWindow({ weekKey });
+      if (!readback.ok)
+        return {
+          ok: false,
+          failure: readback.failure,
+          detail:
+            "Schreiben bestätigt, aber der aktuelle Serverstand konnte nicht geladen werden. Bitte erneut versuchen.",
+        };
+      const written = ergebnis.value;
+      const readDay = readback.value.worksiteDays?.find(
+        (day) => day.worksiteDayId === written.worksiteDayId,
+      );
+      if (
+        readDay === undefined ||
+        readDay.configurationId !== written.configurationId ||
+        readDay.worksiteId !== written.worksiteId ||
+        readDay.localDate !== written.localDate ||
+        readDay.lockVersion !== written.lockVersion ||
+        readDay.team.length !== written.team.length ||
+        written.team.some(
+          (member) =>
+            !readDay.team.some(
+              (row) =>
+                row.assignmentId === member.assignmentId &&
+                row.employeeId === member.employeeId &&
+                Date.parse(row.interval.startUtc) === Date.parse(member.interval.startUtc) &&
+                Date.parse(row.interval.endUtc) === Date.parse(member.interval.endUtc),
+            ),
+        )
+      ) {
+        return {
+          ok: false,
+          failure: "STALE_VERSION",
+          detail:
+            "Schreiben bestätigt, aber der gelesene Planstand stimmt nicht überein. Bitte erneut laden oder versuchen.",
+        };
+      }
+      // Erst nach Write UND identischem Readback verwerfen: der Vorgang ist abgeschlossen, der
       // naechste Einsatz braucht einen eigenen Schluessel. Bei einem Fehler
       // bleibt er ausdruecklich stehen, damit ein Wiederholungsversuch
       // derselben Eingabe derselbe Vorgang bleibt.
       vorgangsSchluessel.current = null;
-      setNachladen((n) => n + 1);
+      // Nur die Woche ersetzen, die noch angezeigt wird. Ist inzwischen eine
+      // andere geladen, ist der Write trotzdem bestaetigt — die Karte steht in
+      // ihrer eigenen Woche, nicht in dieser.
+      if (aktuelleWoche.current === weekKey) {
+        setState({ kind: "geladen", window: readback.value });
+      }
       return { ok: true };
     },
     [gateway, weekKey],
@@ -496,18 +668,18 @@ export function PlanningWindowView({
         />
         {publishIstPrimaer ? (
           <Button type="button" variant="ghost" {...ausloeserProps}>
-            Einsatz anlegen
+            Baustellentag anlegen
           </Button>
         ) : (
-          <PrimaryAction {...ausloeserProps}>Einsatz anlegen</PrimaryAction>
+          <PrimaryAction {...ausloeserProps}>Baustellentag anlegen</PrimaryAction>
         )}
       </div>
 
-      {fenster.assignments.length === 0 ? (
+      {fenster.assignments.length === 0 && (fenster.worksiteDays?.length ?? 0) === 0 ? (
         <EmptyState
           data-testid="planungsfenster-leer"
           title="Für diese Woche ist nichts geplant."
-          description="Lege über „Einsatz anlegen“ den ersten Einsatz an — Person, Baustelle und Zeitraum genügen."
+          description="Lege über „Baustellentag anlegen“ den ersten Tag an — Baustelle, Datum, Arbeitszeit und Einsatzteam."
         />
       ) : null}
 
@@ -520,32 +692,40 @@ export function PlanningWindowView({
                   {tag.wochentagsText}{" "}
                   <span className="wochenraster__tagdatum">{tag.datumsText}</span>
                 </h3>
-                {tag.einsaetze.length === 0 ? (
+                {tag.einsaetze.length === 0 &&
+                !fenster.worksiteDays?.some((day) => day.localDate === tag.tagKey) ? (
                   // Nur Zierde fuer Sehende: die Abwesenheit einer Liste sagt
                   // dem Screenreader dasselbe, ein zweiter Text waere Rauschen.
                   <p className="wochenraster__frei" aria-hidden="true">
                     –
                   </p>
                 ) : (
-                  <ul className="wochenraster__einsaetze">
-                    {tag.einsaetze.map((einsatz) => (
-                      <Einsatzkarte key={einsatz.id} einsatz={einsatz} fenster={fenster} />
-                    ))}
-                  </ul>
+                  <Tagesplanung
+                    days={fenster.worksiteDays?.filter((day) => day.localDate === tag.tagKey) ?? []}
+                    assignments={tag.einsaetze}
+                    fenster={fenster}
+                  />
                 )}
               </div>
             ))}
-            {raster.ausserhalb.length > 0 ? (
+            {raster.ausserhalb.length > 0 ||
+            fenster.worksiteDays?.some(
+              (day) => !raster.tage.some((tag) => tag.tagKey === day.localDate),
+            ) ? (
               // Antworten, die der Server so eigentlich nicht liefern kann —
               // aber „kann nicht sein" ist kein Renderpfad: sichtbar statt
               // verschluckt (`lib/wochenraster.ts`).
               <div className="wochenraster__ausserhalb">
                 <h3>Außerhalb dieser Woche</h3>
-                <ul className="wochenraster__einsaetze">
-                  {raster.ausserhalb.map((einsatz) => (
-                    <Einsatzkarte key={einsatz.id} einsatz={einsatz} fenster={fenster} />
-                  ))}
-                </ul>
+                <Tagesplanung
+                  days={
+                    fenster.worksiteDays?.filter(
+                      (day) => !raster.tage.some((tag) => tag.tagKey === day.localDate),
+                    ) ?? []
+                  }
+                  assignments={raster.ausserhalb}
+                  fenster={fenster}
+                />
               </div>
             ) : null}
           </div>
@@ -558,12 +738,15 @@ export function PlanningWindowView({
                 ? `Die Zeitzone „${fenster.timeZone}“ ist dieser Laufzeit unbekannt; die Einsätze stehen ungeordnet untereinander.`
                 : `Der Wochenschlüssel „${fenster.weekKey}“ ist nicht lesbar; die Einsätze stehen ungeordnet untereinander.`}
             </StateBanner>
-            {fenster.assignments.length > 0 ? (
-              <ul data-testid="planungsfenster-liste" className="wochenraster__einsaetze">
-                {fenster.assignments.map((einsatz) => (
-                  <Einsatzkarte key={einsatz.id} einsatz={einsatz} fenster={fenster} />
-                ))}
-              </ul>
+            {fenster.assignments.length > 0 || (fenster.worksiteDays?.length ?? 0) > 0 ? (
+              <div data-testid="planungsfenster-liste">
+                <Tagesplanung
+                  days={fenster.worksiteDays ?? []}
+                  assignments={fenster.assignments}
+                  fenster={fenster}
+                  ueberschrift="h3"
+                />
+              </div>
             ) : null}
           </>
         )}
@@ -595,7 +778,7 @@ export function PlanningWindowView({
                 Schließen
               </Button>
             </div>
-            <AssignmentForm window={fenster} onSubmit={speichern} />
+            <WorksiteDayForm window={fenster} onSubmit={speichern} />
           </div>
         ) : null}
       </div>
