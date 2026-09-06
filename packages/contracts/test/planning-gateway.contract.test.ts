@@ -8,6 +8,7 @@ import {
 } from "../src/planning/schemas.js";
 import {
   PLANNING_GATEWAY_CONTRACT_FIXTURE,
+  PLANNING_PROBLEM_TYPE,
   PLANNING_VALIDATION_CODE,
   planningGatewayContractSuite,
 } from "../src/testing/planning-gateway-contract.js";
@@ -106,21 +107,32 @@ function makeMock(): MockPlanningGateway {
         "3f2504e0-4f89-41d3-9a0c-0305e82c3308",
       ],
     },
-    // EYT-120: Ids fuer ZWEI Tage mit je einer Person. Ein dritter Tag muss
+    // EYT-120: die VORBEREITETE Serverantwort fuer ZWEI Tage mit je einer
+    // Person. Die Instants stehen hier fertig — der Mock rechnet keine Zone
+    // (Europe/Berlin im Sommer ist UTC+2, 07:00 lokal = 05:00Z; das ist die
+    // Rechnung des Servers, nicht des Clickdummys). Ein dritter Tag muss
     // auffallen — siehe "erfindet keine Id" unten.
     nextEngagement: {
       engagementId: "3f2504e0-4f89-41d3-9a0c-0305e82c3310",
-      worksiteDayIds: [
-        "3f2504e0-4f89-41d3-9a0c-0305e82c3311",
-        "3f2504e0-4f89-41d3-9a0c-0305e82c3312",
-      ],
-      configurationIds: [
-        "3f2504e0-4f89-41d3-9a0c-0305e82c3313",
-        "3f2504e0-4f89-41d3-9a0c-0305e82c3314",
-      ],
-      assignmentIds: [
-        "3f2504e0-4f89-41d3-9a0c-0305e82c3315",
-        "3f2504e0-4f89-41d3-9a0c-0305e82c3316",
+      startsAtUtc: "2026-08-05T05:00:00.000Z",
+      endsAtUtc: "2026-08-06T14:00:00.000Z",
+      days: [
+        {
+          localDate: "2026-08-05",
+          worksiteDayId: "3f2504e0-4f89-41d3-9a0c-0305e82c3311",
+          configurationId: "3f2504e0-4f89-41d3-9a0c-0305e82c3313",
+          startUtc: "2026-08-05T06:00:00.000Z",
+          endUtc: "2026-08-05T16:00:00.000Z",
+          assignmentIds: ["3f2504e0-4f89-41d3-9a0c-0305e82c3315"],
+        },
+        {
+          localDate: "2026-08-06",
+          worksiteDayId: "3f2504e0-4f89-41d3-9a0c-0305e82c3312",
+          configurationId: "3f2504e0-4f89-41d3-9a0c-0305e82c3314",
+          startUtc: "2026-08-06T06:00:00.000Z",
+          endUtc: "2026-08-06T10:00:00.000Z",
+          assignmentIds: ["3f2504e0-4f89-41d3-9a0c-0305e82c3316"],
+        },
       ],
     },
   });
@@ -352,8 +364,8 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
       "3f2504e0-4f89-41d3-9a0c-0305e82c3315",
       "3f2504e0-4f89-41d3-9a0c-0305e82c3316",
     ]);
-    // Lokale Zeiten in Europe/Berlin (Sommer, UTC+2): 07:00 -> 05:00Z; die
-    // Tagesarbeitszeit kommt aus `defaults`, ausser der Tag bringt eine eigene.
+    // Die Instants stammen aus dem Fixture (vorbereitete Serverantwort), nicht
+    // aus einer Zonenrechnung des Mocks — und sie kommen unveraendert an.
     expect(result.value.startsAtUtc).toBe("2026-08-05T05:00:00.000Z");
     expect(result.value.endsAtUtc).toBe("2026-08-06T14:00:00.000Z");
     expect(result.value.days[0]?.team[0]?.interval).toEqual({
@@ -415,6 +427,8 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.problem?.detail).toContain("Fixture erweitern");
+    // Die Ablehnung nennt den Tag, den das Fixture nicht kennt.
+    expect(result.problem?.detail).toContain("2026-08-07");
   });
 
   it("respektiert einen induzierten Fehler", async () => {
@@ -424,5 +438,51 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure).toBe("UNAVAILABLE");
+  });
+
+  it("wiederholt denselben Schluessel statt den Einsatz zu verdoppeln", async () => {
+    // Dieselbe Mechanik wie bei `createAssignment`: ein wiederholter Aufruf mit
+    // demselben Schluessel UND demselben Kommando ist ein Replay, keine zweite
+    // Anlage. Ein Mock, der hier ein zweites Mal anlegt, zeigt der Shell nach
+    // einem Netz-Retry doppelte Tage — und `PlanningWindowSchema` verwirft
+    // ein Fenster, in dem eine Tagesidentitaet zweimal steht.
+    const mock = makeMock();
+    const erster = await mock.createEngagement(EINSATZ, { idempotencyKey: SCHLUESSEL });
+    const zweiter = await mock.createEngagement(EINSATZ, { idempotencyKey: SCHLUESSEL });
+    expect(erster.ok).toBe(true);
+    expect(zweiter.ok).toBe(true);
+    if (!erster.ok || !zweiter.ok) return;
+    expect(zweiter.value).toEqual(erster.value);
+
+    const fenster = await mock.getPlanningWindow({ weekKey: "2026-W32" });
+    expect(fenster.ok).toBe(true);
+    if (!fenster.ok) return;
+    expect(PlanningWindowSchema.safeParse(fenster.value).success).toBe(true);
+    const tagesIds = fenster.value.worksiteDays?.map((tag) => tag.worksiteDayId) ?? [];
+    expect(tagesIds).toHaveLength(2);
+    expect(new Set(tagesIds).size).toBe(tagesIds.length);
+    for (const tag of erster.value.days) {
+      expect(tagesIds.filter((id) => id === tag.worksiteDayId)).toHaveLength(1);
+    }
+  });
+
+  it("lehnt denselben Schluessel mit anderem Kommando ab", async () => {
+    // Gleicher Schluessel, anderes Team: dieselbe Ablehnung wie bei
+    // `createAssignment` mit wiederverwendetem Schluessel — der Typ macht sie
+    // von einer "Fixture erweitern"-Ablehnung unterscheidbar, denn beide
+    // tragen `failure: "REJECTED"`.
+    const ANDERE_PERSON = "3f2504e0-4f89-41d3-9a0c-0305e82c3320";
+    const mock = makeMock();
+    const erster = await mock.createEngagement(EINSATZ, { idempotencyKey: SCHLUESSEL });
+    expect(erster.ok).toBe(true);
+    const anderes = await mock.createEngagement(
+      { ...EINSATZ, team: [ANDERE_PERSON] },
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(anderes.ok).toBe(false);
+    if (anderes.ok) return;
+    expect(anderes.failure).toBe("REJECTED");
+    expect(anderes.problem?.type).toBe(PLANNING_PROBLEM_TYPE.idempotencyKeyReused);
+    expect(anderes.problem?.status).toBe(409);
   });
 });

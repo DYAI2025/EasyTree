@@ -99,13 +99,18 @@ export interface MockPlanningState {
     readonly assignmentIds: readonly string[];
   };
   /**
-   * Ids fuer den Einsatz, den `createEngagement` zurueckgibt (EYT-120).
+   * Die VORBEREITETE Serverantwort fuer `createEngagement` (EYT-120).
    *
-   * Derselbe Mechanismus wie `nextWorksiteDay`, nur je Tag: `worksiteDayIds` und
-   * `configurationIds` werden den ausgewaehlten Tagen der Reihe nach zugeteilt,
-   * `assignmentIds` den Paaren (Tag, Teammitglied) — Tag fuer Tag, innerhalb des
-   * Tages in Teamreihenfolge. Reicht eine Liste nicht, lehnt der Mock ab, statt
-   * Ids zu erfinden oder Tage still wegzulassen.
+   * Nicht nur Ids, sondern auch die Instants: `startsAtUtc`, `endsAtUtc` und je
+   * Tag `startUtc`/`endUtc` stehen hier als fertige UTC-Zeitpunkte (Schreibweise
+   * wie `InstantSchema`). Der Mock rechnet keine lokale Zeit in eine Zone um —
+   * siehe den Kopfkommentar an `createEngagement`, warum nicht.
+   *
+   * Die Tage werden ueber `localDate` den Kommando-Tagen zugeordnet, die
+   * Reihenfolge spielt keine Rolle; `assignmentIds` gehen innerhalb eines Tages
+   * in Teamreihenfolge an die Mitglieder. Fehlt ein Kommando-Tag hier oder
+   * reichen seine `assignmentIds` nicht fuer das Team, lehnt der Mock ab und
+   * nennt den Tag — er erfindet keine Id und laesst keinen Tag still weg.
    *
    * Optional, damit ein Fixture ohne Einsatz gueltig bleibt: ohne diesen Block
    * antwortet `createEngagement` mit derselben Ablehnung wie ein zu kurzes
@@ -114,9 +119,16 @@ export interface MockPlanningState {
    */
   readonly nextEngagement?: {
     readonly engagementId: string;
-    readonly worksiteDayIds: readonly string[];
-    readonly configurationIds: readonly string[];
-    readonly assignmentIds: readonly string[];
+    readonly startsAtUtc: string;
+    readonly endsAtUtc: string | null;
+    readonly days: readonly {
+      readonly localDate: string;
+      readonly worksiteDayId: string;
+      readonly configurationId: string;
+      readonly startUtc: string;
+      readonly endUtc: string;
+      readonly assignmentIds: readonly string[];
+    }[];
   };
 }
 
@@ -129,6 +141,15 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
   readonly #idempotency = new Map<
     string,
     { readonly fingerprint: string; readonly assignment: AssignmentDto }
+  >();
+  /**
+   * Schluessel -> Fingerabdruck + gespeicherte Antwort fuer `createEngagement`.
+   * Dieselbe Mechanik wie `#idempotency`, eigene Tabelle, weil die gespeicherte
+   * Antwort ein `EngagementDto` ist und kein `AssignmentDto`.
+   */
+  readonly #engagementIdempotency = new Map<
+    string,
+    { readonly fingerprint: string; readonly engagement: EngagementDto }
   >();
 
   constructor(private readonly state: MockPlanningState) {
@@ -407,11 +428,35 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
    * Legt einen Einsatz mit seinen Tagen an (EYT-120) — als ANTWORTFORM plus
    * Zustand, nicht als Fachlogik.
    *
-   * Was der Mock tut: das Kommando gegen das Schema pruefen, je ausgewaehltem
-   * Tag einen Baustellentag mit Team aus den Fixture-Ids zusammensetzen, die
-   * lokalen Zeiten mit `state.timeZone` in Instants aufloesen, die Woche des
-   * Tages ueber dieselbe Kalenderrechnung wie der Vertrag bestimmen und Tage
-   * samt Zuweisungen ablegen, damit `getPlanningWindow` sie zeigt.
+   * Was der Mock tut: das Kommando gegen das Schema pruefen, den
+   * Idempotenzschluessel wie bei `createAssignment` behandeln (gleicher
+   * Schluessel + gleiches Kommando = gespeicherte Antwort, gleicher Schluessel +
+   * anderes Kommando = Ablehnung), je ausgewaehltem Tag den vorbereiteten
+   * Fixture-Tag ueber `localDate` heraussuchen, die Woche des Tages ueber
+   * dieselbe Kalenderrechnung wie der Vertrag bestimmen und Tage samt
+   * Zuweisungen ablegen, damit `getPlanningWindow` sie zeigt.
+   *
+   * ## Warum der Clickdummy keine Zeitzone rechnet
+   *
+   * Die Instants — `startsAtUtc`, `endsAtUtc`, je Tag `startUtc`/`endUtc` —
+   * kommen FERTIG aus `state.nextEngagement`. Der Mock loest keine lokale
+   * Uhrzeit in einer Zone auf, und `state.timeZone` wird hier nicht gelesen:
+   *
+   * 1. Zeitmathematik gehoert `@easytree/domain`. Dieses Paket importiert
+   *    `domain` bewusst nicht (ADR-001), und eine zweite Umrechnung hier waere
+   *    eine zweite Wahrheit — mit eigenen Fehlern, die kein Test der Domaene
+   *    sieht.
+   * 2. Der Waechter `no-local-time-construction` (EYT-61 AK6a) ist die Grenze:
+   *    kein Produktionscode baut einen Instant aus Wanduhrteilen. Ein Mock, der
+   *    das doch tut, waere entweder ein Treffer des Waechters oder ein Umweg um
+   *    ihn herum — beides falsch.
+   * 3. Die Sommerzeitfaelle beantwortet nur der Server: eine nicht existente
+   *    Zeit (`LOCAL_TIME_NONEXISTENT`) oder eine mehrdeutige
+   *    (`LOCAL_TIME_AMBIGUOUS`) lehnt er benannt ab. Eine eigene Rechnung im
+   *    Clickdummy legte solche Zeiten still auf einen Kandidaten — ein UI-Test
+   *    an der Umstellung waere gegen den Mock gruen und gegen den Server rot.
+   *
+   * Der Clickdummy haelt deshalb VORBEREITETE SERVERANTWORTEN, keine Rechnung.
    *
    * Was er NICHT tut, und ehrlich nicht kann: einen Beginn in der Vergangenheit,
    * eine nicht existente oder mehrdeutige Sommerzeit-Zeit, eine Arbeitszeit
@@ -439,48 +484,66 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
     }
     const kommando = parsed.data;
 
-    const ids = this.state.nextEngagement;
-    const tage = kommando.days.length;
-    const zuweisungen = tage * kommando.team.length;
-    if (
-      ids === undefined ||
-      ids.worksiteDayIds.length < tage ||
-      ids.configurationIds.length < tage ||
-      ids.assignmentIds.length < zuweisungen
-    ) {
+    // Idempotenz VOR dem Fixture-Abgleich, wie bei `createAssignment`: ein
+    // Replay darf weder ein zweites Mal anlegen noch an einem inzwischen
+    // geaenderten Fixture scheitern.
+    const fingerprint = einsatzFingerabdruck(kommando);
+    const previous = this.#engagementIdempotency.get(key.data);
+    if (previous !== undefined) {
+      return Promise.resolve(
+        previous.fingerprint === fingerprint
+          ? gatewayOk(previous.engagement)
+          : planningRejected<EngagementDto>(
+              "urn:easytree:planning:idempotency-key-reused",
+              "Idempotenzschlüssel wurde für einen anderen Einsatz wiederverwendet",
+              409,
+            ),
+      );
+    }
+
+    const vorbereitet = this.state.nextEngagement;
+    if (vorbereitet === undefined) {
       return Promise.resolve(
         planningRejected<EngagementDto>(
           "urn:easytree:planning:invalid-interval",
-          `Der Clickdummy haelt ${ids?.worksiteDayIds.length ?? 0} Tages-, ` +
-            `${ids?.configurationIds.length ?? 0} Konfigurations- und ` +
-            `${ids?.assignmentIds.length ?? 0} Assignment-Ids bereit; der Einsatz braucht ` +
-            `${tage}, ${tage} und ${zuweisungen}. Fixture erweitern statt Ids zu erfinden.`,
+          "Der Clickdummy haelt keinen Einsatz bereit. Fixture erweitern statt Ids zu erfinden.",
           400,
         ),
       );
     }
+    const fixtureTage = new Map(vorbereitet.days.map((tag) => [tag.localDate, tag]));
 
-    const zone = this.state.timeZone;
     /** Je Tag der Antwort-DTO und die Zuweisungen, die sein Team im Fenster belegen. */
     const angelegt: { readonly tag: EngagementDayDto; readonly zuweisungen: AssignmentDto[] }[] =
       [];
-    let naechsteZuweisung = 0;
-    kommando.days.forEach((tag, index) => {
-      const worksiteDayId = ids.worksiteDayIds[index];
-      const configurationId = ids.configurationIds[index];
-      // Der Laengenriegel oben schliesst das aus — siehe `#baustellentag`.
-      if (worksiteDayId === undefined || configurationId === undefined) {
-        throw new Error("Clickdummy: Tages-Id fehlt trotz Laengenpruefung");
+    for (const auswahl of kommando.days) {
+      const vorlage = fixtureTage.get(auswahl.localDate);
+      if (vorlage === undefined) {
+        return Promise.resolve(
+          planningRejected<EngagementDto>(
+            "urn:easytree:planning:invalid-interval",
+            `Der Clickdummy haelt fuer ${auswahl.localDate} keinen Tag bereit. ` +
+              "Fixture erweitern statt Ids zu erfinden.",
+            400,
+          ),
+        );
       }
-      const arbeitszeit = tag.workingTime ?? kommando.defaults.workingTime;
-      const interval = {
-        startUtc: lokalNachUtc(tag.localDate, arbeitszeit.from, zone),
-        endUtc: lokalNachUtc(tag.localDate, arbeitszeit.to, zone),
-      };
+      if (vorlage.assignmentIds.length < kommando.team.length) {
+        return Promise.resolve(
+          planningRejected<EngagementDto>(
+            "urn:easytree:planning:invalid-interval",
+            `Der Clickdummy haelt fuer ${auswahl.localDate} ${vorlage.assignmentIds.length} ` +
+              `Assignment-Ids bereit, das Team hat ${kommando.team.length}. ` +
+              "Fixture erweitern statt Ids zu erfinden.",
+            400,
+          ),
+        );
+      }
+      const interval = { startUtc: vorlage.startUtc, endUtc: vorlage.endUtc };
       const zuweisungen: AssignmentDto[] = [];
-      const team = kommando.team.map((employeeId) => {
-        const assignmentId = ids.assignmentIds[naechsteZuweisung];
-        naechsteZuweisung += 1;
+      const team = kommando.team.map((employeeId, index) => {
+        const assignmentId = vorlage.assignmentIds[index];
+        // Der Laengenriegel oben schliesst das aus — siehe `#baustellentag`.
         if (assignmentId === undefined) {
           throw new Error("Clickdummy: Assignment-Id fehlt trotz Laengenpruefung");
         }
@@ -494,17 +557,17 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
       });
       angelegt.push({
         tag: {
-          worksiteDayId,
-          configurationId,
+          worksiteDayId: vorlage.worksiteDayId,
+          configurationId: vorlage.configurationId,
           worksiteId: kommando.worksiteId,
-          localDate: tag.localDate,
+          localDate: auswahl.localDate,
           lockVersion: 0,
           team,
-          weekKey: isoWeekKeyOf(tag.localDate),
+          weekKey: isoWeekKeyOf(auswahl.localDate),
         },
         zuweisungen,
       });
-    });
+    }
 
     // Erst nach vollstaendigem Aufbau in den Zustand — EINE Transaktion, auch
     // im Clickdummy: ein Fehler oben hinterlaesst keinen halben Einsatz.
@@ -517,18 +580,15 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
       this.#assignments.set(weekKey, [...(this.#assignments.get(weekKey) ?? []), ...zuweisungen]);
     }
 
-    return Promise.resolve(
-      gatewayOk<EngagementDto>({
-        engagementId: ids.engagementId,
-        worksiteId: kommando.worksiteId,
-        startsAtUtc: lokalNachUtc(kommando.startAt.date, kommando.startAt.time, zone),
-        endsAtUtc:
-          kommando.endAt === null
-            ? null
-            : lokalNachUtc(kommando.endAt.date, kommando.endAt.time, zone),
-        days: angelegt.map(({ tag }) => tag),
-      }),
-    );
+    const engagement: EngagementDto = {
+      engagementId: vorbereitet.engagementId,
+      worksiteId: kommando.worksiteId,
+      startsAtUtc: vorbereitet.startsAtUtc,
+      endsAtUtc: vorbereitet.endsAtUtc,
+      days: angelegt.map(({ tag }) => tag),
+    };
+    this.#engagementIdempotency.set(key.data, { fingerprint, engagement });
+    return Promise.resolve(gatewayOk(engagement));
   }
 
   publishPlan(input: PublishPlanCommand): Promise<GatewayResult<PublishedPlanVersion>> {
@@ -566,72 +626,40 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
 }
 
 /**
- * Loest lokales Datum + lokale Uhrzeit in der Zone zu einem Instant auf.
+ * Deterministischer Fingerabdruck eines Einsatz-Kommandos fuer die Idempotenz.
  *
- * Nur fuer den Clickdummy. Der Versatz der Zone wird ueber `Intl` am geratenen
- * Zeitpunkt bestimmt und ein zweites Mal am Ergebnis, damit ein Wechsel knapp
- * daneben beruecksichtigt wird. Eine nicht existente Zeit (Sommerzeitluecke)
- * oder eine mehrdeutige (Rueckstellung) wird dabei NICHT erkannt, sondern
- * still auf einen der beiden Kandidaten gelegt — der echte Server lehnt sie
- * benannt ab (`LOCAL_TIME_NONEXISTENT`, `LOCAL_TIME_AMBIGUOUS`).
+ * `JSON.stringify(parsed.data)` wie bei `createAssignment` genuegt hier nicht:
+ * `days` und `team` sind Mengen, keine Folgen — dieselbe Auswahl in anderer
+ * Reihenfolge ist dasselbe Kommando und muss denselben Abdruck ergeben. Deshalb
+ * kanonische Feldreihenfolge, `days` nach `localDate` sortiert, `team` sortiert,
+ * und eine fehlende Tagesarbeitszeit ausdruecklich als `null` statt weggelassen.
+ * Sortiert wird ueber Code-Units, nicht `localeCompare`: das haengt an der
+ * Umgebung, nicht am Kommando.
  */
-function lokalNachUtc(date: string, time: string, timeZone: string): string {
-  const [jahr, monat, tag] = date.split("-").map(Number);
-  const [stunde, minute] = time.split(":").map(Number);
-  if (
-    jahr === undefined ||
-    monat === undefined ||
-    tag === undefined ||
-    stunde === undefined ||
-    minute === undefined
-  ) {
-    // Unerreichbar nach `CreateEngagementCommandSchema` — aber ein `?? 0`
-    // stuende hier als stiller Ersatzwert und ergaebe einen falschen Instant.
-    throw new Error(`Clickdummy: ${date} ${time} ist kein lokaler Zeitpunkt`);
-  }
-  const alsUtc = utcMs(jahr, monat, tag, stunde, minute, 0);
-  const ersterVersuch = alsUtc - zonenversatzMs(alsUtc, timeZone);
-  return new Date(alsUtc - zonenversatzMs(ersterVersuch, timeZone)).toISOString();
-}
-
-/** UTC-Millisekunden ohne die 1900-Umdeutung kleiner Jahreszahlen durch `Date.UTC`. */
-function utcMs(
-  jahr: number,
-  monat1bis12: number,
-  tag: number,
-  stunde: number,
-  minute: number,
-  sekunde: number,
-): number {
-  const d = new Date(0);
-  d.setUTCFullYear(jahr, monat1bis12 - 1, tag);
-  d.setUTCHours(stunde, minute, sekunde, 0);
-  return d.getTime();
-}
-
-/** Versatz der Zone zum Zeitpunkt, in Millisekunden (Berlin im Sommer: +7 200 000). */
-function zonenversatzMs(zeitpunktMs: number, timeZone: string): number {
-  const teile = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(new Date(zeitpunktMs));
-  const wert = (typ: Intl.DateTimeFormatPartTypes): number =>
-    Number(teile.find((teil) => teil.type === typ)?.value ?? Number.NaN);
-  const lokalAlsUtc = utcMs(
-    wert("year"),
-    wert("month"),
-    wert("day"),
-    wert("hour"),
-    wert("minute"),
-    wert("second"),
-  );
-  return lokalAlsUtc - zeitpunktMs;
+function einsatzFingerabdruck(kommando: CreateEngagementCommand): string {
+  const nachDatum = (a: { localDate: string }, b: { localDate: string }): number =>
+    a.localDate < b.localDate ? -1 : a.localDate > b.localDate ? 1 : 0;
+  return JSON.stringify({
+    worksiteId: kommando.worksiteId,
+    startAt: { date: kommando.startAt.date, time: kommando.startAt.time },
+    endAt:
+      kommando.endAt === null ? null : { date: kommando.endAt.date, time: kommando.endAt.time },
+    planningHorizon: kommando.planningHorizon,
+    defaults: {
+      workingTime: {
+        from: kommando.defaults.workingTime.from,
+        to: kommando.defaults.workingTime.to,
+      },
+    },
+    days: [...kommando.days].sort(nachDatum).map((tag) => ({
+      localDate: tag.localDate,
+      workingTime:
+        tag.workingTime === undefined
+          ? null
+          : { from: tag.workingTime.from, to: tag.workingTime.to },
+    })),
+    team: [...kommando.team].sort(),
+  });
 }
 
 function planningRejected<T>(type: string, detail: string, status: number): GatewayResult<T> {
