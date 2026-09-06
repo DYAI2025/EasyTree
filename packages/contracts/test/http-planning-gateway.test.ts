@@ -464,3 +464,69 @@ describe("HttpPlanningGateway — Baustellentag-Kommandos (EYT-147 M2)", () => {
     expect(result.failure).toBe("CONTRACT_VIOLATION");
   });
 });
+
+/**
+ * Das Einsatz-Kommando (EYT-120 Inkrement 1).
+ *
+ * Dieselbe Luecke wie bei den Tagescommands: Pfad, Methode und Idempotenzkopf
+ * des Clients sieht weder der Drift- noch der Konformitaetstest. Und der Pfad
+ * ist hier besonders empfindlich — bis T-004 lag unter `/planung/einsaetze`
+ * das Einplanungs-Kommando; ein Rueckfall darauf faellt nur hier auf.
+ */
+const EINSATZ = {
+  worksiteId: BAUSTELLENTAG.worksiteId,
+  startAt: { date: "2031-01-06", time: "07:00" },
+  endAt: { date: "2031-01-07", time: "16:00" },
+  planningHorizon: null,
+  defaults: { workingTime: { from: "08:00", to: "18:00" } },
+  days: [{ localDate: "2031-01-06" }, { localDate: "2031-01-07" }],
+  team: ["77777777-7777-4777-8777-777777777777"],
+};
+
+const ANGELEGTER_EINSATZ = {
+  engagementId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  worksiteId: BAUSTELLENTAG.worksiteId,
+  startsAtUtc: "2031-01-06T06:00:00.000Z",
+  endsAtUtc: "2031-01-07T15:00:00.000Z",
+  days: [{ ...BAUSTELLENTAG, localDate: "2031-01-06", weekKey: "2031-W02" }],
+};
+
+describe("HttpPlanningGateway — Einsatz-Kommando (EYT-120)", () => {
+  it("greift beim Anlegen auf POST /planung/einsaetze mit Idempotenzschluessel", async () => {
+    const recorded: Recorded[] = [];
+    const result = await gatewayWith(stubFetch(201, ANGELEGTER_EINSATZ, recorded)).createEngagement(
+      EINSATZ,
+      { idempotencyKey: KEY_A },
+    );
+    expect(result.ok).toBe(true);
+    // Die Adresse ganz, nicht als Teilstring — siehe die Tagescommands oben.
+    expect(recorded[0]?.url).toBe(`${BASE}/planung/einsaetze`);
+    expect(recorded[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(recorded[0]?.init?.body))).toEqual(EINSATZ);
+    const headers = recorded[0]?.init?.headers as Record<string, string> | undefined;
+    expect(headers?.[IDEMPOTENCY_HEADER]).toBe(KEY_A);
+  });
+
+  it("deutet 409 als fachliche Ablehnung, nicht als veralteten Stand", async () => {
+    // Beim Anlegen gibt es keinen Stand, auf dem der Client haette arbeiten
+    // koennen: Tag vergeben, Zeit ausserhalb, Beginn in der Vergangenheit, DST —
+    // alles Eingabe, die die Planerin korrigiert, nicht neu laedt.
+    const result = await gatewayWith(stubFetch(409, null, [])).createEngagement(EINSATZ, {
+      idempotencyKey: KEY_A,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("REJECTED");
+  });
+
+  it("vertraut einer formal falschen Erfolgsantwort NICHT", async () => {
+    // Ein Einsatz ohne Tage ist im Vertrag kein Einsatz (`days.min(1)`).
+    const kaputt = { ...ANGELEGTER_EINSATZ, days: [] };
+    const result = await gatewayWith(stubFetch(201, kaputt, [])).createEngagement(EINSATZ, {
+      idempotencyKey: KEY_A,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("CONTRACT_VIOLATION");
+  });
+});

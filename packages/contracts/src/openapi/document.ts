@@ -35,6 +35,11 @@ import {
 import {
   AssignmentDtoSchema,
   CreateAssignmentCommandSchema,
+  CreateEngagementCommandSchema,
+  ENGAGEMENT_PROBLEM_TYPE,
+  EngagementDaySelectionSchema,
+  EngagementDayDtoSchema,
+  EngagementDtoSchema,
   PlanValidationResultSchema,
   PlanWorksiteDayCommandSchema,
   PlanningConflictDtoSchema,
@@ -46,6 +51,7 @@ import {
   UpdateWorksiteDayTeamCommandSchema,
   ValidatePlanCommandSchema,
   WORKSITE_DAY_PROBLEM_TYPE,
+  WorkingTimeSchema,
   WorksiteDayDtoSchema,
   WorksiteDayTeamEntrySchema,
   WorksiteDayTeamMemberSchema,
@@ -124,6 +130,24 @@ const NAMED_SCHEMAS = {
   WorksiteDayDto: WorksiteDayDtoSchema,
   PlanWorksiteDayCommand: PlanWorksiteDayCommandSchema,
   UpdateWorksiteDayTeamCommand: UpdateWorksiteDayTeamCommandSchema,
+  // EYT-120: der Einsatz mit seinen bestaetigten Tagen in EINEM Kommando.
+  // Lokale Datum-Zeit-Werte statt Instants — der Server loest sie mit der
+  // Organisationszeitzone auf.
+  //
+  // ## Ehrlichkeitshinweis: die Beziehungen fallen bei der Erzeugung weg
+  //
+  // `CreateEngagementCommandSchema.superRefine` verlangt Ende nach Beginn,
+  // Horizont genau dann, wenn das Ende offen ist, jeden Tag im Zeitraum, keinen
+  // Tag und keine Person doppelt; `WorkingTimeSchema.refine` verlangt `to > from`.
+  // Alles Beziehungen zwischen Feldern — JSON Schema kann sie nicht ausdruecken.
+  // Was ankommt: `minItems: 1` fuer `days` und `team`, `nullable` fuer `endAt`
+  // und `planningHorizon`, `additionalProperties: false`. Abgelehnt wird der
+  // Rest trotzdem, zur Laufzeit von diesen Schemata (`engagement-schemas.test.ts`).
+  WorkingTime: WorkingTimeSchema,
+  EngagementDaySelection: EngagementDaySelectionSchema,
+  CreateEngagementCommand: CreateEngagementCommandSchema,
+  EngagementDayDto: EngagementDayDtoSchema,
+  EngagementDto: EngagementDtoSchema,
   EmployeeSchedule: EmployeeScheduleSchema,
   ConfirmPlanCommand: ConfirmPlanCommandSchema,
   Confirmation: ConfirmationSchema,
@@ -459,6 +483,35 @@ export function buildOpenApiDocument(): Record<string, unknown> {
               WORKSITE_DAY_PROBLEM_TYPE.STALE_WORKSITE_DAY,
               WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_NOT_FOUND,
               WORKSITE_DAY_PROBLEM_TYPE.INTERVAL_OUTSIDE_DAY,
+            ),
+          },
+        },
+      },
+      "/planung/einsaetze": {
+        post: {
+          operationId: "createEngagement",
+          summary: "Einsatz mit bestaetigten Baustellentagen anlegen",
+          description:
+            "Legt einen Einsatz (Baustelle, lokaler Beginn, lokales oder offenes Ende) und seine " +
+            "explizit ausgewaehlten Baustellentage mit Erstkonfiguration und Team in EINER " +
+            "Transaktion an (EYT-120). Lokale Zeiten werden mit der Organisationszeitzone " +
+            "aufgeloest; nicht existente/mehrdeutige Sommerzeit-Zeiten, ein Beginn vor jetzt, " +
+            "Arbeitszeiten ausserhalb der Einsatzgrenzen und bereits vergebene Tage werden mit " +
+            `${ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_NONEXISTENT}, ${ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_AMBIGUOUS}, ` +
+            `${ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_START_IN_PAST}, ${ENGAGEMENT_PROBLEM_TYPE.WORKING_TIME_OUTSIDE_ENGAGEMENT} ` +
+            `und ${ENGAGEMENT_PROBLEM_TYPE.WORKSITE_DAY_CLAIMED} abgelehnt — nie still gekuerzt.`,
+          parameters: [idempotencyHeader],
+          requestBody: jsonBody("CreateEngagementCommand"),
+          responses: {
+            "201": jsonOk("EngagementDto", "Angelegter Einsatz mit seinen Tagen"),
+            ...problemResponses,
+            "409": konfliktMit(
+              ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_START_IN_PAST,
+              ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_NONEXISTENT,
+              ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_AMBIGUOUS,
+              ENGAGEMENT_PROBLEM_TYPE.WORKING_TIME_OUTSIDE_ENGAGEMENT,
+              ENGAGEMENT_PROBLEM_TYPE.WORKSITE_DAY_CLAIMED,
+              WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY,
             ),
           },
         },

@@ -22,7 +22,13 @@ import { z } from "zod";
 
 import { isValidIsoWeekKey } from "./iso-week.js";
 
-import { IdSchema, InstantSchema, LocalDateSchema } from "../primitives.js";
+import {
+  IdSchema,
+  InstantSchema,
+  LocalDateSchema,
+  LocalDateTimeSchema,
+  LocalTimeSchema,
+} from "../primitives.js";
 
 /**
  * Halb-offenes Intervall als Transportform. Entspricht `TimeInterval` der Domain.
@@ -788,3 +794,142 @@ export const WORKSITE_DAY_PROBLEM_TYPE = {
 
 export type WorksiteDayProblemType =
   (typeof WORKSITE_DAY_PROBLEM_TYPE)[keyof typeof WORKSITE_DAY_PROBLEM_TYPE];
+
+// ---------------------------------------------------------------------------
+// Einsatz (EYT-120 Inkrement 1)
+// ---------------------------------------------------------------------------
+
+/** Geplante Arbeitszeit eines Tages, lokal, innerhalb desselben Kalendertages. */
+export const WorkingTimeSchema = z
+  .strictObject({ from: LocalTimeSchema, to: LocalTimeSchema })
+  .refine((zeit) => zeit.to > zeit.from, {
+    message: "to muss nach from liegen (Arbeitszeit innerhalb eines lokalen Tages)",
+    path: ["to"],
+  });
+
+export type WorkingTime = z.infer<typeof WorkingTimeSchema>;
+
+/** Ein ausgewaehlter Tag; ohne eigene Arbeitszeit gilt `defaults.workingTime`. */
+export const EngagementDaySelectionSchema = z.strictObject({
+  localDate: LocalDateSchema,
+  workingTime: WorkingTimeSchema.optional(),
+});
+
+export type EngagementDaySelection = z.infer<typeof EngagementDaySelectionSchema>;
+
+const lokalerZeitpunkt = (wert: { date: string; time: string }): string =>
+  `${wert.date}T${wert.time}`;
+
+/**
+ * Einsatz + bestaetigte Baustellentage in EINEM Kommando (D-004, FR-005).
+ *
+ * `startAt`/`endAt` sind lokale Datum-Zeit-Werte (D-003). `endAt = null` ist das offene
+ * Ende (D-005); dann ist `planningHorizon` Pflicht und begrenzt nur die AUSWAHL, nicht den
+ * Einsatz. Bei bekanntem Ende ist der Horizont das Ende — ein zusaetzlicher Horizont waere
+ * eine zweite Wahrheit und wird abgelehnt.
+ *
+ * `days` ist die EXPLIZITE Auswahl der Planerin (Mo–Fr ist Darstellung, keine Serverregel);
+ * der Server regeneriert keine Wochentage. Jeder Tag liegt in
+ * [startAt.date, endAt.date | planningHorizon], keiner doppelt, keiner leer.
+ *
+ * Grenze der Veroeffentlichung: die Beziehungen (Ende nach Beginn, Tage im Zeitraum,
+ * Duplikate, Horizont-XOR) sind JSON-Schema nicht ausdrueckbar; zur Laufzeit gelten sie.
+ */
+export const CreateEngagementCommandSchema = z
+  .strictObject({
+    worksiteId: IdSchema,
+    startAt: LocalDateTimeSchema,
+    endAt: LocalDateTimeSchema.nullable(),
+    planningHorizon: LocalDateSchema.nullable(),
+    defaults: z.strictObject({ workingTime: WorkingTimeSchema }),
+    days: z.array(EngagementDaySelectionSchema).min(1, "Mindestens ein Tag muss ausgewaehlt sein"),
+    team: z.array(IdSchema).min(1, "Ein Baustellentag entsteht nicht ohne Team"),
+  })
+  .superRefine((cmd, ctx) => {
+    if (cmd.endAt !== null && lokalerZeitpunkt(cmd.endAt) <= lokalerZeitpunkt(cmd.startAt)) {
+      ctx.addIssue({ code: "custom", path: ["endAt"], message: "endAt muss nach startAt liegen" });
+    }
+    if (cmd.endAt === null && cmd.planningHorizon === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["planningHorizon"],
+        message: "Offenes Ende braucht einen konkreten Planungshorizont",
+      });
+    }
+    if (cmd.endAt !== null && cmd.planningHorizon !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["planningHorizon"],
+        message: "Bei bekanntem Ende ist das Ende der Horizont — kein zweiter Wert",
+      });
+    }
+    const bis = cmd.endAt?.date ?? cmd.planningHorizon;
+    if (bis !== null && bis !== undefined && bis < cmd.startAt.date) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["planningHorizon"],
+        message: "Horizont liegt vor dem Beginn",
+      });
+    }
+    const gesehen = new Set<string>();
+    cmd.days.forEach((tag, i) => {
+      if (gesehen.has(tag.localDate)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["days", i],
+          message: `Tag ${tag.localDate} ist doppelt ausgewaehlt`,
+        });
+      }
+      gesehen.add(tag.localDate);
+      if (
+        tag.localDate < cmd.startAt.date ||
+        (bis !== null && bis !== undefined && tag.localDate > bis)
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["days", i],
+          message: `Tag ${tag.localDate} liegt ausserhalb des Zeitraums`,
+        });
+      }
+    });
+    const personen = new Set(cmd.team);
+    if (personen.size !== cmd.team.length) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["team"],
+        message: "Dieselbe Person steht zweimal im Team",
+      });
+    }
+  });
+
+export type CreateEngagementCommand = z.infer<typeof CreateEngagementCommandSchema>;
+
+/** Ein erzeugter Tag — WorksiteDayDto plus die Woche, deren Entwurf ihn traegt. */
+export const EngagementDayDtoSchema = WorksiteDayDtoSchema.extend({ weekKey: IsoWeekKeySchema });
+
+export type EngagementDayDto = z.infer<typeof EngagementDayDtoSchema>;
+
+export const EngagementDtoSchema = z.strictObject({
+  engagementId: IdSchema,
+  worksiteId: IdSchema,
+  startsAtUtc: InstantSchema,
+  endsAtUtc: InstantSchema.nullable(),
+  days: z.array(EngagementDayDtoSchema).min(1),
+});
+
+export type EngagementDto = z.infer<typeof EngagementDtoSchema>;
+
+/** Problem-Types des Einsatz-Commands; Zuordnung an der HTTP-Naht in apps/api. */
+export const ENGAGEMENT_PROBLEM_TYPE = {
+  ENGAGEMENT_START_IN_PAST: "urn:easytree:planning:engagement-start-in-past",
+  LOCAL_TIME_NONEXISTENT: "urn:easytree:planning:local-time-nonexistent",
+  LOCAL_TIME_AMBIGUOUS: "urn:easytree:planning:local-time-ambiguous",
+  WORKING_TIME_OUTSIDE_ENGAGEMENT: "urn:easytree:planning:working-time-outside-engagement",
+  WORKSITE_DAY_CLAIMED: "urn:easytree:planning:worksite-day-claimed",
+  /** Task-Gruppe E: der Einzeltag-Command findet keinen abdeckenden Einsatz. */
+  ENGAGEMENT_REQUIRED: "urn:easytree:planning:engagement-required",
+  ENGAGEMENT_AMBIGUOUS: "urn:easytree:planning:engagement-ambiguous",
+} as const;
+
+export type EngagementProblemType =
+  (typeof ENGAGEMENT_PROBLEM_TYPE)[keyof typeof ENGAGEMENT_PROBLEM_TYPE];

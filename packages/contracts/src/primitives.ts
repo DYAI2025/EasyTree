@@ -87,6 +87,26 @@ export const LocalDateSchema = z
 
 export type LocalDate = z.infer<typeof LocalDateSchema>;
 
+/** Lokale Wanduhrzeit `HH:MM`, minutengenau. Sekunden gibt es im Produkt nicht. */
+export const LocalTimeSchema = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Lokale Uhrzeit im Format HH:MM")
+  .describe("Lokale Uhrzeit 08:00 — ohne Zone; die Organisationszeitzone loest sie auf");
+
+export type LocalTime = z.infer<typeof LocalTimeSchema>;
+
+/**
+ * Lokales Geschaeftsdatum + lokale Geschaeftszeit (D-003). Bewusst KEIN Instant: der
+ * Server loest den Wert mit der Zeitzone der Organisation auf — und lehnt nicht
+ * existente oder mehrdeutige Sommerzeit-Zeiten benannt ab, statt zu raten.
+ */
+export const LocalDateTimeSchema = z.strictObject({
+  date: LocalDateSchema,
+  time: LocalTimeSchema,
+});
+
+export type LocalDateTime = z.infer<typeof LocalDateTimeSchema>;
+
 /**
  * Fehlerantwort.
  *

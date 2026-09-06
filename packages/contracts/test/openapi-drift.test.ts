@@ -12,7 +12,7 @@ import {
   serializeOpenApiDocument,
   weekKeyParam,
 } from "../src/openapi/document.js";
-import { WORKSITE_DAY_PROBLEM_TYPE } from "../src/planning/schemas.js";
+import { ENGAGEMENT_PROBLEM_TYPE, WORKSITE_DAY_PROBLEM_TYPE } from "../src/planning/schemas.js";
 import { LocalDateSchema } from "../src/primitives.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -280,34 +280,60 @@ describe("Baustellentag-Routen (EYT-147 M2)", () => {
   const schemas = (doc["components"] as { schemas: Record<string, Record<string, unknown>> })
     .schemas;
 
-  /** Pfad -> erwartete Operation. Tabelle statt vier Einzelfaelle. */
+  /**
+   * Pfad -> erwartete Operation. Tabelle statt Einzelfaelle.
+   *
+   * `antwort` steht je Zeile, seit die Einsatzroute (EYT-120) dazukam: sie
+   * antwortet mit `EngagementDto`, nicht mit dem Baustellentag — eine Tabelle
+   * mit EINEM festen Antwortschema haette entweder die neue Zeile nicht
+   * aufnehmen koennen oder die Zusicherung fuer die alten verloren.
+   */
   const ROUTEN = [
-    { pfad: "/planung/baustellentage", operationId: "planWorksiteDay", erfolg: "201" },
-    { pfad: "/planung/baustellentage/team", operationId: "updateWorksiteDayTeam", erfolg: "200" },
+    {
+      pfad: "/planung/baustellentage",
+      operationId: "planWorksiteDay",
+      erfolg: "201",
+      antwort: "WorksiteDayDto",
+    },
+    {
+      pfad: "/planung/baustellentage/team",
+      operationId: "updateWorksiteDayTeam",
+      erfolg: "200",
+      antwort: "WorksiteDayDto",
+    },
+    {
+      pfad: "/planung/einsaetze",
+      operationId: "createEngagement",
+      erfolg: "201",
+      antwort: "EngagementDto",
+    },
   ] as const;
 
-  it.each(ROUTEN)("dokumentiert POST $pfad als $operationId", ({ pfad, operationId, erfolg }) => {
-    const eintrag = paths[pfad];
-    expect(eintrag, `Pfad ${pfad} fehlt im Vertrag`).toBeDefined();
+  it.each(ROUTEN)(
+    "dokumentiert POST $pfad als $operationId",
+    ({ pfad, operationId, erfolg, antwort }) => {
+      const eintrag = paths[pfad];
+      expect(eintrag, `Pfad ${pfad} fehlt im Vertrag`).toBeDefined();
 
-    // Vakanzschutz: ohne diese Zeile waeren die Zusicherungen unten auch dann
-    // gruen, wenn die Operation gar keine POST-Methode traegt.
-    const op = eintrag?.["post"];
-    expect(op, `${pfad} hat keine POST-Operation`).toBeDefined();
-    expect(op?.["operationId"]).toBe(operationId);
+      // Vakanzschutz: ohne diese Zeile waeren die Zusicherungen unten auch dann
+      // gruen, wenn die Operation gar keine POST-Methode traegt.
+      const op = eintrag?.["post"];
+      expect(op, `${pfad} hat keine POST-Operation`).toBeDefined();
+      expect(op?.["operationId"]).toBe(operationId);
 
-    const responses = op?.["responses"] as Record<string, unknown> | undefined;
-    expect(Object.keys(responses ?? {})).toContain(erfolg);
+      const responses = op?.["responses"] as Record<string, unknown> | undefined;
+      expect(Object.keys(responses ?? {})).toContain(erfolg);
 
-    // Und der Erfolgsfall traegt WIRKLICH den Baustellentag — nicht irgendein
-    // Objekt. Ohne diese Zeile bliebe der Fall gruen, wenn jemand die Antwort
-    // versehentlich auf `AssignmentDto` umhaengt.
-    const erfolgsantwort = responses?.[erfolg] as
-      { content: { "application/json": { schema: { $ref: string } } } } | undefined;
-    expect(erfolgsantwort?.content["application/json"].schema.$ref).toBe(
-      "#/components/schemas/WorksiteDayDto",
-    );
-  });
+      // Und der Erfolgsfall traegt WIRKLICH das erwartete Schema — nicht irgendein
+      // Objekt. Ohne diese Zeile bliebe der Fall gruen, wenn jemand die Antwort
+      // versehentlich auf `AssignmentDto` umhaengt.
+      const erfolgsantwort = responses?.[erfolg] as
+        { content: { "application/json": { schema: { $ref: string } } } } | undefined;
+      expect(erfolgsantwort?.content["application/json"].schema.$ref).toBe(
+        `#/components/schemas/${antwort}`,
+      );
+    },
+  );
 
   it.each(ROUTEN)("verlangt bei $pfad den Idempotenzschluessel", ({ pfad }) => {
     const params = (paths[pfad]?.["post"]?.["parameters"] ?? []) as Array<{
@@ -349,6 +375,32 @@ describe("Baustellentag-Routen (EYT-147 M2)", () => {
       expect(beschreibung).not.toContain("worksite-day-incomplete");
       expect(beschreibung).not.toContain(WORKSITE_DAY_PROBLEM_TYPE.WORKSITE_DAY_TEAM_REQUIRED);
     }
+  });
+
+  it("nennt die Einsatz-Problem-Types im 409-Zweig von /planung/einsaetze (EYT-120)", () => {
+    // Dieselbe Kopplungsmessung wie oben, fuer `ENGAGEMENT_PROBLEM_TYPE`: als
+    // Literale in `document.ts` bliebe `v1.json` gleich und die Konstante ein
+    // Kommentar.
+    const einsatz = paths["/planung/einsaetze"]?.["post"]?.["responses"] as
+      Record<string, { description: string }> | undefined;
+    for (const typ of [
+      ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_START_IN_PAST,
+      ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_NONEXISTENT,
+      ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_AMBIGUOUS,
+      ENGAGEMENT_PROBLEM_TYPE.WORKING_TIME_OUTSIDE_ENGAGEMENT,
+      ENGAGEMENT_PROBLEM_TYPE.WORKSITE_DAY_CLAIMED,
+      WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY,
+    ]) {
+      expect(einsatz?.["409"]?.description, `${typ} fehlt im 409-Zweig`).toContain(typ);
+    }
+    // Gegenprobe: die Typen der Task-Gruppe E gehoeren dem EINZELTAG-Command,
+    // nicht dieser Route — ein Einsatz kann keinen Einsatz vermissen.
+    expect(einsatz?.["409"]?.description).not.toContain(
+      ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_REQUIRED,
+    );
+    expect(einsatz?.["409"]?.description).not.toContain(
+      ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_AMBIGUOUS,
+    );
   });
 
   it("traegt im Dokument genau die Zod-Grenzen, die JSON Schema ausdruecken KANN", () => {

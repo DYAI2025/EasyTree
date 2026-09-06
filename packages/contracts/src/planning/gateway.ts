@@ -8,6 +8,8 @@ import type { IdempotencyKey } from "../primitives.js";
 import type {
   AssignmentDto,
   CreateAssignmentCommand,
+  CreateEngagementCommand,
+  EngagementDto,
   PlanValidationResult,
   PlanWorksiteDayCommand,
   PlanningWindow,
@@ -73,4 +75,16 @@ export interface PlanningGateway {
     input: UpdateWorksiteDayTeamCommand,
     options: WriteOptions,
   ): Promise<GatewayResult<WorksiteDayDto>>;
+}
+
+/**
+ * Einsatz-Port (EYT-120). Eigener Port statt Wachstum von {@link PlanningGateway}: sieben
+ * apps/web-Teststubs sind `: PlanningGateway` typisiert und wuerden mit jedem neuen
+ * Pflichtmitglied rot — die UI (Inkrement 2) verdrahtet diesen Port im Composition Root.
+ */
+export interface EngagementGateway {
+  createEngagement(
+    input: CreateEngagementCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<EngagementDto>>;
 }

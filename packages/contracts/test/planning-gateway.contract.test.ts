@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { MockPlanningGateway } from "../src/mock/planning.js";
-import { WorksiteDayDtoSchema } from "../src/planning/schemas.js";
+import {
+  EngagementDtoSchema,
+  PlanningWindowSchema,
+  WorksiteDayDtoSchema,
+} from "../src/planning/schemas.js";
 import {
   PLANNING_GATEWAY_CONTRACT_FIXTURE,
   PLANNING_VALIDATION_CODE,
@@ -100,6 +104,23 @@ function makeMock(): MockPlanningGateway {
       assignmentIds: [
         "3f2504e0-4f89-41d3-9a0c-0305e82c3307",
         "3f2504e0-4f89-41d3-9a0c-0305e82c3308",
+      ],
+    },
+    // EYT-120: Ids fuer ZWEI Tage mit je einer Person. Ein dritter Tag muss
+    // auffallen — siehe "erfindet keine Id" unten.
+    nextEngagement: {
+      engagementId: "3f2504e0-4f89-41d3-9a0c-0305e82c3310",
+      worksiteDayIds: [
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3311",
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3312",
+      ],
+      configurationIds: [
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3313",
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3314",
+      ],
+      assignmentIds: [
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3315",
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3316",
       ],
     },
   });
@@ -294,5 +315,114 @@ describe("Baustellentag-Kommandos des Mocks (EYT-147 M2)", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.problem?.detail).toContain("Fixture erweitern");
+  });
+});
+
+describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
+  const SCHLUESSEL = PLANNING_GATEWAY_CONTRACT_FIXTURE.idempotencyKey;
+  // Zwei Tage in der veroeffentlichten Woche W32 des Fixtures — nur dort kann
+  // das Fenster Tage MIT Herkunft zeigen (der Mock kennt keinen Entwurf).
+  const EINSATZ = {
+    worksiteId: WORKSITE_ID,
+    startAt: { date: "2026-08-05", time: "07:00" },
+    endAt: { date: "2026-08-06", time: "16:00" },
+    planningHorizon: null,
+    defaults: { workingTime: { from: "08:00", to: "18:00" } },
+    days: [
+      { localDate: "2026-08-05" },
+      { localDate: "2026-08-06", workingTime: { from: "08:00", to: "12:00" } },
+    ],
+    team: [EMPLOYEE_ID],
+  };
+
+  it("legt je ausgewaehltem Tag einen Baustellentag mit Woche an — vertragskonform", async () => {
+    const result = await makeMock().createEngagement(EINSATZ, { idempotencyKey: SCHLUESSEL });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(() => EngagementDtoSchema.parse(result.value)).not.toThrow();
+    expect(result.value.engagementId).toBe("3f2504e0-4f89-41d3-9a0c-0305e82c3310");
+    expect(result.value.days.map((tag) => tag.localDate)).toEqual(["2026-08-05", "2026-08-06"]);
+    expect(result.value.days.map((tag) => tag.weekKey)).toEqual(["2026-W32", "2026-W32"]);
+    // Ids aus dem Fixture, der Reihe nach — und nicht aus `nextWorksiteDay`.
+    expect(result.value.days.map((tag) => tag.worksiteDayId)).toEqual([
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3311",
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3312",
+    ]);
+    expect(result.value.days.map((tag) => tag.team[0]?.assignmentId)).toEqual([
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3315",
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3316",
+    ]);
+    // Lokale Zeiten in Europe/Berlin (Sommer, UTC+2): 07:00 -> 05:00Z; die
+    // Tagesarbeitszeit kommt aus `defaults`, ausser der Tag bringt eine eigene.
+    expect(result.value.startsAtUtc).toBe("2026-08-05T05:00:00.000Z");
+    expect(result.value.endsAtUtc).toBe("2026-08-06T14:00:00.000Z");
+    expect(result.value.days[0]?.team[0]?.interval).toEqual({
+      startUtc: "2026-08-05T06:00:00.000Z",
+      endUtc: "2026-08-05T16:00:00.000Z",
+    });
+    expect(result.value.days[1]?.team[0]?.interval).toEqual({
+      startUtc: "2026-08-06T06:00:00.000Z",
+      endUtc: "2026-08-06T10:00:00.000Z",
+    });
+  });
+
+  it("zeigt die angelegten Tage danach im Planungsfenster — samt Zuweisungen", async () => {
+    const mock = makeMock();
+    const angelegt = await mock.createEngagement(EINSATZ, { idempotencyKey: SCHLUESSEL });
+    expect(angelegt.ok).toBe(true);
+    const fenster = await mock.getPlanningWindow({ weekKey: "2026-W32" });
+    expect(fenster.ok).toBe(true);
+    if (!fenster.ok) return;
+    // Gegen das Fensterschema geparst: es verlangt, dass jedes Teammitglied
+    // eine Zuweisung unter `assignments` hat — ein Mock, der nur die Tage
+    // ablegt, fiele hier durch.
+    expect(() => PlanningWindowSchema.parse(fenster.value)).not.toThrow();
+    expect(fenster.value.worksiteDays?.map((tag) => tag.localDate)).toEqual([
+      "2026-08-05",
+      "2026-08-06",
+    ]);
+    expect(fenster.value.assignments.map((z) => z.id)).toEqual(
+      expect.arrayContaining([
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3315",
+        "3f2504e0-4f89-41d3-9a0c-0305e82c3316",
+      ]),
+    );
+  });
+
+  it("lehnt ein Kommando ab, das das Schema verwirft, und legt dann nichts an", async () => {
+    const mock = makeMock();
+    const result = await mock.createEngagement(
+      { ...EINSATZ, days: [{ localDate: "2026-08-07" }] }, // ausserhalb von endAt
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("REJECTED");
+    expect(result.problem?.status).toBe(400);
+    const fenster = await mock.getPlanningWindow({ weekKey: "2026-W32" });
+    expect(fenster.ok && fenster.value.worksiteDays).toEqual([]);
+  });
+
+  it("erfindet keine Id, wenn das Fixture nicht reicht", async () => {
+    const result = await makeMock().createEngagement(
+      {
+        ...EINSATZ,
+        endAt: { date: "2026-08-07", time: "16:00" },
+        days: [...EINSATZ.days, { localDate: "2026-08-07" }],
+      },
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.problem?.detail).toContain("Fixture erweitern");
+  });
+
+  it("respektiert einen induzierten Fehler", async () => {
+    const mock = makeMock();
+    mock.induce("UNAVAILABLE");
+    const result = await mock.createEngagement(EINSATZ, { idempotencyKey: SCHLUESSEL });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toBe("UNAVAILABLE");
   });
 });

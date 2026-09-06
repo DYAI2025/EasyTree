@@ -15,11 +15,20 @@ export {
   INSTANT_PATTERN,
   InstantSchema,
   LocalDateSchema,
+  LocalDateTimeSchema,
+  LocalTimeSchema,
   ProblemDocumentSchema,
   cursorPage,
   newIdempotencyKey,
 } from "./primitives.js";
-export type { IdempotencyKey, Instant, LocalDate, ProblemDocument } from "./primitives.js";
+export type {
+  IdempotencyKey,
+  Instant,
+  LocalDate,
+  LocalDateTime,
+  LocalTime,
+  ProblemDocument,
+} from "./primitives.js";
 
 export { GATEWAY_FAILURES, gatewayFailed, gatewayOk } from "./gateway.js";
 export type { GatewayFailure, GatewayResult } from "./gateway.js";
@@ -29,6 +38,11 @@ export {
   CONFLICT_CODE_VALUES,
   ConflictCodeSchema,
   CreateAssignmentCommandSchema,
+  CreateEngagementCommandSchema,
+  ENGAGEMENT_PROBLEM_TYPE,
+  EngagementDaySelectionSchema,
+  EngagementDayDtoSchema,
+  EngagementDtoSchema,
   PlanValidationResultSchema,
   PlanWorksiteDayCommandSchema,
   PlanningConflictDtoSchema,
@@ -44,6 +58,7 @@ export {
   UpdateWorksiteDayTeamCommandSchema,
   ValidatePlanCommandSchema,
   WORKSITE_DAY_PROBLEM_TYPE,
+  WorkingTimeSchema,
   WorksiteDayDtoSchema,
   WorksiteDayTeamCommandSchema,
   WorksiteDayTeamEntrySchema,
@@ -52,6 +67,11 @@ export {
 export type {
   AssignmentDto,
   CreateAssignmentCommand,
+  CreateEngagementCommand,
+  EngagementDaySelection,
+  EngagementDayDto,
+  EngagementDto,
+  EngagementProblemType,
   PlanValidationResult,
   PlanWorksiteDayCommand,
   PlanningConflictDto,
@@ -65,12 +85,13 @@ export type {
   TimeIntervalDto,
   UpdateWorksiteDayTeamCommand,
   ValidatePlanCommand,
+  WorkingTime,
   WorksiteDayDto,
   WorksiteDayProblemType,
   WorksiteDayTeamEntry,
   WorksiteDayTeamMember,
 } from "./planning/schemas.js";
-export type { PlanningGateway } from "./planning/gateway.js";
+export type { EngagementGateway, PlanningGateway } from "./planning/gateway.js";
 
 // ISO-Wochenschluessel mit Kalenderrechnung (EYT-88). Exportiert, weil sowohl
 // spaetere Command-Grenzen als auch der Paritaetstest gegen `@easytree/domain`

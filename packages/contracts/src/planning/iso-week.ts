@@ -186,6 +186,44 @@ export function isValidIsoWeekKey(kandidat: string): boolean {
   return parseIsoWeekKey(kandidat).ok;
 }
 
+const LOKALES_DATUM_MUSTER = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Wochenschluessel eines lokalen Kalendertags `JJJJ-MM-TT` (EYT-120).
+ *
+ * Gerechnet ueber die UTC-Mitternacht des Tages, NICHT ueber einen Zeitpunkt in
+ * einer Zone: der Tag ist bereits die lokale Angabe, und welche ISO-Woche ihn
+ * traegt, haengt an keiner Zeitzone mehr. Deshalb auch keine +24h-Arithmetik
+ * auf einem Instant — die kippte an einer Sommerzeitgrenze um einen Tag.
+ *
+ * Dieselbe Kalenderrechnung wie {@link parseIsoWeekKey}. Eine zweite Wochenregel
+ * im Mock oder in einer Oberflaeche waere genau der Fehler, den EYT-88 behebt.
+ *
+ * @throws {RangeError} wenn der Wert kein realer Kalendertag ist — dieselbe
+ * Haltung wie {@link formatIsoWeekKey}: eine Funktion, die aus `2026-02-30`
+ * still eine Woche macht, waere ein Leck in der Grenze.
+ */
+export function isoWeekKeyOf(localDate: string): string {
+  const treffer = LOKALES_DATUM_MUSTER.exec(localDate);
+  if (treffer === null) {
+    throw new RangeError(`isoWeekKeyOf: ${localDate} ist kein lokales Datum im Format JJJJ-MM-TT.`);
+  }
+  const jahr = Number(treffer[1]);
+  const monat = Number(treffer[2]);
+  const tag = Number(treffer[3]);
+  const utcMs = utcMitternacht(jahr, monat, tag);
+  // Rueckweg: `setUTCFullYear` normalisiert 2026-02-30 still zum 2. Maerz.
+  const zurueck = new Date(utcMs);
+  if (
+    zurueck.getUTCFullYear() !== jahr ||
+    zurueck.getUTCMonth() !== monat - 1 ||
+    zurueck.getUTCDate() !== tag
+  ) {
+    throw new RangeError(`isoWeekKeyOf: ${localDate} ist kein realer Kalendertag.`);
+  }
+  return formatIsoWeekKey(isoWocheVonUtc(utcMs));
+}
+
 /**
  * Formatiert eine ISO-Woche als Schluessel. Gegenstueck zu {@link parseIsoWeekKey}.
  *

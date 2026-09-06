@@ -42,14 +42,16 @@ import {
   ProblemDocumentSchema,
   type ProblemDocument,
 } from "../primitives.js";
-import type { PlanningGateway, WriteOptions } from "../planning/gateway.js";
+import type { EngagementGateway, PlanningGateway, WriteOptions } from "../planning/gateway.js";
 import {
   AssignmentDtoSchema,
+  EngagementDtoSchema,
   PlanValidationResultSchema,
   PlanningWindowSchema,
   PublishedPlanVersionSchema,
   WorksiteDayDtoSchema,
   type CreateAssignmentCommand,
+  type CreateEngagementCommand,
   type PlanWorksiteDayCommand,
   type PlanningWindowQuery,
   type PublishPlanCommand,
@@ -97,7 +99,7 @@ interface Call<TOut> {
   readonly conflictAs: "REJECTED" | "STALE_VERSION";
 }
 
-export class HttpPlanningGateway implements PlanningGateway {
+export class HttpPlanningGateway implements PlanningGateway, EngagementGateway {
   private readonly baseUrl: string;
 
   constructor(private readonly options: HttpPlanningGatewayOptions) {
@@ -197,6 +199,22 @@ export class HttpPlanningGateway implements PlanningGateway {
       // bemaengeln, an der nichts falsch war. Welcher der 409-Typen es genau
       // war, steht in `problem.type` (WORKSITE_DAY_PROBLEM_TYPE).
       conflictAs: "STALE_VERSION",
+    });
+  }
+
+  createEngagement(
+    input: CreateEngagementCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<z.infer<typeof EngagementDtoSchema>>> {
+    return this.send({
+      path: "/planung/einsaetze",
+      method: "POST",
+      body: input,
+      idempotencyKey: options.idempotencyKey,
+      schema: EngagementDtoSchema,
+      // Jeder 409 ist eine fachliche Ablehnung (Tag vergeben, Zeit ausserhalb, Vergangenheit,
+      // DST) — beim Anlegen gibt es keinen veralteten Stand.
+      conflictAs: "REJECTED",
     });
   }
 

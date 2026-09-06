@@ -11,10 +11,14 @@
  */
 import { gatewayFailed, gatewayOk, type GatewayFailure, type GatewayResult } from "../gateway.js";
 import type { WriteOptions } from "../planning/gateway.js";
-import type { PlanningGateway } from "../planning/gateway.js";
+import type { EngagementGateway, PlanningGateway } from "../planning/gateway.js";
+import { isoWeekKeyOf } from "../planning/iso-week.js";
 import type {
   AssignmentDto,
   CreateAssignmentCommand,
+  CreateEngagementCommand,
+  EngagementDayDto,
+  EngagementDto,
   PlanWorksiteDayCommand,
   PlanValidationResult,
   PlanningWindow,
@@ -29,6 +33,7 @@ import type {
 } from "../planning/schemas.js";
 import {
   CreateAssignmentCommandSchema,
+  CreateEngagementCommandSchema,
   PlanWorksiteDayCommandSchema,
   UpdateWorksiteDayTeamCommandSchema,
   ValidatePlanCommandSchema,
@@ -93,12 +98,34 @@ export interface MockPlanningState {
     readonly configurationId: string;
     readonly assignmentIds: readonly string[];
   };
+  /**
+   * Ids fuer den Einsatz, den `createEngagement` zurueckgibt (EYT-120).
+   *
+   * Derselbe Mechanismus wie `nextWorksiteDay`, nur je Tag: `worksiteDayIds` und
+   * `configurationIds` werden den ausgewaehlten Tagen der Reihe nach zugeteilt,
+   * `assignmentIds` den Paaren (Tag, Teammitglied) — Tag fuer Tag, innerhalb des
+   * Tages in Teamreihenfolge. Reicht eine Liste nicht, lehnt der Mock ab, statt
+   * Ids zu erfinden oder Tage still wegzulassen.
+   *
+   * Optional, damit ein Fixture ohne Einsatz gueltig bleibt: ohne diesen Block
+   * antwortet `createEngagement` mit derselben Ablehnung wie ein zu kurzes
+   * Fixture. Ein Vorgabewert waere eine eingebaute Konstante, gegen die eine
+   * Zusicherung pruefen koennte, ohne dass jemand sie gewaehlt hat.
+   */
+  readonly nextEngagement?: {
+    readonly engagementId: string;
+    readonly worksiteDayIds: readonly string[];
+    readonly configurationIds: readonly string[];
+    readonly assignmentIds: readonly string[];
+  };
 }
 
-export class MockPlanningGateway implements PlanningGateway {
+export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
   #induced: GatewayFailure | null = null;
   #lastValidated: ValidatePlanCommand | null = null;
   readonly #assignments = new Map<string, AssignmentDto[]>();
+  /** Wochenschluessel -> Baustellentage, die `createEngagement` angelegt hat. */
+  readonly #worksiteDays = new Map<string, WorksiteDayDto[]>();
   readonly #idempotency = new Map<
     string,
     { readonly fingerprint: string; readonly assignment: AssignmentDto }
@@ -146,6 +173,13 @@ export class MockPlanningGateway implements PlanningGateway {
             : { id: week.publishedVersionId, state: "published" as const },
         publishedVersionId: week?.publishedVersionId ?? null,
         resources: this.state.resources,
+        // Die Tage aus `createEngagement` (EYT-120). Dieselbe Grenze wie bei
+        // `sourceVersion`: in einer Woche ohne veroeffentlichte Version meldet
+        // der Mock `sourceVersion: null`, und `PlanningWindowSchema` verwirft
+        // ein Fenster mit Tagen ohne Herkunft — so wie es Zuweisungen aus
+        // `createAssignment` dort schon verwirft. Wer Tage in einer
+        // unveroeffentlichten Woche sehen will, braucht den echten Server.
+        worksiteDays: [...(this.#worksiteDays.get(input.weekKey) ?? [])],
       }),
     );
   }
@@ -369,6 +403,134 @@ export class MockPlanningGateway implements PlanningGateway {
     });
   }
 
+  /**
+   * Legt einen Einsatz mit seinen Tagen an (EYT-120) — als ANTWORTFORM plus
+   * Zustand, nicht als Fachlogik.
+   *
+   * Was der Mock tut: das Kommando gegen das Schema pruefen, je ausgewaehltem
+   * Tag einen Baustellentag mit Team aus den Fixture-Ids zusammensetzen, die
+   * lokalen Zeiten mit `state.timeZone` in Instants aufloesen, die Woche des
+   * Tages ueber dieselbe Kalenderrechnung wie der Vertrag bestimmen und Tage
+   * samt Zuweisungen ablegen, damit `getPlanningWindow` sie zeigt.
+   *
+   * Was er NICHT tut, und ehrlich nicht kann: einen Beginn in der Vergangenheit,
+   * eine nicht existente oder mehrdeutige Sommerzeit-Zeit, eine Arbeitszeit
+   * ausserhalb der Einsatzgrenzen oder einen bereits vergebenen Tag erkennen.
+   * Diese Problem-Types (`ENGAGEMENT_PROBLEM_TYPE`) gehoeren dem echten Server —
+   * dieselbe Grenze wie `STALE_WORKSITE_DAY` beim Teamwechsel.
+   */
+  createEngagement(
+    input: CreateEngagementCommand,
+    options: WriteOptions,
+  ): Promise<GatewayResult<EngagementDto>> {
+    const failed = this.#maybeFail<EngagementDto>();
+    if (failed !== null) return Promise.resolve(failed);
+
+    const parsed = CreateEngagementCommandSchema.safeParse(input);
+    const key = IdempotencyKeySchema.safeParse(options.idempotencyKey);
+    if (!parsed.success || !key.success) {
+      return Promise.resolve(
+        planningRejected(
+          "urn:easytree:planning:invalid-interval",
+          "Einsatz unvollstaendig, Tage ausserhalb des Zeitraums oder Team leer",
+          400,
+        ),
+      );
+    }
+    const kommando = parsed.data;
+
+    const ids = this.state.nextEngagement;
+    const tage = kommando.days.length;
+    const zuweisungen = tage * kommando.team.length;
+    if (
+      ids === undefined ||
+      ids.worksiteDayIds.length < tage ||
+      ids.configurationIds.length < tage ||
+      ids.assignmentIds.length < zuweisungen
+    ) {
+      return Promise.resolve(
+        planningRejected<EngagementDto>(
+          "urn:easytree:planning:invalid-interval",
+          `Der Clickdummy haelt ${ids?.worksiteDayIds.length ?? 0} Tages-, ` +
+            `${ids?.configurationIds.length ?? 0} Konfigurations- und ` +
+            `${ids?.assignmentIds.length ?? 0} Assignment-Ids bereit; der Einsatz braucht ` +
+            `${tage}, ${tage} und ${zuweisungen}. Fixture erweitern statt Ids zu erfinden.`,
+          400,
+        ),
+      );
+    }
+
+    const zone = this.state.timeZone;
+    /** Je Tag der Antwort-DTO und die Zuweisungen, die sein Team im Fenster belegen. */
+    const angelegt: { readonly tag: EngagementDayDto; readonly zuweisungen: AssignmentDto[] }[] =
+      [];
+    let naechsteZuweisung = 0;
+    kommando.days.forEach((tag, index) => {
+      const worksiteDayId = ids.worksiteDayIds[index];
+      const configurationId = ids.configurationIds[index];
+      // Der Laengenriegel oben schliesst das aus — siehe `#baustellentag`.
+      if (worksiteDayId === undefined || configurationId === undefined) {
+        throw new Error("Clickdummy: Tages-Id fehlt trotz Laengenpruefung");
+      }
+      const arbeitszeit = tag.workingTime ?? kommando.defaults.workingTime;
+      const interval = {
+        startUtc: lokalNachUtc(tag.localDate, arbeitszeit.from, zone),
+        endUtc: lokalNachUtc(tag.localDate, arbeitszeit.to, zone),
+      };
+      const zuweisungen: AssignmentDto[] = [];
+      const team = kommando.team.map((employeeId) => {
+        const assignmentId = ids.assignmentIds[naechsteZuweisung];
+        naechsteZuweisung += 1;
+        if (assignmentId === undefined) {
+          throw new Error("Clickdummy: Assignment-Id fehlt trotz Laengenpruefung");
+        }
+        zuweisungen.push({
+          id: assignmentId,
+          employeeId,
+          worksiteId: kommando.worksiteId,
+          interval,
+        });
+        return { assignmentId, employeeId, interval };
+      });
+      angelegt.push({
+        tag: {
+          worksiteDayId,
+          configurationId,
+          worksiteId: kommando.worksiteId,
+          localDate: tag.localDate,
+          lockVersion: 0,
+          team,
+          weekKey: isoWeekKeyOf(tag.localDate),
+        },
+        zuweisungen,
+      });
+    });
+
+    // Erst nach vollstaendigem Aufbau in den Zustand — EINE Transaktion, auch
+    // im Clickdummy: ein Fehler oben hinterlaesst keinen halben Einsatz.
+    for (const { tag, zuweisungen } of angelegt) {
+      // Ohne `weekKey`: das Fenster fuehrt Tage als `WorksiteDayDto`, und das
+      // Schema ist strikt — ein mitgeschleppter Wochenschluessel machte das
+      // ganze Fenster unlesbar.
+      const { weekKey, ...ohneWoche } = tag;
+      this.#worksiteDays.set(weekKey, [...(this.#worksiteDays.get(weekKey) ?? []), ohneWoche]);
+      this.#assignments.set(weekKey, [...(this.#assignments.get(weekKey) ?? []), ...zuweisungen]);
+    }
+
+    return Promise.resolve(
+      gatewayOk<EngagementDto>({
+        engagementId: ids.engagementId,
+        worksiteId: kommando.worksiteId,
+        startsAtUtc: lokalNachUtc(kommando.startAt.date, kommando.startAt.time, zone),
+        endsAtUtc:
+          kommando.endAt === null
+            ? null
+            : lokalNachUtc(kommando.endAt.date, kommando.endAt.time, zone),
+        days: angelegt.map(({ tag }) => tag),
+      }),
+    );
+  }
+
   publishPlan(input: PublishPlanCommand): Promise<GatewayResult<PublishedPlanVersion>> {
     const failed = this.#maybeFail<PublishedPlanVersion>();
     if (failed !== null) return Promise.resolve(failed);
@@ -401,6 +563,75 @@ export class MockPlanningGateway implements PlanningGateway {
     }
     return Promise.resolve(gatewayOk(week.publishResult));
   }
+}
+
+/**
+ * Loest lokales Datum + lokale Uhrzeit in der Zone zu einem Instant auf.
+ *
+ * Nur fuer den Clickdummy. Der Versatz der Zone wird ueber `Intl` am geratenen
+ * Zeitpunkt bestimmt und ein zweites Mal am Ergebnis, damit ein Wechsel knapp
+ * daneben beruecksichtigt wird. Eine nicht existente Zeit (Sommerzeitluecke)
+ * oder eine mehrdeutige (Rueckstellung) wird dabei NICHT erkannt, sondern
+ * still auf einen der beiden Kandidaten gelegt — der echte Server lehnt sie
+ * benannt ab (`LOCAL_TIME_NONEXISTENT`, `LOCAL_TIME_AMBIGUOUS`).
+ */
+function lokalNachUtc(date: string, time: string, timeZone: string): string {
+  const [jahr, monat, tag] = date.split("-").map(Number);
+  const [stunde, minute] = time.split(":").map(Number);
+  if (
+    jahr === undefined ||
+    monat === undefined ||
+    tag === undefined ||
+    stunde === undefined ||
+    minute === undefined
+  ) {
+    // Unerreichbar nach `CreateEngagementCommandSchema` — aber ein `?? 0`
+    // stuende hier als stiller Ersatzwert und ergaebe einen falschen Instant.
+    throw new Error(`Clickdummy: ${date} ${time} ist kein lokaler Zeitpunkt`);
+  }
+  const alsUtc = utcMs(jahr, monat, tag, stunde, minute, 0);
+  const ersterVersuch = alsUtc - zonenversatzMs(alsUtc, timeZone);
+  return new Date(alsUtc - zonenversatzMs(ersterVersuch, timeZone)).toISOString();
+}
+
+/** UTC-Millisekunden ohne die 1900-Umdeutung kleiner Jahreszahlen durch `Date.UTC`. */
+function utcMs(
+  jahr: number,
+  monat1bis12: number,
+  tag: number,
+  stunde: number,
+  minute: number,
+  sekunde: number,
+): number {
+  const d = new Date(0);
+  d.setUTCFullYear(jahr, monat1bis12 - 1, tag);
+  d.setUTCHours(stunde, minute, sekunde, 0);
+  return d.getTime();
+}
+
+/** Versatz der Zone zum Zeitpunkt, in Millisekunden (Berlin im Sommer: +7 200 000). */
+function zonenversatzMs(zeitpunktMs: number, timeZone: string): number {
+  const teile = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(zeitpunktMs));
+  const wert = (typ: Intl.DateTimeFormatPartTypes): number =>
+    Number(teile.find((teil) => teil.type === typ)?.value ?? Number.NaN);
+  const lokalAlsUtc = utcMs(
+    wert("year"),
+    wert("month"),
+    wert("day"),
+    wert("hour"),
+    wert("minute"),
+    wert("second"),
+  );
+  return lokalAlsUtc - zeitpunktMs;
 }
 
 function planningRejected<T>(type: string, detail: string, status: number): GatewayResult<T> {
