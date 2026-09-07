@@ -499,6 +499,23 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
     }
   });
 
+  it("HP2-R5 behandelt ausgelassene defaults und defaults: {} beim Replay gleich", async () => {
+    const mock = makeMock();
+    const { defaults, ...ohneDefaults } = EINSATZ;
+    void defaults;
+
+    const erster = await mock.createEngagement(ohneDefaults, { idempotencyKey: SCHLUESSEL });
+    const zweiter = await mock.createEngagement(
+      { ...ohneDefaults, defaults: {} },
+      { idempotencyKey: SCHLUESSEL },
+    );
+
+    expect(erster.ok).toBe(true);
+    expect(zweiter.ok).toBe(true);
+    if (!erster.ok || !zweiter.ok) return;
+    expect(zweiter.value).toEqual(erster.value);
+  });
+
   it("erkennt dasselbe Kommando auch in anderer Reihenfolge von Overrides und Team als Wiederholung", async () => {
     // `calendar.include`, `calendar.exclude` und `team` sind MENGEN: dieselbe
     // Auswahl in anderer Reihenfolge ist dasselbe Kommando. Ein Fingerabdruck,

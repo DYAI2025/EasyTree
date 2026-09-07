@@ -136,7 +136,7 @@ const NAMED_SCHEMAS = {
   // ## Ehrlichkeitshinweis: die Beziehungen fallen bei der Erzeugung weg
   //
   // `CreateEngagementCommandSchema.superRefine` verlangt ein Ende nicht vor dem
-  // Beginn, einen Horizont genau dann, wenn das Ende offen ist, Overrides im
+  // Beginn, nach HUMAN_PO_HP1_2026_09_07 einen Horizont genau dann, wenn das Ende offen ist, Overrides im
   // aktuellen Umfang, keinen Tag zugleich auf- und abgewaehlt, mindestens einen
   // effektiven Arbeitstag und keine Person doppelt; `WorkingTimeSchema.refine`
   // verlangt `to > from`. Alles Beziehungen zwischen Feldern — JSON Schema kann
@@ -497,13 +497,18 @@ export function buildOpenApiDocument(): Record<string, unknown> {
             "Transaktion an (EYT-120). Beginn und Ende sind LOKALE GESCHAEFTSDATEN, keine " +
             "Uhrzeiten: startDate ist Pflicht, endDate ein lokales Datum oder null fuer ein " +
             "offenes Ende; bei bekanntem Ende gilt endDate >= startDate, ein eintaegiger Einsatz " +
-            "hat startDate = endDate. Bei offenem Ende gibt planningHorizonDate den aktuellen " +
-            "Planungsumfang an — es ist NICHT das fachliche Ende und wird nicht nach endDate " +
-            "uebernommen. Montag bis Freitag im inklusiven Zeitraum bzw. bis zum Horizont werden " +
+            "hat startDate = endDate. Nach HUMAN_PO_HP1_2026_09_07 gilt exklusiv: Bei bekanntem " +
+            "endDate MUSS planningHorizonDate im aktuellen Wire-Contract null sein; nur bei " +
+            "endDate = null ist " +
+            "planningHorizonDate Pflicht. Der Horizont beschreibt nur den aktuellen Planungsumfang, " +
+            "ist NICHT das fachliche Ende und wird nicht nach endDate uebernommen. Montag bis Freitag " +
+            "im inklusiven Zeitraum bzw. bis zum Horizont werden " +
             "AUTOMATISCH als Arbeitstage abgeleitet; calendar ist ein optionaler Override, der " +
             "Vorgabetage abwaehlt und Wochenendtage ausdruecklich aufnimmt, und kein Pflichtschritt. " +
-            "Geplante Arbeitszeiten (defaults.workingTime) sind OPTIONAL und keine Voraussetzung " +
-            "fuer die Erzeugung eines Baustellentages. Eine optional angegebene lokale Arbeitszeit " +
+            "Nach HUMAN_PO_HP2_2026_09_07 ist defaults OPTIONAL; ausgelassen und {} bedeuten " +
+            "dieselbe leere Ausgangskonfiguration. Geplante Arbeitszeiten " +
+            "(defaults.workingTime) sind ebenfalls OPTIONAL und keine Voraussetzung fuer die " +
+            "Erzeugung eines Baustellentages. Eine optional angegebene lokale Arbeitszeit " +
             "loest der Server mit der Organisationszeitzone auf; nicht existente/mehrdeutige " +
             "Sommerzeit-Zeiten und bereits vergebene Tage werden mit " +
             `${ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_NONEXISTENT}, ${ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_AMBIGUOUS} ` +

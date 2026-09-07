@@ -97,6 +97,11 @@ const NOT_YET_IMPLEMENTED: ReadonlyMap<string, string> = new Map([
     "Tagesbesetzung ersetzen. Braucht zusaetzlich die Lock-Version-Fortschreibung " +
       "und das atomare Ersetzen der Zuweisungen — EYT-147 M4.",
   ],
+  [
+    "POST /planung/einsaetze",
+    "EYT-120 Contract exists, but server createEngagement/persistence is intentionally not " +
+      "implemented in this Contract-only increment.",
+  ],
   // `GET /kosten/planversionen` stand hier bis EYT-144. Die Route ist am
   // `CostsController` registriert; die `stale`-Zusicherung weiter unten hat den
   // Eintrag in genau dem Lauf rot gemeldet, in dem die Route entstand.

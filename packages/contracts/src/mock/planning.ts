@@ -522,8 +522,8 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
     const fixtureTage = new Map(vorbereitet.days.map((tag) => [tag.localDate, tag]));
 
     // Die effektiven Arbeitstage ENTSTEHEN hier — sie stehen nicht im Kommando.
-    // Umfangsende ist das fachliche Ende, sonst der Planungshorizont (D-006);
-    // das Schema hat sichergestellt, dass genau einer von beiden gesetzt ist.
+    // Umfangsende ist das fachliche Ende, sonst der Planungshorizont. Das Schema
+    // hat das Ende/Horizont-XOR nach HUMAN_PO_HP1_2026_09_07 sichergestellt.
     const umfangsEnde = kommando.endDate ?? kommando.planningHorizonDate;
     if (umfangsEnde === null) {
       throw new Error("Clickdummy: weder Ende noch Horizont trotz Vertragspruefung");
@@ -676,7 +676,7 @@ function einsatzFingerabdruck(kommando: CreateEngagementCommand): string {
         : { include: [...kalender.include].sort(), exclude: [...kalender.exclude].sort() },
     defaults: {
       workingTime:
-        kommando.defaults.workingTime === undefined
+        kommando.defaults?.workingTime === undefined
           ? null
           : { from: kommando.defaults.workingTime.from, to: kommando.defaults.workingTime.to },
     },

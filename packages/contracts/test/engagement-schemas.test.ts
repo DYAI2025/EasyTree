@@ -103,7 +103,7 @@ describe("CreateEngagementCommandSchema — Einsatzgrenzen sind Geschaeftsdaten 
   });
 });
 
-describe("CreateEngagementCommandSchema — offenes Ende und Planungshorizont (D-006)", () => {
+describe("CreateEngagementCommandSchema — Ende/Horizont-XOR (HUMAN_PO_HP1_2026_09_07)", () => {
   it("R7 offenes Ende ohne Planen-bis-Datum wird abgelehnt", () => {
     expect(gueltig({ ...basis, endDate: null, planningHorizonDate: null })).toBe(false);
   });
@@ -195,15 +195,24 @@ describe("CreateEngagementCommandSchema — Kalender ist Override, kein Pflichts
   });
 });
 
-describe("CreateEngagementCommandSchema — geplante Uhrzeiten sind optional (D-004)", () => {
-  it("R18 ein Kommando OHNE jede geplante Uhrzeit ist gueltig", () => {
+describe("CreateEngagementCommandSchema — optionaler Defaults-Wrapper (HUMAN_PO_HP2_2026_09_07)", () => {
+  it("HP2-R1 akzeptiert ein gueltiges Kommando ohne defaults-Property", () => {
+    const { defaults, ...ohneDefaults } = basis;
+    void defaults;
+    expect(gueltig(ohneDefaults)).toBe(true);
+  });
+
+  it("HP2-R2 akzeptiert defaults als leeres Objekt", () => {
     expect(gueltig({ ...basis, defaults: {} })).toBe(true);
   });
 
-  it("R19 eine mitgegebene gueltige Arbeitszeit bleibt gueltig", () => {
+  it("HP2-R3 akzeptiert defaults mit gueltiger workingTime", () => {
     expect(gueltig({ ...basis, defaults: { workingTime: { from: "08:00", to: "18:00" } } })).toBe(
       true,
     );
+  });
+
+  it("HP2-R4 lehnt eine fehlerhafte workingTime weiterhin ab", () => {
     // Und bleibt in sich geprueft: `to` muss nach `from` liegen. Das ist die
     // Tagesarbeitszeit, nicht die Einsatzgrenze — sie wird hier NICHT geschwaecht.
     expect(gueltig({ ...basis, defaults: { workingTime: { from: "18:00", to: "08:00" } } })).toBe(

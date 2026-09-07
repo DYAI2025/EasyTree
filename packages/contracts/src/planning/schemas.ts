@@ -838,7 +838,7 @@ export type EngagementCalendarOverride = z.infer<typeof EngagementCalendarOverri
  * `ENGAGEMENT_CLOCK_TIMES = NOT_REQUIRED`). Die Organisationszeitzone bleibt fuer die
  * Auslegung lokaler Geschaeftstage autoritativ, macht die Grenzen aber nicht zu Zeitpunkten.
  *
- * ## Offenes Ende und Planungshorizont (D-006)
+ * ## Ende/Horizont-XOR (HUMAN_PO_HP1_2026_09_07)
  *
  * Bei `endDate === null` ist `planningHorizonDate` Pflicht und begrenzt NUR die aktuelle
  * Materialisierung. Er ist **nicht** das fachliche Ende und wird nicht still nach `endDate`
@@ -851,16 +851,17 @@ export type EngagementCalendarOverride = z.infer<typeof EngagementCalendarOverri
  * Der Normalflow kommt ohne jede Kalenderinteraktion aus; ein Flow, der 10/50/150 Tage
  * einzeln erfassen liesse, ist damit ausgeschlossen.
  *
- * ## Geplante Uhrzeiten sind optional (D-004)
+ * ## Defaults-Wrapper und geplante Uhrzeiten sind optional
  *
- * `defaults.workingTime` darf fehlen. Ihr Fehlen macht keinen Baustellentag ungueltig, und
- * eine vorhandene Arbeitszeit wird gegen KEINE Einsatz-Uhrzeitgrenze geprueft — es gibt
- * keine.
+ * `defaults` darf fehlen; ausgelassen und `{}` bedeuten dieselbe leere Ausgangskonfiguration
+ * (HUMAN_PO_HP2_2026_09_07). `defaults.workingTime` darf ebenfalls fehlen. Ihr Fehlen macht
+ * keinen Baustellentag ungueltig, und eine vorhandene Arbeitszeit wird gegen KEINE
+ * Einsatz-Uhrzeitgrenze geprueft — es gibt keine.
  *
  * ## Grenze der Veroeffentlichung
  *
- * Die Beziehungen (Ende nicht vor Beginn, Horizont-XOR, Overrides im Umfang, nicht leere
- * Tagesmenge) sind JSON-Schema nicht ausdrueckbar; zur Laufzeit gelten sie.
+ * Die Beziehungen (Ende nicht vor Beginn, HP-1-Horizont-XOR, Overrides im Umfang, nicht
+ * leere Tagesmenge) sind JSON-Schema nicht ausdrueckbar; zur Laufzeit gelten sie.
  */
 export const CreateEngagementCommandSchema = z
   .strictObject({
@@ -869,7 +870,7 @@ export const CreateEngagementCommandSchema = z
     endDate: LocalDateSchema.nullable(),
     planningHorizonDate: LocalDateSchema.nullable(),
     calendar: EngagementCalendarOverrideSchema.optional(),
-    defaults: z.strictObject({ workingTime: WorkingTimeSchema.optional() }),
+    defaults: z.strictObject({ workingTime: WorkingTimeSchema.optional() }).optional(),
     team: z.array(IdSchema).min(1, "Ein Baustellentag entsteht nicht ohne Team"),
   })
   .superRefine((cmd, ctx) => {

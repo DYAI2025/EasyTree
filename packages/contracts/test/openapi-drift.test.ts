@@ -401,6 +401,34 @@ describe("Schreibrouten der Planung (EYT-147 M2, EYT-120)", () => {
     );
   });
 
+  it("veroeffentlicht HP-1-XOR und den optionalen HP-2-Defaults-Wrapper sichtbar", () => {
+    const command = schemas["CreateEngagementCommand"];
+    const required = (command?.["required"] ?? []) as string[];
+    expect(required).toEqual(
+      expect.arrayContaining(["worksiteId", "startDate", "endDate", "planningHorizonDate", "team"]),
+    );
+    expect(required).not.toContain("defaults");
+
+    const defaults = (
+      command?.["properties"] as Record<string, Record<string, unknown>> | undefined
+    )?.["defaults"];
+    expect(defaults, "optionaler defaults-Wrapper fehlt als dokumentierte Property").toBeDefined();
+    expect((defaults?.["required"] ?? []) as string[]).not.toContain("workingTime");
+
+    const description = paths["/planung/einsaetze"]?.["post"]?.["description"] as
+      string | undefined;
+    expect(description).toContain("HUMAN_PO_HP1_2026_09_07");
+    expect(description).toContain(
+      "endDate MUSS planningHorizonDate im aktuellen Wire-Contract null sein",
+    );
+    expect(description).toContain("nur bei endDate = null ist planningHorizonDate Pflicht");
+    expect(description).toContain("HUMAN_PO_HP2_2026_09_07");
+    expect(description).toContain("defaults OPTIONAL");
+    expect(description).toContain(
+      "ausgelassen und {} bedeuten dieselbe leere Ausgangskonfiguration",
+    );
+  });
+
   it("verspricht im ganzen Dokument keine Uhrzeit-Semantik des Einsatzes mehr (EYT-120 D-003)", () => {
     // Die Human-PO-Entscheidung vom 06.09.2026 hat verpflichtende Einsatz-Uhrzeiten
     // aufgehoben. Ein Dokument, das weiterhin eine zeitgenaue Vergangenheitsregel

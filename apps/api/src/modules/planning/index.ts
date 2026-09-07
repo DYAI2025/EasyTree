@@ -87,18 +87,16 @@ export {
   PlanningProblemFilter,
 } from "./interface/http/planning-problem.filter";
 export type { PlanningErrorType } from "./interface/http/planning-problem.filter";
-// EYT-120: der Einsatzzeitraum als reine Kalenderregel (D-003/D-005/D-006).
-// Montag bis Freitag entstehen automatisch, der Kalender ist Override; die
-// Einsatzgrenzen sind Geschaeftsdaten und tragen keine Uhrzeit. Eine OPTIONAL
-// mitgegebene Tagesarbeitszeit loest die Zone auf — kein Clipping, Sommerzeit
-// faellt geschlossen.
+// EYT-120: Einsatzgrenzen und Tagesarbeitszeit als reine Regeln (D-003/D-009).
+// Uhr und Zone kommen herein; kein Clipping, Sommerzeit faellt geschlossen.
 export {
-  deriveEffectiveWorkdays,
+  resolveEngagementBounds,
   resolveLocalDateTime,
   resolveWorkingInterval,
+  workingIntervalWithinBounds,
 } from "./domain/engagement-range";
 export type {
-  EngagementCalendarOverride,
+  EngagementBounds,
   EngagementRangeProblem,
   LocalDateTimeInput,
   WorkingInterval,
