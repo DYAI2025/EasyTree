@@ -87,3 +87,17 @@ export {
   PlanningProblemFilter,
 } from "./interface/http/planning-problem.filter";
 export type { PlanningErrorType } from "./interface/http/planning-problem.filter";
+// EYT-120: Einsatzgrenzen und Tagesarbeitszeit als reine Regeln (D-003/D-009).
+// Uhr und Zone kommen herein; kein Clipping, Sommerzeit faellt geschlossen.
+export {
+  resolveEngagementBounds,
+  resolveLocalDateTime,
+  resolveWorkingInterval,
+  workingIntervalWithinBounds,
+} from "./domain/engagement-range";
+export type {
+  EngagementBounds,
+  EngagementRangeProblem,
+  LocalDateTimeInput,
+  WorkingInterval,
+} from "./domain/engagement-range";
