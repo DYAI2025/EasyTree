@@ -27,6 +27,8 @@ import {
 const VERSION_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3300";
 const ASSIGNMENT_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const EMPLOYEE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3302";
+/** Zweite bekannte Person — nur der Einsatz-Fingerabdruck braucht ein Team, das sich umsortieren laesst. */
+const ZWEITE_PERSON_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3321";
 const WORKSITE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3303";
 const INTERVAL = { startUtc: "2026-08-03T06:00:00.000Z", endUtc: "2026-08-03T14:00:00.000Z" };
 
@@ -38,7 +40,10 @@ function makeMock(): MockPlanningGateway {
     // die Absicht: der Mock kann keine Zuweisung mehr auf jemanden zeigen
     // lassen, den die Auswahlliste nicht kennt.
     resources: {
-      employees: [{ id: EMPLOYEE_ID, label: "Beschaeftigte A", active: true }],
+      employees: [
+        { id: EMPLOYEE_ID, label: "Beschaeftigte A", active: true },
+        { id: ZWEITE_PERSON_ID, label: "Beschaeftigte B", active: true },
+      ],
       worksites: [{ id: WORKSITE_ID, label: "Baustelle A", active: true }],
     },
     weeks: new Map([
@@ -107,10 +112,11 @@ function makeMock(): MockPlanningGateway {
         "3f2504e0-4f89-41d3-9a0c-0305e82c3308",
       ],
     },
-    // EYT-120: die VORBEREITETE Serverantwort fuer ZWEI Tage mit je einer
-    // Person. Die Instants stehen hier fertig — der Mock rechnet keine Zone
-    // (Europe/Berlin im Sommer ist UTC+2, 07:00 lokal = 05:00Z; das ist die
-    // Rechnung des Servers, nicht des Clickdummys). Ein dritter Tag muss
+    // EYT-120: die VORBEREITETE Serverantwort fuer ZWEI Tage mit je bis zu
+    // zwei Personen (die zweite Id je Tag braucht nur der Reihenfolge-Fall des
+    // Fingerabdrucks). Die Instants stehen hier fertig — der Mock rechnet keine
+    // Zone (Europe/Berlin im Sommer ist UTC+2, 07:00 lokal = 05:00Z; das ist
+    // die Rechnung des Servers, nicht des Clickdummys). Ein dritter Tag muss
     // auffallen — siehe "erfindet keine Id" unten.
     nextEngagement: {
       engagementId: "3f2504e0-4f89-41d3-9a0c-0305e82c3310",
@@ -123,7 +129,10 @@ function makeMock(): MockPlanningGateway {
           configurationId: "3f2504e0-4f89-41d3-9a0c-0305e82c3313",
           startUtc: "2026-08-05T06:00:00.000Z",
           endUtc: "2026-08-05T16:00:00.000Z",
-          assignmentIds: ["3f2504e0-4f89-41d3-9a0c-0305e82c3315"],
+          assignmentIds: [
+            "3f2504e0-4f89-41d3-9a0c-0305e82c3315",
+            "3f2504e0-4f89-41d3-9a0c-0305e82c3317",
+          ],
         },
         {
           localDate: "2026-08-06",
@@ -131,7 +140,10 @@ function makeMock(): MockPlanningGateway {
           configurationId: "3f2504e0-4f89-41d3-9a0c-0305e82c3314",
           startUtc: "2026-08-06T06:00:00.000Z",
           endUtc: "2026-08-06T10:00:00.000Z",
-          assignmentIds: ["3f2504e0-4f89-41d3-9a0c-0305e82c3316"],
+          assignmentIds: [
+            "3f2504e0-4f89-41d3-9a0c-0305e82c3316",
+            "3f2504e0-4f89-41d3-9a0c-0305e82c3318",
+          ],
         },
       ],
     },
@@ -463,6 +475,46 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
     expect(new Set(tagesIds).size).toBe(tagesIds.length);
     for (const tag of erster.value.days) {
       expect(tagesIds.filter((id) => id === tag.worksiteDayId)).toHaveLength(1);
+    }
+  });
+
+  it("erkennt dasselbe Kommando auch in anderer Reihenfolge von Tagen und Team als Wiederholung", async () => {
+    // `days` und `team` sind Mengen: dieselbe Auswahl in anderer Reihenfolge ist
+    // dasselbe Kommando. Ein Fingerabdruck, der die Reihenfolge mitliest,
+    // meldete hier 409 (Schluessel wiederverwendet) — der Client haette nach
+    // einem Netz-Retry weder seine Antwort noch einen zweiten Einsatz.
+    // Gegenmutation: `.sort(...)` auf `days` ODER `.sort()` auf `team` im
+    // Fingerabdruck entfernen — beides macht diesen Fall rot.
+    const mock = makeMock();
+    const zuZweit = { ...EINSATZ, team: [EMPLOYEE_ID, ZWEITE_PERSON_ID] };
+    const erster = await mock.createEngagement(zuZweit, { idempotencyKey: SCHLUESSEL });
+    const zweiter = await mock.createEngagement(
+      {
+        ...zuZweit,
+        days: [...zuZweit.days].reverse(),
+        team: [...zuZweit.team].reverse(),
+      },
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(erster.ok).toBe(true);
+    expect(zweiter.ok).toBe(true);
+    if (!erster.ok || !zweiter.ok) return;
+    expect(zweiter.value).toEqual(erster.value);
+
+    // Keine Verdopplung im Fenster: zwei Tage, und jede der vier Zuweisungen des
+    // Einsatzes genau einmal (die Woche traegt daneben ihre Fixture-Zuweisung).
+    const fenster = await mock.getPlanningWindow({ weekKey: "2026-W32" });
+    expect(fenster.ok).toBe(true);
+    if (!fenster.ok) return;
+    expect(PlanningWindowSchema.safeParse(fenster.value).success).toBe(true);
+    const tagesIds = fenster.value.worksiteDays?.map((tag) => tag.worksiteDayId) ?? [];
+    expect(tagesIds).toHaveLength(2);
+    expect(new Set(tagesIds).size).toBe(2);
+    const eigene = erster.value.days.flatMap((tag) => tag.team.map((m) => m.assignmentId));
+    expect(eigene).toHaveLength(4);
+    const imFenster = fenster.value.assignments.map((z) => z.id);
+    for (const id of eigene) {
+      expect(imFenster.filter((kandidat) => kandidat === id)).toHaveLength(1);
     }
   });
 

@@ -66,6 +66,16 @@ export const IdSchema = z.uuid().describe("UUID");
  * dazu: ohne Zeitanteil duerfte eine Laufzeit den Wert als LOKALE Zeit lesen, und
  * eine westliche Zone verschoebe den Rueckweg um einen Tag.
  *
+ * ## Warum das Jahr 0000 zusaetzlich faellt
+ *
+ * `Date` kennt das Jahr 0 und gibt `0000-01-01` unveraendert zurueck — der
+ * Rueckweg allein liesse es durch. Die Domain kennt es nicht:
+ * `utcInstantOfLocalWallTime` in `@easytree/domain` wirft fuer ein Jahr < 1
+ * einen `RangeError`, und `planning/iso-week.ts` lehnt `0000-W01` aus demselben
+ * Grund ab (PostgreSQL hat kein Jahr null). Ein Vertrag, der das Jahr 0
+ * annimmt, machte aus einer gueltigen Eingabe einen 500 statt eines 400.
+ * Untergrenze deshalb hier wie dort: Jahr >= 1.
+ *
  * ## Abgrenzung zu `BusinessDateSchema`
  *
  * `costs/schemas.ts` fuehrt fuer denselben Begriff ein SCHWAECHERES Schema: nur
@@ -83,6 +93,8 @@ export const LocalDateSchema = z
     const parsed = new Date(`${wert}T00:00:00.000Z`);
     return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === wert;
   }, "Kein realer Kalendertag im gregorianischen Kalender")
+  // Jahr 0 ist fuer `Date` ein Kalendertag, fuer die Domain keiner: siehe Dateikopf.
+  .refine((wert) => Number(wert.slice(0, 4)) >= 1, "Das Jahr 0000 gibt es nicht — Jahr >= 1")
   .describe("Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone");
 
 export type LocalDate = z.infer<typeof LocalDateSchema>;

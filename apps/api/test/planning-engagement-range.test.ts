@@ -112,14 +112,14 @@ describe("Tagesarbeitszeit innerhalb der Einsatzgrenzen (D-009)", () => {
       true,
     );
   });
-  it("15 offenes Ende erzeugt keine kuenstliche Endgrenze, die Startgrenze gilt weiter", () => {
-    const offen = { startsAtUtc: grenzen.startsAtUtc, endsAtUtc: null };
-    expect(workingIntervalWithinBounds(intervall(`${JAHR}-12-31`, "08:00", "23:59"), offen)).toBe(
-      true,
-    );
-    expect(workingIntervalWithinBounds(intervall(`${JAHR}-01-06`, "09:00", "18:00"), offen)).toBe(
-      false,
-    );
+  it("15 ohne Ende gibt es keine kuenstliche Endgrenze, die Startgrenze gilt weiter", () => {
+    const ohneEnde = { startsAtUtc: grenzen.startsAtUtc, endsAtUtc: null };
+    expect(
+      workingIntervalWithinBounds(intervall(`${JAHR}-12-31`, "08:00", "23:59"), ohneEnde),
+    ).toBe(true);
+    expect(
+      workingIntervalWithinBounds(intervall(`${JAHR}-01-06`, "09:00", "18:00"), ohneEnde),
+    ).toBe(false);
   });
   it("12 die Instants entstehen aus der Wanduhrzeit je Tag — ueber die Sommerzeitgrenze hinweg keine +24h-Arithmetik", () => {
     const vortag = `${DST_BEGINN.slice(0, 8)}${String(Number(DST_BEGINN.slice(8)) - 1).padStart(2, "0")}`;
@@ -127,12 +127,16 @@ describe("Tagesarbeitszeit innerhalb der Einsatzgrenzen (D-009)", () => {
     const nach = intervall(DST_BEGINN, "08:00", "18:00");
     expect(nach.start.getTime() - vor.start.getTime()).toBe(23 * 60 * 60 * 1000);
   });
-  it("16 kein stilles Clipping: das Modul exportiert keine Kuerzungs-/Klemmfunktion", () => {
+  it("16 kein stilles Clipping: das Modul exportiert keine Kuerzungs-/Klemmfunktion (Namensheuristik ueber alle Exportformen)", () => {
     const quelle = readFileSync(
       join(process.cwd(), "src/modules/planning/domain/engagement-range.ts"),
       "utf8",
     );
-    const exporte = [...quelle.matchAll(/export function ([A-Za-z0-9_]+)/g)].map((m) => m[1]);
+    // Alle benannten Exportformen, nicht nur `export function`: ein
+    // `export const clampEnd = () => …` ging an `/export function/` vorbei (gemessen).
+    const exporte = [
+      ...quelle.matchAll(/export (?:function|const|let|class) ([A-Za-z0-9_]+)/g),
+    ].map((m) => m[1]);
     expect(exporte.length).toBeGreaterThanOrEqual(4);
     expect(exporte.some((name) => /clip|clamp|kuerz|trim|adjust/i.test(name ?? ""))).toBe(false);
   });

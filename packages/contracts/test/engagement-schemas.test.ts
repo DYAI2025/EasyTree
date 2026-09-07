@@ -135,4 +135,29 @@ describe("CreateEngagementCommandSchema (EYT-120)", () => {
       CreateEngagementCommandSchema.safeParse({ ...basis, team: [EMPLOYEE, EMPLOYEE] }).success,
     ).toBe(false);
   });
+
+  it("lehnt das Jahr 0000 ab — die Domain kennt es nicht", () => {
+    // `Date` nimmt `0000-01-01` an und gibt es unveraendert zurueck; der
+    // Rueckweg-Test allein liesse den Wert durch. `utcInstantOfLocalWallTime`
+    // in `@easytree/domain` wirft fuer Jahr < 1 einen RangeError — aus einer
+    // vertragsgueltigen Eingabe wuerde ein 500. Der Tag liegt im Zeitraum, damit
+    // hier nur die Jahresregel entscheidet, nicht die Zeitraumregel.
+    expect(
+      CreateEngagementCommandSchema.safeParse({
+        ...basis,
+        startAt: { date: "0000-01-01", time: "08:00" },
+        days: [{ localDate: "0000-01-01" }],
+      }).success,
+    ).toBe(false);
+    // Gegenprobe: das Jahr 1 ist die Untergrenze und bleibt gueltig.
+    expect(
+      CreateEngagementCommandSchema.safeParse({
+        ...basis,
+        startAt: { date: "0001-01-01", time: "08:00" },
+        endAt: null,
+        planningHorizon: "0001-01-05",
+        days: [{ localDate: "0001-01-01" }],
+      }).success,
+    ).toBe(true);
+  });
 });
