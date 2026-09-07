@@ -13,6 +13,7 @@ import { gatewayFailed, gatewayOk, type GatewayFailure, type GatewayResult } fro
 import type { WriteOptions } from "../planning/gateway.js";
 import type { EngagementGateway, PlanningGateway } from "../planning/gateway.js";
 import { isoWeekKeyOf } from "../planning/iso-week.js";
+import { deriveEffectiveWorkdays } from "../planning/workdays.js";
 import type {
   AssignmentDto,
   CreateAssignmentCommand,
@@ -101,14 +102,15 @@ export interface MockPlanningState {
   /**
    * Die VORBEREITETE Serverantwort fuer `createEngagement` (EYT-120).
    *
-   * Nicht nur Ids, sondern auch die Instants: `startsAtUtc`, `endsAtUtc` und je
-   * Tag `startUtc`/`endUtc` stehen hier als fertige UTC-Zeitpunkte (Schreibweise
-   * wie `InstantSchema`). Der Mock rechnet keine lokale Zeit in eine Zone um —
-   * siehe den Kopfkommentar an `createEngagement`, warum nicht.
+   * Die EINSATZGRENZEN stehen hier NICHT: sie sind lokale Geschaeftsdaten und kommen
+   * unveraendert aus dem Kommando zurueck (D-003). Was hier steht, sind die Ids und je
+   * Tag die fertigen UTC-Zeitpunkte `startUtc`/`endUtc` der Zuweisungen (Schreibweise wie
+   * `InstantSchema`) — der Mock rechnet keine lokale Zeit in eine Zone um, siehe den
+   * Kopfkommentar an `createEngagement`.
    *
-   * Die Tage werden ueber `localDate` den Kommando-Tagen zugeordnet, die
+   * Die Tage werden ueber `localDate` den ABGELEITETEN Arbeitstagen zugeordnet, die
    * Reihenfolge spielt keine Rolle; `assignmentIds` gehen innerhalb eines Tages
-   * in Teamreihenfolge an die Mitglieder. Fehlt ein Kommando-Tag hier oder
+   * in Teamreihenfolge an die Mitglieder. Fehlt ein abgeleiteter Tag hier oder
    * reichen seine `assignmentIds` nicht fuer das Team, lehnt der Mock ab und
    * nennt den Tag — er erfindet keine Id und laesst keinen Tag still weg.
    *
@@ -119,8 +121,6 @@ export interface MockPlanningState {
    */
   readonly nextEngagement?: {
     readonly engagementId: string;
-    readonly startsAtUtc: string;
-    readonly endsAtUtc: string | null;
     readonly days: readonly {
       readonly localDate: string;
       readonly worksiteDayId: string;
@@ -431,15 +431,23 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
    * Was der Mock tut: das Kommando gegen das Schema pruefen, den
    * Idempotenzschluessel wie bei `createAssignment` behandeln (gleicher
    * Schluessel + gleiches Kommando = gespeicherte Antwort, gleicher Schluessel +
-   * anderes Kommando = Ablehnung), je ausgewaehltem Tag den vorbereiteten
-   * Fixture-Tag ueber `localDate` heraussuchen, die Woche des Tages ueber
-   * dieselbe Kalenderrechnung wie der Vertrag bestimmen und Tage samt
-   * Zuweisungen ablegen, damit `getPlanningWindow` sie zeigt.
+   * anderes Kommando = Ablehnung), die Arbeitstage mit `deriveEffectiveWorkdays`
+   * ABLEITEN (Mo–Fr im Zeitraum bzw. bis zum Planungshorizont, optionaler
+   * Kalender-Override), je abgeleitetem Tag den vorbereiteten Fixture-Tag ueber
+   * `localDate` heraussuchen, die Woche des Tages ueber dieselbe Kalenderrechnung
+   * wie der Vertrag bestimmen und Tage samt Zuweisungen ablegen, damit
+   * `getPlanningWindow` sie zeigt.
+   *
+   * Die Tagesableitung ist bewusst KEINE zweite Rechnung: sie ist genau die
+   * Funktion, die auch `CreateEngagementCommandSchema` verwendet. Ein Clickdummy,
+   * der eine eigene Wochentagsregel mitbraechte, zeigte der Oberflaeche andere
+   * Tage als der Server (D-005).
    *
    * ## Warum der Clickdummy keine Zeitzone rechnet
    *
-   * Die Instants — `startsAtUtc`, `endsAtUtc`, je Tag `startUtc`/`endUtc` —
-   * kommen FERTIG aus `state.nextEngagement`. Der Mock loest keine lokale
+   * Die Einsatzgrenzen sind lokale Daten und brauchen keine Umrechnung. Die
+   * Instants je Tag — `startUtc`/`endUtc` — kommen FERTIG aus
+   * `state.nextEngagement`. Der Mock loest keine lokale
    * Uhrzeit in einer Zone auf, und `state.timeZone` wird hier nicht gelesen:
    *
    * 1. Zeitmathematik gehoert `@easytree/domain`. Dieses Paket importiert
@@ -458,11 +466,11 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
    *
    * Der Clickdummy haelt deshalb VORBEREITETE SERVERANTWORTEN, keine Rechnung.
    *
-   * Was er NICHT tut, und ehrlich nicht kann: einen Beginn in der Vergangenheit,
-   * eine nicht existente oder mehrdeutige Sommerzeit-Zeit, eine Arbeitszeit
-   * ausserhalb der Einsatzgrenzen oder einen bereits vergebenen Tag erkennen.
-   * Diese Problem-Types (`ENGAGEMENT_PROBLEM_TYPE`) gehoeren dem echten Server —
-   * dieselbe Grenze wie `STALE_WORKSITE_DAY` beim Teamwechsel.
+   * Was er NICHT tut, und ehrlich nicht kann: eine nicht existente oder
+   * mehrdeutige Sommerzeit-Zeit in einer OPTIONAL mitgegebenen Arbeitszeit oder
+   * einen bereits vergebenen Tag erkennen. Diese Problem-Types
+   * (`ENGAGEMENT_PROBLEM_TYPE`) gehoeren dem echten Server — dieselbe Grenze wie
+   * `STALE_WORKSITE_DAY` beim Teamwechsel.
    */
   createEngagement(
     input: CreateEngagementCommand,
@@ -477,7 +485,7 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
       return Promise.resolve(
         planningRejected(
           "urn:easytree:planning:invalid-interval",
-          "Einsatz unvollstaendig, Tage ausserhalb des Zeitraums oder Team leer",
+          "Einsatz unvollstaendig, Overrides ausserhalb des Zeitraums, kein Arbeitstag oder Team leer",
           400,
         ),
       );
@@ -513,16 +521,25 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
     }
     const fixtureTage = new Map(vorbereitet.days.map((tag) => [tag.localDate, tag]));
 
+    // Die effektiven Arbeitstage ENTSTEHEN hier — sie stehen nicht im Kommando.
+    // Umfangsende ist das fachliche Ende, sonst der Planungshorizont (D-006);
+    // das Schema hat sichergestellt, dass genau einer von beiden gesetzt ist.
+    const umfangsEnde = kommando.endDate ?? kommando.planningHorizonDate;
+    if (umfangsEnde === null) {
+      throw new Error("Clickdummy: weder Ende noch Horizont trotz Vertragspruefung");
+    }
+    const arbeitstage = deriveEffectiveWorkdays(kommando.startDate, umfangsEnde, kommando.calendar);
+
     /** Je Tag der Antwort-DTO und die Zuweisungen, die sein Team im Fenster belegen. */
     const angelegt: { readonly tag: EngagementDayDto; readonly zuweisungen: AssignmentDto[] }[] =
       [];
-    for (const auswahl of kommando.days) {
-      const vorlage = fixtureTage.get(auswahl.localDate);
+    for (const localDate of arbeitstage) {
+      const vorlage = fixtureTage.get(localDate);
       if (vorlage === undefined) {
         return Promise.resolve(
           planningRejected<EngagementDto>(
             "urn:easytree:planning:invalid-interval",
-            `Der Clickdummy haelt fuer ${auswahl.localDate} keinen Tag bereit. ` +
+            `Der Clickdummy haelt fuer ${localDate} keinen Tag bereit. ` +
               "Fixture erweitern statt Ids zu erfinden.",
             400,
           ),
@@ -532,7 +549,7 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
         return Promise.resolve(
           planningRejected<EngagementDto>(
             "urn:easytree:planning:invalid-interval",
-            `Der Clickdummy haelt fuer ${auswahl.localDate} ${vorlage.assignmentIds.length} ` +
+            `Der Clickdummy haelt fuer ${localDate} ${vorlage.assignmentIds.length} ` +
               `Assignment-Ids bereit, das Team hat ${kommando.team.length}. ` +
               "Fixture erweitern statt Ids zu erfinden.",
             400,
@@ -560,10 +577,10 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
           worksiteDayId: vorlage.worksiteDayId,
           configurationId: vorlage.configurationId,
           worksiteId: kommando.worksiteId,
-          localDate: auswahl.localDate,
+          localDate,
           lockVersion: 0,
           team,
-          weekKey: isoWeekKeyOf(auswahl.localDate),
+          weekKey: isoWeekKeyOf(localDate),
         },
         zuweisungen,
       });
@@ -583,8 +600,11 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
     const engagement: EngagementDto = {
       engagementId: vorbereitet.engagementId,
       worksiteId: kommando.worksiteId,
-      startsAtUtc: vorbereitet.startsAtUtc,
-      endsAtUtc: vorbereitet.endsAtUtc,
+      // Datumsgrenzen unveraendert aus dem Kommando: der Horizont bleibt neben
+      // `endDate` stehen und wird nicht still hineinkopiert (D-006).
+      startDate: kommando.startDate,
+      endDate: kommando.endDate,
+      planningHorizonDate: kommando.planningHorizonDate,
       days: angelegt.map(({ tag }) => tag),
     };
     this.#engagementIdempotency.set(key.data, { fingerprint, engagement });
@@ -629,35 +649,37 @@ export class MockPlanningGateway implements PlanningGateway, EngagementGateway {
  * Deterministischer Fingerabdruck eines Einsatz-Kommandos fuer die Idempotenz.
  *
  * `JSON.stringify(parsed.data)` wie bei `createAssignment` genuegt hier nicht:
- * `days` und `team` sind Mengen, keine Folgen — dieselbe Auswahl in anderer
- * Reihenfolge ist dasselbe Kommando und muss denselben Abdruck ergeben. Deshalb
- * kanonische Feldreihenfolge, `days` nach `localDate` sortiert, `team` sortiert,
- * und eine fehlende Tagesarbeitszeit ausdruecklich als `null` statt weggelassen.
+ * `calendar.include`, `calendar.exclude` und `team` sind MENGEN, keine Folgen —
+ * dieselbe Auswahl in anderer Reihenfolge ist dasselbe Kommando und muss denselben
+ * Abdruck ergeben, sonst meldete ein legitimer Netz-Retry einen 409. Deshalb
+ * kanonische Feldreihenfolge, alle drei Listen sortiert, ein fehlender Kalender und
+ * eine fehlende Arbeitszeit ausdruecklich als `null` statt weggelassen.
+ *
  * Sortiert wird ueber Code-Units, nicht `localeCompare`: das haengt an der
  * Umgebung, nicht am Kommando.
+ *
+ * Die abgeleiteten Arbeitstage gehen NICHT in den Abdruck ein — sie sind eine
+ * Funktion der Eingaben, die schon darin stehen. Ein zweites Mal aufgenommen
+ * waeren sie eine abgeleitete Groesse, die bei jeder Regelaenderung stillschweigend
+ * alle gespeicherten Schluessel entwertete.
  */
 function einsatzFingerabdruck(kommando: CreateEngagementCommand): string {
-  const nachDatum = (a: { localDate: string }, b: { localDate: string }): number =>
-    a.localDate < b.localDate ? -1 : a.localDate > b.localDate ? 1 : 0;
+  const kalender = kommando.calendar;
   return JSON.stringify({
     worksiteId: kommando.worksiteId,
-    startAt: { date: kommando.startAt.date, time: kommando.startAt.time },
-    endAt:
-      kommando.endAt === null ? null : { date: kommando.endAt.date, time: kommando.endAt.time },
-    planningHorizon: kommando.planningHorizon,
+    startDate: kommando.startDate,
+    endDate: kommando.endDate,
+    planningHorizonDate: kommando.planningHorizonDate,
+    calendar:
+      kalender === undefined
+        ? null
+        : { include: [...kalender.include].sort(), exclude: [...kalender.exclude].sort() },
     defaults: {
-      workingTime: {
-        from: kommando.defaults.workingTime.from,
-        to: kommando.defaults.workingTime.to,
-      },
-    },
-    days: [...kommando.days].sort(nachDatum).map((tag) => ({
-      localDate: tag.localDate,
       workingTime:
-        tag.workingTime === undefined
+        kommando.defaults.workingTime === undefined
           ? null
-          : { from: tag.workingTime.from, to: tag.workingTime.to },
-    })),
+          : { from: kommando.defaults.workingTime.from, to: kommando.defaults.workingTime.to },
+    },
     team: [...kommando.team].sort(),
   });
 }

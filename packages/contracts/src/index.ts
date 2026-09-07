@@ -15,7 +15,6 @@ export {
   INSTANT_PATTERN,
   InstantSchema,
   LocalDateSchema,
-  LocalDateTimeSchema,
   LocalTimeSchema,
   ProblemDocumentSchema,
   cursorPage,
@@ -25,7 +24,6 @@ export type {
   IdempotencyKey,
   Instant,
   LocalDate,
-  LocalDateTime,
   LocalTime,
   ProblemDocument,
 } from "./primitives.js";
@@ -40,7 +38,7 @@ export {
   CreateAssignmentCommandSchema,
   CreateEngagementCommandSchema,
   ENGAGEMENT_PROBLEM_TYPE,
-  EngagementDaySelectionSchema,
+  EngagementCalendarOverrideSchema,
   EngagementDayDtoSchema,
   EngagementDtoSchema,
   PlanValidationResultSchema,
@@ -68,7 +66,7 @@ export type {
   AssignmentDto,
   CreateAssignmentCommand,
   CreateEngagementCommand,
-  EngagementDaySelection,
+  EngagementCalendarOverride,
   EngagementDayDto,
   EngagementDto,
   EngagementProblemType,
@@ -105,6 +103,12 @@ export {
   parseIsoWeekKey,
 } from "./planning/iso-week.js";
 export type { IsoWeek, IsoWeekKeyProblem, IsoWeekKeyResult } from "./planning/iso-week.js";
+
+// Automatische Werktagsableitung des Einsatzes (EYT-120). Exportiert aus demselben
+// Grund wie die Wochenregel darueber: die Kommandogrenze und der Paritaetstest gegen
+// die Domainfassung in apps/api muessen dieselbe Funktion verwenden.
+export { deriveEffectiveWorkdays } from "./planning/workdays.js";
+export type { EngagementCalendarOverrideInput } from "./planning/workdays.js";
 
 export {
   ActiveTimeEntrySchema,

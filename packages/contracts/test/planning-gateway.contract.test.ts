@@ -114,14 +114,12 @@ function makeMock(): MockPlanningGateway {
     },
     // EYT-120: die VORBEREITETE Serverantwort fuer ZWEI Tage mit je bis zu
     // zwei Personen (die zweite Id je Tag braucht nur der Reihenfolge-Fall des
-    // Fingerabdrucks). Die Instants stehen hier fertig — der Mock rechnet keine
-    // Zone (Europe/Berlin im Sommer ist UTC+2, 07:00 lokal = 05:00Z; das ist
-    // die Rechnung des Servers, nicht des Clickdummys). Ein dritter Tag muss
-    // auffallen — siehe "erfindet keine Id" unten.
+    // Fingerabdrucks). EINSATZGRENZEN stehen hier nicht mehr: sie sind lokale
+    // Geschaeftsdaten und kommen unveraendert aus dem Kommando zurueck (D-003).
+    // Die Tages-Instants stehen fertig — der Mock rechnet keine Zone. Ein
+    // dritter Tag muss auffallen — siehe "erfindet keine Id" unten.
     nextEngagement: {
       engagementId: "3f2504e0-4f89-41d3-9a0c-0305e82c3310",
-      startsAtUtc: "2026-08-05T05:00:00.000Z",
-      endsAtUtc: "2026-08-06T14:00:00.000Z",
       days: [
         {
           localDate: "2026-08-05",
@@ -344,27 +342,26 @@ describe("Baustellentag-Kommandos des Mocks (EYT-147 M2)", () => {
 
 describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
   const SCHLUESSEL = PLANNING_GATEWAY_CONTRACT_FIXTURE.idempotencyKey;
-  // Zwei Tage in der veroeffentlichten Woche W32 des Fixtures — nur dort kann
-  // das Fenster Tage MIT Herkunft zeigen (der Mock kennt keinen Entwurf).
+  // 2026-08-05 ist ein Mittwoch, 2026-08-06 ein Donnerstag — beide Werktage in
+  // der veroeffentlichten Woche W32 des Fixtures. Nur dort kann das Fenster Tage
+  // MIT Herkunft zeigen (der Mock kennt keinen Entwurf). Es gibt KEINE Tagesliste
+  // im Kommando: Montag bis Freitag entstehen automatisch (D-005).
   const EINSATZ = {
     worksiteId: WORKSITE_ID,
-    startAt: { date: "2026-08-05", time: "07:00" },
-    endAt: { date: "2026-08-06", time: "16:00" },
-    planningHorizon: null,
+    startDate: "2026-08-05",
+    endDate: "2026-08-06",
+    planningHorizonDate: null,
     defaults: { workingTime: { from: "08:00", to: "18:00" } },
-    days: [
-      { localDate: "2026-08-05" },
-      { localDate: "2026-08-06", workingTime: { from: "08:00", to: "12:00" } },
-    ],
     team: [EMPLOYEE_ID],
   };
 
-  it("legt je ausgewaehltem Tag einen Baustellentag mit Woche an — vertragskonform", async () => {
+  it("leitet die Werktage selbst ab und legt je Tag einen Baustellentag an — vertragskonform", async () => {
     const result = await makeMock().createEngagement(EINSATZ, { idempotencyKey: SCHLUESSEL });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(() => EngagementDtoSchema.parse(result.value)).not.toThrow();
     expect(result.value.engagementId).toBe("3f2504e0-4f89-41d3-9a0c-0305e82c3310");
+    // Die Tage kommen aus der Ableitung, nicht aus dem Kommando — es nennt keine.
     expect(result.value.days.map((tag) => tag.localDate)).toEqual(["2026-08-05", "2026-08-06"]);
     expect(result.value.days.map((tag) => tag.weekKey)).toEqual(["2026-W32", "2026-W32"]);
     // Ids aus dem Fixture, der Reihe nach — und nicht aus `nextWorksiteDay`.
@@ -376,18 +373,42 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
       "3f2504e0-4f89-41d3-9a0c-0305e82c3315",
       "3f2504e0-4f89-41d3-9a0c-0305e82c3316",
     ]);
-    // Die Instants stammen aus dem Fixture (vorbereitete Serverantwort), nicht
-    // aus einer Zonenrechnung des Mocks — und sie kommen unveraendert an.
-    expect(result.value.startsAtUtc).toBe("2026-08-05T05:00:00.000Z");
-    expect(result.value.endsAtUtc).toBe("2026-08-06T14:00:00.000Z");
     expect(result.value.days[0]?.team[0]?.interval).toEqual({
       startUtc: "2026-08-05T06:00:00.000Z",
       endUtc: "2026-08-05T16:00:00.000Z",
     });
-    expect(result.value.days[1]?.team[0]?.interval).toEqual({
-      startUtc: "2026-08-06T06:00:00.000Z",
-      endUtc: "2026-08-06T10:00:00.000Z",
-    });
+  });
+
+  it("gibt die Einsatzgrenzen als lokale DATEN zurueck, nicht als Zeitpunkte (D-003)", async () => {
+    const result = await makeMock().createEngagement(EINSATZ, { idempotencyKey: SCHLUESSEL });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.startDate).toBe("2026-08-05");
+    expect(result.value.endDate).toBe("2026-08-06");
+    expect(result.value.planningHorizonDate).toBeNull();
+    // Und die verworfene Instant-Form taucht nirgends mehr auf.
+    expect(Object.keys(result.value)).not.toContain("startsAtUtc");
+    expect(Object.keys(result.value)).not.toContain("endsAtUtc");
+  });
+
+  it("materialisiert bei offenem Ende nur bis zum Horizont — ohne endDate zu setzen (D-006)", async () => {
+    // Horizont bis Freitag; das Fixture kennt Mittwoch und Donnerstag. Der
+    // Ausschluss des Freitags haelt die Ableitung auf den vorhandenen Tagen —
+    // gemessen wird hier, dass `endDate` null BLEIBT.
+    const result = await makeMock().createEngagement(
+      {
+        ...EINSATZ,
+        endDate: null,
+        planningHorizonDate: "2026-08-07",
+        calendar: { include: [], exclude: ["2026-08-07"] },
+      },
+      { idempotencyKey: SCHLUESSEL },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.endDate).toBeNull();
+    expect(result.value.planningHorizonDate).toBe("2026-08-07");
+    expect(result.value.days.map((tag) => tag.localDate)).toEqual(["2026-08-05", "2026-08-06"]);
   });
 
   it("zeigt die angelegten Tage danach im Planungsfenster — samt Zuweisungen", async () => {
@@ -416,7 +437,9 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
   it("lehnt ein Kommando ab, das das Schema verwirft, und legt dann nichts an", async () => {
     const mock = makeMock();
     const result = await mock.createEngagement(
-      { ...EINSATZ, days: [{ localDate: "2026-08-07" }] }, // ausserhalb von endAt
+      // Ein Ausschluss ausserhalb des Zeitraums — dieselbe Klasse Eingabefehler
+      // wie frueher ein Tag ausserhalb, nur jetzt am Override statt an der Liste.
+      { ...EINSATZ, calendar: { include: [], exclude: ["2026-08-10"] } },
       { idempotencyKey: SCHLUESSEL },
     );
     expect(result.ok).toBe(false);
@@ -427,13 +450,11 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
     expect(fenster.ok && fenster.value.worksiteDays).toEqual([]);
   });
 
-  it("erfindet keine Id, wenn das Fixture nicht reicht", async () => {
+  it("erfindet keine Id, wenn das Fixture die abgeleiteten Tage nicht deckt", async () => {
+    // Der Zeitraum bis Freitag leitet einen dritten Werktag ab, den das Fixture
+    // nicht kennt.
     const result = await makeMock().createEngagement(
-      {
-        ...EINSATZ,
-        endAt: { date: "2026-08-07", time: "16:00" },
-        days: [...EINSATZ.days, { localDate: "2026-08-07" }],
-      },
+      { ...EINSATZ, endDate: "2026-08-07" },
       { idempotencyKey: SCHLUESSEL },
     );
     expect(result.ok).toBe(false);
@@ -478,20 +499,32 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
     }
   });
 
-  it("erkennt dasselbe Kommando auch in anderer Reihenfolge von Tagen und Team als Wiederholung", async () => {
-    // `days` und `team` sind Mengen: dieselbe Auswahl in anderer Reihenfolge ist
-    // dasselbe Kommando. Ein Fingerabdruck, der die Reihenfolge mitliest,
-    // meldete hier 409 (Schluessel wiederverwendet) — der Client haette nach
-    // einem Netz-Retry weder seine Antwort noch einen zweiten Einsatz.
-    // Gegenmutation: `.sort(...)` auf `days` ODER `.sort()` auf `team` im
+  it("erkennt dasselbe Kommando auch in anderer Reihenfolge von Overrides und Team als Wiederholung", async () => {
+    // `calendar.include`, `calendar.exclude` und `team` sind MENGEN: dieselbe
+    // Auswahl in anderer Reihenfolge ist dasselbe Kommando. Ein Fingerabdruck,
+    // der die Reihenfolge mitliest, meldete hier 409 (Schluessel wiederverwendet) —
+    // der Client haette nach einem Netz-Retry weder seine Antwort noch einen
+    // zweiten Einsatz.
+    //
+    // Gegenmutation M12: `.sort()` auf `exclude` ODER auf `team` im
     // Fingerabdruck entfernen — beides macht diesen Fall rot.
+    //
+    // Der Zeitraum Mo–Fr leitet fuenf Werktage ab; drei davon werden abgewaehlt,
+    // damit genau die zwei Tage uebrig bleiben, die das Fixture kennt. Das gibt
+    // eine Ausschlussliste mit drei Eintraegen, die sich umsortieren laesst.
     const mock = makeMock();
-    const zuZweit = { ...EINSATZ, team: [EMPLOYEE_ID, ZWEITE_PERSON_ID] };
+    const zuZweit = {
+      ...EINSATZ,
+      startDate: "2026-08-03",
+      endDate: "2026-08-07",
+      calendar: { include: [], exclude: ["2026-08-03", "2026-08-04", "2026-08-07"] },
+      team: [EMPLOYEE_ID, ZWEITE_PERSON_ID],
+    };
     const erster = await mock.createEngagement(zuZweit, { idempotencyKey: SCHLUESSEL });
     const zweiter = await mock.createEngagement(
       {
         ...zuZweit,
-        days: [...zuZweit.days].reverse(),
+        calendar: { include: [], exclude: [...zuZweit.calendar.exclude].reverse() },
         team: [...zuZweit.team].reverse(),
       },
       { idempotencyKey: SCHLUESSEL },
@@ -499,6 +532,7 @@ describe("Einsatz-Kommando des Mocks (EYT-120)", () => {
     expect(erster.ok).toBe(true);
     expect(zweiter.ok).toBe(true);
     if (!erster.ok || !zweiter.ok) return;
+    expect(erster.value.days.map((tag) => tag.localDate)).toEqual(["2026-08-05", "2026-08-06"]);
     expect(zweiter.value).toEqual(erster.value);
 
     // Keine Verdopplung im Fenster: zwei Tage, und jede der vier Zuweisungen des

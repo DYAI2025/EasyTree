@@ -37,7 +37,7 @@ import {
   CreateAssignmentCommandSchema,
   CreateEngagementCommandSchema,
   ENGAGEMENT_PROBLEM_TYPE,
-  EngagementDaySelectionSchema,
+  EngagementCalendarOverrideSchema,
   EngagementDayDtoSchema,
   EngagementDtoSchema,
   PlanValidationResultSchema,
@@ -130,21 +130,22 @@ const NAMED_SCHEMAS = {
   WorksiteDayDto: WorksiteDayDtoSchema,
   PlanWorksiteDayCommand: PlanWorksiteDayCommandSchema,
   UpdateWorksiteDayTeamCommand: UpdateWorksiteDayTeamCommandSchema,
-  // EYT-120: der Einsatz mit seinen bestaetigten Tagen in EINEM Kommando.
-  // Lokale Datum-Zeit-Werte statt Instants — der Server loest sie mit der
-  // Organisationszeitzone auf.
+  // EYT-120: der Einsatz mit seinen AUTOMATISCH abgeleiteten Tagen in EINEM
+  // Kommando. Die Grenzen sind lokale Geschaeftsdaten, keine Uhrzeiten (D-003).
   //
   // ## Ehrlichkeitshinweis: die Beziehungen fallen bei der Erzeugung weg
   //
-  // `CreateEngagementCommandSchema.superRefine` verlangt Ende nach Beginn,
-  // Horizont genau dann, wenn das Ende offen ist, jeden Tag im Zeitraum, keinen
-  // Tag und keine Person doppelt; `WorkingTimeSchema.refine` verlangt `to > from`.
-  // Alles Beziehungen zwischen Feldern — JSON Schema kann sie nicht ausdruecken.
-  // Was ankommt: `minItems: 1` fuer `days` und `team`, `nullable` fuer `endAt`
-  // und `planningHorizon`, `additionalProperties: false`. Abgelehnt wird der
-  // Rest trotzdem, zur Laufzeit von diesen Schemata (`engagement-schemas.test.ts`).
+  // `CreateEngagementCommandSchema.superRefine` verlangt ein Ende nicht vor dem
+  // Beginn, einen Horizont genau dann, wenn das Ende offen ist, Overrides im
+  // aktuellen Umfang, keinen Tag zugleich auf- und abgewaehlt, mindestens einen
+  // effektiven Arbeitstag und keine Person doppelt; `WorkingTimeSchema.refine`
+  // verlangt `to > from`. Alles Beziehungen zwischen Feldern — JSON Schema kann
+  // sie nicht ausdruecken. Was ankommt: `minItems: 1` fuer `team`, `nullable`
+  // fuer `endDate` und `planningHorizonDate`, `additionalProperties: false`.
+  // Abgelehnt wird der Rest trotzdem, zur Laufzeit von diesen Schemata
+  // (`engagement-schemas.test.ts`).
   WorkingTime: WorkingTimeSchema,
-  EngagementDaySelection: EngagementDaySelectionSchema,
+  EngagementCalendarOverride: EngagementCalendarOverrideSchema,
   CreateEngagementCommand: CreateEngagementCommandSchema,
   EngagementDayDto: EngagementDayDtoSchema,
   EngagementDto: EngagementDtoSchema,
@@ -490,26 +491,34 @@ export function buildOpenApiDocument(): Record<string, unknown> {
       "/planung/einsaetze": {
         post: {
           operationId: "createEngagement",
-          summary: "Einsatz mit bestaetigten Baustellentagen anlegen",
+          summary: "Einsatz mit automatisch abgeleiteten Baustellentagen anlegen",
           description:
-            "Legt einen Einsatz (Baustelle, lokaler Beginn, lokales oder offenes Ende) und seine " +
-            "explizit ausgewaehlten Baustellentage mit Erstkonfiguration und Team in EINER " +
-            "Transaktion an (EYT-120). Lokale Zeiten werden mit der Organisationszeitzone " +
-            "aufgeloest; nicht existente/mehrdeutige Sommerzeit-Zeiten, ein Beginn vor jetzt, " +
-            "Arbeitszeiten ausserhalb der Einsatzgrenzen und bereits vergebene Tage werden mit " +
-            `${ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_NONEXISTENT}, ${ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_AMBIGUOUS}, ` +
-            `${ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_START_IN_PAST}, ${ENGAGEMENT_PROBLEM_TYPE.WORKING_TIME_OUTSIDE_ENGAGEMENT} ` +
-            `und ${ENGAGEMENT_PROBLEM_TYPE.WORKSITE_DAY_CLAIMED} abgelehnt — nie still gekuerzt.`,
+            "Legt einen Einsatz und seine Baustellentage mit Erstkonfiguration und Team in EINER " +
+            "Transaktion an (EYT-120). Beginn und Ende sind LOKALE GESCHAEFTSDATEN, keine " +
+            "Uhrzeiten: startDate ist Pflicht, endDate ein lokales Datum oder null fuer ein " +
+            "offenes Ende; bei bekanntem Ende gilt endDate >= startDate, ein eintaegiger Einsatz " +
+            "hat startDate = endDate. Bei offenem Ende gibt planningHorizonDate den aktuellen " +
+            "Planungsumfang an — es ist NICHT das fachliche Ende und wird nicht nach endDate " +
+            "uebernommen. Montag bis Freitag im inklusiven Zeitraum bzw. bis zum Horizont werden " +
+            "AUTOMATISCH als Arbeitstage abgeleitet; calendar ist ein optionaler Override, der " +
+            "Vorgabetage abwaehlt und Wochenendtage ausdruecklich aufnimmt, und kein Pflichtschritt. " +
+            "Geplante Arbeitszeiten (defaults.workingTime) sind OPTIONAL und keine Voraussetzung " +
+            "fuer die Erzeugung eines Baustellentages. Eine optional angegebene lokale Arbeitszeit " +
+            "loest der Server mit der Organisationszeitzone auf; nicht existente/mehrdeutige " +
+            "Sommerzeit-Zeiten und bereits vergebene Tage werden mit " +
+            `${ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_NONEXISTENT}, ${ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_AMBIGUOUS} ` +
+            `und ${ENGAGEMENT_PROBLEM_TYPE.WORKSITE_DAY_CLAIMED} abgelehnt — nie still gekuerzt. ` +
+            "Mehrere Einsaetze derselben Organisation duerfen am selben lokalen Tag parallel an " +
+            "unterschiedlichen Baustellen laufen; je Baustelle und lokalem Tag gibt es hoechstens " +
+            "einen Einsatzkontext.",
           parameters: [idempotencyHeader],
           requestBody: jsonBody("CreateEngagementCommand"),
           responses: {
             "201": jsonOk("EngagementDto", "Angelegter Einsatz mit seinen Tagen"),
             ...problemResponses,
             "409": konfliktMit(
-              ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_START_IN_PAST,
               ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_NONEXISTENT,
               ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_AMBIGUOUS,
-              ENGAGEMENT_PROBLEM_TYPE.WORKING_TIME_OUTSIDE_ENGAGEMENT,
               ENGAGEMENT_PROBLEM_TYPE.WORKSITE_DAY_CLAIMED,
               WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY,
             ),

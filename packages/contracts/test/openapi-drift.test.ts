@@ -384,10 +384,8 @@ describe("Schreibrouten der Planung (EYT-147 M2, EYT-120)", () => {
     const einsatz = paths["/planung/einsaetze"]?.["post"]?.["responses"] as
       Record<string, { description: string }> | undefined;
     for (const typ of [
-      ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_START_IN_PAST,
       ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_NONEXISTENT,
       ENGAGEMENT_PROBLEM_TYPE.LOCAL_TIME_AMBIGUOUS,
-      ENGAGEMENT_PROBLEM_TYPE.WORKING_TIME_OUTSIDE_ENGAGEMENT,
       ENGAGEMENT_PROBLEM_TYPE.WORKSITE_DAY_CLAIMED,
       WORKSITE_DAY_PROBLEM_TYPE.DUPLICATE_WORKSITE_DAY,
     ]) {
@@ -401,6 +399,31 @@ describe("Schreibrouten der Planung (EYT-147 M2, EYT-120)", () => {
     expect(einsatz?.["409"]?.description).not.toContain(
       ENGAGEMENT_PROBLEM_TYPE.ENGAGEMENT_AMBIGUOUS,
     );
+  });
+
+  it("verspricht im ganzen Dokument keine Uhrzeit-Semantik des Einsatzes mehr (EYT-120 D-003)", () => {
+    // Die Human-PO-Entscheidung vom 06.09.2026 hat verpflichtende Einsatz-Uhrzeiten
+    // aufgehoben. Ein Dokument, das weiterhin eine zeitgenaue Vergangenheitsregel
+    // oder eine Arbeitszeit-gegen-Einsatzgrenze-Ablehnung ANKUENDIGT, versaeche
+    // einem Client etwas, das kein Server je liefern wird — und genau daraus
+    // entstuende die naechste Drift.
+    //
+    // Gemessen am ganzen serialisierten Dokument, nicht nur an einem Zweig: die
+    // Zusicherung soll auch dann feuern, wenn der Typ irgendwo anders wieder
+    // auftaucht.
+    const gesamt = serializeOpenApiDocument();
+    for (const verboten of [
+      "engagement-start-in-past",
+      "working-time-outside-engagement",
+      "startsAtUtc",
+      "endsAtUtc",
+    ]) {
+      expect(gesamt, `${verboten} steht wieder im Vertrag`).not.toContain(verboten);
+    }
+    // Gegenprobe gegen den Leerlauf: was WIRKLICH dort stehen soll, steht dort.
+    for (const erwartet of ["startDate", "endDate", "planningHorizonDate", "calendar"]) {
+      expect(gesamt, `${erwartet} fehlt im Vertrag`).toContain(erwartet);
+    }
   });
 
   it("traegt im Dokument genau die Zod-Grenzen, die JSON Schema ausdruecken KANN", () => {

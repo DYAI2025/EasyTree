@@ -21,14 +21,9 @@
 import { z } from "zod";
 
 import { isValidIsoWeekKey } from "./iso-week.js";
+import { deriveEffectiveWorkdays } from "./workdays.js";
 
-import {
-  IdSchema,
-  InstantSchema,
-  LocalDateSchema,
-  LocalDateTimeSchema,
-  LocalTimeSchema,
-} from "../primitives.js";
+import { IdSchema, InstantSchema, LocalDateSchema, LocalTimeSchema } from "../primitives.js";
 
 /**
  * Halb-offenes Intervall als Transportform. Entspricht `TimeInterval` der Domain.
@@ -799,7 +794,14 @@ export type WorksiteDayProblemType =
 // Einsatz (EYT-120 Inkrement 1)
 // ---------------------------------------------------------------------------
 
-/** Geplante Arbeitszeit eines Tages, lokal, innerhalb desselben Kalendertages. */
+/**
+ * Geplante Arbeitszeit eines Tages, lokal, innerhalb desselben Kalendertages.
+ *
+ * Bleibt in sich streng (`to > from`): das ist die Tagesarbeitszeit im Sinne des Glossars
+ * 46727169, nicht die Einsatzgrenze. Optional ist ihre ANWESENHEIT im Einsatz-Kommando
+ * (D-004, `PLANNED_DAY_TIMES = OPTIONAL`) — nicht ihre innere Pruefung, und schon gar nicht
+ * fuer andere Kommandos.
+ */
 export const WorkingTimeSchema = z
   .strictObject({ from: LocalTimeSchema, to: LocalTimeSchema })
   .refine((zeit) => zeit.to > zeit.from, {
@@ -809,95 +811,168 @@ export const WorkingTimeSchema = z
 
 export type WorkingTime = z.infer<typeof WorkingTimeSchema>;
 
-/** Ein ausgewaehlter Tag; ohne eigene Arbeitszeit gilt `defaults.workingTime`. */
-export const EngagementDaySelectionSchema = z.strictObject({
-  localDate: LocalDateSchema,
-  workingTime: WorkingTimeSchema.optional(),
+/**
+ * Kalender-Override (D-005) — OPTIONALE Feinkorrektur, kein Pflichtschritt.
+ *
+ * `exclude` waehlt automatisch vorgeschlagene Werktage ab, `include` nimmt Wochenendtage
+ * oder andere sichtbare Tage ausdruecklich auf. Beide Listen sind MENGEN: Reihenfolge und
+ * Wiederholung aendern die effektive Tagesmenge nicht (siehe `deriveEffectiveWorkdays`).
+ */
+export const EngagementCalendarOverrideSchema = z.strictObject({
+  include: z.array(LocalDateSchema),
+  exclude: z.array(LocalDateSchema),
 });
 
-export type EngagementDaySelection = z.infer<typeof EngagementDaySelectionSchema>;
-
-const lokalerZeitpunkt = (wert: { date: string; time: string }): string =>
-  `${wert.date}T${wert.time}`;
+export type EngagementCalendarOverride = z.infer<typeof EngagementCalendarOverrideSchema>;
 
 /**
- * Einsatz + bestaetigte Baustellentage in EINEM Kommando (D-004, FR-005).
+ * Einsatz + automatisch abgeleitete Baustellentage in EINEM Kommando (D-005, D-009).
  *
- * `startAt`/`endAt` sind lokale Datum-Zeit-Werte (D-003). `endAt = null` ist das offene
- * Ende (D-005); dann ist `planningHorizon` Pflicht und begrenzt nur die AUSWAHL, nicht den
- * Einsatz. Bei bekanntem Ende ist der Horizont das Ende — ein zusaetzlicher Horizont waere
- * eine zweite Wahrheit und wird abgelehnt.
+ * ## Einsatzgrenzen sind Geschaeftsdaten, keine Uhrzeiten (D-003)
  *
- * `days` ist die EXPLIZITE Auswahl der Planerin (Mo–Fr ist Darstellung, keine Serverregel);
- * der Server regeneriert keine Wochentage. Jeder Tag liegt in
- * [startAt.date, endAt.date | planningHorizon], keiner doppelt, keiner leer.
+ * `startDate` ist Pflicht, `endDate` ein lokales Datum ODER `null` fuer das offene Ende.
+ * Bei bekanntem Ende gilt `endDate >= startDate`; ein eintaegiger Einsatz hat
+ * `startDate = endDate`. Es gibt **keinen verpflichtenden Einsatzbeginn und kein
+ * verpflichtendes Einsatzende als Uhrzeit** — die frueheren `startAt`/`endAt` sind mit der
+ * Human-PO-Entscheidung vom 06.09.2026 superseded (Confluence 49119274,
+ * `ENGAGEMENT_CLOCK_TIMES = NOT_REQUIRED`). Die Organisationszeitzone bleibt fuer die
+ * Auslegung lokaler Geschaeftstage autoritativ, macht die Grenzen aber nicht zu Zeitpunkten.
  *
- * Grenze der Veroeffentlichung: die Beziehungen (Ende nach Beginn, Tage im Zeitraum,
- * Duplikate, Horizont-XOR) sind JSON-Schema nicht ausdrueckbar; zur Laufzeit gelten sie.
+ * ## Offenes Ende und Planungshorizont (D-006)
+ *
+ * Bei `endDate === null` ist `planningHorizonDate` Pflicht und begrenzt NUR die aktuelle
+ * Materialisierung. Er ist **nicht** das fachliche Ende und wird nicht still nach `endDate`
+ * kopiert. Bei bekanntem Ende ist das Ende der Umfang; ein zusaetzlicher Horizont waere eine
+ * zweite Wahrheit und wird abgelehnt.
+ *
+ * ## Es gibt keine Pflicht-Tagesliste mehr (D-005)
+ *
+ * Montag bis Freitag im inklusiven Zeitraum entstehen automatisch. `calendar` ist optional.
+ * Der Normalflow kommt ohne jede Kalenderinteraktion aus; ein Flow, der 10/50/150 Tage
+ * einzeln erfassen liesse, ist damit ausgeschlossen.
+ *
+ * ## Geplante Uhrzeiten sind optional (D-004)
+ *
+ * `defaults.workingTime` darf fehlen. Ihr Fehlen macht keinen Baustellentag ungueltig, und
+ * eine vorhandene Arbeitszeit wird gegen KEINE Einsatz-Uhrzeitgrenze geprueft — es gibt
+ * keine.
+ *
+ * ## Grenze der Veroeffentlichung
+ *
+ * Die Beziehungen (Ende nicht vor Beginn, Horizont-XOR, Overrides im Umfang, nicht leere
+ * Tagesmenge) sind JSON-Schema nicht ausdrueckbar; zur Laufzeit gelten sie.
  */
 export const CreateEngagementCommandSchema = z
   .strictObject({
     worksiteId: IdSchema,
-    startAt: LocalDateTimeSchema,
-    endAt: LocalDateTimeSchema.nullable(),
-    planningHorizon: LocalDateSchema.nullable(),
-    defaults: z.strictObject({ workingTime: WorkingTimeSchema }),
-    days: z.array(EngagementDaySelectionSchema).min(1, "Mindestens ein Tag muss ausgewaehlt sein"),
+    startDate: LocalDateSchema,
+    endDate: LocalDateSchema.nullable(),
+    planningHorizonDate: LocalDateSchema.nullable(),
+    calendar: EngagementCalendarOverrideSchema.optional(),
+    defaults: z.strictObject({ workingTime: WorkingTimeSchema.optional() }),
     team: z.array(IdSchema).min(1, "Ein Baustellentag entsteht nicht ohne Team"),
   })
   .superRefine((cmd, ctx) => {
-    if (cmd.endAt !== null && lokalerZeitpunkt(cmd.endAt) <= lokalerZeitpunkt(cmd.startAt)) {
-      ctx.addIssue({ code: "custom", path: ["endAt"], message: "endAt muss nach startAt liegen" });
+    // Zod fuehrt `superRefine` AUCH DANN aus, wenn ein Feld seine eigene Pruefung
+    // verfehlt hat — gemessen: `startDate: "0000-01-01"` und `"06.01.2031"` erreichten
+    // die Kalenderrechnung und warfen einen RangeError, statt eine Meldung zu erzeugen.
+    // Die Beziehungsregeln setzen reale Kalendertage voraus; liegt einer nicht vor, hat
+    // `LocalDateSchema` den Fehler bereits benannt und hier ist nichts hinzuzufuegen.
+    const istKalendertag = (wert: string | null): boolean =>
+      wert === null || LocalDateSchema.safeParse(wert).success;
+    if (
+      !istKalendertag(cmd.startDate) ||
+      !istKalendertag(cmd.endDate) ||
+      !istKalendertag(cmd.planningHorizonDate) ||
+      (cmd.calendar?.include ?? []).some((tag) => !istKalendertag(tag)) ||
+      (cmd.calendar?.exclude ?? []).some((tag) => !istKalendertag(tag))
+    ) {
+      return;
     }
-    if (cmd.endAt === null && cmd.planningHorizon === null) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["planningHorizon"],
-        message: "Offenes Ende braucht einen konkreten Planungshorizont",
-      });
-    }
-    if (cmd.endAt !== null && cmd.planningHorizon !== null) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["planningHorizon"],
-        message: "Bei bekanntem Ende ist das Ende der Horizont — kein zweiter Wert",
-      });
-    }
-    const bis = cmd.endAt?.date ?? cmd.planningHorizon;
-    if (bis !== null && bis !== undefined && bis < cmd.startAt.date) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["planningHorizon"],
-        message: "Horizont liegt vor dem Beginn",
-      });
-    }
-    const gesehen = new Set<string>();
-    cmd.days.forEach((tag, i) => {
-      if (gesehen.has(tag.localDate)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["days", i],
-          message: `Tag ${tag.localDate} ist doppelt ausgewaehlt`,
-        });
-      }
-      gesehen.add(tag.localDate);
-      if (
-        tag.localDate < cmd.startAt.date ||
-        (bis !== null && bis !== undefined && tag.localDate > bis)
-      ) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["days", i],
-          message: `Tag ${tag.localDate} liegt ausserhalb des Zeitraums`,
-        });
-      }
-    });
-    const personen = new Set(cmd.team);
-    if (personen.size !== cmd.team.length) {
+
+    // Dieselbe Person zweimal im Team ist kein zweiter Platz auf der Baustelle.
+    // Die Regel stammt aus der urspruenglichen Fassung des Kommandos und bleibt
+    // unveraendert: die Datumsreparatur beruehrt die Teamsemantik nicht.
+    if (new Set(cmd.team).size !== cmd.team.length) {
       ctx.addIssue({
         code: "custom",
         path: ["team"],
         message: "Dieselbe Person steht zweimal im Team",
+      });
+    }
+
+    if (cmd.endDate !== null && cmd.endDate < cmd.startDate) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["endDate"],
+        message: "endDate darf nicht vor startDate liegen",
+      });
+    }
+    if (cmd.endDate === null && cmd.planningHorizonDate === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["planningHorizonDate"],
+        message: "Offenes Ende braucht ein konkretes Planen-bis-Datum",
+      });
+    }
+    if (cmd.endDate !== null && cmd.planningHorizonDate !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["planningHorizonDate"],
+        message: "Bei bekanntem Ende ist das Ende der Umfang — kein zweiter Wert",
+      });
+    }
+    if (cmd.planningHorizonDate !== null && cmd.planningHorizonDate < cmd.startDate) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["planningHorizonDate"],
+        message: "Der Planungshorizont liegt vor dem Beginn",
+      });
+    }
+
+    // Der aktuelle Umfang: das fachliche Ende, sonst der Horizont. Ohne einen
+    // auswertbaren Zeitraum haetten die Folgeregeln keinen Bezug — sie schweigen
+    // dann, statt eine zweite, verwirrende Meldung zum selben Fehler zu erzeugen.
+    const bis = cmd.endDate ?? cmd.planningHorizonDate;
+    if (bis === null || bis < cmd.startDate) return;
+
+    const kalender = cmd.calendar;
+    if (kalender !== undefined) {
+      const aufgenommen = new Set(kalender.include);
+      for (const tag of kalender.exclude) {
+        if (aufgenommen.has(tag)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["calendar"],
+            message: `${tag} ist zugleich auf- und abgewaehlt — welche Absicht gilt, wird nicht geraten`,
+          });
+        }
+      }
+      for (const [feld, tage] of [
+        ["include", kalender.include],
+        ["exclude", kalender.exclude],
+      ] as const) {
+        tage.forEach((tag, i) => {
+          if (tag < cmd.startDate || tag > bis) {
+            ctx.addIssue({
+              code: "custom",
+              path: ["calendar", feld, i],
+              message: `${tag} liegt ausserhalb des aktuellen Planungsumfangs`,
+            });
+          }
+        });
+      }
+    }
+
+    // Jeder Datumswert ist an dieser Stelle bereits ein realer Kalendertag mit Jahr >= 1
+    // (`LocalDateSchema`), und `bis >= startDate` ist geprueft — die Rechnung wirft hier
+    // also nicht.
+    if (deriveEffectiveWorkdays(cmd.startDate, bis, cmd.calendar).length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["calendar"],
+        message:
+          "Kein einziger Arbeitstag im aktuellen Zeitraum — ein leerer Einsatz ist kein Normalzustand",
       });
     }
   });
@@ -909,22 +984,41 @@ export const EngagementDayDtoSchema = WorksiteDayDtoSchema.extend({ weekKey: Iso
 
 export type EngagementDayDto = z.infer<typeof EngagementDayDtoSchema>;
 
+/**
+ * Der angelegte Einsatz beim Rueckweg.
+ *
+ * Die Grenzen sind DATUMSWERTE, keine Zeitpunkte: eine Antwort mit `startsAtUtc`/`endsAtUtc`
+ * fuehrte die Uhrzeit-Semantik wieder ein, die D-003 aufgehoben hat. `planningHorizonDate`
+ * steht daneben und ersetzt `endDate` nicht — am offenen Ende bleibt `endDate` sichtbar
+ * `null` (D-006).
+ */
 export const EngagementDtoSchema = z.strictObject({
   engagementId: IdSchema,
   worksiteId: IdSchema,
-  startsAtUtc: InstantSchema,
-  endsAtUtc: InstantSchema.nullable(),
+  startDate: LocalDateSchema,
+  endDate: LocalDateSchema.nullable(),
+  planningHorizonDate: LocalDateSchema.nullable(),
   days: z.array(EngagementDayDtoSchema).min(1),
 });
 
 export type EngagementDto = z.infer<typeof EngagementDtoSchema>;
 
-/** Problem-Types des Einsatz-Commands; Zuordnung an der HTTP-Naht in apps/api. */
+/**
+ * Problem-Types des Einsatz-Commands; Zuordnung an der HTTP-Naht in apps/api.
+ *
+ * `ENGAGEMENT_START_IN_PAST` und `WORKING_TIME_OUTSIDE_ENGAGEMENT` stehen hier bewusst
+ * NICHT mehr: der Einsatz hat keine Uhrzeitgrenzen, gegen die eine Arbeitszeit verstossen
+ * koennte, und die zeitgenaue Vergangenheitsregel der aelteren Fassungen ist mit den
+ * Uhrzeiten entfallen. Eine datumsgenaue Nachfolgeregel ist NICHT entschieden und wird
+ * hier nicht erfunden (`HUMAN_INPUT_REQUIRED`).
+ *
+ * `LOCAL_TIME_*` bleibt, und zwar begruendet: eine OPTIONAL mitgegebene geplante
+ * Arbeitszeit ist eine lokale Wanduhrzeit, die der Server in der Organisationszeitzone
+ * aufloest — an einer Sommerzeitgrenze kann sie nicht existieren oder mehrdeutig sein.
+ */
 export const ENGAGEMENT_PROBLEM_TYPE = {
-  ENGAGEMENT_START_IN_PAST: "urn:easytree:planning:engagement-start-in-past",
   LOCAL_TIME_NONEXISTENT: "urn:easytree:planning:local-time-nonexistent",
   LOCAL_TIME_AMBIGUOUS: "urn:easytree:planning:local-time-ambiguous",
-  WORKING_TIME_OUTSIDE_ENGAGEMENT: "urn:easytree:planning:working-time-outside-engagement",
   WORKSITE_DAY_CLAIMED: "urn:easytree:planning:worksite-day-claimed",
   /** Task-Gruppe E: der Einzeltag-Command findet keinen abdeckenden Einsatz. */
   ENGAGEMENT_REQUIRED: "urn:easytree:planning:engagement-required",

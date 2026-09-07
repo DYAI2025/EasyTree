@@ -475,19 +475,19 @@ describe("HttpPlanningGateway — Baustellentag-Kommandos (EYT-147 M2)", () => {
  */
 const EINSATZ = {
   worksiteId: BAUSTELLENTAG.worksiteId,
-  startAt: { date: "2031-01-06", time: "07:00" },
-  endAt: { date: "2031-01-07", time: "16:00" },
-  planningHorizon: null,
+  startDate: "2031-01-06",
+  endDate: "2031-01-07",
+  planningHorizonDate: null,
   defaults: { workingTime: { from: "08:00", to: "18:00" } },
-  days: [{ localDate: "2031-01-06" }, { localDate: "2031-01-07" }],
   team: ["77777777-7777-4777-8777-777777777777"],
 };
 
 const ANGELEGTER_EINSATZ = {
   engagementId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   worksiteId: BAUSTELLENTAG.worksiteId,
-  startsAtUtc: "2031-01-06T06:00:00.000Z",
-  endsAtUtc: "2031-01-07T15:00:00.000Z",
+  startDate: "2031-01-06",
+  endDate: "2031-01-07",
+  planningHorizonDate: null,
   days: [{ ...BAUSTELLENTAG, localDate: "2031-01-06", weekKey: "2031-W02" }],
 };
 

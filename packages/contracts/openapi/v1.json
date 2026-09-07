@@ -483,8 +483,8 @@
     "/planung/einsaetze": {
       "post": {
         "operationId": "createEngagement",
-        "summary": "Einsatz mit bestaetigten Baustellentagen anlegen",
-        "description": "Legt einen Einsatz (Baustelle, lokaler Beginn, lokales oder offenes Ende) und seine explizit ausgewaehlten Baustellentage mit Erstkonfiguration und Team in EINER Transaktion an (EYT-120). Lokale Zeiten werden mit der Organisationszeitzone aufgeloest; nicht existente/mehrdeutige Sommerzeit-Zeiten, ein Beginn vor jetzt, Arbeitszeiten ausserhalb der Einsatzgrenzen und bereits vergebene Tage werden mit urn:easytree:planning:local-time-nonexistent, urn:easytree:planning:local-time-ambiguous, urn:easytree:planning:engagement-start-in-past, urn:easytree:planning:working-time-outside-engagement und urn:easytree:planning:worksite-day-claimed abgelehnt — nie still gekuerzt.",
+        "summary": "Einsatz mit automatisch abgeleiteten Baustellentagen anlegen",
+        "description": "Legt einen Einsatz und seine Baustellentage mit Erstkonfiguration und Team in EINER Transaktion an (EYT-120). Beginn und Ende sind LOKALE GESCHAEFTSDATEN, keine Uhrzeiten: startDate ist Pflicht, endDate ein lokales Datum oder null fuer ein offenes Ende; bei bekanntem Ende gilt endDate >= startDate, ein eintaegiger Einsatz hat startDate = endDate. Bei offenem Ende gibt planningHorizonDate den aktuellen Planungsumfang an — es ist NICHT das fachliche Ende und wird nicht nach endDate uebernommen. Montag bis Freitag im inklusiven Zeitraum bzw. bis zum Horizont werden AUTOMATISCH als Arbeitstage abgeleitet; calendar ist ein optionaler Override, der Vorgabetage abwaehlt und Wochenendtage ausdruecklich aufnimmt, und kein Pflichtschritt. Geplante Arbeitszeiten (defaults.workingTime) sind OPTIONAL und keine Voraussetzung fuer die Erzeugung eines Baustellentages. Eine optional angegebene lokale Arbeitszeit loest der Server mit der Organisationszeitzone auf; nicht existente/mehrdeutige Sommerzeit-Zeiten und bereits vergebene Tage werden mit urn:easytree:planning:local-time-nonexistent, urn:easytree:planning:local-time-ambiguous und urn:easytree:planning:worksite-day-claimed abgelehnt — nie still gekuerzt. Mehrere Einsaetze derselben Organisation duerfen am selben lokalen Tag parallel an unterschiedlichen Baustellen laufen; je Baustelle und lokalem Tag gibt es hoechstens einen Einsatzkontext.",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -551,7 +551,7 @@
             }
           },
           "409": {
-            "description": "Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: urn:easytree:planning:engagement-start-in-past, urn:easytree:planning:local-time-nonexistent, urn:easytree:planning:local-time-ambiguous, urn:easytree:planning:working-time-outside-engagement, urn:easytree:planning:worksite-day-claimed, urn:easytree:planning:duplicate-worksite-day. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier wiederverwendet und nicht neu erfunden.",
+            "description": "Konflikt oder veralteter Planstand. Moegliche problem.type-Werte dieser Route: urn:easytree:planning:local-time-nonexistent, urn:easytree:planning:local-time-ambiguous, urn:easytree:planning:worksite-day-claimed, urn:easytree:planning:duplicate-worksite-day. Zusaetzlich gelten die allgemeinen Planungstypen der uebrigen Schreibrouten unveraendert (Idempotenzschluessel wiederverwendet, ueberlappende Zuweisung, ausserhalb der Woche, nicht auswaehlbare Ressource) - sie werden hier wiederverwendet und nicht neu erfunden.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2599,37 +2599,29 @@
         ],
         "additionalProperties": false
       },
-      "EngagementDaySelection": {
+      "EngagementCalendarOverride": {
         "type": "object",
         "properties": {
-          "localDate": {
-            "type": "string",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-            "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+            }
           },
-          "workingTime": {
-            "type": "object",
-            "properties": {
-              "from": {
-                "type": "string",
-                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "description": "Lokale Uhrzeit 08:00 — ohne Zone; die Organisationszeitzone loest sie auf"
-              },
-              "to": {
-                "type": "string",
-                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "description": "Lokale Uhrzeit 08:00 — ohne Zone; die Organisationszeitzone loest sie auf"
-              }
-            },
-            "required": [
-              "from",
-              "to"
-            ],
-            "additionalProperties": false
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+            }
           }
         },
         "required": [
-          "localDate"
+          "include",
+          "exclude"
         ],
         "additionalProperties": false
       },
@@ -2642,52 +2634,48 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
             "description": "UUID"
           },
-          "startAt": {
-            "type": "object",
-            "properties": {
-              "date": {
-                "type": "string",
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
-              },
-              "time": {
-                "type": "string",
-                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "description": "Lokale Uhrzeit 08:00 — ohne Zone; die Organisationszeitzone loest sie auf"
-              }
-            },
-            "required": [
-              "date",
-              "time"
-            ],
-            "additionalProperties": false
+          "startDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
           },
-          "endAt": {
-            "nullable": true,
-            "type": "object",
-            "properties": {
-              "date": {
-                "type": "string",
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
-              },
-              "time": {
-                "type": "string",
-                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "description": "Lokale Uhrzeit 08:00 — ohne Zone; die Organisationszeitzone loest sie auf"
-              }
-            },
-            "required": [
-              "date",
-              "time"
-            ],
-            "additionalProperties": false
-          },
-          "planningHorizon": {
+          "endDate": {
             "nullable": true,
             "type": "string",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+          },
+          "planningHorizonDate": {
+            "nullable": true,
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+          },
+          "calendar": {
+            "type": "object",
+            "properties": {
+              "include": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+                }
+              },
+              "exclude": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+                }
+              }
+            },
+            "required": [
+              "include",
+              "exclude"
+            ],
+            "additionalProperties": false
           },
           "defaults": {
             "type": "object",
@@ -2713,48 +2701,7 @@
                 "additionalProperties": false
               }
             },
-            "required": [
-              "workingTime"
-            ],
             "additionalProperties": false
-          },
-          "days": {
-            "minItems": 1,
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "localDate": {
-                  "type": "string",
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                  "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
-                },
-                "workingTime": {
-                  "type": "object",
-                  "properties": {
-                    "from": {
-                      "type": "string",
-                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "description": "Lokale Uhrzeit 08:00 — ohne Zone; die Organisationszeitzone loest sie auf"
-                    },
-                    "to": {
-                      "type": "string",
-                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "description": "Lokale Uhrzeit 08:00 — ohne Zone; die Organisationszeitzone loest sie auf"
-                    }
-                  },
-                  "required": [
-                    "from",
-                    "to"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "localDate"
-              ],
-              "additionalProperties": false
-            }
           },
           "team": {
             "minItems": 1,
@@ -2769,11 +2716,10 @@
         },
         "required": [
           "worksiteId",
-          "startAt",
-          "endAt",
-          "planningHorizon",
+          "startDate",
+          "endDate",
+          "planningHorizonDate",
           "defaults",
-          "days",
           "team"
         ],
         "additionalProperties": false
@@ -2887,16 +2833,22 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
             "description": "UUID"
           },
-          "startsAtUtc": {
+          "startDate": {
             "type": "string",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
           },
-          "endsAtUtc": {
+          "endDate": {
             "nullable": true,
             "type": "string",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
-            "description": "UTC-Zeitpunkt nach ISO 8601, drei Nachkommastellen, Suffix Z"
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
+          },
+          "planningHorizonDate": {
+            "nullable": true,
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Lokaler Kalendertag im Format 2026-08-03 — ohne Uhrzeit, ohne Zone"
           },
           "days": {
             "minItems": 1,
@@ -3000,8 +2952,9 @@
         "required": [
           "engagementId",
           "worksiteId",
-          "startsAtUtc",
-          "endsAtUtc",
+          "startDate",
+          "endDate",
+          "planningHorizonDate",
           "days"
         ],
         "additionalProperties": false
