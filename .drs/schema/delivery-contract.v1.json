@@ -1,0 +1,243 @@
+{
+  "schema_id": "drs-easytree-contract/1",
+  "titel": "EasyTree Delivery Contract (DRS-v1.0-Adapter, Slice 1)",
+  "zweck": "Deklarative, maschinenlesbare Feldbeschreibung des abgeleiteten EasyTree-Delivery-Contracts. Diese Datei beschreibt AUSSCHLIESSLICH Struktur; die feldruebergreifenden Invarianten stehen in scripts/drs/contract-invariants.mjs und werden dort einzeln benannt.",
+  "kein_json_schema": "Bewusst KEIN JSON Schema. Ein JSON-Schema-Validator waere eine neue Laufzeitabhaengigkeit (ajv), und die ist fuer EYT-162 Slice 1 ausgeschlossen. Stattdessen ein kleines, hier vollstaendig aufgezaehltes Vokabular, das scripts/drs/contract-model.mjs interpretiert.",
+  "vokabular": {
+    "typen": ["object", "string", "boolean", "array", "git_sha", "path_pattern", "iso_timestamp"],
+    "schluessel": [
+      "type",
+      "fields",
+      "required",
+      "nullable",
+      "const",
+      "enum",
+      "min_length",
+      "min_items",
+      "unique",
+      "item",
+      "beschreibung"
+    ],
+    "strikt": "Jedes object ist strikt: ein nicht deklariertes Feld ist ein Befund (unknown-field), kein ignorierter Zusatz. Damit kann insbesondere kein source_binding freie Produktwahrheit als Zusatzfeld schmuggeln."
+  },
+  "root": {
+    "type": "object",
+    "fields": {
+      "schema_version": {
+        "type": "string",
+        "required": true,
+        "const": "drs-easytree-contract/1",
+        "beschreibung": "Bindet den Vertrag an genau diese Feldbeschreibung."
+      },
+      "contract_id": {
+        "type": "string",
+        "required": true,
+        "min_length": 1,
+        "beschreibung": "Stabiler Bezeichner dieses Vertrags im Repository."
+      },
+      "jira_key": {
+        "type": "string",
+        "required": true,
+        "pattern": "^EYT-[0-9]+$",
+        "beschreibung": "Der Jira-Vorgang, dessen Akzeptanzkriterien vorgelagert autoritativ bleiben."
+      },
+      "delivery_profile": {
+        "type": "string",
+        "required": true,
+        "enum": ["DELIVERY_INFRASTRUCTURE", "PRODUCT_SLICE", "DOCUMENTATION"],
+        "beschreibung": "Art der Lieferung. Steuert spaeter, welche Gates ueberhaupt anwendbar sind."
+      },
+      "enforcement_mode": {
+        "type": "string",
+        "required": true,
+        "enum": ["SHADOW", "ADVISORY", "REQUIRED"],
+        "beschreibung": "Das Modell kennt drei Modi. Slice 1 laesst nur SHADOW zu; die Einschraenkung ist die Invariante slice-1-shadow-only, nicht diese Aufzaehlung."
+      },
+      "state": {
+        "type": "string",
+        "required": true,
+        "enum": ["CONTRACT", "IN_PROGRESS", "IC", "R2G", "R4M", "MERGED"],
+        "beschreibung": "Lieferzustand. Ein Zustand jenseits von IN_PROGRESS verlangt das zugehoerige bestandene Gate."
+      },
+      "acceptance_state": {
+        "type": "string",
+        "required": true,
+        "enum": ["NOT_ACCEPTED", "ACCEPTED"],
+        "beschreibung": "Annahme ist NICHT dasselbe wie ein gruenes Gate. Sie verlangt eine aufgeloeste, unabhaengige Acceptor-Autoritaet."
+      },
+      "base_sha": {
+        "type": "git_sha",
+        "required": true,
+        "beschreibung": "Vollstaendiger Git-SHA der Basis, gegen die der Scope gerechnet wird."
+      },
+      "candidate_sha": {
+        "type": "git_sha",
+        "required": true,
+        "nullable": true,
+        "beschreibung": "Vollstaendiger Git-SHA des Kandidaten, oder null solange keiner existiert. Ein Gate-PASS ohne passenden Kandidaten ist strukturell ungueltig."
+      },
+      "drs_reference": {
+        "type": "object",
+        "required": true,
+        "fields": {
+          "standard": { "type": "string", "required": true, "const": "DRS" },
+          "version": { "type": "string", "required": true, "const": "1.0" },
+          "relationship": {
+            "type": "string",
+            "required": true,
+            "const": "SHARED_REFERENCE_SEMANTICS",
+            "beschreibung": "Human-PO-Entscheidung 07.09.2026: EasyTree konsumiert DRS als gemeinsamen Referenzstandard und baut keinen zweiten."
+          },
+          "reference_repository": { "type": "string", "required": true, "min_length": 1 },
+          "reference_commit": { "type": "git_sha", "required": true },
+          "artifact_blob": { "type": "git_sha", "required": true }
+        }
+      },
+      "authority_model": {
+        "type": "object",
+        "required": true,
+        "beschreibung": "Die Stellung des Vertrags in der Autoritaetskette. Er ist eine abgeleitete Projektion, niemals die Quelle.",
+        "fields": {
+          "role": { "type": "string", "required": true, "enum": ["DERIVED_PROJECTION"] },
+          "non_authoritative": { "type": "boolean", "required": true },
+          "confers_merge_authority": { "type": "boolean", "required": true },
+          "upstream": {
+            "type": "array",
+            "required": true,
+            "min_items": 1,
+            "unique": true,
+            "item": {
+              "type": "string",
+              "enum": [
+                "PRODUCT_TRUTH",
+                "EASYTREE_DRIFT_GATE",
+                "HUMAN_PO",
+                "JIRA_ACCEPTANCE_CRITERIA",
+                "CONFLUENCE_PRODUCT_TRUTH",
+                "GITHUB_DELIVERY_TRUTH"
+              ]
+            }
+          }
+        }
+      },
+      "implementation_agent": {
+        "type": "object",
+        "required": true,
+        "beschreibung": "Wer den Vertrag geschrieben hat. Existiert, damit acceptance_authority deterministisch dagegen geprueft werden kann.",
+        "fields": {
+          "kind": { "type": "string", "required": true, "enum": ["CODING_AGENT", "HUMAN"] },
+          "ref": { "type": "string", "required": true, "min_length": 1 }
+        }
+      },
+      "acceptance_authority": {
+        "type": "object",
+        "required": true,
+        "beschreibung": "Wer annehmen darf. In Slice 1 ausdruecklich unaufgeloest — es gibt noch keinen unabhaengigen Acceptor, und ein erfundener Name waere eine Falschaussage.",
+        "fields": {
+          "resolution": { "type": "string", "required": true, "enum": ["UNRESOLVED", "RESOLVED"] },
+          "acceptor_ref": { "type": "string", "required": true, "nullable": true, "min_length": 1 },
+          "asserted_by_implementer": { "type": "boolean", "required": true }
+        }
+      },
+      "source_bindings": {
+        "type": "array",
+        "required": true,
+        "min_items": 1,
+        "beschreibung": "Zeigt auf vorgelagerte Autoritaeten. Traegt bewusst NUR Referenzen und Beobachtungszeitpunkte, keinen kopierten Inhalt — das strikte Objekt verhindert, dass hier eine zweite Produktwahrheit entsteht.",
+        "item": {
+          "type": "object",
+          "fields": {
+            "authority": {
+              "type": "string",
+              "required": true,
+              "enum": ["JIRA", "CONFLUENCE", "GITHUB", "REPOSITORY_DOCUMENT", "HUMAN_PO"]
+            },
+            "binding_kind": {
+              "type": "string",
+              "required": true,
+              "enum": [
+                "ACCEPTANCE_CRITERIA",
+                "PRODUCT_TRUTH",
+                "GOVERNANCE_DECISION",
+                "ARCHITECTURAL_REFERENCE",
+                "DELIVERY_TRUTH"
+              ]
+            },
+            "ref": { "type": "string", "required": true, "min_length": 1 },
+            "observed_at": { "type": "iso_timestamp", "required": true },
+            "observed_revision": { "type": "string", "required": true, "min_length": 1 }
+          }
+        }
+      },
+      "allowed_paths": {
+        "type": "array",
+        "required": true,
+        "min_items": 1,
+        "unique": true,
+        "item": { "type": "path_pattern" }
+      },
+      "forbidden_paths": {
+        "type": "array",
+        "required": true,
+        "min_items": 1,
+        "unique": true,
+        "item": { "type": "path_pattern" }
+      },
+      "gates": {
+        "type": "object",
+        "required": true,
+        "fields": {
+          "ic": { "type": "gate", "required": true },
+          "r2g": { "type": "gate", "required": true },
+          "r4m": { "type": "gate", "required": true }
+        }
+      },
+      "invalidation": {
+        "type": "object",
+        "required": true,
+        "beschreibung": "INVALIDATED ist ein erstklassiger Zustand, kein Fehlen von PASS. Deshalb traegt der Vertrag die Begruendung mit.",
+        "fields": {
+          "invalidated": { "type": "boolean", "required": true },
+          "reason": { "type": "string", "required": true, "nullable": true, "min_length": 1 },
+          "at": { "type": "iso_timestamp", "required": true, "nullable": true },
+          "superseded_candidate_sha": { "type": "git_sha", "required": true, "nullable": true }
+        }
+      },
+      "known_boundaries": {
+        "type": "array",
+        "required": true,
+        "min_items": 1,
+        "unique": true,
+        "beschreibung": "Was dieser Vertrag NICHT leistet. Pflichtfeld, damit ein gruener Lauf nicht als mehr gelesen wird, als er ist.",
+        "item": {
+          "type": "string",
+          "enum": [
+            "NO_CI_ENFORCEMENT",
+            "NO_INDEPENDENT_ACCEPTOR",
+            "NO_SOURCE_FRESHNESS_ENFORCEMENT",
+            "NO_AGENT_HOOK_PARITY",
+            "NO_MERGE_BLOCKING",
+            "BRANCH_OWNED_CONTRACT_IS_NOT_ACCEPTANCE_EVIDENCE",
+            "NO_DIFF_SCOPE_GATE"
+          ]
+        }
+      }
+    }
+  },
+  "definitionen": {
+    "gate": {
+      "type": "object",
+      "beschreibung": "Ein Delivery-Gate. definition haelt fest, WAS geprueft wird, damit ein PASS nicht nur ein Wort ist.",
+      "fields": {
+        "definition": { "type": "string", "required": true, "min_length": 1 },
+        "state": {
+          "type": "string",
+          "required": true,
+          "enum": ["NOT_EVALUATED", "PASS", "FAIL", "INVALIDATED", "NOT_APPLICABLE"]
+        },
+        "evaluated_against_sha": { "type": "git_sha", "required": true, "nullable": true },
+        "evidence_ref": { "type": "string", "required": true, "nullable": true, "min_length": 1 }
+      }
+    }
+  }
+}

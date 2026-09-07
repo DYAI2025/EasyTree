@@ -1,0 +1,115 @@
+{
+  "schema_version": "drs-easytree-contract/1",
+  "contract_id": "EYT-162-slice-1-shadow-contract",
+  "jira_key": "EYT-162",
+  "delivery_profile": "DELIVERY_INFRASTRUCTURE",
+  "enforcement_mode": "SHADOW",
+  "state": "CONTRACT",
+  "acceptance_state": "NOT_ACCEPTED",
+  "base_sha": "f8e96e4ceb4f00ae5f5ac777c6eb47aa8f766d6f",
+  "candidate_sha": null,
+  "drs_reference": {
+    "standard": "DRS",
+    "version": "1.0",
+    "relationship": "SHARED_REFERENCE_SEMANTICS",
+    "reference_repository": "DYAI2025/DRS",
+    "reference_commit": "c4efb97931c6171563191afb74d61507e13bc6d4",
+    "artifact_blob": "5848aef30de9262fb59a12a42b22301b9214941c"
+  },
+  "authority_model": {
+    "role": "DERIVED_PROJECTION",
+    "non_authoritative": true,
+    "confers_merge_authority": false,
+    "upstream": [
+      "PRODUCT_TRUTH",
+      "EASYTREE_DRIFT_GATE",
+      "HUMAN_PO",
+      "JIRA_ACCEPTANCE_CRITERIA",
+      "GITHUB_DELIVERY_TRUTH"
+    ]
+  },
+  "implementation_agent": {
+    "kind": "CODING_AGENT",
+    "ref": "claude-code"
+  },
+  "acceptance_authority": {
+    "resolution": "UNRESOLVED",
+    "acceptor_ref": null,
+    "asserted_by_implementer": false
+  },
+  "source_bindings": [
+    {
+      "authority": "JIRA",
+      "binding_kind": "ACCEPTANCE_CRITERIA",
+      "ref": "EYT-162",
+      "observed_at": "2026-09-07T03:05:00+02:00",
+      "observed_revision": "2026-09-07T02:20:41.117+0200"
+    },
+    {
+      "authority": "JIRA",
+      "binding_kind": "GOVERNANCE_DECISION",
+      "ref": "EYT-162#DRS_OWNERSHIP_DECISION=SHARED_REFERENCE_SEMANTICS",
+      "observed_at": "2026-09-07T03:05:00+02:00",
+      "observed_revision": "2026-09-07T02:20:41.117+0200"
+    },
+    {
+      "authority": "CONFLUENCE",
+      "binding_kind": "ARCHITECTURAL_REFERENCE",
+      "ref": "49283074",
+      "observed_at": "2026-09-07T03:05:00+02:00",
+      "observed_revision": "PLUM-36-DRS-Architekturreferenz"
+    },
+    {
+      "authority": "GITHUB",
+      "binding_kind": "DELIVERY_TRUTH",
+      "ref": "DYAI2025/EasyTree@master",
+      "observed_at": "2026-09-07T03:05:00+02:00",
+      "observed_revision": "f8e96e4ceb4f00ae5f5ac777c6eb47aa8f766d6f"
+    }
+  ],
+  "allowed_paths": [".drs/**", "scripts/drs/**"],
+  "forbidden_paths": [
+    "apps/**",
+    "packages/**",
+    "supabase/**",
+    ".github/**",
+    ".claude/**",
+    "CLAUDE.md",
+    "AGENTS.md"
+  ],
+  "gates": {
+    "ic": {
+      "definition": "Implementation Complete: die Slice-1-Dateien existieren, der Validator laeuft lokal gruen und jede registrierte Invariante ist durch einen roten Testfall belegt.",
+      "state": "NOT_EVALUATED",
+      "evaluated_against_sha": null,
+      "evidence_ref": null
+    },
+    "r2g": {
+      "definition": "Ready to Gate: die Delivery-Gates sind gegen einen konkreten candidate_sha in einem agentenunabhaengigen Kontext ausgefuehrt. In Slice 1 gibt es diesen Kontext nicht.",
+      "state": "NOT_EVALUATED",
+      "evaluated_against_sha": null,
+      "evidence_ref": null
+    },
+    "r4m": {
+      "definition": "Ready for Merge: R2G besteht gegen denselben candidate_sha und eine unabhaengige Acceptor-Instanz hat angenommen. In Slice 1 existiert keine solche Instanz.",
+      "state": "NOT_EVALUATED",
+      "evaluated_against_sha": null,
+      "evidence_ref": null
+    }
+  },
+  "invalidation": {
+    "invalidated": false,
+    "reason": null,
+    "at": null,
+    "superseded_candidate_sha": null
+  },
+  "known_boundaries": [
+    "NO_CI_ENFORCEMENT",
+    "NO_INDEPENDENT_ACCEPTOR",
+    "NO_SOURCE_FRESHNESS_ENFORCEMENT",
+    "NO_AGENT_HOOK_PARITY",
+    "NO_MERGE_BLOCKING",
+    "BRANCH_OWNED_CONTRACT_IS_NOT_ACCEPTANCE_EVIDENCE",
+    "NO_DIFF_SCOPE_GATE"
+  ]
+}
