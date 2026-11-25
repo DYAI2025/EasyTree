@@ -1,9 +1,11 @@
 # Runbook — Staging-Deploy, Testdaten, Diagnose und Rollback (EYT-142, EYT-126)
 
-> **Vorbedingung, die heute NICHT erfüllt ist.** Dieses Runbook beschreibt einen Weg, der derzeit
-> **nicht begangen werden darf**. Solange `BLOCKER_ENVIRONMENT_SEPARATION` gilt, ist jeder Schritt
-> unterhalb von §1 gesperrt — auch ein Healthcheck, auch „nur einmal zum Schauen".
-> Siehe [`docs/plans/2026-08-20-sprint-6-staging-blocker.md`](../plans/2026-08-20-sprint-6-staging-blocker.md).
+> **Vorbedingung seit dem 24.08.2026 erfüllt.** `BLOCKER_ENVIRONMENT_SEPARATION` ist durch die
+> owner-freigegebene, VPS-lokale Datengrenze aufgelöst (§1, Nachtrag) — für ein **cloudseitiges**
+> Staging gilt die Sperre unverändert fort
+> ([`docs/plans/2026-08-20-sprint-6-staging-blocker.md`](../plans/2026-08-20-sprint-6-staging-blocker.md)).
+> Wer gegen ein anderes Ziel als den VPS-Stack deployt, prüft §1 zuerst — auch „nur einmal zum
+> Schauen".
 
 > **Zielplattform geändert am 21.08.2026.** Kanonisch ist seither Confluence
 > **„EasyTree – Deployment-Entscheidung 21.08.2026: VPS + Coolify + Docker"** (Seite 30998530):
@@ -39,6 +41,13 @@ Ein Deploy ist erst zulässig, wenn **alle drei** Bedingungen erfüllt sind:
    `inypnrvpawvhgiyagxbd` zeigt genau eine Branch `main` mit
    `project_ref == parent_project_ref == inypnrvpawvhgiyagxbd`. Die einzige Branch **ist** die
    Produktion. Die Bedingung gilt unverändert.
+
+   **Nachtrag 24./25.08.2026 — die Bedingung ist auf anderem Weg erfüllt.** Auf Owner-Auftrag
+   vom 24.08.2026 ist die Datengrenze ein **VPS-lokaler Supabase-CLI-Stack** auf
+   srv1308064.hstgr.cloud: er hat keinen Cloud-`project_ref`, die Gate-Frage ist trivial
+   erfüllt, Produktionsdaten sind unberührt. Ein zweites Supabase-**Cloud**-Projekt existiert
+   weiterhin nicht (Free-Quota-Lage unverändert); für ein cloudseitiges Staging gilt dieser
+   Abschnitt fort.
 
    **Und der kostenlose Weg dorthin ist versperrt.** Ein Versuch, ein zweites Projekt
    `easytree-staging` anzulegen (`get_cost` → 0 $/Monat), wurde mit einem **Quota**-Fehler
@@ -101,6 +110,15 @@ und NIE in ein Image:**
 es deshalb auskommentiert — ein Platzhalterwert dort wäre schlimmer als keiner, weil er
 funktionierend aussähe. Der Container-Smoke belegt das negativ: mit `NODE_ENV=production` und
 ohne Wurzelzertifikat **verweigert der API-Container den Start und nennt die Variable**.
+
+### Staging braucht HTTPS — gemessen, nicht vermutet (25.08.2026)
+
+Über plain HTTP scheitert **jeder** Schreibvorgang im Browser still: die
+Idempotenzschlüssel-Erzeugung benutzt `crypto.randomUUID()`, und das existiert nur in einem
+Secure Context (HTTPS oder localhost). Symptom: Formular gefüllt, Klick ohne Wirkung, kein
+Request im Netzwerkprotokoll, `pageerror: crypto.randomUUID is not a function`. Lesen und Login
+funktionieren — genau deshalb fällt es erst beim ersten Schreibversuch auf. Konsequenz: eine
+Staging-Oberfläche wird ausschließlich über HTTPS abgenommen.
 
 ### Die achte Größe: `EASYTREE_API_PROXY_TARGET` ist LAUFZEIT, nicht Bauzeit
 
@@ -215,9 +233,8 @@ für Nicht-Produktion gedacht. Auf Staging ist sie zulässig; sie war und bleibt
 nicht angewandt.
 
 Für einen bedienbaren Mandanten samt Anmeldung existiert
-`scripts/ops/bootstrap-demo-tenant.mjs`. **Nicht gemessen:** dieses Skript ist bislang nicht
-gegen eine echte Staging-Grenze gelaufen — es ist als Werkzeug vorhanden, sein Vollzug ist keine
-belegte Tatsache.
+`scripts/ops/bootstrap-demo-tenant.mjs`. **Erstmals ausgeführt am 24.08.2026** gegen die echte
+Staging-Grenze: Bootstrap plus `--verify` grün und idempotent (Protokoll vom 24.08., §Demo-Mandant).
 
 Niemals: Produktionsdaten kopieren, echte Personendaten einspielen, echte Stundensätze verwenden.
 
@@ -290,8 +307,13 @@ docker inspect easytree-api:<sha> --format '{{index .Config.Labels "org.opencont
 ```
 
 In Coolify heißt der Weg „vorherige Bereitstellung erneut aktivieren"; ohne notierte Commit-SHA
-(§8) gibt es kein Ziel zum Zurückkehren. **Nicht gemessen:** dass Coolifys Rollbackfunktion für
-diese Anwendung tut, was sie verspricht, ist bislang nicht ausgeführt worden.
+(§8) gibt es kein Ziel zum Zurückkehren. **Ausgeführt am 25.08.2026** (Evidenz:
+`docs/evidence/2026-08-25-eyt-142-staging/README.md`): Kandidat `164f1a1` via Coolify gestoppt,
+Vorgänger `3b4bbdb` gestartet und über OCI-Revision plus `/ready`=200 verifiziert (32 s), danach
+der Kandidat wiederhergestellt und erneut verifiziert (42 s). Einschränkung, ehrlich benannt:
+der Vorgänger stammte aus einem Nicht-Coolify-Deploy, geübt ist deshalb der Weg „Coolify-Stop →
+`docker start` des Vorgängers → Coolify-Start" — Coolifys eigene Redeploy-Historie greift erst,
+sobald auch der Vorgänger über Coolify deployt wurde.
 
 Fällt der VPS als Plattform aus, ist **Railway der dokumentierte Fallback**: dieselben Dockerfiles,
 dieselben Startbefehle. Das ist der Grund, warum die Railway-Kompatibilität in diesem Sprint
@@ -310,9 +332,13 @@ Daraus folgt die Regel, die man vor dem Deploy kennen muss, nicht danach:
 > deshalb sind additive Migrationen die Auflage. Ein Rollback auf eine Version, die eine
 > _entfernte_ Struktur braucht, ist **kein Rollback**, sondern ein Ausfall.
 
-**Nicht gemessen:** es existiert bislang **keine** ausgeführte Restore-Evidenz gegen eine
-EasyTree-Staging-Grenze. Solange die fehlt, ist „Rollback belegt" eine Beschreibung des Weges,
-**keine** Tatsachenbehauptung. Der erste Deploy schuldet diesen Nachweis nach.
+**Gemessen am 24./25.08.2026:** die Staging-Datengrenze ist per `supabase db reset` vollständig
+aus Migrationen + Seed reproduzierbar (18/18 Migrationen, ausgeführt 24.08.), und der
+App-Rollback samt Wiederherstellung ist ausgeführt (§7.1). Eine zusätzliche Grenze bleibt
+bestehen: **veröffentlichte** Planversionen, Zuweisungen und Snapshots sind per DB-Trigger
+(`app.reject_published_row_change`) unveränderlich — auch für Superuser. Ein selektiver
+Teardown veröffentlichter Stände ist konstruktiv unmöglich; wer eine Woche „zurücksetzen"
+will, braucht eine neue Woche oder den vollen Reset.
 
 ---
 
@@ -330,7 +356,14 @@ Ohne diese fünf Angaben ist ein Rollback nicht ausführbar und eine Abnahme nic
 
 ## 9. Coolify auf dem VPS — was konkret angelegt wird
 
-**Nicht gemessen:** kein Schritt dieses Abschnitts ist ausgeführt worden; §1 sperrt ihn.
+**Ausgeführt am 25.08.2026, mit zwei Abweichungen von der Beschreibung unten:** angelegt wurde
+ein Coolify-**Service** (Projekt `easytree`, Umgebung `staging`) aus einer eigenen Compose-Datei
+(`/opt/easytree-staging/coolify-compose.yml`), die die **GHCR-Digests zieht statt zu bauen** —
+Coolify baut auf diesem Server nichts (2,6 GB freier RAM, siehe Restarbeit-Plan Phase 2). Und die
+Topologie folgt dem GoTrue-Issuer-Fix vom 25.08. (API/Worker im Host-Netz), nicht der
+Bridge-Topologie der `docker-compose.yml`. Registry-Zugangsdaten waren nicht nötig: die
+GHCR-Pakete sind anonym ziehbar. Der Rest dieses Abschnitts beschreibt weiter den Weg für ein
+Ziel mit production-Profil.
 
 - **Ressourcentyp:** „Docker Compose" mit dieser Repository-Quelle und `docker-compose.yml` aus
   dem Wurzelverzeichnis. Coolify baut damit beide Images selbst aus dem gepinnten Lockfile.
@@ -378,7 +411,10 @@ gegen zwei Ziele, das Nicht-Lecken der internen Adresse in gewöhnlichen Antwort
 unveränderte Durchreichen harmloser Köpfe mit demselben Wort und beide Fail-closed-Fälle
 belegt.
 
-**Noch nie ausgeführt.** Kein Abschnitt unterhalb von §1 ist gegen eine reale Staging-Grenze
-gelaufen, weil es keine gibt. Beim ersten echten Deploy gehört dieses Runbook gegen die
-Wirklichkeit geprüft und dort korrigiert, wo es sich irrt — und die Korrekturen gehören hierher
-zurück, nicht in eine Chatnachricht.
+**Ausgeführt am 24.08.2026 (Erstdeploy, `3b4bbdb`, docker-run-Weg) und am 25.08.2026
+(Coolify-Deploy der GHCR-Digests von `164f1a1`, reale Kernreise 14/14, Rollback-Übung).**
+Protokolle: `docs/plans/2026-08-24-vps-staging-deploy-protokoll.md` und
+`docs/evidence/2026-08-25-eyt-142-staging/README.md`. Drei Korrekturen aus der Wirklichkeit
+stehen jetzt hier: die VPS-lokale Datengrenze in §1, die HTTPS-Pflicht in §3, der ausgeführte
+Rollback in §7. **Weiterhin nicht gemessen:** ein Railway-Deploy (§10) und Coolifys eigene
+Redeploy-Historie als Rollbackweg (§7.1, Einschränkung).

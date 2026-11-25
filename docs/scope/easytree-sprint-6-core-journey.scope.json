@@ -44,7 +44,10 @@
       ".github/workflows/**",
       "scripts/**",
       "docs/runbooks/**",
-      "docs/architecture/**"
+      "docs/architecture/**",
+      ".gitignore",
+      ".claude/settings.json",
+      "docs/evidence/**"
     ]
   },
   "artifacts": {
@@ -296,6 +299,121 @@
         ]
       },
       "scope_digest": "sha256:bd4224b230fc968b4d3df7fca50b0a5940c24e143b735274757bdf1c8fbdc4bf"
+    },
+    {
+      "revision": 7,
+      "origin": "PO-Entscheidung 23.08.2026 im Rahmen des /health-Konfigurationsaudits: Antwort \"1\" auf die Eskalation \"Scope-Manifest um .gitignore und .claude/** erweitern\".",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-23T01:51:51+02:00",
+      "rationale": "Revision 7 nimmt GENAU ZWEI Pfade auf, beide ohne Platzhalter: .gitignore und .claude/settings.json. Anlass ist das /health-Audit vom 23.08.2026, das zwei Non-negotiable-Regeln aus CLAUDE.md als nur einschichtig durchgesetzt gemessen hat: 'Migrationen unter supabase/migrations/ sind append-only' und 'packages/contracts/openapi/v1.json wird nie handeditiert' haengen heute allein an CI, also am Zeitpunkt NACH dem Push. Der Riegel dagegen ist ein PreToolUse-Hook; sein Skript darf unter scripts/** bereits geschrieben werden (seit Revision 5), aber ohne Registrierung in .claude/settings.json ist er wirkungslos - Skript und Registrierung sind unteilbar. .gitignore wird gebraucht, weil .claude/settings.local.json heute nur ueber die maschinenlokale ~/.gitignore_global ignoriert ist (gemessen 23.08.2026: git check-ignore meldete Quelle ~/.gitignore_global:1); diese Datei reist nicht mit und schuetzt weder die zwei anderen Contributors noch einen frischen Clone eines oeffentlichen Repositoriums. AUSDRUECKLICH NICHT aufgenommen: .claude/** als Platzhalter. Nur die eine Datei, damit .claude/homunculus/ und .claude/settings.local.json ausserhalb der Scope bleiben. Einordnung als governance und nicht als product, ABWEICHEND vom Praezedenzfall aus Revision 5, wo .dockerignore unter product steht: .dockerignore beeinflusst das gebaute Artefakt, diese beiden Pfade steuern Veroeffentlichung und Agentenwerkzeug, nicht die laufende Software. ABWEICHUNG, die benannt gehoert: der EYT-126-Reparatur-Slice trug die Vorgabe 'Revision 6 remains authoritative. NO Revision 7.' Diese Revision widerspricht ihr. Sie stammt nicht aus dem EYT-126-Slice, sondern aus einem getrennten Konfigurationsaudit, und der PO hat sie am 23.08.2026 ausdruecklich entschieden. FOLGE, die man kennen muss: .claude/settings.json existiert noch nicht und wird durch diesen Slice erst angelegt; sie ist danach eine getrackte Datei im oeffentlichen Repository und darf keine Geheimnisse tragen.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**",
+          ".dockerignore",
+          "docker-compose.yml",
+          "turbo.json",
+          "apps/api/Dockerfile",
+          "apps/web/Dockerfile",
+          "apps/web/next.config.ts",
+          "apps/api/test/architecture/deploy-authority-rules.ts",
+          "apps/api/test/deploy-authority.test.ts",
+          "apps/web/app/api/**",
+          "apps/web/app/health/**",
+          "apps/web/app/ready/**",
+          "apps/web/instrumentation.ts",
+          "apps/api/test/architecture/secret-surface-rules.ts",
+          "apps/api/test/container-bindung.test.ts"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/reality/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md",
+          ".github/workflows/**",
+          "scripts/**",
+          "docs/runbooks/**",
+          "docs/architecture/**",
+          ".gitignore",
+          ".claude/settings.json"
+        ]
+      },
+      "scope_digest": "sha256:cdaa7c289ca60a81b7b2c2dd5a4d648fe5712e4c0ce5365a509121f69c8dbeec"
+    },
+    {
+      "revision": 8,
+      "origin": "Owner-Auftrag 25.08.2026 (/goal \"EasyTree Sprint 6 real auf Staging abnehmen und abschliessen\"): die Abnahme verlangt woertlich \"reale Screenshots gebunden\" und eine vollstaendige Evidenzbindung (Head, Digests, CI, Rollback).",
+      "decision_maker": "Product Owner Benjamin Poersch",
+      "decided_at": "2026-08-25T12:55:00+02:00",
+      "rationale": "Revision 8 nimmt GENAU EINEN Pfad auf: docs/evidence/** unter governance. Anlass: die Sprint-6-Staging-Abnahme (EYT-142) bindet 19 reale Screenshots, ids.json und ein README nach Runbook-Paragraph-8 an den Head 164f1a1; der Owner-/goal-Auftrag vom 25.08.2026 fordert diese Bindung ausdruecklich, und PR #93 (master 02c66935) traegt sie bereits. Praezedenzfall ist Revision 4 (docs/reality/** aufgenommen, als das Reality-Gate erstmals passierbar wurde): Evidenzverzeichnisse sind Governance-Artefakte, keine Produktsoftware. AUSDRUECKLICH NICHT aufgenommen: weitere Wurzelpfade oder Wildcards ausserhalb docs/evidence/. HINWEIS zur Nummerierung: die committete Manifestlinie auf master traegt eine ANDERE Revision 7 (docker-compose.staging.yml, 23.08.); die hiesige unkommittete Revision 7 (.gitignore/.claude/settings.json) ist laut Restarbeit-Plan beim Commit auf 8 umzunummerieren - diese Revision rueckt dann auf 9, ihr Inhalt bleibt unveraendert.",
+      "confirmed": true,
+      "scope": {
+        "product": [
+          "apps/web/app/planung/**",
+          "apps/web/app/globals.css",
+          "apps/web/components/**",
+          "apps/web/lib/**",
+          "apps/web/test/**",
+          "apps/web/e2e/**",
+          "packages/domain/src/**",
+          "packages/domain/test/**",
+          "apps/api/test/domain-invariants/**",
+          "apps/api/test/iso-week-parity.test.ts",
+          "packages/ui/src/**",
+          "packages/ui/test/**",
+          ".dockerignore",
+          "docker-compose.yml",
+          "turbo.json",
+          "apps/api/Dockerfile",
+          "apps/web/Dockerfile",
+          "apps/web/next.config.ts",
+          "apps/api/test/architecture/deploy-authority-rules.ts",
+          "apps/api/test/deploy-authority.test.ts",
+          "apps/web/app/api/**",
+          "apps/web/app/health/**",
+          "apps/web/app/ready/**",
+          "apps/web/instrumentation.ts",
+          "apps/api/test/architecture/secret-surface-rules.ts",
+          "apps/api/test/container-bindung.test.ts"
+        ],
+        "governance": [
+          "docs/canvas/**",
+          "docs/vision/**",
+          "docs/prd/**",
+          "docs/plans/**",
+          "docs/context/**",
+          "docs/scope/**",
+          "docs/reality/**",
+          "docs/traceability.md",
+          "CLAUDE.md",
+          "docs/handoff/AGENT_HANDOFF_v1.3.md",
+          ".github/workflows/**",
+          "scripts/**",
+          "docs/runbooks/**",
+          "docs/architecture/**",
+          ".gitignore",
+          ".claude/settings.json",
+          "docs/evidence/**"
+        ]
+      },
+      "scope_digest": "sha256:0ab5d95312bbc07108bd25302dcaa3eb81eaeb6b9d9719a22a5edbd63977e5dc"
     }
   ]
 }
